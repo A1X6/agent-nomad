@@ -3,6 +3,14 @@ import type { SourceOs } from '@agentnomad/contracts';
 /** Stands in for the user's home folder inside file contents, so they work on any PC. */
 export const HOME_PLACEHOLDER = '{{HOME}}';
 
+/** A path that is unsafe, outside the expected folder, or impossible on this OS. */
+export class PathError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PathError';
+  }
+}
+
 /**
  * The OS and home folder paths are resolved for. Passed in rather than read from the
  * machine, so core stays free of Node APIs and every OS can be tested on any OS.
