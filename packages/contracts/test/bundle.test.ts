@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { BUNDLE_FORMAT_VERSION, BundleSchema, type Bundle } from '../src/index.js';
+import { BUNDLE_FORMAT_VERSION, BundleSchema, type Bundle } from '../src/index.ts';
 
 const validBundle: Bundle = {
   formatVersion: 1,

@@ -1,5 +1,7 @@
 import * as z from 'zod';
 
+import { hasControlCharacter } from './primitives.ts';
+
 /**
  * Version of the plaintext bundle format. Bumped only for breaking changes;
  * readers reject any other version (T09).
@@ -21,14 +23,6 @@ export const ProjectNameSchema = z
   .max(100)
   .refine((name) => name === name.trim(), 'Project name must not start or end with spaces')
   .refine((name) => !hasControlCharacter(name), 'Project name must not contain control characters');
-
-/** True when `text` contains an ASCII control character (e.g. a newline or NUL). */
-function hasControlCharacter(text: string): boolean {
-  return Array.from(text).some((char) => {
-    const code = char.charCodeAt(0);
-    return code < 0x20 || code === 0x7f;
-  });
-}
 
 export const BundleScopeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('global') }),
