@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/A1X6/agentnomad.git"
+    "url": "git+https://github.com/A1X6/agent-nomad.git"
   },
   "packageManager": "pnpm@12.6.0",
   "engines": {
