@@ -74,6 +74,7 @@ describe('KdfParamsSchema', () => {
     { memoryKiB: 8192 },
     { memoryKiB: 2 * 1024 * 1024 },
     { passes: 0 },
+    { passes: 1 },
     { passes: 11 },
     { parallelism: 4 },
     { algorithm: 'argon2i' },
