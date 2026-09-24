@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PACKAGE_NAME } from '../src/index.js';
+import { PACKAGE_NAME } from '../src/index.ts';
 
 describe('@agentnomad/cli', () => {
   it('exposes its package name', () => {
