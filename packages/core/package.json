@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@agentnomad/contracts": "workspace:*",
+    "fflate": "0.8.3",
     "libsodium-wrappers-sumo": "0.8.4"
   }
 }
