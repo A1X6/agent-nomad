@@ -6,4 +6,5 @@ export * from './merge.ts';
 export * from './merge-strategies.ts';
 export * from './path-resolver.ts';
 export * from './paths.ts';
+export * from './project-names.ts';
 export * from './sodium-crypto.ts';
