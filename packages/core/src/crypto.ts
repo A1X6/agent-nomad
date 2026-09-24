@@ -1,6 +1,17 @@
 import type { KdfParams } from '@agentnomad/contracts';
 
 /**
+ * Decryption failed: wrong key, wrong associated data, or bytes that were changed.
+ * Deliberately gives no detail, so it cannot help an attacker.
+ */
+export class DecryptionError extends Error {
+  constructor() {
+    super('Decryption failed: wrong key or the data was changed');
+    this.name = 'DecryptionError';
+  }
+}
+
+/**
  * Keys derived from the password. Argon2id produces one master key, which is split
  * into these two (T08).
  */

@@ -20,9 +20,9 @@ export const KdfParamsSchema = z.strictObject({
   algorithm: z.literal('argon2id'),
   /** Argon2 version 1.3 (0x13). */
   version: z.literal(19),
-  /** Memory cost in KiB: 19 MiB (OWASP minimum) to 1 GiB. */
+  /** Memory cost in KiB: 19 MiB to 1 GiB. With `passes` >= 2 this meets the OWASP minimum. */
   memoryKiB: z.int().min(19_456).max(1_048_576),
-  passes: z.int().min(1).max(10),
+  passes: z.int().min(2).max(10),
   parallelism: z.literal(1),
 });
 
