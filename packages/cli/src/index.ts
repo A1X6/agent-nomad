@@ -1,2 +1,4 @@
-// agentnomad command-line interface: commands, prompts, file system, API client, agent adapters.
-export const PACKAGE_NAME = '@agentnomad/cli';
+export * from './agents/adapter.ts';
+export * from './api/api-client.ts';
+export * from './secrets/secret-store.ts';
+export * from './ui/prompter.ts';

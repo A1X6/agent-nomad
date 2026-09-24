@@ -1,2 +1,4 @@
-// Pure business logic: bundles, crypto, merging, paths. No terminal, network or disk access.
-export const PACKAGE_NAME = '@agentnomad/core';
+export * from './bundle-codec.ts';
+export * from './crypto.ts';
+export * from './merge.ts';
+export * from './paths.ts';
