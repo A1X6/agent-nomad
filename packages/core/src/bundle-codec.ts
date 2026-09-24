@@ -1,5 +1,13 @@
 import type { Bundle } from '@agentnomad/contracts';
 
+/** Bytes that are not a valid bundle this version of agentnomad can read. */
+export class BundleFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BundleFormatError';
+  }
+}
+
 /**
  * Turns a bundle into compressed bytes and back (T09). Encryption happens after
  * `encode` and before `decode`; this layer never sees keys.
