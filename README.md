@@ -1,4 +1,4 @@
-# agentnomad
+# agent-nomad
 
 Save your AI agent setup (Claude Code first) encrypted on your PC and restore it on any machine, in one command.
 
