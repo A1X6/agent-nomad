@@ -1,0 +1,21 @@
+{
+  "name": "@agentnomad/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure business logic: bundles, crypto, merging, paths. No terminal, network or disk access",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agentnomad/contracts": "workspace:*"
+  }
+}

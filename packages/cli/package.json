@@ -1,0 +1,22 @@
+{
+  "name": "@agentnomad/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "agentnomad command-line interface: commands, prompts, file system, API client, agent adapters",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agentnomad/contracts": "workspace:*",
+    "@agentnomad/core": "workspace:*"
+  }
+}
