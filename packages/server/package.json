@@ -1,0 +1,22 @@
+{
+  "name": "@agentnomad/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "agentnomad API: Hono server and database",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "agentnomad-source": "./src/index.ts",
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agentnomad/contracts": "workspace:*"
+  }
+}
