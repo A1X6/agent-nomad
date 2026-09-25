@@ -11,6 +11,7 @@ import type { ApiClient } from '../api/api-client.ts';
 import { ApiError } from '../api/api-errors.ts';
 import type { CommandHandlers } from '../cli/commands.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
+import type { LocalState } from '../state/local-state.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { clearLocalSession, hasLocalSession, saveLocalSession } from './local-session.ts';
 import type { PasswordChecker } from './password-policy.ts';
@@ -35,7 +36,13 @@ export interface AuthCommandDeps {
   readonly passwordChecker: () => Promise<PasswordChecker>;
   /** Shown in the server's session list, e.g. the PC's host name. */
   readonly deviceName: string;
+  /** This PC's remembered revisions and project names; cleared by account delete. */
+  readonly localState?: () => LocalState;
 }
+
+export const ACCOUNT_DELETE_WARNING =
+  'This deletes your agentnomad account and every setup saved in it, on every PC. ' +
+  'Files on your PCs are not touched. It cannot be undone.';
 
 const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
 const fromBase64 = (text: string) => new Uint8Array(Buffer.from(text, 'base64'));
@@ -47,10 +54,10 @@ function validateUsername(value: string): string | undefined {
 
 const notEmpty = (value: string) => (value.length > 0 ? undefined : 'Enter your password.');
 
-/** register, login and logout (T23). */
+/** register, login and logout (T23), account delete (T35). */
 export function createAuthCommands(
   deps: AuthCommandDeps,
-): Pick<CommandHandlers, 'register' | 'login' | 'logout'> {
+): Pick<CommandHandlers, 'register' | 'login' | 'logout' | 'accountDelete'> {
   const { prompter, reporter } = deps;
 
   /** Slow on purpose (Argon2id, 64 MiB); a spinner shows it is working. */
@@ -211,6 +218,57 @@ export function createAuthCommands(
       }
       await logOut(secrets);
       reporter.success('Logged out. Your login was removed from this PC.');
+    },
+
+    /**
+     * Always asks, even with --yes: the username typed out, then the password, which the
+     * server needs as proof (a stolen session alone cannot delete the account).
+     */
+    async accountDelete() {
+      const secrets = await deps.secrets();
+      if (!(await hasLocalSession(secrets))) {
+        reporter.info('Log in first (`agentnomad login`) to delete your account.');
+        return;
+      }
+      reporter.warn(ACCOUNT_DELETE_WARNING);
+      const username = await prompter.text('Type your username to confirm', {
+        validate: validateUsername,
+      });
+      const password = await prompter.password('Password', { validate: notEmpty });
+
+      const api = deps.api();
+      const prelogin = await api.auth.prelogin({ username });
+      const crypto = await deps.crypto();
+      const keys = await deriveKeys(
+        crypto,
+        password,
+        fromBase64(prelogin.kdfSalt),
+        prelogin.kdfParams,
+      );
+      try {
+        await api.auth.deleteAccount({ authKey: toBase64(keys.authKey) });
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'unauthorized') {
+          // "Wrong password" keeps the login; any other 401 means the session itself ended.
+          if (error.message.startsWith('Wrong password')) {
+            throw new Error('Wrong username or password. Nothing was deleted.', { cause: error });
+          }
+          await clearLocalSession(secrets);
+          throw new Error('Your session has expired. Log in again, then delete the account.', {
+            cause: error,
+          });
+        }
+        // OutcomeUnknownError (a lost answer) passes through with its own advice (T21).
+        throw error;
+      } finally {
+        keys.passwordKey.fill(0);
+        keys.authKey.fill(0);
+      }
+      await clearLocalSession(secrets);
+      await deps.localState?.().forgetServer();
+      reporter.success(
+        `Account "${username}" and all its saved setups were deleted. Your login was removed from this PC.`,
+      );
     },
   };
 }

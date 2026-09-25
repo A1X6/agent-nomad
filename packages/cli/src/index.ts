@@ -34,6 +34,7 @@ export * from './cli/error-messages.ts';
 export * from './cli/flags.ts';
 export * from './cli/program.ts';
 export * from './cli/run.ts';
+export * from './commands/setup-commands.ts';
 export * from './config/config-dir.ts';
 export * from './env/env-command.ts';
 export * from './env/env-references.ts';

@@ -42,6 +42,12 @@ export interface LocalState {
   rememberProject(folder: string, name: string): Promise<void>;
   revisionOf(agent: string, scopeKey: string): Promise<number | null>;
   setRevision(agent: string, scopeKey: string, revision: number): Promise<void>;
+  /** Every revision this PC knows, by `<agent>/<scopeKey>` (T35 status). */
+  knownRevisions(): Promise<Readonly<Record<string, number>>>;
+  /** Forgets one setup (after it was deleted on the server). */
+  forgetRevision(agent: string, scopeKey: string): Promise<void>;
+  /** Forgets everything about this server (after the account was deleted). */
+  forgetServer(): Promise<void>;
 }
 
 export interface LocalStateOptions {
@@ -75,11 +81,16 @@ export function createLocalState(options: LocalStateOptions): LocalState {
 
   async function update(
     change: (server: z.infer<typeof ServerStateSchema>) => void,
+    remove = false,
   ): Promise<void> {
     const state = await load();
     const server = state.servers[options.server] ?? { projects: {}, revisions: {} };
     change(server);
-    state.servers[options.server] = server;
+    state.servers = remove
+      ? Object.fromEntries(
+          Object.entries(state.servers).filter(([host]) => host !== options.server),
+        )
+      : { ...state.servers, [options.server]: server };
     await mkdir(path.dirname(options.path), { recursive: true, mode: 0o700 });
     const temp = `${options.path}.${randomBytes(4).toString('hex')}.tmp`;
     try {
@@ -109,6 +120,19 @@ export function createLocalState(options: LocalStateOptions): LocalState {
       await update((state) => {
         state.revisions[`${agent}/${scopeKey}`] = revision;
       });
+    },
+    async knownRevisions() {
+      return (await server())?.revisions ?? {};
+    },
+    async forgetRevision(agent, scopeKey) {
+      await update((state) => {
+        state.revisions = Object.fromEntries(
+          Object.entries(state.revisions).filter(([key]) => key !== `${agent}/${scopeKey}`),
+        );
+      });
+    },
+    async forgetServer() {
+      await update(() => undefined, true);
     },
   };
 }
