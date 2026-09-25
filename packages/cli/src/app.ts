@@ -20,6 +20,7 @@ import type { ApiClient } from './api/api-client.ts';
 import { resolveApiUrl } from './api/api-url.ts';
 import { createHttpApiClient } from './api/http-api-client.ts';
 import { createAuthCommands } from './auth/auth-commands.ts';
+import { createSetupCommands } from './commands/setup-commands.ts';
 import { loadZxcvbnChecker } from './auth/password-policy.ts';
 import { NOT_YET_AVAILABLE, type CommandHandlers } from './cli/commands.ts';
 import { configDir } from './config/config-dir.ts';
@@ -132,6 +133,16 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
 
   return {
     ...NOT_YET_AVAILABLE,
+    ...createSetupCommands({
+      prompter: app.prompter,
+      reporter: app.reporter,
+      registry,
+      secrets,
+      api,
+      crypto,
+      localState,
+      cwd: app.cwd,
+    }),
     ...createPullCommand({
       prompter: app.prompter,
       reporter: app.reporter,
@@ -182,6 +193,7 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       crypto,
       passwordChecker: loadZxcvbnChecker,
       deviceName: deviceNameOf(app.hostname),
+      localState,
     }),
   };
 }
