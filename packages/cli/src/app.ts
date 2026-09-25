@@ -10,6 +10,7 @@ import { createHttpApiClient } from './api/http-api-client.ts';
 import { createAuthCommands } from './auth/auth-commands.ts';
 import { loadZxcvbnChecker } from './auth/password-policy.ts';
 import { NOT_YET_AVAILABLE, type CommandHandlers } from './cli/commands.ts';
+import { createEnvCommand } from './env/env-command.ts';
 import { createSecretStore } from './secrets/create-secret-store.ts';
 import type { SecretStore } from './secrets/secret-store.ts';
 import type { Prompter, Reporter, Spinner } from './ui/prompter.ts';
@@ -20,6 +21,8 @@ export interface AppEnvironment {
   readonly homedir: string;
   /** The PC's host name, used as the device name of new sessions. */
   readonly hostname: string;
+  /** The folder the command runs in; the project for project-scope commands. */
+  readonly cwd: string;
   readonly prompter: Prompter;
   readonly reporter: Reporter;
   readonly fetch?: typeof fetch;
@@ -96,6 +99,7 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
   return {
     ...NOT_YET_AVAILABLE,
     ...createAgentsCommand({ registry, reporter: app.reporter }),
+    ...createEnvCommand({ registry, reporter: app.reporter, env: app.env, cwd: app.cwd }),
     ...createAuthCommands({
       prompter: app.prompter,
       reporter: app.reporter,

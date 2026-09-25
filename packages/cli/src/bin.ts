@@ -14,6 +14,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
     platform: process.platform,
     homedir: homedir(),
     hostname: hostname(),
+    cwd: process.cwd(),
     prompter: createClackPrompter(),
     reporter,
   }),
