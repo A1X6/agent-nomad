@@ -10,6 +10,12 @@ const RAW = {
   /** Bumped when the meaning of an entry changes. */
   version: 1,
 
+  /**
+   * The newest Claude Code these lists were checked against (T41). The weekly drift check
+   * reports changelog entries of newer versions; bump this after reviewing them.
+   */
+  reviewedVersion: '2.1.283',
+
   global: {
     /** Single files in the base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
     files: ['settings.json', 'CLAUDE.md', 'keybindings.json'],
@@ -47,6 +53,14 @@ const RAW = {
       'settings.local.json',
       'remote-settings.json',
       'skills/synced',
+      // Named by the .claude directory docs (T41): session files, pasted images,
+      // /feedback drafts, and the organization's limits cached from claude.ai.
+      'tasks',
+      'uploads',
+      'image-cache',
+      'feedback',
+      'feedback-bundles',
+      'policy-limits.json',
     ],
     /**
      * Other things Claude Code keeps in the base folder that are known and deliberately
@@ -62,6 +76,7 @@ const RAW = {
       'telemetry',
       'local',
       'usage-data',
+      'stats-cache.json',
     ],
   },
 
@@ -187,6 +202,7 @@ const names = z.array(
 
 const PathsDataSchema = z.strictObject({
   version: z.literal(1),
+  reviewedVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
   global: z.strictObject({
     files: names,
     folders: names,

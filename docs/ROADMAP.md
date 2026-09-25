@@ -27,8 +27,8 @@ Everything in v1 is built and tested on macOS, Linux and Windows:
   security review with a published [threat model](security/threat-model.md).
 
 Released on npm as `agentnomad` 1.0, built and published by GitHub Actions with provenance.
-Still to do: a weekly check that the Claude Code data file still matches the newest Claude
-Code (T41).
+A weekly check compares the Claude Code data file with the newest Claude Code and opens an
+issue when something needs reviewing.
 
 ## v1.x: more agents
 
