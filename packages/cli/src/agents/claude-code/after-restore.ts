@@ -20,10 +20,10 @@ import { PluginManifestSchema } from './plugins.ts';
 const ProgramsFileSchema = z.strictObject({
   programs: z.array(
     z.strictObject({
-      command: z.string().regex(/^[A-Za-z0-9._-]+$/),
+      command: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
       npm: z
         .strictObject({
-          package: z.string().regex(/^(@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/),
+          package: z.string().regex(/^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/),
           version: z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/),
         })
         .nullable(),
@@ -82,6 +82,7 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
       reporter: context.reporter,
       cwd: projectDir ?? deps.system.homedir,
       assumeYes: context.assumeYes,
+      allowCommands: context.allowCommands,
       explainFailure: (reason) => explainPluginFailure(reason, managed),
     });
   }
@@ -106,7 +107,15 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
         continue;
       }
       const question = `"${program.command}" is not installed here. Install it with \`npm install -g ${spec}\`?`;
-      if (!context.assumeYes && !(await context.prompter.confirm(question, true))) continue;
+      if (!context.allowCommands) {
+        if (context.assumeYes) {
+          context.reporter.warn(
+            `"${program.command}" is not installed here and was not installed: --yes never installs or runs new code; add --allow-commands, or run pull without --yes to choose. To install it yourself: npm install -g ${spec}`,
+          );
+          continue;
+        }
+        if (!(await context.prompter.confirm(question, true))) continue;
+      }
       const run = await cli(npmPath).run(['install', '-g', spec], deps.system.homedir);
       if (run.exitCode === 0) context.reporter.success(`Installed ${spec}.`);
       else

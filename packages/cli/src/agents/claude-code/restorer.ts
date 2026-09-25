@@ -18,6 +18,7 @@ import type {
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
+import { hookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { commandsInSettings, commandWords, createFileGatherer } from './file-gathering.ts';
 import { CLAUDE_JSON_BUNDLE_PATH, CLAUDE_JSON_MCP_KEY } from './global-paths.ts';
@@ -27,6 +28,7 @@ import {
   projectDestination,
   projectHookScripts,
   type RestoreDestination,
+  windowsNameProblem,
 } from './restore-rules.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
 
@@ -233,15 +235,28 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
   return {
     async restore(target, incoming, onConflict, context: RestoreContext = {}) {
       const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
-      const hookScripts = projectHookScripts(
+      const projectScripts = projectHookScripts(
         incoming
           .filter((entry) =>
             ['.claude/settings.json', '.claude/settings.local.json'].includes(entry.path),
           )
           .map((entry) => new TextDecoder().decode(entry.content)),
       );
-      const destinationOf = (path: string) =>
-        target.kind === 'global' ? globalDestination(path) : projectDestination(path, hookScripts);
+      const settings = incoming.find((entry) => entry.path === 'settings.json');
+      const globalScripts = new Set(
+        settings
+          ? hookScripts(new TextDecoder().decode(settings.content), options).map(
+              (script) => script.bundlePath,
+            )
+          : [],
+      );
+      const destinationOf = (path: string): RestoreDestination => {
+        const windowsProblem = options.platform === 'win32' ? windowsNameProblem(path) : null;
+        if (windowsProblem !== null) return { kind: 'refused', reason: windowsProblem };
+        return target.kind === 'global'
+          ? globalDestination(path, globalScripts)
+          : projectDestination(path, projectScripts);
+      };
 
       let memory: Promise<string | null> | undefined;
       const memoryDir = () =>

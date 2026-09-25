@@ -108,8 +108,10 @@ export interface SyncPluginsDeps {
   readonly reporter: Pick<Reporter, 'info' | 'success' | 'warn'>;
   /** Where project-scope plugins are installed; the home folder for a global setup. */
   readonly cwd: string;
-  /** `--yes`: accept the list, but still never run command-source plugins without asking. */
+  /** `--yes`: never ask; without `allowCommands` nothing is installed (T38). */
   readonly assumeYes?: boolean;
+  /** `--allow-commands`: install the list, command-source plugins included, without asking. */
+  readonly allowCommands?: boolean;
   /** Turns an install failure into a clearer reason, e.g. "blocked by your organization" (T31). */
   readonly explainFailure?: (reason: string) => string;
 }
@@ -143,7 +145,15 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
   ];
   deps.reporter.info(['Plugins to reinstall with Claude Code:', ...list].join('\n'));
   const count = `${String(plan.plugins.length)} plugin${plan.plugins.length === 1 ? '' : 's'}`;
-  if (!deps.assumeYes && !(await deps.prompter.confirm(`Reinstall ${count}?`, true))) {
+  const reinstall =
+    deps.allowCommands === true ||
+    (!deps.assumeYes && (await deps.prompter.confirm(`Reinstall ${count}?`, true)));
+  if (!reinstall) {
+    if (deps.assumeYes) {
+      deps.reporter.warn(
+        `Plugins were not reinstalled: --yes never installs or runs new code; add --allow-commands, or run pull without --yes to choose.`,
+      );
+    }
     result.declined.push(...plan.plugins.map((plugin) => plugin.id));
     return result;
   }
@@ -171,19 +181,15 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
     }
     const args = ['plugin', 'install', plugin.id, '--scope', plugin.scope, '--json'];
     if (plugin.commandSource) {
-      // Never allowed unasked: --yes takes the safe answer (skip) instead of running it.
+      // Its own question, unless --allow-commands already accepted code from the setup
+      // (--yes alone never gets this far: it reinstalls nothing).
       const accept =
-        !deps.assumeYes &&
+        deps.allowCommands === true ||
         (await deps.prompter.confirm(
           `${plugin.id} is built by running a command from its marketplace. Allow it?`,
           false,
         ));
       if (!accept) {
-        if (deps.assumeYes) {
-          deps.reporter.warn(
-            `Skipped ${plugin.id}: it is built by running a command, which --yes never allows. Run pull without --yes to choose.`,
-          );
-        }
         result.declined.push(plugin.id);
         continue;
       }

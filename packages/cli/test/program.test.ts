@@ -234,7 +234,7 @@ describe('outcomes', () => {
     ],
     [
       ['pull', '--global'],
-      'Use --agent, --global or --project <name>, --merge or --overwrite, and --yes. See `agentnomad pull --help`.',
+      'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, and --yes. See `agentnomad pull --help`.',
     ],
     [
       ['account', 'delete'],

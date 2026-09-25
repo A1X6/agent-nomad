@@ -26,9 +26,20 @@ const migrationsFolder = fileURLToPath(new URL('../../server/drizzle', import.me
  */
 const E2E_SERVER_SECRET = new Uint8Array(32).fill(7);
 
+/** One request as it reached the server: everything that left the PC. */
+export interface RecordedRequest {
+  readonly method: string;
+  readonly url: string;
+  /** Every header, as `name: value` lines. */
+  readonly headers: string;
+  readonly body: Uint8Array;
+}
+
 export interface LocalServer {
   /** `http://127.0.0.1:<port>`, for `AGENTNOMAD_API_URL`. */
   readonly url: string;
+  /** Every request received so far (T38: checked for plaintext). */
+  readonly requests: readonly RecordedRequest[];
   /** Rows in a table, e.g. to check account delete left nothing behind. */
   count(table: 'users' | 'sessions' | 'bundles' | 'bundle_blobs'): Promise<number>;
   /** The whole database as a gzipped tarball, for the next machine of the chain. */
@@ -69,9 +80,20 @@ export async function startLocalServer(load?: Uint8Array): Promise<LocalServer> 
     logger: createJsonLogger(() => undefined),
   });
 
+  const requests: RecordedRequest[] = [];
+  const record = async (request: Request): Promise<Response> => {
+    requests.push({
+      method: request.method,
+      url: request.url,
+      headers: [...request.headers].map(([name, value]) => `${name}: ${value}`).join('\n'),
+      body: new Uint8Array(await request.clone().arrayBuffer()),
+    });
+    return app.fetch(request);
+  };
+
   const { http, port } = await new Promise<{ http: ReturnType<typeof serve>; port: number }>(
     (resolve) => {
-      const http = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 }, (info) => {
+      const http = serve({ fetch: record, hostname: '127.0.0.1', port: 0 }, (info) => {
         resolve({ http, port: info.port });
       });
     },
@@ -79,6 +101,7 @@ export async function startLocalServer(load?: Uint8Array): Promise<LocalServer> 
 
   return {
     url: `http://127.0.0.1:${String(port)}`,
+    requests,
     count: async (table) => {
       const result = await client.query<{ n: number }>(`select count(*)::int as n from ${table}`);
       return result.rows[0]?.n ?? 0;

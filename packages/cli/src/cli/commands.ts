@@ -21,6 +21,11 @@ export interface PullOptions extends ScopeFlags {
   readonly yes: boolean;
   /** `--merge` or `--overwrite`: one answer for every existing file instead of asking. */
   readonly conflict?: 'merge' | 'overwrite';
+  /**
+   * `--allow-commands`: accept new or changed hooks, status line, MCP servers and the scripts
+   * they run, and install plugins and programs, without asking. `--yes` alone skips them.
+   */
+  readonly allowCommands?: boolean;
 }
 
 export interface DeleteOptions extends ScopeFlags {

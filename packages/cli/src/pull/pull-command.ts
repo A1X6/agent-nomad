@@ -225,6 +225,18 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
     }
     const { bundle, revision } = downloaded;
 
+    // Older than what this PC already had (T38): deleted and saved again from another PC,
+    // or a server sending an old copy. Never restored without a yes from the user.
+    const known = await deps.localState().revisionOf(adapter.id, setup.scopeKey);
+    if (known !== null && revision < known) {
+      const note = `The saved ${describe(adapter, setup)} is revision ${String(revision)}, older than revision ${String(known)} that this PC already had. Either it was deleted and saved again from another PC, or the server is sending an old copy.`;
+      reporter.warn(note);
+      if (options.yes || !(await prompter.confirm('Restore this older copy anyway?', false))) {
+        reporter.info(`Skipped the ${describe(adapter, setup)}.`);
+        return;
+      }
+    }
+
     const versionNote = agentVersionNotice(adapter.displayName, bundle.agentVersion, version);
     if (versionNote !== null) reporter.warn(versionNote);
 
@@ -249,11 +261,16 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
           ),
         ].join('\n'),
       );
-      const allow = options.yes || (await prompter.confirm('Allow them?', false));
+      // --yes never accepts new code by itself (T38): only --allow-commands does.
+      const allow =
+        options.allowCommands === true ||
+        (!options.yes && (await prompter.confirm('Allow them?', false)));
       if (!allow) {
         const blocked = new Set(review.map((entry) => entry.file));
         files = files.filter((file) => !blocked.has(file.path));
-        reporter.warn(`Skipped ${[...blocked].join(', ')}, which hold them. The rest is restored.`);
+        reporter.warn(
+          `Skipped ${[...blocked].join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
+        );
       }
     }
 
@@ -275,7 +292,14 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
     if (setup.projectName !== null)
       await deps.localState().rememberProject(deps.cwd, setup.projectName);
 
-    await adapter.afterRestore?.({ target, files, prompter, reporter, assumeYes: options.yes });
+    await adapter.afterRestore?.({
+      target,
+      files,
+      prompter,
+      reporter,
+      assumeYes: options.yes,
+      allowCommands: options.allowCommands === true,
+    });
 
     const envFile = files.find((file) => file.path === ENV_BUNDLE_PATH);
     const section = envFile ? parseEnvSection(envFile.content) : null;

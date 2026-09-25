@@ -228,6 +228,8 @@ describe('agentnomad push', () => {
     await t.command.push(noFlags);
 
     const { bundle, upload, revision } = await received(t.server, { kind: 'global' });
+    // The revision is sealed inside, so a server cannot relabel an old copy (T38).
+    expect(bundle.revision).toBe(revision);
     expect(bundle).toMatchObject({
       agent: 'claude-code',
       scope: { kind: 'global' },
@@ -361,7 +363,10 @@ describe('agentnomad push', () => {
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
     const desktop = setup(['global', false, true], { server, pc: 'desktop' });
     await desktop.command.push(noFlags);
-    expect((await received(server, { kind: 'global' })).revision).toBe(2);
+    const saved = await received(server, { kind: 'global' });
+    expect(saved.revision).toBe(2);
+    // Encrypted again for the revision it became, not the one first tried (T38).
+    expect(saved.bundle.revision).toBe(2);
     expect(await desktop.state.revisionOf('claude-code', 'global')).toBe(2);
   });
 

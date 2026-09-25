@@ -64,6 +64,12 @@ interface PushItem {
   readonly target: ScopeTarget;
 }
 
+/** An encrypted bundle, ready to upload. */
+interface Sealed {
+  readonly ciphertext: Uint8Array;
+  readonly contentSha256: string;
+}
+
 const toHex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 const sizeOf = (bytes: number) =>
   bytes < 1024
@@ -164,30 +170,36 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
     return name;
   }
 
-  /** Uploads one encrypted bundle; asks before replacing a newer copy from another PC. */
+  /**
+   * Uploads one encrypted bundle; asks before replacing a newer copy from another PC. The
+   * server saves an upload as `expectedRevision + 1`, and each attempt is encrypted with
+   * that revision inside (T38), so the first try reuses `first` and a retry re-encrypts.
+   */
   async function upload(
     item: PushItem,
     secrets: SecretStore,
     scopeKey: string,
-    ciphertext: Uint8Array,
-    extra: { contentSha256: string; nameEnc?: string },
+    first: { expectedRevision: number; sealed: Sealed },
+    seal: (revision: number) => Promise<Sealed>,
+    nameEnc: string | undefined,
     options: PushOptions,
   ): Promise<number | null> {
     const api = deps.api();
-    const state = deps.localState();
     const params = { agent: item.adapter.id, scopeKey };
-    const put = (expectedRevision: number) =>
-      withSession(secrets, () =>
+    const put = async (expectedRevision: number, sealed?: Sealed) => {
+      const { ciphertext, contentSha256 } = sealed ?? (await seal(expectedRevision + 1));
+      return withSession(secrets, () =>
         api.bundles.put(params, {
           ciphertext,
           expectedRevision,
-          contentSha256: extra.contentSha256,
+          contentSha256,
           formatVersion: BUNDLE_FORMAT_VERSION,
-          ...(extra.nameEnc !== undefined && { nameEnc: extra.nameEnc }),
+          ...(nameEnc !== undefined && { nameEnc }),
         }),
       );
+    };
     try {
-      return (await put((await state.revisionOf(item.adapter.id, scopeKey)) ?? 0)).revision;
+      return (await put(first.expectedRevision, first.sealed)).revision;
     } catch (error) {
       if (!(error instanceof ApiError && error.code === 'revision_conflict')) throw error;
       const current = error.currentRevision;
@@ -280,7 +292,7 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
               });
           if (envSection) collected.push(envSectionFile(envSection));
 
-          const bundle: Bundle = {
+          const bundle: Omit<Bundle, 'revision'> = {
             formatVersion: BUNDLE_FORMAT_VERSION,
             agent: item.adapter.id,
             scope: item.scope,
@@ -294,12 +306,19 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
           let size: number;
           try {
             const scopeKey = scopeKeyFor(crypto, dataKey, item.scope);
-            const ciphertext = sealBundle(crypto, await deps.codec.encode(bundle), dataKey, {
-              formatVersion: BUNDLE_FORMAT_VERSION,
-              agent: bundle.agent,
-              scopeKey,
-            });
-            size = ciphertext.byteLength;
+            const seal = async (revision: number): Promise<Sealed> => {
+              const ciphertext = sealBundle(
+                crypto,
+                await deps.codec.encode({ ...bundle, revision }),
+                dataKey,
+                { formatVersion: BUNDLE_FORMAT_VERSION, agent: bundle.agent, scopeKey },
+              );
+              return { ciphertext, contentSha256: toHex(crypto.sha256(ciphertext)) };
+            };
+            const expectedRevision =
+              (await deps.localState().revisionOf(item.adapter.id, scopeKey)) ?? 0;
+            const sealed = await seal(expectedRevision + 1);
+            size = sealed.ciphertext.byteLength;
             if (size > MAX_BUNDLE_BYTES) {
               spinner.stop();
               reporter.error(
@@ -320,11 +339,9 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
               item,
               secrets,
               scopeKey,
-              ciphertext,
-              {
-                contentSha256: toHex(crypto.sha256(ciphertext)),
-                ...(nameEnc !== undefined && { nameEnc }),
-              },
+              { expectedRevision, sealed },
+              seal,
+              nameEnc,
               options,
             );
             if (revision !== null)

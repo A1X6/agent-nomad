@@ -97,6 +97,12 @@ export const BundleSchema = z.strictObject({
    * `null` when it could not be read. Pull warns when this PC runs an older version.
    */
   agentVersion: AgentVersionSchema.nullable(),
+  /**
+   * The revision this copy is saved as (T38). It is inside the encryption, so a server
+   * cannot pass an older copy off as the current one: pull checks it against the revision
+   * the server reports and the one this PC last had.
+   */
+  revision: z.int().min(1),
   files: BundleFilesSchema,
 });
 

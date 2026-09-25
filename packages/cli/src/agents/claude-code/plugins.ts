@@ -35,14 +35,14 @@ export interface PluginManifest {
 export const PluginManifestSchema = z.strictObject({
   marketplaces: z.array(
     z.strictObject({
-      name: z.string().regex(/^[A-Za-z0-9._-]+$/),
+      name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
       // Passed to `claude plugin marketplace add`; never an option or a local path.
       add: z.string().regex(/^[^\s-][^\s"'`&|<>^%;]*$/),
     }),
   ),
   plugins: z.array(
     z.strictObject({
-      id: z.string().regex(/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$/),
+      id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*$/),
       scope: z.enum(['user', 'project', 'local']),
       commandSource: z.boolean(),
     }),

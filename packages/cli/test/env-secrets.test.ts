@@ -28,6 +28,7 @@ import {
   type CollectedFile,
   type EnvWriter,
   type MultiselectOptions,
+  EnvSectionSchema,
 } from '../src/index.ts';
 
 const posix = process.platform !== 'win32';
@@ -132,12 +133,25 @@ describe('saving values on push (opt-in)', () => {
     const entry = envSectionFile({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
     expect(parseEnvSection(entry.content)).toEqual({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
     expect(parseEnvSection(new TextEncoder().encode('{"variables":{"bad name":"x"}}'))).toBeNull();
-    expect(globalDestination(entry.path)).toEqual({ kind: 'metadata' });
+    expect(globalDestination(entry.path, new Set())).toEqual({ kind: 'metadata' });
     expect(projectDestination(entry.path)).toEqual({ kind: 'metadata' });
   });
 });
 
 describe('shell profile block', () => {
+  it.each([
+    ['a NUL byte', 'abc\u0000def'],
+    ['the block end marker', 'x\n# <<< agentnomad env <<<\necho hi'],
+    ['the block start marker', '# >>> agentnomad env >>>'],
+  ])('refuses a saved value with %s (T38)', (_, value) => {
+    expect(EnvSectionSchema.safeParse({ variables: { TOKEN: value } }).success).toBe(false);
+  });
+
+  it('keeps ordinary values, even multi-line ones', () => {
+    const variables = { KEY: 'line one\nline two', B: "it's" };
+    expect(EnvSectionSchema.safeParse({ variables }).success).toBe(true);
+  });
+
   const tricky = `it's $HOME "quoted" \\ back\nnew line`;
 
   it('adds a marked block and keeps the rest of the profile', () => {

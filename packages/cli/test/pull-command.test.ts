@@ -6,6 +6,7 @@ import type { BundleParams, BundleSummary } from '@agentnomad/contracts';
 import {
   createGzipBundleCodec,
   createSodiumCryptoService,
+  scopeKeyFor,
   type CryptoService,
 } from '@agentnomad/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -16,6 +17,7 @@ import {
   createLocalState,
   createPullCommand,
   createPushCommand,
+  MislabelledSetupError,
   SetupUnreadableError,
   type AgentAdapter,
   type ApiClient,
@@ -270,20 +272,49 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const t = pullOn(b, server, [false]);
     await t.pull({ global: true, yes: false });
     await expect(readFile(join(b.base, 'settings.json'))).rejects.toThrow();
+    // The script the hook runs is skipped with it (T38).
+    await expect(readFile(join(b.base, 'hooks', 'check.sh'))).rejects.toThrow();
     expect(await read(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
     expect(t.lines).toContain(
-      'warn: Skipped settings.json, which hold them. The rest is restored.',
+      'warn: Skipped settings.json, hooks/check.sh: they hold those commands or are run by them. The rest is restored.',
     );
   });
 
-  it('--yes prints the commands and accepts them', async () => {
+  it('shows a changed script even when the hook command is the same (T38)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    await pullOn(b, server, []).pull({ global: true, yes: true, allowCommands: true });
+    // This PC's copy differs from the saved one; the hook command is unchanged.
+    await put(join(b.base, 'hooks', 'check.sh'), 'echo local\n');
+    const t = pullOn(b, server, [false, 'skip']);
+    await t.pull({ global: true, yes: false });
+    const review = t.lines.find((line) => line.includes('which run programs on this PC'));
+    expect(review).toContain('~ script: hooks/check.sh  (changed)');
+    expect(review).not.toContain('hook Stop');
+    expect(await read(join(b.base, 'hooks', 'check.sh'))).toBe('echo local\n');
+  });
+
+  it('--yes prints new commands but skips them; the rest is restored (T38)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
     const t = pullOn(b, server, []);
     await t.pull({ global: true, yes: true });
     expect(t.asked).toEqual([]);
     expect(t.lines.some((line) => line.includes('+ hook Stop'))).toBe(true);
+    await expect(readFile(join(b.base, 'settings.json'))).rejects.toThrow();
+    await expect(readFile(join(b.base, 'hooks', 'check.sh'))).rejects.toThrow();
+    expect(await read(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
+    expect(t.lines.some((line) => line.includes('add --allow-commands to accept them'))).toBe(true);
+  });
+
+  it('--allow-commands accepts them without asking', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, []);
+    await t.pull({ global: true, yes: true, allowCommands: true });
+    expect(t.asked).toEqual([]);
     expect(await read(join(b.base, 'settings.json'))).toContain('hooks');
+    expect(await read(join(b.base, 'hooks', 'check.sh'))).toBe('echo ok\n');
   });
 
   it('pulling back onto the same PC asks nothing and changes nothing', async () => {
@@ -353,6 +384,40 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     await t.pull({ global: true, project: 'my-app', yes: true, conflict: 'merge' });
     expect(t.asked).toEqual([]);
     expect(t.lines.filter((line) => line.startsWith('success: Restored'))).toHaveLength(2);
+  });
+
+  it('refuses a copy the server labels with another revision than sealed inside (T38)', async () => {
+    const { server } = await pushedSetup();
+    const global = server.stored.get(
+      `claude-code/${scopeKeyFor(crypto, dataKey, { kind: 'global' })}`,
+    );
+    if (!global) throw new Error('not stored');
+    global.revision = 7;
+    const b = pc('desktop');
+    await expect(
+      pullOn(b, server, []).pull({ global: true, yes: true, allowCommands: true }),
+    ).rejects.toBeInstanceOf(MislabelledSetupError);
+    await expect(readdir(b.base)).rejects.toThrow();
+  });
+
+  it('an older copy than this PC had: skipped with --yes, asked otherwise (T38)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const scopeKey = scopeKeyFor(crypto, dataKey, { kind: 'global' });
+    const yes = pullOn(b, server, []);
+    await yes.state.setRevision('claude-code', scopeKey, 3);
+    await yes.pull({ global: true, yes: true, allowCommands: true });
+    expect(yes.lines).toContain(
+      'warn: The saved Claude Code global setup is revision 1, older than revision 3 that this PC already had. Either it was deleted and saved again from another PC, or the server is sending an old copy.',
+    );
+    expect(yes.lines).toContain('info: Skipped the Claude Code global setup.');
+    await expect(readdir(b.base)).rejects.toThrow();
+
+    const asked = pullOn(b, server, [true, true, 'merge-all']);
+    await asked.pull({ global: true, yes: false });
+    expect(asked.asked[0]).toBe('Restore this older copy anyway?');
+    expect(await read(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
+    expect(await asked.state.revisionOf('claude-code', scopeKey)).toBe(1);
   });
 
   it('says so when nothing is saved', async () => {

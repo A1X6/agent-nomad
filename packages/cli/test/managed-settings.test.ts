@@ -139,7 +139,7 @@ describe('server-managed settings (claude.ai admin console)', () => {
   });
 
   it('the cache is never synced', () => {
-    expect(globalDestination('remote-settings.json')).toEqual({
+    expect(globalDestination('remote-settings.json', new Set())).toEqual({
       kind: 'refused',
       reason: 'never synced',
     });
