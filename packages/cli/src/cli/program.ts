@@ -133,8 +133,16 @@ export function createProgram({ handlers, output }: ProgramDeps) {
     .addOption(pushAgent)
     .addOption(pushGlobal)
     .addOption(pushProject)
+    .addOption(new Option('--memory', 'include memory (subagent and auto memory)'))
+    .addOption(new Option('--no-memory', 'leave memory out'))
     .addOption(yesOption())
-    .action((options) => handlers.push({ ...scope(options), yes: options.yes === true }));
+    .action((options) =>
+      handlers.push({
+        ...scope(options),
+        yes: options.yes === true,
+        ...(options.memory !== undefined && { memory: options.memory }),
+      }),
+    );
 
   const [pullAgent, pullGlobal, pullProject] = scopeOptions();
   program

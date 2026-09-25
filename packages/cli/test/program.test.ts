@@ -133,6 +133,14 @@ describe('routing and flags', () => {
     ]);
   });
 
+  it.each([
+    ['--memory', true],
+    ['--no-memory', false],
+  ])('passes %s to push', async (flag, memory) => {
+    const { calls } = await run(['push', '--global', flag]);
+    expect(calls).toEqual([{ command: 'push', options: { global: true, yes: false, memory } }]);
+  });
+
   it('leaves out what was not given, so the command can ask', async () => {
     const { calls } = await run(['push']);
     expect(calls).toEqual([{ command: 'push', options: { global: false, yes: false } }]);
@@ -222,7 +230,7 @@ describe('outcomes', () => {
   it.each([
     [
       ['push'],
-      'Use --agent, --global or --project <name>, and --yes. See `agentnomad push --help`.',
+      'Use --agent, --global or --project <name>, --memory or --no-memory, and --yes. See `agentnomad push --help`.',
     ],
     [
       ['pull', '--global'],

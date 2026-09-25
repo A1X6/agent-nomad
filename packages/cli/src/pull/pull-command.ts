@@ -259,6 +259,7 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
 
     const report = await adapter.restorer.restore(target, files, context.resolver, {
       sourceOs: bundle.sourceOs,
+      assumeYes: options.yes,
     });
     for (const warning of report.warnings) reporter.warn(warning);
     const parts = [

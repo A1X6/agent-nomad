@@ -238,12 +238,14 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
         }
       }
 
-      const includeMemory = options.yes
-        ? false
-        : await prompter.confirm(
-            'Include memory (what Claude learned: subagent and auto memory)?',
-            false,
-          );
+      const includeMemory =
+        options.memory ??
+        (options.yes
+          ? false
+          : await prompter.confirm(
+              'Include memory (what Claude learned: subagent and auto memory)?',
+              false,
+            ));
 
       const shown = new Set<string>();
       for (const { adapter } of agents) {

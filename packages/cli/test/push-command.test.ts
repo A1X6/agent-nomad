@@ -301,6 +301,27 @@ describe('agentnomad push', () => {
     expect(await t.state.projectNameFor(PROJECT)).toBe('renamed');
   });
 
+  it.each([
+    [true, true],
+    [false, false],
+  ])('--memory=%s answers the memory question from a script', async (memory, expected) => {
+    const seen: boolean[] = [];
+    const base = fakeAdapter();
+    const adapter: AgentAdapter = {
+      ...base,
+      collector: {
+        collect: (target, options) => {
+          seen.push(options.includeMemory);
+          return base.collector.collect(target, options);
+        },
+      },
+    };
+    const t = setup([], { adapter });
+    await t.command.push({ global: true, yes: true, memory });
+    expect(t.script.asked).toEqual([]);
+    expect(seen).toEqual([expected]);
+  });
+
   it('never offers the home folder as a project', async () => {
     const t = setup([false], { cwd: HOME });
     await t.command.push(noFlags);
