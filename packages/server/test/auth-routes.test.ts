@@ -213,6 +213,25 @@ describe('POST /auth/login', () => {
     expect(unknownUser.status).toBe(401);
     expect(await wrongKey.json()).toEqual(await unknownUser.json());
   });
+
+  it("clears the account's idle sessions at login (e.g. after an offline logout), not others'", async () => {
+    await register();
+    await register('other');
+    // A session whose token was lost 31 days ago, and another user's idle session.
+    await t.database.client.query(
+      "update sessions set last_used_at = now() - interval '31 days' where user_id in (select id from users)",
+    );
+    const res = await t.app.request(
+      '/auth/login',
+      postJson({ username: 'ahmed', authKey, deviceName: 'desktop' }),
+    );
+    expect(res.status).toBe(200);
+    const { rows } = await t.database.client.query<{ username: string }>(
+      'select u.username from sessions s join users u on u.id = s.user_id order by 1',
+    );
+    // ahmed: only the new session; other: untouched until other logs in.
+    expect(rows.map((row) => row.username)).toEqual(['ahmed', 'other']);
+  });
 });
 
 describe('sessions', () => {

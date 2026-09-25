@@ -2,6 +2,7 @@ import { CommanderError } from '@commander-js/extra-typings';
 
 import { PromptCancelledError, type Reporter } from '../ui/prompter.ts';
 import type { CommandHandlers } from './commands.ts';
+import { describeError } from './error-messages.ts';
 import { createProgram, type ProgramOutput } from './program.ts';
 
 /** Exit codes: 0 done, 1 failed or bad usage, 130 cancelled with Ctrl+C (shell convention). */
@@ -32,7 +33,7 @@ export async function runCli(args: readonly string[], deps: RunDeps): Promise<nu
       deps.reporter.warn('Cancelled.');
       return EXIT.cancelled;
     }
-    deps.reporter.error(error instanceof Error ? error.message : String(error));
+    deps.reporter.error(describeError(error));
     return EXIT.failed;
   }
 }

@@ -45,8 +45,15 @@ export function createClackPrompter(): Prompter {
       );
     },
 
-    async password(message) {
-      return unwrapAnswer(await clack.password({ message }));
+    async password(message, options = {}) {
+      const { validate } = options;
+      return unwrapAnswer(
+        await clack.password({
+          message,
+          clearOnError: true,
+          ...(validate && { validate: (value: string | undefined) => validate(value ?? '') }),
+        }),
+      );
     },
 
     async confirm(message, initial = false) {

@@ -1,4 +1,4 @@
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { and, eq, gt, lt, lte, or, sql } from 'drizzle-orm';
 
 import type { Database } from './database.ts';
 import type { SessionRecord, SessionRepository } from './repositories.ts';
@@ -52,6 +52,22 @@ export function createSessionRepository(db: Database): SessionRepository {
 
     async delete(id) {
       await db.delete(sessions).where(eq(sessions.id, id));
+    },
+
+    async deleteStale(userId, idleTimeoutMs) {
+      const idleSeconds = Math.floor(idleTimeoutMs / 1000);
+      // Uses sessions_user_id_idx; only this user's rows are touched.
+      await db
+        .delete(sessions)
+        .where(
+          and(
+            eq(sessions.userId, userId),
+            or(
+              lte(sessions.expiresAt, sql`now()`),
+              lt(sessions.lastUsedAt, sql`now() - make_interval(secs => ${idleSeconds})`),
+            ),
+          ),
+        );
     },
   };
 }

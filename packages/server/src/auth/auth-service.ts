@@ -134,6 +134,9 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
         async () => (await keys.verifyAuthKey(authKey, user?.authHash ?? '')) && user !== null,
       );
       if (!user) throw new InvalidCredentialsError();
+      // Housekeeping: sessions whose token was lost (e.g. a logout without internet) or that
+      // ran out are otherwise never removed.
+      await sessions.deleteStale(user.id, SESSION_IDLE_TIMEOUT_MS);
       const session = await issueSession(user.id, deviceName);
       return { ...session, wrappedDataKey: user.wrappedDataKey };
     },
