@@ -50,3 +50,15 @@ jobs:
 
       - name: Typecheck, lint, format check and tests
         run: pnpm check
+
+      # Linux runners have no keychain, so the step above tests the file fallback. This runs
+      # the keychain tests again against a real, unlocked GNOME Keyring (Secret Service),
+      # set up the way @napi-rs/keyring's own CI does it.
+      - name: Linux keychain (GNOME Keyring over Secret Service)
+        if: runner.os == 'Linux'
+        env:
+          AGENTNOMAD_EXPECT_KEYCHAIN: '1'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gnome-keyring dbus dbus-x11
+          dbus-run-session -- bash -c 'echo -n test | gnome-keyring-daemon --unlock && pnpm --filter @agentnomad/cli exec vitest run test/secret-store.test.ts'
