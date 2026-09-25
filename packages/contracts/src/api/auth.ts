@@ -26,6 +26,18 @@ export const KdfParamsSchema = z.strictObject({
   parallelism: z.literal(1),
 });
 
+/**
+ * Argon2id settings for new accounts: 64 MiB, 3 passes (the T04 benchmark). The server also
+ * returns these for unknown usernames at prelogin, so a fake answer looks like a real one.
+ */
+export const DEFAULT_KDF_PARAMS = {
+  algorithm: 'argon2id',
+  version: 19,
+  memoryKiB: 65_536,
+  passes: 3,
+  parallelism: 1,
+} as const satisfies z.input<typeof KdfParamsSchema>;
+
 const KdfSaltSchema = base64OfLength(KDF_SALT_BYTES);
 const AuthKeySchema = base64OfLength(AUTH_KEY_BYTES);
 const WrappedDataKeySchema = base64OfLength(WRAPPED_DATA_KEY_BYTES);

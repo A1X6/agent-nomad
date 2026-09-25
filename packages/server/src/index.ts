@@ -1,3 +1,5 @@
+export * from './auth/auth-service.ts';
+export * from './auth/server-keys.ts';
 export * from './db/bundle-repository.ts';
 export * from './db/database.ts';
 export * from './db/env.ts';
@@ -5,5 +7,7 @@ export * from './db/repositories.ts';
 export * from './db/schema.ts';
 export * from './db/session-repository.ts';
 export * from './db/user-repository.ts';
+export * from './http/app.ts';
+export * from './http/errors.ts';
 export * from './storage/blob-store.ts';
 export * from './storage/postgres-blob-store.ts';

@@ -48,17 +48,22 @@ export interface SessionRecord {
   /** Hash of the session token; the token itself is never stored. */
   readonly tokenHash: string;
   readonly deviceName: string;
+  /** Hard limit: the session ends here however often it is used. */
   readonly expiresAt: Date;
+  /** For the idle timeout (T15). */
+  readonly lastUsedAt: Date;
   readonly createdAt: Date;
 }
 
-export type NewSession = Omit<SessionRecord, 'id' | 'createdAt'>;
+export type NewSession = Omit<SessionRecord, 'id' | 'createdAt' | 'lastUsedAt'>;
 
 /** Sessions (T14). */
 export interface SessionRepository {
   create(session: NewSession): Promise<SessionRecord>;
   /** Returns only sessions that have not expired. */
   findByTokenHash(tokenHash: string): Promise<SessionRecord | null>;
+  /** Records that the session was just used. */
+  touch(id: string): Promise<void>;
   delete(id: string): Promise<void>;
 }
 

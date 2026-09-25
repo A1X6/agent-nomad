@@ -11,6 +11,7 @@ function toSessionRecord(row: typeof sessions.$inferSelect): SessionRecord {
     tokenHash: row.tokenHash,
     deviceName: row.deviceName,
     expiresAt: row.expiresAt,
+    lastUsedAt: row.lastUsedAt,
     createdAt: row.createdAt,
   };
 }
@@ -40,6 +41,13 @@ export function createSessionRepository(db: Database): SessionRepository {
         .where(and(eq(sessions.tokenHash, tokenHash), gt(sessions.expiresAt, sql`now()`)))
         .limit(1);
       return row ? toSessionRecord(row) : null;
+    },
+
+    async touch(id) {
+      await db
+        .update(sessions)
+        .set({ lastUsedAt: sql`now()` })
+        .where(eq(sessions.id, id));
     },
 
     async delete(id) {

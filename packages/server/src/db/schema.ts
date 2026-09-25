@@ -76,6 +76,8 @@ export const sessions = pgTable(
     tokenHash: text('token_hash').notNull(),
     deviceName: text('device_name').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** For the idle timeout; refreshed at most once a day, not on every request. */
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: createdAt(),
   },
   (table) => [
