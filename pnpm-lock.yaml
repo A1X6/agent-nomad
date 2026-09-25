@@ -232,6 +232,9 @@ importers:
       drizzle-orm:
         specifier: 0.45.3
         version: 0.45.3(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)
+      hono:
+        specifier: 4.13.9
+        version: 4.13.9
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -1264,6 +1267,10 @@ packages:
   hashery@1.5.1:
     resolution: {integrity: sha512-iZyKG96/JwPz1N55vj2Ie2vXbhu440zfUfJvSwEqEbeLluk7NnapfGqa7LH0mOsnDxTF85Mx8/dyR6HfqcbmbQ==}
     engines: {node: '>=20'}
+
+  hono@4.13.9:
+    resolution: {integrity: sha512-7dMkQmZoC4E6F7AtaQSPhlWAdnBti+j7rreMZl8QB4jFiEhP9TWbGWUMi8WYzBCgmgulxuvLQupKqo+Co6Omyg==}
+    engines: {node: '>=16.9.0'}
 
   hookified@1.15.1:
     resolution: {integrity: sha512-MvG/clsADq1GPM2KGo2nyfaWVyn9naPiXrqIe4jYjXNZQt238kWyOGrsyc/DmRAQ+Re6yeo6yX/yoNCG5KAEVg==}
@@ -2402,6 +2409,8 @@ snapshots:
   hashery@1.5.1:
     dependencies:
       hookified: 1.15.1
+
+  hono@4.13.9: {}
 
   hookified@1.15.1: {}
 

@@ -5,6 +5,7 @@ import {
   API_ROUTES,
   AUTH_KEY_BYTES,
   BundleParamsSchema,
+  DEFAULT_KDF_PARAMS,
   DeleteAccountRequestSchema,
   ErrorResponseSchema,
   GetBundleResponseHeadersSchema,
@@ -67,6 +68,8 @@ describe('routes and headers', () => {
 describe('KdfParamsSchema', () => {
   it('accepts the default parameters', () => {
     expect(ok(KdfParamsSchema, kdfParams)).toBe(true);
+    expect(ok(KdfParamsSchema, DEFAULT_KDF_PARAMS)).toBe(true);
+    expect(DEFAULT_KDF_PARAMS).toEqual(kdfParams);
   });
 
   // Upper bounds protect the CLI from a malicious server asking for huge memory at prelogin.
