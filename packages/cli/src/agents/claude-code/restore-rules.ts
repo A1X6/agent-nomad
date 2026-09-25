@@ -80,7 +80,7 @@ export function globalDestination(path: string): RestoreDestination {
   if (NEVER_SYNCED.some((entry) => under(path, entry))) return refused('never synced');
 
   const allowed =
-    (GLOBAL_FILES as readonly string[]).includes(path) ||
+    GLOBAL_FILES.includes(path) ||
     [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].some((folder) => path.startsWith(`${folder}/`)) ||
     isScript(path);
   return allowed ? { kind: 'target', path } : refused('not part of a Claude Code setup');
@@ -125,7 +125,7 @@ export function projectDestination(
 
   const claudeFolders = [...PROJECT_CLAUDE_FOLDERS, ...PROJECT_MEMORY_FOLDERS];
   const allowed =
-    (PROJECT_ROOT_FILES as readonly string[]).includes(path) ||
+    PROJECT_ROOT_FILES.includes(path) ||
     PROJECT_CLAUDE_FILES.some((name) => path === `.claude/${name}`) ||
     claudeFolders.some((folder) => path.startsWith(`.claude/${folder}/`)) ||
     (isScript(path) && (path.startsWith('.claude/') || hookScripts.has(path)));

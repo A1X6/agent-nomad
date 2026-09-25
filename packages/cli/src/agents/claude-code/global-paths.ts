@@ -1,80 +1,37 @@
 /**
- * What the Claude Code global collector takes from `~/.claude` (T25). Everything is an
- * allowlist: a file Claude Code adds in a new version is left out until it is listed here
- * (T32 moves these lists into the paths data file and reports unknown files).
+ * What the Claude Code global collector takes from `~/.claude` (T25). The lists come from
+ * the paths data file (T32); this module only gives them names and fast lookups.
  */
+import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
 
 /** Single files in the base folder. */
-export const GLOBAL_FILES = ['settings.json', 'CLAUDE.md', 'keybindings.json'] as const;
+export const GLOBAL_FILES: readonly string[] = DATA.global.files;
 
 /** Folders in the base folder, taken whole (minus the skips below). */
-export const GLOBAL_FOLDERS = [
-  'rules',
-  'skills',
-  'commands',
-  'agents',
-  'workflows',
-  'output-styles',
-  'themes',
-] as const;
+export const GLOBAL_FOLDERS: readonly string[] = DATA.global.folders;
 
 /** Opt-in: subagent memory with `memory: user` (auto memory is per project, T26). */
-export const GLOBAL_MEMORY_FOLDERS = ['agent-memory'] as const;
+export const GLOBAL_MEMORY_FOLDERS: readonly string[] = DATA.global.memoryFolders;
 
-/**
- * Never taken, even when a hook names them. `skills/synced/` is downloaded by Claude Code
- * from the claude.ai account, which already syncs it.
- */
-export const NEVER_SYNCED = [
-  '.credentials.json',
-  'history.jsonl',
-  'projects',
-  'file-history',
-  'plans',
-  'debug',
-  'cache',
-  'backups',
-  'sessions',
-  'session-env',
-  'shell-snapshots',
-  'jobs',
-  'daemon',
-  'downloads',
-  'paste-cache',
-  'ide',
-  'security',
-  'statsig',
-  'todos',
-  '.trash',
-  'plugins',
-  'settings.local.json',
-  // The organization's server-managed settings, as Claude Code cached them (T31).
-  'remote-settings.json',
-  'skills/synced',
-] as const;
+/** Never taken, even when a hook names them (includes `skills/synced`). */
+export const NEVER_SYNCED: readonly string[] = DATA.global.neverSynced;
+
+/** Known base-folder entries left out on purpose, so the unknown-file check stays quiet. */
+export const GLOBAL_KNOWN_STATE: readonly string[] = DATA.global.knownState;
 
 /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
-export const SKIPPED_NAMES = new Set([
-  '.git',
-  'node_modules',
-  '__pycache__',
-  '.venv',
-  '.DS_Store',
-  'Thumbs.db',
-  'desktop.ini',
-]);
+export const SKIPPED_NAMES: ReadonlySet<string> = new Set(DATA.skippedNames);
+
+/** The user's own copies (`settings.json.bak`), never reported as unknown. */
+export const IGNORED_COPY_PATTERNS: readonly RegExp[] = DATA.ignoredCopyPatterns.map(
+  (pattern) => new RegExp(pattern),
+);
 
 /**
  * `~/.claude.json` keys that are preferences: the "Global config" keys in Claude Code's
  * settings reference. Everything else there is account, machine or project state.
  */
-export const CLAUDE_JSON_PREFERENCE_KEYS = [
-  'autoConnectIde',
-  'autoInstallIdeExtension',
-  'copyOnSelect',
-  'diffTool',
-  'externalEditorContext',
-] as const;
+export const CLAUDE_JSON_PREFERENCE_KEYS: readonly string[] = DATA.claudeJsonPreferenceKeys;
 
 /** User-scope MCP servers, also kept in `~/.claude.json`. */
 export const CLAUDE_JSON_MCP_KEY = 'mcpServers';
@@ -87,37 +44,10 @@ export const CLAUDE_JSON_BUNDLE_PATH = `${RESERVED_DIR}/claude.json`;
 export const HOME_SCRIPTS_PREFIX = `${RESERVED_DIR}/home/`;
 
 /** A hook argument is only taken as a script with one of these extensions. */
-export const SCRIPT_EXTENSIONS = new Set([
-  '.sh',
-  '.bash',
-  '.zsh',
-  '.fish',
-  '.ps1',
-  '.psm1',
-  '.cmd',
-  '.bat',
-  '.py',
-  '.js',
-  '.mjs',
-  '.cjs',
-  '.ts',
-  '.rb',
-  '.pl',
-  '.lua',
-]);
+export const SCRIPT_EXTENSIONS: ReadonlySet<string> = new Set(DATA.scriptExtensions);
 
 /** Home folders never read for hook scripts, whatever a command names: keys and cloud logins. */
-export const SENSITIVE_HOME_DIRS = [
-  '.ssh',
-  '.gnupg',
-  '.aws',
-  '.azure',
-  '.kube',
-  '.docker',
-  '.config/gcloud',
-  '.config/gh',
-  '.password-store',
-] as const;
+export const SENSITIVE_HOME_DIRS: readonly string[] = DATA.sensitiveHomeDirs;
 
 /** Marketplaces and plugins to reinstall on pull (T29). */
 export const PLUGINS_BUNDLE_PATH = `${RESERVED_DIR}/plugins.json`;
@@ -129,26 +59,10 @@ export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
  * Settings files of known status line and hook tools, from the home folder. Taken when a
  * command runs the tool, directly or through `npx` / `bunx`.
  */
-export const TOOL_CONFIG_FILES: Readonly<Record<string, readonly string[]>> = {
-  ccstatusline: ['.config/ccstatusline/settings.json'],
-};
+export const TOOL_CONFIG_FILES: Readonly<Record<string, readonly string[]>> = DATA.toolConfigFiles;
 
 /** Shells and runtimes: present wherever agentnomad runs, so not recorded as programs. */
-export const RUNTIME_COMMANDS = new Set([
-  'bash',
-  'sh',
-  'zsh',
-  'fish',
-  'pwsh',
-  'powershell',
-  'cmd',
-  'node',
-  'python',
-  'python3',
-  'py',
-  'env',
-  'exec',
-]);
+export const RUNTIME_COMMANDS: ReadonlySet<string> = new Set(DATA.runtimeCommands);
 
 /** Run a package without installing it; the package name follows the options. */
-export const PACKAGE_RUNNERS = new Set(['npx', 'bunx', 'pnpx', 'uvx']);
+export const PACKAGE_RUNNERS: ReadonlySet<string> = new Set(DATA.packageRunners);
