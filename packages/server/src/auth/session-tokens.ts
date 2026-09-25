@@ -1,4 +1,4 @@
-import { toBase64Url, toHex, utf8 } from './encoding.ts';
+import { toBase64Url, toHex, utf8 } from '../encoding.ts';
 
 /** 32 random bytes = 256 bits, well above OWASP's 128-bit minimum for custom session ids. */
 const SESSION_TOKEN_BYTES = 32;

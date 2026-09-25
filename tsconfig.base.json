@@ -17,6 +17,7 @@
     "useUnknownInCatchVariables": true,
 
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "isolatedModules": true,
     "rewriteRelativeImportExtensions": true,
     "forceConsistentCasingInFileNames": true,

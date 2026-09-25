@@ -1,5 +1,6 @@
 export * from './auth/auth-service.ts';
 export * from './auth/server-keys.ts';
+export * from './bundles/bundle-service.ts';
 export * from './db/bundle-repository.ts';
 export * from './db/database.ts';
 export * from './db/env.ts';

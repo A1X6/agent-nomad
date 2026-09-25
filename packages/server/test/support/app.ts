@@ -2,6 +2,9 @@ import { randomBytes } from 'node:crypto';
 
 import { createAuthService, type AuthService } from '../../src/auth/auth-service.ts';
 import { createServerKeys } from '../../src/auth/server-keys.ts';
+import { createBundleService } from '../../src/bundles/bundle-service.ts';
+import { createBundleRepository } from '../../src/db/bundle-repository.ts';
+import { createPostgresBlobStore } from '../../src/storage/postgres-blob-store.ts';
 import { createSessionRepository } from '../../src/db/session-repository.ts';
 import { createUserRepository } from '../../src/db/user-repository.ts';
 import { createApp } from '../../src/http/app.ts';
@@ -28,8 +31,15 @@ export async function createTestApp(serverSecret = TEST_SERVER_SECRET): Promise<
     now: () => now,
     randomBytes: (length) => new Uint8Array(randomBytes(length)),
   });
+  const bundles = createBundleService({
+    bundles: createBundleRepository(database.db),
+    blobs: createPostgresBlobStore(database.db),
+    logError: (message, error) => {
+      throw new Error(`Unexpected cleanup failure: ${message}`, { cause: error });
+    },
+  });
   return {
-    app: createApp({ auth }),
+    app: createApp({ auth, bundles }),
     auth,
     database,
     setNow: (date) => {

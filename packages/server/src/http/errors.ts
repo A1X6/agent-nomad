@@ -5,14 +5,21 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 /** An error the API reports to the client as `{ error: { code, message } }`. */
 export class ApiError extends Error {
+  readonly status: ContentfulStatusCode;
+  readonly code: ErrorCode;
+  readonly currentRevision: number | undefined;
+
   constructor(
-    readonly status: ContentfulStatusCode,
-    readonly code: ErrorCode,
+    status: ContentfulStatusCode,
+    code: ErrorCode,
     message: string,
-    readonly currentRevision?: number,
+    currentRevision?: number,
   ) {
     super(message);
     this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.currentRevision = currentRevision;
   }
 }
 
