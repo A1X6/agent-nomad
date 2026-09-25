@@ -13,6 +13,12 @@ export const AgentIdSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]{0,39}$/, 'Agent id must be lowercase letters, digits and dashes');
 
+/** An agent's version as it reports it, e.g. `2.1.282` or `2.0.0-beta.3`. */
+export const AgentVersionSchema = z
+  .string()
+  .max(64)
+  .regex(/^[0-9A-Za-z.+-]+$/, 'Agent version must be letters, digits, dots, plus or dashes');
+
 /** OS the bundle was pushed from, as reported by Node's `process.platform`. */
 export const SourceOsSchema = z.enum(['darwin', 'linux', 'win32']);
 
@@ -86,6 +92,11 @@ export const BundleSchema = z.strictObject({
   agent: AgentIdSchema,
   scope: BundleScopeSchema,
   sourceOs: SourceOsSchema,
+  /**
+   * Version of the agent the setup was saved from, e.g. Claude Code `2.1.282` (T32);
+   * `null` when it could not be read. Pull warns when this PC runs an older version.
+   */
+  agentVersion: AgentVersionSchema.nullable(),
   files: BundleFilesSchema,
 });
 

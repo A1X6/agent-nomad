@@ -37,8 +37,9 @@ const fakeAdapter: AgentAdapter = {
     restore: async (_target, files, onConflict) => {
       const skipped: string[] = [];
       for (const file of files)
-        if ((await onConflict(file.path)) === 'skip') skipped.push(file.path);
-      return { written: [], skipped, backups: [] };
+        if ((await onConflict(file.path, { overwriteAllowed: true })) === 'skip')
+          skipped.push(file.path);
+      return { written: [], skipped, backups: [], warnings: [] };
     },
   },
 };

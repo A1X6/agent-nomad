@@ -19,6 +19,11 @@ export interface TextOptions {
   readonly validate?: (value: string) => string | undefined;
 }
 
+export interface PasswordOptions {
+  /** Returns an error message, or `undefined` when the value is fine. */
+  readonly validate?: (value: string) => string | undefined;
+}
+
 /**
  * Every question the CLI asks (T20). Commands depend on this, never on the prompt library,
  * so a flags-only version can answer without a terminal (`--yes`, T36). When the user
@@ -32,9 +37,17 @@ export interface Prompter {
     options?: MultiselectOptions<T>,
   ): Promise<T[]>;
   text(message: string, options?: TextOptions): Promise<string>;
-  /** Input is hidden while typing. */
-  password(message: string): Promise<string>;
+  /** Input is hidden while typing; a rejected answer is cleared and asked again. */
+  password(message: string, options?: PasswordOptions): Promise<string>;
   confirm(message: string, initial?: boolean): Promise<boolean>;
+}
+
+/** The user cancelled a question (Ctrl+C or Esc); the command stops without changing anything. */
+export class PromptCancelledError extends Error {
+  constructor() {
+    super('Cancelled');
+    this.name = 'PromptCancelledError';
+  }
 }
 
 /** A progress indicator for slow steps, e.g. key derivation or uploading. */
