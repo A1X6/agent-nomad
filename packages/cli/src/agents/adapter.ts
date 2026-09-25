@@ -79,6 +79,14 @@ export interface Restorer {
   ): Promise<RestoreReport>;
 }
 
+/** Agent-specific checks that commands show to the user (T31, T32). */
+export interface AgentInspector {
+  /** Entries the collector does not know, e.g. a folder a newer agent version added. */
+  unknownEntries(target: ScopeTarget): Promise<readonly string[]>;
+  /** Things to point out before push or pull, e.g. organization-managed settings. */
+  notices(command: 'push' | 'pull'): Promise<readonly string[]>;
+}
+
 /**
  * Everything agentnomad knows about one agent. Adding an agent means writing one of these
  * and registering it; nothing else changes.
@@ -90,6 +98,7 @@ export interface AgentAdapter {
   readonly detector: Detector;
   readonly collector: Collector;
   readonly restorer: Restorer;
+  readonly inspector?: AgentInspector;
 }
 
 /** The only place agents are registered (T28). */
