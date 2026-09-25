@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { AuthService } from '../auth/auth-service.ts';
 import type { BundleService } from '../bundles/bundle-service.ts';
 import { handleError, handleNotFound } from './errors.ts';
+import { accountRoutes } from './routes/account.ts';
 import { authRoutes } from './routes/auth.ts';
 import { bundleRoutes } from './routes/bundles.ts';
 
@@ -32,6 +33,7 @@ export function createApp(deps: AppDeps): Hono {
     .get(API_ROUTES.health, (c) => c.json({ status: 'ok' } satisfies HealthResponse))
     .route('/', authRoutes(deps.auth))
     .route('/', bundleRoutes(deps.auth, deps.bundles))
+    .route('/', accountRoutes(deps.auth))
     .notFound(handleNotFound)
     .onError(handleError);
 }

@@ -8,26 +8,14 @@ import {
   type SessionResponse,
 } from '@agentnomad/contracts';
 import { Hono } from 'hono';
-import { bodyLimit } from 'hono/body-limit';
 
 import { InvalidCredentialsError, type AuthService } from '../../auth/auth-service.ts';
-import { fromBase64, toBase64 } from '../../encoding.ts';
 import { UsernameTakenError } from '../../db/repositories.ts';
+import { fromBase64, toBase64 } from '../../encoding.ts';
 import { ApiError } from '../errors.ts';
 import { requireSession, type SessionVariables } from '../session.ts';
+import { smallBody } from '../small-body.ts';
 import { jsonBody } from '../validate.ts';
-
-/** Auth requests are small JSON; anything bigger is refused before it is read. */
-const MAX_AUTH_BODY_BYTES = 16 * 1024;
-
-/** Per route (not `use('*')`), so it never applies to the large bundle uploads (T16). */
-const smallBody = () =>
-  bodyLimit({
-    maxSize: MAX_AUTH_BODY_BYTES,
-    onError: () => {
-      throw new ApiError(413, 'payload_too_large', 'Request body is too large');
-    },
-  });
 
 /** POST /auth/prelogin, /auth/register, /auth/login, /auth/logout (T15). */
 export function authRoutes(auth: AuthService) {
