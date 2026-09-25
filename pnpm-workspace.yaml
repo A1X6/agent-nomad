@@ -1,2 +1,6 @@
 packages:
   - packages/*
+# Install scripts are off by default. esbuild (used by drizzle-kit) ships its binary as an
+# optional dependency, so its postinstall check is not needed.
+allowBuilds:
+  esbuild: false

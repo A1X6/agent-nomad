@@ -5,7 +5,7 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "include": ["src", "test"],
+  "include": ["src", "test", "drizzle.config.ts"],
   "references": [
     {
       "path": "../contracts"
