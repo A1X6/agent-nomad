@@ -57,7 +57,18 @@ export function parseVersion(output: string): string | null {
  * The `claude` command the user's shell would run: the first match on PATH, then the
  * native installer's folder (`~/.local/bin`), which some shells leave off PATH.
  */
-export async function findClaudeExecutable(system: DetectorSystem): Promise<string | null> {
+export function findClaudeExecutable(system: DetectorSystem): Promise<string | null> {
+  return findExecutable(system, 'claude');
+}
+
+/**
+ * The file the shell would run for command `command`: PATH in order (PATHEXT order on
+ * Windows), then `~/.local/bin`. `null` when it is not installed.
+ */
+export async function findExecutable(
+  system: DetectorSystem,
+  command: string,
+): Promise<string | null> {
   const windows = system.platform === 'win32';
   const path = pathsOf(system);
   const folders = (envValue(system, 'PATH') ?? '')
@@ -71,8 +82,8 @@ export async function findClaudeExecutable(system: DetectorSystem): Promise<stri
     ? (envValue(system, 'PATHEXT') ?? DEFAULT_PATHEXT)
         .split(';')
         .filter((extension) => extension.startsWith('.'))
-        .map((extension) => `claude${extension.toLowerCase()}`)
-    : ['claude'];
+        .map((extension) => `${command}${extension.toLowerCase()}`)
+    : [command];
 
   for (const folder of folders) {
     for (const name of names) {
