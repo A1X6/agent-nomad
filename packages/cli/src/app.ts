@@ -3,6 +3,11 @@ import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core'
 import type { AgentRegistry } from './agents/adapter.ts';
 import { createAgentsCommand } from './agents/agents-command.ts';
 import { createClaudeCodeAdapter } from './agents/claude-code/claude-code-adapter.ts';
+import {
+  detectManagedSettings,
+  managedSettingsNotice,
+  nodeManagedSettingsSystem,
+} from './agents/claude-code/managed-settings.ts';
 import { createAgentRegistry } from './agents/registry.ts';
 import type { ApiClient } from './api/api-client.ts';
 import { resolveApiUrl } from './api/api-url.ts';
@@ -98,7 +103,15 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
 
   return {
     ...NOT_YET_AVAILABLE,
-    ...createAgentsCommand({ registry, reporter: app.reporter }),
+    ...createAgentsCommand({
+      registry,
+      reporter: app.reporter,
+      notices: async () => {
+        const found = await detectManagedSettings(nodeManagedSettingsSystem(app.env, app.platform));
+        const notice = managedSettingsNotice(found, 'agents');
+        return notice === null ? [] : [notice];
+      },
+    }),
     ...createEnvCommand({ registry, reporter: app.reporter, env: app.env, cwd: app.cwd }),
     ...createAuthCommands({
       prompter: app.prompter,

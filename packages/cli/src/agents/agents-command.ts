@@ -4,7 +4,9 @@ import type { AgentRegistry, DetectedAgent } from './adapter.ts';
 
 export interface AgentsCommandDeps {
   readonly registry: () => AgentRegistry;
-  readonly reporter: Pick<Reporter, 'info' | 'success'>;
+  readonly reporter: Pick<Reporter, 'info' | 'success' | 'warn'>;
+  /** Extra things to point out, e.g. organization-managed settings (T31). */
+  readonly notices?: () => Promise<readonly string[]>;
 }
 
 /** One line per agent, e.g. `✓ Claude Code  2.1.282  C:\Users\a\.claude`. */
@@ -29,6 +31,7 @@ export function createAgentsCommand(deps: AgentsCommandDeps): Pick<CommandHandle
       );
       const installed = found.filter((agent) => agent.installed).length;
       deps.reporter.info(['Supported agents:', ...lines.map((line) => `  ${line}`)].join('\n'));
+      for (const notice of (await deps.notices?.()) ?? []) deps.reporter.warn(notice);
       deps.reporter.success(
         `${String(installed)} of ${String(adapters.length)} supported agent${adapters.length === 1 ? '' : 's'} found on this PC.`,
       );

@@ -110,6 +110,8 @@ export interface SyncPluginsDeps {
   readonly cwd: string;
   /** `--yes`: accept the list, but still never run command-source plugins without asking. */
   readonly assumeYes?: boolean;
+  /** Turns an install failure into a clearer reason, e.g. "blocked by your organization" (T31). */
+  readonly explainFailure?: (reason: string) => string;
 }
 
 /**
@@ -184,10 +186,8 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
     if (run.exitCode === 0 && (outcome === null || outcome.ok)) {
       result.installed.push(plugin.id);
     } else {
-      result.failed.push({
-        what: plugin.id,
-        reason: outcome?.message || run.stderr.trim() || `exit code ${String(run.exitCode)}`,
-      });
+      const reason = outcome?.message || run.stderr.trim() || `exit code ${String(run.exitCode)}`;
+      result.failed.push({ what: plugin.id, reason: deps.explainFailure?.(reason) ?? reason });
     }
   }
 
