@@ -1,0 +1,137 @@
+name: Claude Code drift check
+
+# T41: every week, compare the Claude Code paths data file with the newest Claude Code
+# (its .claude directory docs, what a fresh install creates, and its changelog since the
+# version the data file was reviewed against). Findings go into one open GitHub issue
+# labelled `drift`; nothing is filed when there is nothing to do. A broken check fails the
+# run, so GitHub emails the owner.
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays, 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Test run: always file the report, as a [TEST] issue labelled drift-test'
+        type: boolean
+        default: false
+  # When the check itself changes, run it (report only, no issue) to prove it still works.
+  push:
+    paths:
+      - '.github/workflows/drift-check.yml'
+      - 'packages/cli/scripts/drift/**'
+      - 'packages/cli/src/agents/claude-code/claude-code-paths.data.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: drift-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs the newest Claude Code with no write permissions and no secrets, in an empty home.
+  fresh-install:
+    name: fresh Claude Code
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.install.outputs.version }}
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install the newest Claude Code
+        id: install
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest
+          version="$(npm view @anthropic-ai/claude-code version)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Claude Code $version"
+
+      - name: Run it in an empty home and config folder
+        run: |
+          export HOME="$RUNNER_TEMP/home" CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude"
+          mkdir -p "$HOME" "$CLAUDE_CONFIG_DIR"
+          unset ANTHROPIC_API_KEY
+          claude --version
+          timeout 60 claude doctor < /dev/null || true
+          timeout 60 claude -p hello < /dev/null || true
+          ls -A "$CLAUDE_CONFIG_DIR" | tee "$RUNNER_TEMP/fresh-entries.txt"
+
+      - name: Keep the listing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fresh-entries
+          path: ${{ runner.temp }}/fresh-entries.txt
+          retention-days: 7
+          if-no-files-found: error
+
+  report:
+    name: compare and report
+    needs: fresh-install
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          cache: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Get the fresh-install listing
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: fresh-entries
+          path: ${{ runner.temp }}
+
+      - name: Compare with the data file
+        id: check
+        env:
+          DRIFT_LATEST: ${{ needs.fresh-install.outputs.version }}
+          DRIFT_FRESH_ENTRIES: ${{ runner.temp }}/fresh-entries.txt
+          DRIFT_OUT: ${{ runner.temp }}/report.md
+        run: node --experimental-strip-types packages/cli/scripts/drift/check-claude-code.ts
+
+      # One open issue at a time: created once, then updated (with a comment) only when the
+      # report changes. Pushes never file issues.
+      - name: File or update the issue
+        if: >-
+          github.event_name != 'push' &&
+          (steps.check.outputs.found == 'true' || inputs.test == true)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.check.outputs.latest }}
+          TEST: ${{ inputs.test == true }}
+          REPORT: ${{ runner.temp }}/report.md
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Claude Code drift: $LATEST"
+          label="drift"
+          if [ "$TEST" = "true" ]; then title="[TEST] $title"; label="drift-test"; fi
+          gh label create "$label" --color FBCA04 --description "Claude Code drift check (T41)" --force
+          number="$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$number" ]; then
+            gh issue create --title "$title" --label "$label" --body-file "$REPORT"
+          elif [ "$(gh issue view "$number" --json body --jq .body)" != "$(cat "$REPORT")" ]; then
+            gh issue edit "$number" --title "$title" --body-file "$REPORT"
+            gh issue comment "$number" --body "Updated for Claude Code $LATEST by $RUN_URL"
+          else
+            echo "Issue #$number already has this report."
+          fi
