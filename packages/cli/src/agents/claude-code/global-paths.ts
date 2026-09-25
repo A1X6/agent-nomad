@@ -117,6 +117,9 @@ export const SENSITIVE_HOME_DIRS = [
   '.password-store',
 ] as const;
 
+/** Marketplaces and plugins to reinstall on pull (T29). */
+export const PLUGINS_BUNDLE_PATH = `${RESERVED_DIR}/plugins.json`;
+
 /** Programs a hook or the status line needs, with install details (`.agentnomad/programs.json`). */
 export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
 
