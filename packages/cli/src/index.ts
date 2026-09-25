@@ -1,4 +1,5 @@
 export * from './agents/adapter.ts';
+export * from './agents/claude-code/detector.ts';
 export * from './api/api-client.ts';
 export * from './api/api-errors.ts';
 export * from './api/api-url.ts';
