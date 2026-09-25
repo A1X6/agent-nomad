@@ -78,6 +78,8 @@ describe('migrations', () => {
     );
     expect(indexes.map((row) => row.indexname)).toEqual([
       'bundle_blobs_pkey',
+      'bundle_blobs_user_id_id_key',
+      'bundles_blob_id_key',
       'bundles_pkey',
       'bundles_user_agent_scope_key',
       'bundles_user_updated_idx',
@@ -153,7 +155,16 @@ describe('sessions', () => {
 });
 
 describe('bundles and bundle_blobs', () => {
-  const meta = (userId: string) => ({
+  async function insertBlob(userId: string, fill = 7) {
+    const [blob] = await db
+      .insert(bundleBlobs)
+      .values({ userId, ciphertext: bytes(40, fill) })
+      .returning();
+    if (!blob) throw new Error('insert returned nothing');
+    return blob;
+  }
+
+  const meta = (userId: string, blobId: string) => ({
     userId,
     agent: 'claude-code',
     scopeKey: 'global',
@@ -162,47 +173,69 @@ describe('bundles and bundle_blobs', () => {
     formatVersion: 1,
     revision: 1,
     sizeBytes: 100,
+    blobId,
   });
 
   it('allow one saved setup per user, agent and scope', async () => {
     const user = await insertUser();
-    await db.insert(bundles).values(meta(user.id));
-    await expect(db.insert(bundles).values(meta(user.id))).rejects.toThrow();
-    await db.insert(bundles).values({ ...meta(user.id), agent: 'codex' });
+    await db.insert(bundles).values(meta(user.id, (await insertBlob(user.id)).id));
+    await expect(
+      db.insert(bundles).values(meta(user.id, (await insertBlob(user.id)).id)),
+    ).rejects.toThrow();
+    await db
+      .insert(bundles)
+      .values({ ...meta(user.id, (await insertBlob(user.id)).id), agent: 'codex' });
   });
 
-  it('keep the old and new revision of the bytes side by side (safe upload order)', async () => {
+  it('give every stored file its own random id', async () => {
     const user = await insertUser();
-    const blob = { userId: user.id, agent: 'claude-code', scopeKey: 'global' };
-    await db.insert(bundleBlobs).values({ ...blob, revision: 1, ciphertext: bytes(40, 1) });
-    await db.insert(bundleBlobs).values({ ...blob, revision: 2, ciphertext: bytes(40, 2) });
+    const first = await insertBlob(user.id, 1);
+    const second = await insertBlob(user.id, 2);
+    expect(first.id).not.toBe(second.id);
+  });
+
+  it('refuse to delete the file a setup points to', async () => {
+    const user = await insertUser();
+    const blob = await insertBlob(user.id);
+    await db.insert(bundles).values(meta(user.id, blob.id));
+    await expect(db.delete(bundleBlobs).where(eq(bundleBlobs.id, blob.id))).rejects.toThrow();
+  });
+
+  it("refuse to point a setup at another user's file", async () => {
+    const owner = await insertUser('owner');
+    const other = await insertUser('other');
+    const blob = await insertBlob(owner.id);
+    await expect(db.insert(bundles).values(meta(other.id, blob.id))).rejects.toThrow();
+  });
+
+  it('refuse to point two setups at the same file', async () => {
+    const user = await insertUser();
+    const blob = await insertBlob(user.id);
+    await db.insert(bundles).values(meta(user.id, blob.id));
     await expect(
-      db.insert(bundleBlobs).values({ ...blob, revision: 2, ciphertext: bytes(40, 3) }),
+      db.insert(bundles).values({ ...meta(user.id, blob.id), agent: 'codex' }),
     ).rejects.toThrow();
-    const stored = await db.select().from(bundleBlobs).where(eq(bundleBlobs.userId, user.id));
-    expect(stored.map((row) => row.revision).sort()).toEqual([1, 2]);
   });
 
   it.each([
     ['revision 0', { revision: 0 }],
     ['a content hash that is not 32 bytes', { contentHash: bytes(31) }],
+    ['a size of 0', { sizeBytes: 0 }],
     ['a size over the 5 MB cap', { sizeBytes: 5 * 1024 * 1024 + 1 }],
     ['an encrypted name over 512 bytes', { nameEnc: bytes(513) }],
   ])('reject %s', async (_, override) => {
     const user = await insertUser();
-    await expect(db.insert(bundles).values({ ...meta(user.id), ...override })).rejects.toThrow();
+    const blob = await insertBlob(user.id);
+    await expect(
+      db.insert(bundles).values({ ...meta(user.id, blob.id), ...override }),
+    ).rejects.toThrow();
   });
 
   it('are deleted with their user, along with sessions (account delete)', async () => {
     const user = await insertUser();
-    await db.insert(bundles).values(meta(user.id));
-    await db.insert(bundleBlobs).values({
-      userId: user.id,
-      agent: 'claude-code',
-      scopeKey: 'global',
-      revision: 1,
-      ciphertext: bytes(40),
-    });
+    const blob = await insertBlob(user.id);
+    await insertBlob(user.id); // a leftover file no setup points to
+    await db.insert(bundles).values(meta(user.id, blob.id));
     await db.insert(sessions).values({
       userId: user.id,
       tokenHash: 't',

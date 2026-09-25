@@ -9,11 +9,11 @@ import { sql } from 'drizzle-orm';
 import {
   check,
   customType,
+  foreignKey,
   index,
   integer,
   jsonb,
   pgTable,
-  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -85,8 +85,35 @@ export const sessions = pgTable(
 );
 
 /**
- * One saved setup per user, agent and scope: metadata only. The encrypted bytes live in
- * `bundle_blobs`, so list queries never touch them.
+ * Encrypted bundle bytes (the Postgres BlobStore). Every upload gets a new random id, so two
+ * uploads can never overwrite each other; which file is current is decided by
+ * `bundles.blob_id`, never by the file's name. `ciphertext` is STORAGE EXTERNAL (custom
+ * migration): it is already encrypted, so Postgres should not try to compress it.
+ */
+export const bundleBlobs = pgTable(
+  'bundle_blobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** 24-byte nonce followed by the encrypted bundle. */
+    ciphertext: bytea('ciphertext').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    /** Lets `bundles` point at a file of the same user only; also indexes `user_id`. */
+    uniqueIndex('bundle_blobs_user_id_id_key').on(table.userId, table.id),
+    check(
+      'bundle_blobs_ciphertext_size',
+      sql`octet_length(${table.ciphertext}) <= ${lit(MAX_BUNDLE_BYTES)}`,
+    ),
+  ],
+);
+
+/**
+ * One saved setup per user, agent and scope: metadata only, plus a pointer to the file that
+ * holds the current revision's bytes. List queries never touch the bytes.
  */
 export const bundles = pgTable(
   'bundles',
@@ -105,17 +132,30 @@ export const bundles = pgTable(
     formatVersion: integer('format_ver').notNull(),
     revision: integer('revision').notNull(),
     sizeBytes: integer('size_bytes').notNull(),
+    /** The current revision's file in `bundle_blobs`. */
+    blobId: uuid('blob_id').notNull(),
     updatedAt: updatedAt(),
   },
   (table) => [
     uniqueIndex('bundles_user_agent_scope_key').on(table.userId, table.agent, table.scopeKey),
     /** `list`: one user's setups, newest first, paged by (updated_at, id). */
     index('bundles_user_updated_idx').on(table.userId, table.updatedAt.desc(), table.id.desc()),
+    /** One file backs at most one setup; also indexes the foreign key below. */
+    uniqueIndex('bundles_blob_id_key').on(table.blobId),
+    /**
+     * The file must belong to the same user, and cannot be deleted while a setup points to
+     * it (no action: checked at the end of the statement, so account delete still cascades).
+     */
+    foreignKey({
+      name: 'bundles_blob_fk',
+      columns: [table.userId, table.blobId],
+      foreignColumns: [bundleBlobs.userId, bundleBlobs.id],
+    }),
     check('bundles_revision_positive', sql`${table.revision} >= 1`),
     check('bundles_format_ver_positive', sql`${table.formatVersion} >= 1`),
     check(
       'bundles_size_bytes_range',
-      sql`${table.sizeBytes} between 0 and ${lit(MAX_BUNDLE_BYTES)}`,
+      sql`${table.sizeBytes} between 1 and ${lit(MAX_BUNDLE_BYTES)}`,
     ),
     check(
       'bundles_content_hash_length',
@@ -124,39 +164,6 @@ export const bundles = pgTable(
     check(
       'bundles_name_enc_length',
       sql`${table.nameEnc} is null or octet_length(${table.nameEnc}) <= ${lit(MAX_NAME_ENC_BYTES)}`,
-    ),
-  ],
-);
-
-/**
- * Encrypted bundle bytes, one row per revision (the Postgres BlobStore). A new revision is
- * written before the revision check, so the old and new copy exist side by side until the
- * loser is deleted. Keyed by user rather than by `bundles` row, because on a first upload
- * the bytes exist before the metadata does. `ciphertext` is STORAGE EXTERNAL (see the
- * custom migration): it is already encrypted, so Postgres should not try to compress it.
- */
-export const bundleBlobs = pgTable(
-  'bundle_blobs',
-  {
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    agent: text('agent').notNull(),
-    scopeKey: text('scope_key').notNull(),
-    revision: integer('revision').notNull(),
-    /** 24-byte nonce followed by the encrypted bundle. */
-    ciphertext: bytea('ciphertext').notNull(),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    primaryKey({
-      name: 'bundle_blobs_pkey',
-      columns: [table.userId, table.agent, table.scopeKey, table.revision],
-    }),
-    check('bundle_blobs_revision_positive', sql`${table.revision} >= 1`),
-    check(
-      'bundle_blobs_ciphertext_size',
-      sql`octet_length(${table.ciphertext}) <= ${lit(MAX_BUNDLE_BYTES)}`,
     ),
   ],
 );
