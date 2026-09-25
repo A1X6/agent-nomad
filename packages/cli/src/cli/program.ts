@@ -157,7 +157,9 @@ export function createProgram({ handlers, output }: ProgramDeps) {
 
   program
     .command('env')
-    .description('manage environment variable values your setups use (e.g. API keys)')
+    .description(
+      'show which environment variables your setups use (e.g. API keys) and which are set here',
+    )
     .action(() => handlers.env());
 
   return program;
