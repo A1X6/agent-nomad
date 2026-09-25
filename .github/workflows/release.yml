@@ -117,9 +117,10 @@ jobs:
           name: npm-package
           path: package
 
+      # "./" matters: without it npm reads "package/x.tgz" as a GitHub owner/repo.
       - name: Publish with provenance
         shell: bash
-        run: npm publish package/agentnomad-*.tgz --access public --provenance
+        run: npm publish ./package/agentnomad-*.tgz --access public --provenance
 
   check-published:
     name: npx on ${{ matrix.os }}, Node ${{ matrix.node }}
