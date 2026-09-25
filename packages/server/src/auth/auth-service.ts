@@ -53,6 +53,11 @@ export interface AuthService {
   /** Throws InvalidCredentialsError for an unknown user or a wrong auth key. */
   login(username: Username, authKey: Uint8Array, deviceName: string): Promise<LoginResult>;
   logout(sessionId: string): Promise<void>;
+  /**
+   * Deletes the account with its sessions, setups and files (T17). Needs the auth key as well
+   * as a session, so a stolen token alone cannot do it. Throws InvalidCredentialsError.
+   */
+  deleteAccount(userId: string, authKey: Uint8Array): Promise<void>;
   /** `null` for an unknown, expired or idle session. */
   authenticate(token: string): Promise<AuthenticatedSession | null>;
 }
@@ -112,6 +117,15 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
 
     async logout(sessionId) {
       await sessions.delete(sessionId);
+    },
+
+    async deleteAccount(userId, authKey) {
+      const user = await users.findById(userId);
+      if (!user || !(await keys.verifyAuthKey(authKey, user.authHash))) {
+        throw new InvalidCredentialsError();
+      }
+      // ON DELETE CASCADE removes sessions, setups and files in the same statement.
+      await users.delete(user.id);
     },
 
     async authenticate(token) {
