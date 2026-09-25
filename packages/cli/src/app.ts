@@ -1,4 +1,10 @@
-import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core';
+import { join } from 'node:path';
+
+import {
+  createGzipBundleCodec,
+  createSodiumCryptoService,
+  type CryptoService,
+} from '@agentnomad/core';
 
 import type { AgentRegistry } from './agents/adapter.ts';
 import { createAgentsCommand } from './agents/agents-command.ts';
@@ -16,9 +22,12 @@ import { createHttpApiClient } from './api/http-api-client.ts';
 import { createAuthCommands } from './auth/auth-commands.ts';
 import { loadZxcvbnChecker } from './auth/password-policy.ts';
 import { NOT_YET_AVAILABLE, type CommandHandlers } from './cli/commands.ts';
+import { configDir } from './config/config-dir.ts';
 import { createEnvCommand } from './env/env-command.ts';
+import { createPushCommand } from './push/push-command.ts';
 import { createSecretStore } from './secrets/create-secret-store.ts';
 import type { SecretStore } from './secrets/secret-store.ts';
+import { createLocalState, STATE_FILE, type LocalState } from './state/local-state.ts';
 import type { Prompter, Reporter, Spinner } from './ui/prompter.ts';
 
 export interface AppEnvironment {
@@ -102,8 +111,30 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
     ]),
   );
 
+  const localState = lazy<LocalState>(() =>
+    createLocalState({
+      path: join(configDir(app), STATE_FILE),
+      server: apiUrl().host,
+      platform: app.platform,
+    }),
+  );
+
   return {
     ...NOT_YET_AVAILABLE,
+    ...createPushCommand({
+      prompter: app.prompter,
+      reporter: app.reporter,
+      registry,
+      secrets,
+      api,
+      crypto,
+      codec: createGzipBundleCodec(),
+      localState,
+      env: app.env,
+      cwd: app.cwd,
+      homedir: app.homedir,
+      platform: app.platform,
+    }),
     ...createAgentsCommand({
       registry,
       reporter: app.reporter,
