@@ -55,7 +55,7 @@ async function insertUser(username = 'ahmed') {
 }
 
 describe('migrations', () => {
-  it('create exactly the four tables', async () => {
+  it('create exactly the five tables', async () => {
     const tables = await rows<{ table_name: string }>(
       `select table_name from information_schema.tables
        where table_schema = 'public' order by table_name`,
@@ -63,6 +63,7 @@ describe('migrations', () => {
     expect(tables.map((row) => row.table_name)).toEqual([
       'bundle_blobs',
       'bundles',
+      'rate_limits',
       'sessions',
       'users',
     ]);
@@ -83,6 +84,8 @@ describe('migrations', () => {
       'bundles_pkey',
       'bundles_user_agent_scope_key',
       'bundles_user_updated_idx',
+      'rate_limits_pkey',
+      'rate_limits_window_started_at_idx',
       'sessions_pkey',
       'sessions_token_hash_key',
       'sessions_user_id_idx',

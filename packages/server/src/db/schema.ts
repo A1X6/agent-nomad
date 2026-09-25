@@ -87,6 +87,24 @@ export const sessions = pgTable(
 );
 
 /**
+ * Fixed-window request counters for rate limiting (T18). In the database, not in memory, so
+ * every server instance on any host shares them. `key` is a keyed hash of the rule and the
+ * subject (IP or username), so no readable IP address or username is stored.
+ */
+export const rateLimits = pgTable(
+  'rate_limits',
+  {
+    key: text('key').primaryKey(),
+    windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull(),
+    count: integer('count').notNull(),
+  },
+  (table) => [
+    /** Pruning old windows. */
+    index('rate_limits_window_started_at_idx').on(table.windowStartedAt),
+  ],
+);
+
+/**
  * Encrypted bundle bytes (the Postgres BlobStore). Every upload gets a new random id, so two
  * uploads can never overwrite each other; which file is current is decided by
  * `bundles.blob_id`, never by the file's name. `ciphertext` is STORAGE EXTERNAL (custom
