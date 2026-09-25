@@ -65,6 +65,12 @@ export interface SessionRepository {
   /** Records that the session was just used. */
   touch(id: string): Promise<void>;
   delete(id: string): Promise<void>;
+  /**
+   * Deletes the user's sessions that can never be used again: expired, or unused for longer
+   * than `idleTimeoutMs`. Their tokens are gone (e.g. logged out without internet), so
+   * nothing else would ever remove them.
+   */
+  deleteStale(userId: string, idleTimeoutMs: number): Promise<void>;
 }
 
 /** Identifies one saved setup: one user, one agent, one scope. */

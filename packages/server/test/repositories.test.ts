@@ -1,4 +1,5 @@
 import type { KdfParams } from '@agentnomad/contracts';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -9,6 +10,7 @@ import {
   createPostgresBlobStore,
   createSessionRepository,
   createUserRepository,
+  sessions,
   type BlobStore,
   type BundleKey,
   type BundleMetaWrite,
@@ -108,6 +110,32 @@ describe('SessionRepository', () => {
     expect(await sessionRepo.findByTokenHash('token')).toEqual(session);
     await sessionRepo.delete(session.id);
     expect(await sessionRepo.findByTokenHash('token')).toBeNull();
+  });
+
+  it("deletes only this user's expired and idle sessions", async () => {
+    const user = await userRepo.create(newUser('ahmed'));
+    const other = await userRepo.create(newUser('other'));
+    const day = 24 * 60 * 60 * 1000;
+    const make = (userId: string, tokenHash: string, expiresInMs: number) =>
+      sessionRepo.create({
+        userId,
+        tokenHash,
+        deviceName: 'laptop',
+        expiresAt: new Date(Date.now() + expiresInMs),
+      });
+    await make(user.id, 'live', day);
+    await make(user.id, 'expired', -1000);
+    const idle = await make(user.id, 'idle', 60 * day);
+    await make(other.id, 'other-expired', -1000);
+    await database.db
+      .update(sessions)
+      .set({ lastUsedAt: new Date(Date.now() - 31 * day) })
+      .where(eq(sessions.id, idle.id));
+
+    await sessionRepo.deleteStale(user.id, 30 * day);
+
+    const left = await database.db.select({ tokenHash: sessions.tokenHash }).from(sessions);
+    expect(left.map((row) => row.tokenHash).sort()).toEqual(['live', 'other-expired']);
   });
 
   it('ignores an expired session', async () => {
