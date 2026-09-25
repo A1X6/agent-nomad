@@ -1,6 +1,6 @@
 {
   "name": "@agentnomad/cli",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "description": "agentnomad command-line interface: commands, prompts, file system, API client, agent adapters",
   "license": "MIT",
@@ -30,5 +30,8 @@
     "@zxcvbn-ts/language-en": "4.1.1",
     "commander": "15.0.0",
     "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

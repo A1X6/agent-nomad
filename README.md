@@ -1,5 +1,9 @@
 # agentnomad
 
+[![npm](https://img.shields.io/npm/v/agentnomad)](https://www.npmjs.com/package/agentnomad)
+[![CI](https://github.com/A1X6/agent-nomad/actions/workflows/ci.yml/badge.svg)](https://github.com/A1X6/agent-nomad/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Take your AI coding agent's setup to any PC, encrypted.** Save your Claude Code setup
 (settings, instructions, skills, subagents, commands, hooks, MCP servers, plugins) from one
 machine and restore it on another in one command, on macOS, Linux and Windows. It is
@@ -15,8 +19,7 @@ agentnomad login
 agentnomad pull
 ```
 
-> **Status:** v1 is built and tested; the first npm release (1.0) is being prepared.
-> See the [roadmap](#roadmap).
+> **Status:** 1.0 supports Claude Code. More agents are next: see the [roadmap](#roadmap).
 
 ## Why
 
@@ -52,8 +55,15 @@ agentnomad needs [Node.js](https://nodejs.org) 22.13 or newer.
 npm install -g agentnomad
 ```
 
-(Available on npm with the 1.0 release. Until then, see [CONTRIBUTING.md](CONTRIBUTING.md)
-to run it from source.)
+Or run it without installing:
+
+```sh
+npx agentnomad pull
+```
+
+Every release is built and published by GitHub Actions with
+[npm provenance](https://docs.npmjs.com/generating-provenance-statements), so you can check
+that the package was built from this repository: `npm audit signatures`.
 
 ## Quick start
 
@@ -149,13 +159,13 @@ Details: [SECURITY.md](SECURITY.md) and the [threat model](docs/security/threat-
 
 ## Roadmap
 
-| Stage    | What                                                                                                                                                                                          | Status                  |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| **v1**   | Claude Code on macOS, Linux and Windows: global and project setups, plugins, memory, secrets, scripting, cross-OS tests, security review                                                      | Built; releasing as 1.0 |
-| **v1.x** | More agents: OpenAI Codex CLI, Google Gemini CLI, OpenCode, Cursor, Claude Desktop and others                                                                                                 | Next                    |
-| **v1.x** | Data-only agents: support a simple agent with a data file, no code                                                                                                                            | Planned                 |
-| **v2**   | **One setup, every agent:** turn your Claude Code setup into a Codex, Gemini CLI, OpenCode or Cursor setup (instructions, skills, MCP servers, commands), with a preview of what carries over | Planned                 |
-| Later    | Password change, version history, selective sync, team sharing, dashboard, background sync                                                                                                    | Ideas                   |
+| Stage    | What                                                                                                                                                                                          | Status          |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| **v1**   | Claude Code on macOS, Linux and Windows: global and project setups, plugins, memory, secrets, scripting, cross-OS tests, security review                                                      | Released as 1.0 |
+| **v1.x** | More agents: OpenAI Codex CLI, Google Gemini CLI, OpenCode, Cursor, Claude Desktop and others                                                                                                 | Next            |
+| **v1.x** | Data-only agents: support a simple agent with a data file, no code                                                                                                                            | Planned         |
+| **v2**   | **One setup, every agent:** turn your Claude Code setup into a Codex, Gemini CLI, OpenCode or Cursor setup (instructions, skills, MCP servers, commands), with a preview of what carries over | Planned         |
+| Later    | Password change, version history, selective sync, team sharing, dashboard, background sync                                                                                                    | Ideas           |
 
 The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
