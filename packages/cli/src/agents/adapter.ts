@@ -1,4 +1,4 @@
-import type { AgentId } from '@agentnomad/contracts';
+import type { AgentId, SourceOs } from '@agentnomad/contracts';
 
 /** Where a setup lives on this PC: the agent's global folder, or one project folder. */
 export type ScopeTarget =
@@ -39,8 +39,19 @@ export interface Collector {
 /** The user's answer when a pulled file already exists here. */
 export type ConflictChoice = 'merge' | 'overwrite' | 'skip';
 
-/** Asks (or decides from flags) what to do with one existing file. */
-export type ConflictResolver = (path: string) => Promise<ConflictChoice>;
+export interface ConflictQuestion {
+  /**
+   * False for a file that must never be replaced, e.g. `~/.claude.json`, which also holds
+   * the Claude login: then only merge or skip may be offered.
+   */
+  readonly overwriteAllowed: boolean;
+}
+
+/** Asks (or decides from flags) what to do with one existing file that differs. */
+export type ConflictResolver = (
+  path: string,
+  question: ConflictQuestion,
+) => Promise<ConflictChoice>;
 
 /** What a restore did, for the summary shown to the user. Paths are bundle paths. */
 export interface RestoreReport {
@@ -48,6 +59,14 @@ export interface RestoreReport {
   readonly skipped: readonly string[];
   /** Backups made before overwriting. */
   readonly backups: readonly string[];
+  /** Things the user should know, e.g. a hook that will likely not run on this OS. */
+  readonly warnings: readonly string[];
+}
+
+/** About the setup being restored. */
+export interface RestoreContext {
+  /** OS the setup was pushed from, to flag hooks that only run there. */
+  readonly sourceOs?: SourceOs;
 }
 
 /** Writes a pulled setup to disk, with per-OS permissions and line endings (T27). */
@@ -56,6 +75,7 @@ export interface Restorer {
     target: ScopeTarget,
     files: readonly CollectedFile[],
     onConflict: ConflictResolver,
+    context?: RestoreContext,
   ): Promise<RestoreReport>;
 }
 
