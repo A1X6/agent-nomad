@@ -37,6 +37,19 @@ export class SetupUnreadableError extends Error {
   }
 }
 
+/**
+ * The server labelled a copy with another revision than the one sealed inside it (T38):
+ * an older copy passed off as the current one.
+ */
+export class MislabelledSetupError extends Error {
+  constructor(what: string, sealed: number, reported: number) {
+    super(
+      `The server sent the saved ${what} as revision ${String(reported)}, but it was saved as revision ${String(sealed)}. It may be an old copy; nothing was written.`,
+    );
+    this.name = 'MislabelledSetupError';
+  }
+}
+
 /** Every saved setup of the account (all pages), names decrypted; unreadable names are left out. */
 export async function listSavedSetups(
   api: ApiClient,
@@ -108,5 +121,8 @@ export async function downloadSetup(
   if (bundle.agent !== setup.agent || expectedScopeKey !== setup.scopeKey) {
     throw new SetupUnreadableError(what);
   }
-  return { bundle, revision: downloaded.revision };
+  if (bundle.revision !== downloaded.revision) {
+    throw new MislabelledSetupError(what, bundle.revision, downloaded.revision);
+  }
+  return { bundle, revision: bundle.revision };
 }

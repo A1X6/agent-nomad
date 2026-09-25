@@ -100,6 +100,11 @@ export interface AfterRestoreContext {
   readonly reporter: Reporter;
   /** `--yes`: accept without asking where that is safe. */
   readonly assumeYes: boolean;
+  /**
+   * `--allow-commands`: also accept what installs or runs code (plugins, programs) without
+   * asking. Without it, `--yes` skips those with a note (T38).
+   */
+  readonly allowCommands: boolean;
 }
 
 /**

@@ -8,6 +8,7 @@ export * from './agents/claude-code/detector.ts';
 export * from './agents/claude-code/file-gathering.ts';
 export * from './agents/claude-code/global-collector.ts';
 export * from './agents/claude-code/global-paths.ts';
+export * from './agents/claude-code/hook-scripts.ts';
 export * from './agents/claude-code/managed-settings.ts';
 export * from './agents/claude-code/plugin-sync.ts';
 export * from './agents/claude-code/plugins.ts';

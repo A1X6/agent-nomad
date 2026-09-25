@@ -17,7 +17,7 @@ export const ANSWER_FLAGS: Readonly<Record<string, string>> = {
   register: 'Use --username, --password-stdin and --yes.',
   login: 'Use --username and --password-stdin (and --yes to replace a login already here).',
   push: 'Use --agent, --global or --project <name>, --memory or --no-memory, and --yes.',
-  pull: 'Use --agent, --global or --project <name>, --merge or --overwrite, and --yes.',
+  pull: 'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, and --yes.',
   delete: 'Use --global or --project <name>, and --yes.',
   'account delete': 'Use --username, --password-stdin and --yes.',
 };

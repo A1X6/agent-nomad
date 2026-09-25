@@ -5,6 +5,7 @@ import { createClaudeRunningCheck, projectDirName } from '@agentnomad/cli';
 import { expect } from 'vitest';
 
 import type { LocalServer } from './local-server.ts';
+import { plaintextLeaks } from './plaintext.ts';
 import { forward, isExecutable, newPc, read, write, type Pc, type RunResult } from './pc.ts';
 
 /** A throwaway account on the throwaway local server; strong enough for the T23 policy. */
@@ -37,6 +38,36 @@ const notes = (pc: Pc) => `Notes live in ${pc.home}/notes.\n`;
  * `~/.claude.json` alone by design, so its MCP servers are only checked elsewhere.
  */
 const claudeRunningHere = await createClaudeRunningCheck()();
+
+/**
+ * T38: nothing readable left the PC. Every request the server received (URL, headers,
+ * body) is searched for the password, file contents, commands, memory, the project name and
+ * the login state in `~/.claude.json`. Only the username and device name are sent readable.
+ */
+function expectNothingReadable(server: LocalServer): void {
+  expect(server.requests.length).toBeGreaterThan(0);
+  const secrets = [
+    PASSWORD,
+    'Notes live in',
+    'Deploy the app',
+    'Run the deploy script',
+    'Read the diff',
+    'uses port 5173',
+    'Project rules.',
+    'docs-mcp',
+    'db.js',
+    'check.sh',
+    'echo ok',
+    EDIT.trim(),
+    'Old notes on the third PC',
+    'first@example.com',
+    'second@example.com',
+    'demo',
+  ];
+  expect(plaintextLeaks(server.requests, secrets)).toEqual([]);
+  // Control: the username is sent readable (register, login), so the search does see bodies.
+  expect(plaintextLeaks(server.requests, [USERNAME])).toEqual([USERNAME]);
+}
 
 /** Exit 0, or a failure that shows what the CLI printed. */
 function ok(result: RunResult): RunResult {
@@ -133,6 +164,12 @@ export async function firstPc({ server, keychain }: StepContext): Promise<void> 
     const status = ok(await pc.run(['status']));
     expect(status.stdout).toContain('Claude Code global setup: up to date (revision 1)');
     expect(status.stdout).toContain('Claude Code project "demo": up to date (revision 1)');
+
+    // The uploads really were recorded: encrypted bundles went up.
+    const uploads = server.requests.filter((request) => request.method === 'PUT');
+    expect(uploads.length).toBe(2);
+    expect(uploads.every((request) => request.body.byteLength > 0)).toBe(true);
+    expectNothingReadable(server);
   } finally {
     await pc.remove();
   }
@@ -160,7 +197,17 @@ export async function secondPc({ server, keychain }: StepContext): Promise<void>
     expect(notLoggedIn.stderr).toContain('agentnomad login');
 
     ok(await pc.run(['login', ...LOGIN], stdin));
-    const pulled = ok(await pc.run(['pull', '--global', '--project', 'demo', '--merge', '--yes']));
+    const pulled = ok(
+      await pc.run([
+        'pull',
+        '--global',
+        '--project',
+        'demo',
+        '--merge',
+        '--yes',
+        '--allow-commands',
+      ]),
+    );
     expect(pulled.stdout).toContain('Restored the Claude Code global setup');
     expect(pulled.stdout).toContain('Restored the Claude Code project "demo"');
     await expectRestored(pc, false);
@@ -179,7 +226,17 @@ export async function secondPc({ server, keychain }: StepContext): Promise<void>
     });
 
     // Pulling again: nothing to write, nothing backed up.
-    const again = ok(await pc.run(['pull', '--global', '--project', 'demo', '--merge', '--yes']));
+    const again = ok(
+      await pc.run([
+        'pull',
+        '--global',
+        '--project',
+        'demo',
+        '--merge',
+        '--yes',
+        '--allow-commands',
+      ]),
+    );
     expect(again.stdout).toContain('Restored the Claude Code global setup: 0 written');
     expect(again.stdout).toContain('Restored the Claude Code project "demo": 0 written');
 
@@ -189,6 +246,7 @@ export async function secondPc({ server, keychain }: StepContext): Promise<void>
     expect(pushed.stdout).toContain('(revision 2)');
     const status = ok(await pc.run(['status']));
     expect(status.stdout).toContain('Claude Code global setup: up to date (revision 2)');
+    expectNothingReadable(server);
   } finally {
     await pc.remove();
   }
@@ -211,7 +269,15 @@ export async function thirdPc({ server, keychain }: StepContext): Promise<void> 
     expect(status.stdout).toContain('never pulled or pushed on this PC');
 
     const pulled = ok(
-      await pc.run(['pull', '--global', '--project', 'demo', '--overwrite', '--yes']),
+      await pc.run([
+        'pull',
+        '--global',
+        '--project',
+        'demo',
+        '--overwrite',
+        '--yes',
+        '--allow-commands',
+      ]),
     );
     expect(pulled.stdout).toContain('backed up first');
     await expectRestored(pc, true);
@@ -245,6 +311,7 @@ export async function thirdPc({ server, keychain }: StepContext): Promise<void> 
     for (const table of ['users', 'sessions', 'bundles', 'bundle_blobs'] as const) {
       expect(await server.count(table), table).toBe(0);
     }
+    expectNothingReadable(server);
   } finally {
     await Promise.all([pc.remove(), stale.remove()]);
   }

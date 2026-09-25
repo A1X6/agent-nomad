@@ -1,6 +1,8 @@
 import * as z from 'zod';
 
 import type { CollectedFile } from '../agents/adapter.ts';
+import { commandWords } from '../agents/claude-code/file-gathering.ts';
+import { HOME_SCRIPTS_PREFIX, SCRIPT_EXTENSIONS } from '../agents/claude-code/global-paths.ts';
 
 /**
  * Things in a setup that run programs on this PC (T34): hooks, the status line and MCP
@@ -82,9 +84,34 @@ export function runnableEntries(files: readonly CollectedFile[]): RunnableEntry[
   return entries;
 }
 
+const sameBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index]);
+
 /**
- * The incoming entries that are not already on this PC exactly as they are: new ones, and
- * a status line or MCP server whose command changed. Unchanged ones are not asked about.
+ * Incoming script files that one of the incoming commands runs, matched by path: the
+ * command names the script's path within the base folder, the project or (for
+ * `.agentnomad/home/...`) the home folder, e.g. `…/.claude/hooks/check.sh` runs `hooks/check.sh`.
+ */
+function scriptsRun(incoming: readonly CollectedFile[], commands: readonly string[]) {
+  const words = commands.flatMap((command) =>
+    commandWords(command).map((word) => word.replace(/\\/g, '/')),
+  );
+  return incoming.filter((file) => {
+    if (!SCRIPT_EXTENSIONS.has(/(\.[^./]+)$/.exec(file.path)?.[1]?.toLowerCase() ?? '')) {
+      return false;
+    }
+    const relative = file.path.startsWith(HOME_SCRIPTS_PREFIX)
+      ? file.path.slice(HOME_SCRIPTS_PREFIX.length)
+      : file.path;
+    return words.some((word) => word === relative || word.endsWith(`/${relative}`));
+  });
+}
+
+/**
+ * The incoming entries that are not already on this PC exactly as they are: new ones, a
+ * status line or MCP server whose command changed, and scripts those commands run whose
+ * content is new or changed here (T38: a changed `check.sh` behind an unchanged hook
+ * command is shown too). Unchanged ones are not asked about.
  */
 export function reviewRunnable(
   incoming: readonly CollectedFile[],
@@ -96,7 +123,8 @@ export function reviewRunnable(
   const normal = (command: string) => command.replace(/\\/g, '/');
   const same = (a: RunnableEntry, b: RunnableEntry) =>
     a.label === b.label && normal(a.command) === normal(b.command);
-  return runnableEntries(incoming)
+  const entries = runnableEntries(incoming);
+  const commands: ReviewedEntry[] = entries
     .filter((entry) => !here.some((existing) => same(existing, entry)))
     .map((entry) => ({
       ...entry,
@@ -106,4 +134,22 @@ export function reviewRunnable(
           ? ('changed' as const)
           : ('new' as const),
     }));
+  const scripts: ReviewedEntry[] = scriptsRun(
+    incoming,
+    entries.map((entry) => entry.command),
+  ).flatMap((file) => {
+    const existing = current.find((entry) => entry.path === file.path);
+    if (existing && sameBytes(existing.content, file.content)) return [];
+    return [
+      {
+        file: file.path,
+        label: 'script',
+        command: file.path.startsWith(HOME_SCRIPTS_PREFIX)
+          ? `~/${file.path.slice(HOME_SCRIPTS_PREFIX.length)}`
+          : file.path,
+        change: existing ? ('changed' as const) : ('new' as const),
+      },
+    ];
+  });
+  return [...commands, ...scripts];
 }

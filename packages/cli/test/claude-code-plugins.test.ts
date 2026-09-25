@@ -140,7 +140,7 @@ describe('plugin list on push', () => {
       customConfigDir: false,
     }).collect({ kind: 'global' }, { includeMemory: false });
     expect(files.map((file) => file.path)).toEqual(['.agentnomad/plugins.json']);
-    expect(globalDestination('.agentnomad/plugins.json')).toEqual({ kind: 'metadata' });
+    expect(globalDestination('.agentnomad/plugins.json', new Set())).toEqual({ kind: 'metadata' });
     expect(projectDestination('.agentnomad/plugins.json')).toEqual({ kind: 'metadata' });
   });
 
@@ -216,6 +216,7 @@ function run(options: {
   failures?: Record<string, string>;
   current?: Parameters<typeof planPluginSync>[1];
   assumeYes?: boolean;
+  allowCommands?: boolean;
 }) {
   const answers = [...(options.answers ?? [true, true])];
   const asked: string[] = [];
@@ -238,6 +239,7 @@ function run(options: {
     },
     cwd: '/work/app',
     ...(options.assumeYes !== undefined && { assumeYes: options.assumeYes }),
+    ...(options.allowCommands !== undefined && { allowCommands: options.allowCommands }),
   });
   return { done, asked, lines, runs };
 }
@@ -276,16 +278,22 @@ describe('plugin reinstall on pull', () => {
     expect(t.runs).toEqual([]);
   });
 
-  it('with --yes never runs a command-source plugin: skipped with a note, not asked', async () => {
+  it('--yes alone installs nothing, not asked, and says how to allow it (T38)', async () => {
     const t = run({ answers: [], assumeYes: true });
     const result = await t.done;
     expect(t.asked).toEqual([]);
-    expect(result.declined).toEqual(['builder@company']);
-    expect(result.installed).toEqual(['brag@brag', 'lint@company']);
-    expect(t.runs.some((line) => line.includes('builder'))).toBe(false);
+    expect(t.runs).toEqual([]);
+    expect(result.declined).toEqual(['brag@brag', 'builder@company', 'lint@company']);
     expect(t.lines).toContain(
-      'Skipped builder@company: it is built by running a command, which --yes never allows. Run pull without --yes to choose.',
+      'Plugins were not reinstalled: --yes never installs or runs new code; add --allow-commands, or run pull without --yes to choose.',
     );
+  });
+
+  it('--allow-commands installs every plugin, command-source too, without asking', async () => {
+    const t = run({ answers: [], assumeYes: true, allowCommands: true });
+    const result = await t.done;
+    expect(t.asked).toEqual([]);
+    expect(result.installed).toEqual(['brag@brag', 'builder@company', 'lint@company']);
   });
 
   it('skips what is already here', async () => {

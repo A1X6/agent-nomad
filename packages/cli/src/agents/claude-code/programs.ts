@@ -15,7 +15,7 @@ export interface ProgramInfo {
 export type ProgramLocator = (command: string) => Promise<ProgramInfo | null>;
 
 const NpmManifestSchema = z.object({
-  name: z.string().regex(/^(@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/),
+  name: z.string().regex(/^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/),
   version: z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/),
   bin: z.union([z.string(), z.record(z.string(), z.string())]).optional(),
 });

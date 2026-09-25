@@ -6,6 +6,7 @@ import {
   type ClaudeCli,
   type CollectedFile,
   type DetectorSystem,
+  PluginManifestSchema,
 } from '../src/index.ts';
 
 const json = (path: string, value: unknown): CollectedFile => ({
@@ -33,6 +34,7 @@ function context(files: CollectedFile[], answers: boolean[] = [true, true]) {
     target: { kind: 'global' },
     files,
     assumeYes: false,
+    allowCommands: false,
     prompter: {
       confirm: (message: string) => {
         asked.push(message);
@@ -83,6 +85,29 @@ describe('after a Claude Code restore', () => {
     ).toBe(true);
   });
 
+  it.each([
+    [false, []],
+    [true, ['/usr/bin/npm install -g ccstatusline@2.2.22']],
+  ])(
+    '--yes installs a program only with --allow-commands (%s), never asking',
+    async (allow, ran) => {
+      const { cli, runs } = recordingCli();
+      const t = context([programs], []);
+      await createClaudeCodeAfterRestore({ system: system(['/usr/bin/npm']), cli })({
+        ...t.ctx,
+        assumeYes: true,
+        allowCommands: allow,
+      });
+      expect(t.asked).toEqual([]);
+      expect(runs).toEqual(ran);
+      if (!allow) {
+        expect(t.lines.some((line) => line.includes('npm install -g ccstatusline@2.2.22'))).toBe(
+          true,
+        );
+      }
+    },
+  );
+
   it('does nothing for programs already installed', async () => {
     const { cli, runs } = recordingCli();
     const t = context([programs]);
@@ -94,16 +119,42 @@ describe('after a Claude Code restore', () => {
     expect(t.asked).toEqual([]);
   });
 
-  it('refuses a programs file that could smuggle arguments', async () => {
-    const { cli, runs } = recordingCli();
-    const bad = json('.agentnomad/programs.json', {
-      programs: [{ command: 'x', npm: { package: 'x --registry=evil', version: '1.0.0' } }],
-    });
-    await createClaudeCodeAfterRestore({ system: system(['/usr/bin/npm']), cli })(
-      context([bad]).ctx,
-    );
-    expect(runs).toEqual([]);
+  it.each(['x --registry=evil', '--global', '-g'])(
+    'refuses a programs file that could smuggle arguments: %s',
+    async (pkg) => {
+      const { cli, runs } = recordingCli();
+      const bad = json('.agentnomad/programs.json', {
+        programs: [{ command: 'x', npm: { package: pkg, version: '1.0.0' } }],
+      });
+      await createClaudeCodeAfterRestore({ system: system(['/usr/bin/npm']), cli })(
+        context([bad]).ctx,
+      );
+      expect(runs).toEqual([]);
+    },
+  );
+
+  it('a normal plugin id is accepted (control for the next test)', () => {
+    expect(
+      PluginManifestSchema.safeParse({
+        marketplaces: [],
+        plugins: [{ id: 'x@market', scope: 'user', commandSource: false }],
+        skipped: [],
+      }).success,
+    ).toBe(true);
   });
+
+  it.each(['-x@market', 'x@-market', '--help@x'])(
+    'a plugin id that starts like an option is refused: %s',
+    (id) => {
+      expect(
+        PluginManifestSchema.safeParse({
+          marketplaces: [],
+          plugins: [{ id, scope: 'user', commandSource: false }],
+          skipped: [],
+        }).success,
+      ).toBe(false);
+    },
+  );
 
   it('reinstalls saved plugins with the claude command', async () => {
     const { cli, runs } = recordingCli();

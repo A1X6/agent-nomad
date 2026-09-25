@@ -10,6 +10,8 @@ import {
   createClaudeCodeRestorer,
   createClaudeRunningCheck,
   globalDestination,
+  hookScripts,
+  windowsNameProblem,
   hooksForOtherOs,
   isClaudeProcess,
   lineEndingsFor,
@@ -154,11 +156,48 @@ describe('restorer: refuses what a collector never produces', () => {
     ['projects/C--x/abc.jsonl', 'never synced'],
     ['unknown.json', 'not part of a Claude Code setup'],
     ['.agentnomad/home/.ssh/id_ed25519', 'a folder for keys and logins'],
-    ['.agentnomad/home/.bashrc', 'not a script or known tool settings file'],
+    ['.agentnomad/home/.bashrc', 'no hook or status line in this setup runs it'],
+    // Files that run by themselves, never shown in the pull review (T38).
+    [
+      '.agentnomad/home/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/update.bat',
+      'no hook or status line in this setup runs it',
+    ],
+    [
+      '.agentnomad/home/Documents/PowerShell/Microsoft.PowerShell_profile.ps1',
+      'no hook or status line in this setup runs it',
+    ],
+    ['.agentnomad/home/.config/fish/config.fish', 'no hook or status line in this setup runs it'],
     ['.agentnomad/other.json', 'unknown agentnomad entry'],
     ['../outside.md', 'not a safe path'],
   ])('global: %s', (path, reason) => {
-    expect(globalDestination(path)).toEqual({ kind: 'refused', reason });
+    expect(globalDestination(path, new Set())).toEqual({ kind: 'refused', reason });
+  });
+
+  it('global: a home script is restored only when a hook or the status line runs it', () => {
+    const settings = JSON.stringify({
+      statusLine: { type: 'command', command: '~/scripts/statusline.sh' },
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'bash $HOME/tools/stop.sh' }] }] },
+    });
+    const scripts = new Set(
+      hookScripts(settings, { homedir: home, baseDir: base, platform: process.platform }).map(
+        (script) => script.bundlePath,
+      ),
+    );
+    expect(scripts).toEqual(
+      new Set(['.agentnomad/home/scripts/statusline.sh', '.agentnomad/home/tools/stop.sh']),
+    );
+    expect(globalDestination('.agentnomad/home/scripts/statusline.sh', scripts)).toEqual({
+      kind: 'home',
+      path: 'scripts/statusline.sh',
+    });
+    expect(globalDestination('.agentnomad/home/scripts/other.sh', scripts)).toEqual({
+      kind: 'refused',
+      reason: 'no hook or status line in this setup runs it',
+    });
+    // Known tool settings are not run, so they need no hook.
+    expect(
+      globalDestination('.agentnomad/home/.config/ccstatusline/settings.json', new Set()),
+    ).toEqual({ kind: 'home', path: '.config/ccstatusline/settings.json' });
   });
 
   it.each([
@@ -369,9 +408,11 @@ describe('restorer: ~/.claude.json', () => {
 
 describe('restorer: home files', () => {
   it('puts tool settings and hook scripts back in the home folder', async () => {
+    const hook = { Stop: [{ hooks: [{ type: 'command', command: '~/scripts/notify.sh' }] }] };
     await restorer().restorer.restore(
       { kind: 'global' },
       [
+        file('settings.json', JSON.stringify({ hooks: hook })),
         file('.agentnomad/home/.config/ccstatusline/settings.json', '{"lines":[]}'),
         file('.agentnomad/home/scripts/notify.sh', 'echo hi\n', true),
       ],
@@ -379,6 +420,18 @@ describe('restorer: home files', () => {
     );
     expect(await read(join(home, '.config', 'ccstatusline', 'settings.json'))).toBe('{"lines":[]}');
     expect(await read(join(home, 'scripts', 'notify.sh'))).toBe('echo hi\n');
+  });
+
+  it('skips a home script no hook runs, e.g. one for the Windows Startup folder (T38)', async () => {
+    const startup = 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/update.bat';
+    const report = await restorer().restorer.restore(
+      { kind: 'global' },
+      [file(`.agentnomad/home/${startup}`, 'echo pwned\n')],
+      answer('merge').resolve,
+    );
+    expect(report.written).toEqual([]);
+    expect(report.skipped).toEqual([`.agentnomad/home/${startup}`]);
+    await expect(read(join(home, ...startup.split('/')))).rejects.toThrow();
   });
 });
 
@@ -508,4 +561,25 @@ describe('restorer: project scripts', () => {
     ]);
     expect(report.skipped).toEqual(['src/evil.ts']);
   });
+});
+
+describe('restorer: names Windows cannot write safely (T38)', () => {
+  it.each([
+    ['skills/a/notes:secret.md', 'a name with ":" cannot be written on Windows'],
+    ['skills/CON/SKILL.md', 'a name Windows keeps for devices'],
+    ['skills/a/nul.txt', 'a name Windows keeps for devices'],
+    ['skills/a/COM1.md', 'a name Windows keeps for devices'],
+    ['skills/a/file?.md', 'a name Windows does not allow'],
+    ['skills/a/trailing.', 'a name ending in a dot or space on Windows'],
+    ['skills/a/space ', 'a name ending in a dot or space on Windows'],
+  ])('%s', (path, reason) => {
+    expect(windowsNameProblem(path)).toBe(reason);
+  });
+
+  it.each(['skills/deploy/SKILL.md', 'skills/a/console.md', 'hooks/check.sh', 'CLAUDE.md'])(
+    'allows %s',
+    (path) => {
+      expect(windowsNameProblem(path)).toBeNull();
+    },
+  );
 });

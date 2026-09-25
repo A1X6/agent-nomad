@@ -21,7 +21,10 @@ Examples:
   agentnomad push --agent claude-code --global      save the global Claude Code setup
   agentnomad pull --agent claude-code --project my-saas-app
                                                     restore a project into the current folder
-  agentnomad pull --global --merge --yes            restore without questions, merging files
+  agentnomad pull --global --merge --yes            restore without questions, merging files;
+                                                    new hooks and commands are skipped
+  agentnomad pull --global --yes --allow-commands   also accept new hooks, MCP servers and
+                                                    installs (only for setups you trust)
   echo "$PASSWORD" | agentnomad login --username me --password-stdin
                                                     log in from a script
 
@@ -159,10 +162,17 @@ export function createProgram({ handlers, output }: ProgramDeps) {
       ).conflicts('overwrite'),
     )
     .addOption(new Option('--overwrite', 'replace existing files (the old ones are backed up)'))
+    .addOption(
+      new Option(
+        '--allow-commands',
+        'accept new or changed hooks, MCP servers and scripts, and install plugins and programs (--yes alone skips them)',
+      ),
+    )
     .action((options) =>
       handlers.pull({
         ...scope(options),
         yes: options.yes === true,
+        ...(options.allowCommands && { allowCommands: true }),
         ...(options.merge && { conflict: 'merge' as const }),
         ...(options.overwrite && { conflict: 'overwrite' as const }),
       }),

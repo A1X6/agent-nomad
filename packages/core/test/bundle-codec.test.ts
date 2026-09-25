@@ -16,6 +16,7 @@ const bundle: Bundle = {
   scope: { kind: 'project', name: 'my-saas-app' },
   sourceOs: 'darwin',
   agentVersion: '2.1.282',
+  revision: 1,
   files: [
     {
       path: 'settings.json',
