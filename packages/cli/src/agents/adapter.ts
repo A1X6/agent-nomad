@@ -69,6 +69,8 @@ export interface RestoreReport {
 export interface RestoreContext {
   /** OS the setup was pushed from, to flag hooks that only run there. */
   readonly sourceOs?: SourceOs;
+  /** `--yes`: take the safe answer instead of asking (e.g. skip a file an open app rewrites). */
+  readonly assumeYes?: boolean;
 }
 
 /** Writes a pulled setup to disk, with per-OS permissions and line endings (T27). */

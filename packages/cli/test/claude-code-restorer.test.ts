@@ -339,6 +339,18 @@ describe('restorer: ~/.claude.json', () => {
     expect(report.warnings[0]).toContain('Claude Code was running');
   });
 
+  it('with --yes skips it while Claude Code runs, without asking', async () => {
+    await put(join(home, '.claude.json'), '{}');
+    const { restorer: r, asked } = restorer({ running: [true] });
+    const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve, {
+      assumeYes: true,
+    });
+    expect(asked).toEqual([]);
+    expect(await read(join(home, '.claude.json'))).toBe('{}');
+    expect(report.skipped).toEqual(['.agentnomad/claude.json']);
+    expect(report.warnings[0]).toContain('Claude Code was running');
+  });
+
   it('creates it when missing, readable only by this user', async () => {
     await restorer().restorer.restore({ kind: 'global' }, [incoming], answer('skip').resolve);
     expect((await readJson(join(home, '.claude.json')))['diffTool']).toBe('terminal');

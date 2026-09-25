@@ -245,6 +245,24 @@ importers:
         specifier: 0.8.4
         version: 0.8.4
 
+  packages/e2e:
+    dependencies:
+      '@agentnomad/cli':
+        specifier: workspace:*
+        version: link:../cli
+      '@agentnomad/server':
+        specifier: workspace:*
+        version: link:../server
+      '@electric-sql/pglite':
+        specifier: 0.5.8
+        version: 0.5.8
+      '@hono/node-server':
+        specifier: 2.1.1
+        version: 2.1.1(hono@4.13.9)
+      drizzle-orm:
+        specifier: 0.45.3
+        version: 0.45.3(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)
+
   packages/server:
     dependencies:
       '@agentnomad/contracts':

@@ -13,6 +13,8 @@ export interface ScopeFlags {
 export interface PushOptions extends ScopeFlags {
   /** `--yes`: accept defaults instead of asking. */
   readonly yes: boolean;
+  /** `--memory` / `--no-memory`: include memory or not, instead of asking (default with --yes: no). */
+  readonly memory?: boolean;
 }
 
 export interface PullOptions extends ScopeFlags {

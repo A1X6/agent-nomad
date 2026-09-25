@@ -161,6 +161,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     file: CollectedFile,
     onConflict: ConflictResolver,
     report: MutableReport,
+    assumeYes: boolean,
   ): Promise<void> {
     const incoming = z
       .record(z.string(), z.unknown())
@@ -210,7 +211,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
       }
     }
     while (await options.isClaudeRunning()) {
-      if ((await options.onClaudeRunning()) === 'skip') {
+      // --yes never waits for the user to close Claude Code: the file is skipped instead.
+      if (assumeYes || (await options.onClaudeRunning()) === 'skip') {
         report.skipped.push(file.path);
         report.warnings.push(
           `${claudeJsonFile} was left as it is because Claude Code was running; pull again later to add your MCP servers and preferences.`,
@@ -264,7 +266,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         }
         if (destination.kind === 'metadata') continue;
         if (destination.kind === 'claude-json') {
-          await mergeClaudeJson(file, onConflict, report);
+          await mergeClaudeJson(file, onConflict, report, context.assumeYes === true);
           continue;
         }
 
