@@ -24,6 +24,12 @@ import { loadZxcvbnChecker } from './auth/password-policy.ts';
 import { NOT_YET_AVAILABLE, type CommandHandlers } from './cli/commands.ts';
 import { configDir } from './config/config-dir.ts';
 import { createEnvCommand } from './env/env-command.ts';
+import {
+  createShellProfileWriter,
+  createWindowsEnvWriter,
+  shellProfileFor,
+} from './env/shell-profile.ts';
+import { createPullCommand } from './pull/pull-command.ts';
 import { createPushCommand } from './push/push-command.ts';
 import { createSecretStore } from './secrets/create-secret-store.ts';
 import type { SecretStore } from './secrets/secret-store.ts';
@@ -119,8 +125,28 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
     }),
   );
 
+  const envWriter = () =>
+    app.platform === 'win32'
+      ? createWindowsEnvWriter()
+      : createShellProfileWriter(shellProfileFor(app.env['SHELL'], app.homedir, app.platform));
+
   return {
     ...NOT_YET_AVAILABLE,
+    ...createPullCommand({
+      prompter: app.prompter,
+      reporter: app.reporter,
+      registry,
+      secrets,
+      api,
+      crypto,
+      codec: createGzipBundleCodec(),
+      localState,
+      envWriter,
+      env: app.env,
+      cwd: app.cwd,
+      homedir: app.homedir,
+      platform: app.platform,
+    }),
     ...createPushCommand({
       prompter: app.prompter,
       reporter: app.reporter,

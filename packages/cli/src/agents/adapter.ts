@@ -1,5 +1,7 @@
 import type { AgentId, SourceOs } from '@agentnomad/contracts';
 
+import type { Prompter, Reporter } from '../ui/prompter.ts';
+
 /** Where a setup lives on this PC: the agent's global folder, or one project folder. */
 export type ScopeTarget =
   { readonly kind: 'global' } | { readonly kind: 'project'; readonly projectDir: string };
@@ -87,6 +89,17 @@ export interface AgentInspector {
   notices(command: 'push' | 'pull'): Promise<readonly string[]>;
 }
 
+/** What an agent's follow-up after a restore gets (T34), e.g. to reinstall plugins. */
+export interface AfterRestoreContext {
+  readonly target: ScopeTarget;
+  /** The restored setup's files, including agentnomad's own entries (plugins, programs). */
+  readonly files: readonly CollectedFile[];
+  readonly prompter: Prompter;
+  readonly reporter: Reporter;
+  /** `--yes`: accept without asking where that is safe. */
+  readonly assumeYes: boolean;
+}
+
 /**
  * Everything agentnomad knows about one agent. Adding an agent means writing one of these
  * and registering it; nothing else changes.
@@ -99,6 +112,8 @@ export interface AgentAdapter {
   readonly collector: Collector;
   readonly restorer: Restorer;
   readonly inspector?: AgentInspector;
+  /** Runs after a pull restored a setup, e.g. plugin reinstalls (T34). */
+  readonly afterRestore?: (context: AfterRestoreContext) => Promise<void>;
 }
 
 /** The only place agents are registered (T28). */
