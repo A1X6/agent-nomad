@@ -276,12 +276,16 @@ describe('plugin reinstall on pull', () => {
     expect(t.runs).toEqual([]);
   });
 
-  it('with --yes still asks before a command-source plugin', async () => {
-    const t = run({ answers: [false], assumeYes: true });
-    await t.done;
-    expect(t.asked).toEqual([
-      'builder@company is built by running a command from its marketplace. Allow it?',
-    ]);
+  it('with --yes never runs a command-source plugin: skipped with a note, not asked', async () => {
+    const t = run({ answers: [], assumeYes: true });
+    const result = await t.done;
+    expect(t.asked).toEqual([]);
+    expect(result.declined).toEqual(['builder@company']);
+    expect(result.installed).toEqual(['brag@brag', 'lint@company']);
+    expect(t.runs.some((line) => line.includes('builder'))).toBe(false);
+    expect(t.lines).toContain(
+      'Skipped builder@company: it is built by running a command, which --yes never allows. Run pull without --yes to choose.',
+    );
   });
 
   it('skips what is already here', async () => {

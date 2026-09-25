@@ -287,6 +287,7 @@ describe('agentnomad account delete', () => {
   function account(
     answers: unknown[],
     deleteAccount: () => Promise<void>,
+    stdin?: string,
     saved = new Map<SecretName, string>(),
   ) {
     const script = scripted(answers);
@@ -321,6 +322,7 @@ describe('agentnomad account delete', () => {
       passwordChecker: () => Promise.reject(new Error('not used')),
       deviceName: 'pc',
       localState: () => state,
+      ...(stdin !== undefined && { readPasswordStdin: () => Promise.resolve(stdin) }),
     });
     return { run: handlers.accountDelete, asked: script.asked, lines, saved, sent };
   }
@@ -328,7 +330,7 @@ describe('agentnomad account delete', () => {
   it('asks for the username and password, deletes, and cleans up this PC', async () => {
     await state.setRevision('claude-code', 'global', 3);
     const t = account(['ahmed', 'plum-garage-violin-47'], () => Promise.resolve());
-    await t.run({ yes: true });
+    await t.run({ yes: true, passwordStdin: false });
     expect(t.asked).toEqual(['Type your username to confirm', 'Password']);
     expect(Buffer.from(t.sent[0] ?? '', 'base64')).toHaveLength(32);
     expect(t.sent[0]).not.toContain('plum');
@@ -338,11 +340,28 @@ describe('agentnomad account delete', () => {
     expect(t.lines.at(-1)).toContain('Account "ahmed" and all its saved setups were deleted');
   });
 
+  it('from a script: username and password by flags, confirmed with --yes', async () => {
+    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
+    await t.run({ yes: true, passwordStdin: true, username: 'ahmed' });
+    expect(t.asked).toEqual([]);
+    expect(t.sent).toHaveLength(1);
+    expect(t.saved.size).toBe(0);
+  });
+
+  it('from a script without --yes: refuses, deleting nothing', async () => {
+    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
+    await expect(t.run({ yes: false, passwordStdin: true, username: 'ahmed' })).rejects.toThrow(
+      'Nothing was deleted. Add --yes to confirm deleting the account.',
+    );
+    expect(t.sent).toEqual([]);
+    expect(t.saved.has('session-token')).toBe(true);
+  });
+
   it('a wrong password deletes nothing and keeps the login', async () => {
     const t = account(['ahmed', 'wrong'], () =>
       Promise.reject(new ApiError(401, 'unauthorized', 'Wrong password')),
     );
-    await expect(t.run({ yes: false })).rejects.toThrow(
+    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toThrow(
       'Wrong username or password. Nothing was deleted.',
     );
     expect(t.saved.has('session-token')).toBe(true);
@@ -352,7 +371,9 @@ describe('agentnomad account delete', () => {
     const t = account(['ahmed', 'pw'], () =>
       Promise.reject(new ApiError(401, 'unauthorized', 'Log in again: no valid session')),
     );
-    await expect(t.run({ yes: false })).rejects.toThrow('Your session has expired');
+    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toThrow(
+      'Your session has expired',
+    );
     expect(t.saved.has('session-token')).toBe(false);
   });
 
@@ -360,7 +381,9 @@ describe('agentnomad account delete', () => {
     const t = account(['ahmed', 'pw'], () =>
       Promise.reject(new OutcomeUnknownError('delete-account')),
     );
-    await expect(t.run({ yes: false })).rejects.toBeInstanceOf(OutcomeUnknownError);
+    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toBeInstanceOf(
+      OutcomeUnknownError,
+    );
     expect(t.saved.has('session-token')).toBe(true);
   });
 });
