@@ -4,11 +4,13 @@ import type { ClientIp } from '../http/rate-limit.ts';
 const IP_PATTERN = /^[0-9a-fA-F:.]{2,45}$/;
 
 /**
- * Render's proxy puts the real client IP first in X-Forwarded-For (T19). Verified after
- * deploy: a client-sent X-Forwarded-For must not change which rate-limit bucket is used.
+ * The visitor's IP on Render (T19). Cloudflare always sits in front of Render and sets
+ * True-Client-IP and CF-Connecting-IP itself, overwriting anything the client sends.
+ * X-Forwarded-For is NOT used: Render's proxy only appends to it, so its first entry is
+ * whatever the client wrote (verified live: faking it dodged the per-IP limit).
  * Anything that does not look like an IP counts as unknown (one shared, stricter bucket).
  */
-export const firstForwardedIp: ClientIp = (c) => {
-  const first = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
-  return first && IP_PATTERN.test(first) ? first : undefined;
+export const renderClientIp: ClientIp = (c) => {
+  const ip = (c.req.header('true-client-ip') ?? c.req.header('cf-connecting-ip'))?.trim();
+  return ip && IP_PATTERN.test(ip) ? ip : undefined;
 };
