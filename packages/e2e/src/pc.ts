@@ -4,8 +4,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** The built CLI, run exactly as a user runs it (`pnpm test:e2e` builds it first). */
-const BIN = fileURLToPath(new URL('../../cli/dist/src/bin.js', import.meta.url));
+/**
+ * The CLI to run: the workspace build (`pnpm test:e2e` builds it first), or, with
+ * `E2E_CLI`, another entry file, such as the npm package installed globally (T40).
+ */
+const BIN =
+  process.env['E2E_CLI'] ?? fileURLToPath(new URL('../../cli/dist/src/bin.js', import.meta.url));
 
 /**
  * Loaded into the CLI when several "PCs" share one machine: the OS keychain is one per

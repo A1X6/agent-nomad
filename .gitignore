@@ -8,3 +8,7 @@ coverage/
 .DS_Store
 Thumbs.db
 *.log
+
+# The npm package built by packages/cli/scripts/build-release.ts (T40)
+packages/cli/release/
+*.tgz

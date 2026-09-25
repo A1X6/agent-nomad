@@ -388,8 +388,18 @@ errors go to stderr. Passwords are read only from stdin, never from an argument.
 | Cross-OS             | The same three steps on different machines, the database handed over as an artifact: macOS → Windows → macOS and Linux → Windows → Linux                                                                                                                                                            | `.github/workflows/ci.yml` |
 
 CI runs `pnpm check` (typecheck, lint, format, tests) on macOS, Linux and Windows with
-Node 22.13 and 24, the real Linux keychain (GNOME Keyring), the e2e run on each OS, and
-the two cross-OS chains. Actions are pinned by commit.
+Node 22.13 and 24, the real Linux keychain (GNOME Keyring), and the two cross-OS chains.
+On every OS and Node version it also builds the npm package, installs it globally, and runs
+the e2e steps with the installed `agentnomad` command. Actions are pinned by commit.
+
+**The npm package.** `packages/cli/scripts/build-release.ts` bundles our own code (cli,
+core, contracts) into one readable file with esbuild and writes `packages/cli/release/`:
+that file, a `package.json` naming every library as a normal dependency, the README and
+the license. The build fails if anything but our own source is bundled or a library is
+not declared. **Releases:** pushing a tag `vX.Y.Z` on `main` runs
+`.github/workflows/release.yml`: build and test on every OS, install and run the packed
+package, wait for the owner's approval, publish the tested tarball through npm trusted
+publishing with provenance (no npm token exists), then check `npx agentnomad` on every OS.
 
 Deployment: Render builds `main` from `render.yaml` after CI; database migrations
 (`packages/server/drizzle`) are run by hand with the direct connection string, and the API
@@ -601,11 +611,13 @@ Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 
 ## Repository root
 
-| Path                                   | Responsible for                                                                   |
-| -------------------------------------- | --------------------------------------------------------------------------------- |
-| `.github/workflows/ci.yml`             | CI: checks on 3 OSes × 2 Node versions, Linux keychain, e2e, the cross-OS chains. |
-| `render.yaml`                          | The Render service (build, start, health check).                                  |
-| `pnpm-workspace.yaml`                  | Workspace packages and dependency overrides.                                      |
-| `tsconfig.base.json`, `tsconfig.json`  | Strict TypeScript settings and project references.                                |
-| `eslint.config.js`, `vitest.config.ts` | Lint rules and the test projects.                                                 |
-| `docs/`                                | This document, the roadmap, the agent guide, decisions and the threat model.      |
+| Path                                    | Responsible for                                                                                                            |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `.github/workflows/ci.yml`              | CI: checks on 3 OSes × 2 Node versions, Linux keychain, the npm package installed and run end to end, the cross-OS chains. |
+| `.github/workflows/release.yml`         | Release: verify on every OS, approval, publish to npm with provenance, check `npx` on every OS.                            |
+| `packages/cli/scripts/build-release.ts` | Builds the `agentnomad` npm package (esbuild bundle + manifest).                                                           |
+| `render.yaml`                           | The Render service (build, start, health check).                                                                           |
+| `pnpm-workspace.yaml`                   | Workspace packages and dependency overrides.                                                                               |
+| `tsconfig.base.json`, `tsconfig.json`   | Strict TypeScript settings and project references.                                                                         |
+| `eslint.config.js`, `vitest.config.ts`  | Lint rules and the test projects.                                                                                          |
+| `docs/`                                 | This document, the roadmap, the agent guide, decisions and the threat model.                                               |

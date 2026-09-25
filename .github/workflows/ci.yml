@@ -51,11 +51,32 @@ jobs:
       - name: Typecheck, lint, format check and tests
         run: pnpm check
 
-      # T37: the built CLI, run like a script, against a local API: all three e2e steps on
-      # this OS, each on a fresh "PC". Once per OS is enough (the CLI is already built above).
-      - name: End-to-end, all steps on this OS
-        if: matrix.node == '24'
-        run: pnpm --filter @agentnomad/e2e run e2e
+      # T40: the npm package exactly as users get it: built, packed, installed globally, and
+      # run as the `agentnomad` command, on every OS and both Node versions.
+      - name: Build, pack and install the npm package
+        shell: bash
+        run: |
+          pnpm release:build
+          npm pack ./packages/cli/release --pack-destination "$RUNNER_TEMP"
+          npm install -g "$RUNNER_TEMP"/agentnomad-*.tgz
+
+      - name: The installed command works
+        shell: bash
+        run: |
+          expected="$(node -p "require('./packages/cli/package.json').version")"
+          actual="$(agentnomad --version)"
+          echo "agentnomad --version: $actual"
+          test "$actual" = "$expected"
+          agentnomad --help > /dev/null
+          agentnomad help pull > /dev/null
+
+      # T37 + T40: all three e2e steps on this OS, each on a fresh "PC", run with the
+      # globally installed package rather than the workspace build.
+      - name: End-to-end with the installed package
+        shell: bash
+        run: |
+          export E2E_CLI="$(npm root -g)/agentnomad/dist/agentnomad.js"
+          pnpm --filter @agentnomad/e2e run e2e
 
       # Linux runners have no keychain, so the step above tests the file fallback. This runs
       # the keychain tests again against a real, unlocked GNOME Keyring (Secret Service),

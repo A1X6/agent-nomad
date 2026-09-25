@@ -21,7 +21,8 @@
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "clean": "tsc --build --clean",
-    "test:e2e": "tsc --build && pnpm --filter @agentnomad/e2e run e2e"
+    "test:e2e": "tsc --build && pnpm --filter @agentnomad/e2e run e2e",
+    "release:build": "node --experimental-strip-types packages/cli/scripts/build-release.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

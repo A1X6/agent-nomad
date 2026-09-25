@@ -31,6 +31,7 @@ node packages/cli/dist/src/bin.js --help
 | `pnpm test:e2e`             | Builds, then runs the built CLI end to end against a local API (three simulated PCs).    |
 | `pnpm check`                | Typecheck, lint, format check and tests: what CI runs. Run it before every pull request. |
 | `pnpm lint` / `pnpm format` | ESLint / Prettier on their own.                                                          |
+| `pnpm release:build`        | Builds the npm package into `packages/cli/release/` (bundled with esbuild).              |
 
 ## The repository
 
@@ -97,7 +98,22 @@ When testing by hand, use a temporary home folder (set `HOME` and, on Windows,
 4. Open the pull request against `dev`, describing what and why. CI must be green on every
    OS.
 
-`dev` is released to `main` (and npm) when a set of changes is ready.
+`dev` is released to `main` when a set of changes is ready.
+
+## Releases
+
+Maintainers release from `main`:
+
+1. Set the new version in `packages/cli/package.json` and `packages/cli/src/version.ts`
+   (a test keeps them equal), merged through `dev` to `main`.
+2. Tag the commit on `main` (`git tag v1.2.3 && git push origin v1.2.3`).
+3. `.github/workflows/release.yml` builds and tests the package on every OS, then waits for
+   approval in the `npm` environment; after approval it publishes with provenance through
+   npm trusted publishing and checks `npx agentnomad` on every OS.
+
+To try the package locally: `pnpm release:build`, then
+`npm pack ./packages/cli/release` and install the `.tgz` into a temporary prefix
+(`npm install -g --prefix <temp folder> ./agentnomad-*.tgz`).
 
 ## Security
 

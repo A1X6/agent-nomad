@@ -2,13 +2,13 @@
 
 Where agentnomad is today and where it is going. Dates are not promised; the order is.
 
-| Stage                            | Theme                                                                                   | Status                  |
-| -------------------------------- | --------------------------------------------------------------------------------------- | ----------------------- |
-| [v1](#v1-claude-code-everywhere) | Claude Code, on every OS, zero-knowledge                                                | Built; releasing as 1.0 |
-| [v1.x](#v1x-more-agents)         | More agents: Codex, Gemini CLI, OpenCode, Cursor and others                             | Next                    |
-| [v1.x](#v1x-data-only-agents)    | Data-only agents: add a simple agent with a data file, no code                          | Planned                 |
-| [v2](#v2-one-setup-every-agent)  | One setup, every agent: turn a Claude Code setup into a Codex, Gemini or OpenCode setup | Planned                 |
-| [Later](#later)                  | History, teams, a dashboard, password change, storage                                   | Ideas                   |
+| Stage                            | Theme                                                                                   | Status          |
+| -------------------------------- | --------------------------------------------------------------------------------------- | --------------- |
+| [v1](#v1-claude-code-everywhere) | Claude Code, on every OS, zero-knowledge                                                | Released as 1.0 |
+| [v1.x](#v1x-more-agents)         | More agents: Codex, Gemini CLI, OpenCode, Cursor and others                             | Next            |
+| [v1.x](#v1x-data-only-agents)    | Data-only agents: add a simple agent with a data file, no code                          | Planned         |
+| [v2](#v2-one-setup-every-agent)  | One setup, every agent: turn a Claude Code setup into a Codex, Gemini or OpenCode setup | Planned         |
+| [Later](#later)                  | History, teams, a dashboard, password change, storage                                   | Ideas           |
 
 ## v1: Claude Code everywhere
 
@@ -26,8 +26,9 @@ Everything in v1 is built and tested on macOS, Linux and Windows:
 - Cross-OS end-to-end tests (macOS → Windows → macOS, Linux → Windows → Linux) and a
   security review with a published [threat model](security/threat-model.md).
 
-Still to do for the 1.0 release: publishing to npm with provenance (T40) and a weekly check
-that the Claude Code data file still matches the newest Claude Code (T41).
+Released on npm as `agentnomad` 1.0, built and published by GitHub Actions with provenance.
+Still to do: a weekly check that the Claude Code data file still matches the newest Claude
+Code (T41).
 
 ## v1.x: more agents
 
