@@ -55,7 +55,11 @@ describe('agentnomad agents', () => {
           fakeAdapter('claude-code', 'Claude Code', installed),
           fakeAdapter('codex', 'Codex', missing),
         ]),
-      reporter: { info: (m) => lines.push(m), success: (m) => lines.push(m) },
+      reporter: {
+        info: (m) => lines.push(m),
+        success: (m) => lines.push(m),
+        warn: (m) => lines.push(m),
+      },
     });
     await command.agents();
     expect(lines).toEqual([

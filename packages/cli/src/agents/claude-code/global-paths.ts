@@ -48,6 +48,8 @@ export const NEVER_SYNCED = [
   '.trash',
   'plugins',
   'settings.local.json',
+  // The organization's server-managed settings, as Claude Code cached them (T31).
+  'remote-settings.json',
   'skills/synced',
 ] as const;
 
