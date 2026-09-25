@@ -4,7 +4,7 @@
  */
 import { serve } from '@hono/node-server';
 
-import { firstForwardedIp } from './hosting/client-ip.ts';
+import { renderClientIp } from './hosting/client-ip.ts';
 import { createJsonLogger, describeError } from './logging/logger.ts';
 import { readPort } from './port.ts';
 import { createServerFromEnv } from './server.ts';
@@ -13,7 +13,7 @@ const logger = createJsonLogger();
 
 try {
   const port = readPort(process.env);
-  const server = await createServerFromEnv(process.env, { clientIp: firstForwardedIp, logger });
+  const server = await createServerFromEnv(process.env, { clientIp: renderClientIp, logger });
   const http = serve({ fetch: server.app.fetch, port }, () => {
     logger.info('server_started', { port });
   });
