@@ -116,3 +116,34 @@ export const SENSITIVE_HOME_DIRS = [
   '.config/gh',
   '.password-store',
 ] as const;
+
+/** Programs a hook or the status line needs, with install details (`.agentnomad/programs.json`). */
+export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
+
+/**
+ * Settings files of known status line and hook tools, from the home folder. Taken when a
+ * command runs the tool, directly or through `npx` / `bunx`.
+ */
+export const TOOL_CONFIG_FILES: Readonly<Record<string, readonly string[]>> = {
+  ccstatusline: ['.config/ccstatusline/settings.json'],
+};
+
+/** Shells and runtimes: present wherever agentnomad runs, so not recorded as programs. */
+export const RUNTIME_COMMANDS = new Set([
+  'bash',
+  'sh',
+  'zsh',
+  'fish',
+  'pwsh',
+  'powershell',
+  'cmd',
+  'node',
+  'python',
+  'python3',
+  'py',
+  'env',
+  'exec',
+]);
+
+/** Run a package without installing it; the package name follows the options. */
+export const PACKAGE_RUNNERS = new Set(['npx', 'bunx', 'pnpx', 'uvx']);

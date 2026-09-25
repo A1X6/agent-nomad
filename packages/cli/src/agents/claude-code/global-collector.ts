@@ -14,11 +14,16 @@ import {
   GLOBAL_FOLDERS,
   GLOBAL_MEMORY_FOLDERS,
   HOME_SCRIPTS_PREFIX,
+  PACKAGE_RUNNERS,
+  PROGRAMS_BUNDLE_PATH,
+  RUNTIME_COMMANDS,
   NEVER_SYNCED,
   SCRIPT_EXTENSIONS,
   SENSITIVE_HOME_DIRS,
   SKIPPED_NAMES,
+  TOOL_CONFIG_FILES,
 } from './global-paths.ts';
+import type { ProgramInfo, ProgramLocator } from './programs.ts';
 
 export interface GlobalCollectorOptions {
   /** Claude Code's base folder, from the detector (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -27,6 +32,8 @@ export interface GlobalCollectorOptions {
   readonly platform: NodeJS.Platform;
   /** Whether `CLAUDE_CONFIG_DIR` is set: `.claude.json` then lives in the base folder. */
   readonly customConfigDir: boolean;
+  /** Looks up programs hooks and the status line run; without it none are recorded. */
+  readonly findProgram?: ProgramLocator;
 }
 
 /** `~/.claude.json` could not be read as JSON (e.g. Claude Code was writing it). */
@@ -77,6 +84,29 @@ function commandWords(command: string): string[] {
   return [...command.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(
     (match) => match[1] ?? match[2] ?? match[3] ?? '',
   );
+}
+
+/** `ccstatusline@2.2.22` → `ccstatusline`; `@scope/tool@1` → `@scope/tool`. */
+const withoutVersion = (spec: string) => spec.replace(/(?<=.)@[^/]*$/, '');
+
+/**
+ * The program a command starts, e.g. `ccstatusline`, or `ccstatusline` for
+ * `npx -y ccstatusline@latest` (`runner`: nothing to install). `null` for a script path,
+ * a shell or a runtime.
+ */
+export function programOf(command: string): { name: string; runner: boolean } | null {
+  const words = commandWords(command);
+  let index = 0;
+  while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? '')) index += 1;
+  const first = words[index];
+  if (first === undefined || /[\\/]/.test(first)) return null;
+  const base = first.toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
+  if (PACKAGE_RUNNERS.has(base)) {
+    const spec = words.slice(index + 1).find((word) => !word.startsWith('-'));
+    return spec === undefined ? null : { name: withoutVersion(spec), runner: true };
+  }
+  if (RUNTIME_COMMANDS.has(base) || !/^[A-Za-z0-9._-]+$/.test(first)) return null;
+  return { name: base, runner: false };
 }
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
@@ -183,6 +213,40 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
     return files;
   }
 
+  /**
+   * For each program the commands run: its known settings file (e.g. ccstatusline's) and,
+   * unless it runs through npx, what it is and how it was installed, so pull can check it.
+   */
+  async function programs(settingsJson: string): Promise<CollectedFile[]> {
+    const files: CollectedFile[] = [];
+    const found = new Map<string, ProgramInfo>();
+    for (const command of commandsInSettings(settingsJson)) {
+      const program = programOf(command);
+      if (program === null) continue;
+      for (const relative of TOOL_CONFIG_FILES[program.name] ?? []) {
+        const file = await readIfFile(path.join(homedir, ...relative.split('/')));
+        if (file) files.push({ ...file, path: HOME_SCRIPTS_PREFIX + relative });
+      }
+      if (!program.runner && !found.has(program.name)) {
+        const info = (await options.findProgram?.(program.name)) ?? {
+          command: program.name,
+          npm: null,
+        };
+        found.set(program.name, info);
+      }
+    }
+    if (found.size > 0 && options.findProgram) {
+      const list = [...found.values()].sort((a, b) => a.command.localeCompare(b.command));
+      files.push({
+        path: PROGRAMS_BUNDLE_PATH,
+        content: new TextEncoder().encode(`${JSON.stringify({ programs: list }, null, 2)}
+`),
+        executable: false,
+      });
+    }
+    return files;
+  }
+
   /** MCP servers and preference keys from `~/.claude.json`; nothing else in it. */
   async function claudeJson(): Promise<CollectedFile | null> {
     const file = options.customConfigDir
@@ -239,7 +303,10 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       }
 
       const settings = found.find((file) => file.path === 'settings.json');
-      if (settings) found.push(...(await hookScripts(new TextDecoder().decode(settings.content))));
+      if (settings) {
+        const text = new TextDecoder().decode(settings.content);
+        found.push(...(await hookScripts(text)), ...(await programs(text)));
+      }
 
       const selected = await claudeJson();
       if (selected) found.push(selected);

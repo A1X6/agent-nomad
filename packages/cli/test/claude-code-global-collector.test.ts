@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   ClaudeJsonError,
   commandsInSettings,
+  createProgramLocator,
+  programOf,
+  type DetectorSystem,
+  type ProgramInfo,
   createClaudeCodeGlobalCollector,
   type CollectedFile,
 } from '../src/index.ts';
@@ -330,5 +334,130 @@ describe.runIf(posix)('global collector: links', () => {
     const files = await collect();
     expect(text(files, 'skills/my-skill/SKILL.md')).toBe('linked');
     expect(paths(files).some((path) => path.includes('loop/loop'))).toBe(false);
+  });
+});
+
+describe('global collector: programs the status line and hooks need', () => {
+  const statusLine = (command: string) =>
+    put(join(base, 'settings.json'), JSON.stringify({ statusLine: { type: 'command', command } }));
+  const npmInfo = (command: string) =>
+    Promise.resolve({ command, npm: { package: command, version: '2.2.22' } });
+
+  function collectWith(findProgram?: (command: string) => Promise<ProgramInfo | null>) {
+    return createClaudeCodeGlobalCollector({
+      baseDir: base,
+      homedir: home,
+      platform: process.platform,
+      customConfigDir: false,
+      ...(findProgram && { findProgram }),
+    }).collect({ kind: 'global' }, { includeMemory: false });
+  }
+
+  it('takes ccstatusline settings and records the npm package and version', async () => {
+    await statusLine('ccstatusline');
+    await put(join(home, '.config', 'ccstatusline', 'settings.json'), '{"lines":[]}');
+    const files = await collectWith(npmInfo);
+    expect(text(files, '.agentnomad/home/.config/ccstatusline/settings.json')).toBe('{"lines":[]}');
+    expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
+      programs: [{ command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } }],
+    });
+  });
+
+  it('npx needs no install record, but the tool settings still come along', async () => {
+    await statusLine('npx -y ccstatusline@latest');
+    await put(join(home, '.config', 'ccstatusline', 'settings.json'), '{}');
+    const files = paths(await collectWith(npmInfo));
+    expect(files).toContain('.agentnomad/home/.config/ccstatusline/settings.json');
+    expect(files).not.toContain('.agentnomad/programs.json');
+  });
+
+  it('records a program that is not from npm without install details', async () => {
+    await put(
+      join(base, 'settings.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ hooks: [{ type: 'command', command: 'terminal-notifier -message done' }] }],
+        },
+      }),
+    );
+    const files = await collectWith((command) => Promise.resolve({ command, npm: null }));
+    expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
+      programs: [{ command: 'terminal-notifier', npm: null }],
+    });
+  });
+
+  it.each([
+    ['ccstatusline', { name: 'ccstatusline', runner: false }],
+    ['npx -y ccstatusline@latest', { name: 'ccstatusline', runner: true }],
+    ['bunx @scope/tool@1.2.3 --flag', { name: '@scope/tool', runner: true }],
+    ['FOO=1 my-tool --x', { name: 'my-tool', runner: false }],
+    ['ccstatusline.cmd', { name: 'ccstatusline', runner: false }],
+    ['bash ~/x.sh', null],
+    ['~/bin/x.sh', null],
+    ['node script.js', null],
+  ])('reads the program of %j', (command, expected) => {
+    expect(programOf(command)).toEqual(expected);
+  });
+});
+
+describe('program locator', () => {
+  const system = (pc: {
+    platform: NodeJS.Platform;
+    path: string;
+    executables: string[];
+    files: Record<string, string>;
+  }): DetectorSystem => ({
+    platform: pc.platform,
+    homedir: pc.platform === 'win32' ? 'C:\\Users\\a' : '/home/a',
+    env: { PATH: pc.path, PATHEXT: '.EXE;.CMD' },
+    isDirectory: () => Promise.resolve(false),
+    isExecutable: (path) => Promise.resolve(pc.executables.includes(path)),
+    readText: (path) => Promise.resolve(pc.files[path] ?? null),
+    runVersion: () => Promise.resolve(null),
+  });
+  const manifest = JSON.stringify({
+    name: 'ccstatusline',
+    version: '2.2.22',
+    bin: { ccstatusline: 'dist/cli.js' },
+  });
+
+  it('finds a global npm package on Windows (prefix/node_modules)', async () => {
+    const find = createProgramLocator(
+      system({
+        platform: 'win32',
+        path: 'C:\\nvm4w\\nodejs',
+        executables: ['C:\\nvm4w\\nodejs\\ccstatusline.cmd'],
+        files: { 'C:\\nvm4w\\nodejs\\node_modules\\ccstatusline\\package.json': manifest },
+      }),
+    );
+    expect(await find('ccstatusline')).toEqual({
+      command: 'ccstatusline',
+      npm: { package: 'ccstatusline', version: '2.2.22' },
+    });
+  });
+
+  it('finds a global npm package on macOS and Linux (prefix/lib/node_modules)', async () => {
+    const find = createProgramLocator(
+      system({
+        platform: 'linux',
+        path: '/usr/local/bin',
+        executables: ['/usr/local/bin/ccstatusline'],
+        files: { '/usr/local/lib/node_modules/ccstatusline/package.json': manifest },
+      }),
+    );
+    expect((await find('ccstatusline'))?.npm?.version).toBe('2.2.22');
+  });
+
+  it('a program from elsewhere has no npm details; a missing one is null', async () => {
+    const find = createProgramLocator(
+      system({
+        platform: 'linux',
+        path: '/usr/bin',
+        executables: ['/usr/bin/jq'],
+        files: {},
+      }),
+    );
+    expect(await find('jq')).toEqual({ command: 'jq', npm: null });
+    expect(await find('nope')).toBeNull();
   });
 });
