@@ -1,0 +1,35 @@
+# Render Blueprint for the agentnomad API (T19). Secrets are never in this file: values
+# marked `sync: false` are entered once in the Render dashboard.
+services:
+  - type: web
+    name: agentnomad-api
+    runtime: node
+    # Next to the Neon database (eu-central-1, Frankfurt).
+    region: frankfurt
+    # Free: sleeps after 15 idle minutes; the first request then waits about a minute.
+    plan: free
+    branch: main
+    # Deploy only after GitHub CI passes on the commit.
+    autoDeployTrigger: checksPass
+    buildCommand: corepack enable pnpm && pnpm install --frozen-lockfile && pnpm build
+    startCommand: node packages/server/dist/src/main.js
+    healthCheckPath: /health
+    # Only changes that affect the server trigger a deploy.
+    buildFilter:
+      paths:
+        - packages/server/**
+        - packages/contracts/**
+        - package.json
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+        - tsconfig*.json
+        - render.yaml
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      # Neon POOLED connection string (host contains "-pooler"), not the direct one.
+      - key: DATABASE_URL
+        sync: false
+      # 32+ random bytes, base64. Must never change or leak (see .env.example).
+      - key: SERVER_SECRET
+        sync: false

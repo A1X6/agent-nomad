@@ -4,6 +4,9 @@ import { AgentIdSchema } from '../bundle.ts';
 import { base64UpTo, Sha256HexSchema, TimestampSchema } from '../primitives.ts';
 import { API_HEADERS, MAX_BUNDLE_BYTES, MAX_NAME_ENC_BYTES } from './common.ts';
 
+/** Scope key of the global setup. Project setups use a keyed hash instead (core, T12). */
+export const GLOBAL_SCOPE_KEY = 'global';
+
 /** `global`, or the keyed hash of a project name (32 bytes, lowercase hex). Never the name itself. */
 export const ScopeKeySchema = z
   .string()

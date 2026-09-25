@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import type { BlobRef, BlobStore, PutMetaResult } from '../src/index.ts';
@@ -5,11 +7,12 @@ import type { BlobRef, BlobStore, PutMetaResult } from '../src/index.ts';
 /** In-memory BlobStore, the kind of fake later route tests will use. */
 function memoryBlobStore(): BlobStore {
   const blobs = new Map<string, Uint8Array>();
-  const id = (ref: BlobRef) => `${ref.userId}/${ref.agent}/${ref.scopeKey}/${String(ref.revision)}`;
+  const id = (ref: BlobRef) => `${ref.userId}/${ref.blobId}`;
   return {
-    put: (ref, bytes) => {
+    put: (userId, bytes) => {
+      const ref = { userId, blobId: randomUUID() };
       blobs.set(id(ref), bytes);
-      return Promise.resolve();
+      return Promise.resolve(ref);
     },
     get: (ref) => Promise.resolve(blobs.get(id(ref)) ?? null),
     delete: (ref) => {
@@ -31,14 +34,15 @@ function statusFor(result: PutMetaResult): number {
 }
 
 describe('server interfaces', () => {
-  it('a BlobStore keeps each revision separately', async () => {
+  it('a BlobStore gives every upload its own id', async () => {
     const store = memoryBlobStore();
-    const ref: BlobRef = { userId: 'u1', agent: 'claude-code', scopeKey: 'global', revision: 1 };
-    await store.put(ref, new Uint8Array([1, 2, 3]));
-    expect(await store.get(ref)).toEqual(new Uint8Array([1, 2, 3]));
-    expect(await store.get({ ...ref, revision: 2 })).toBeNull();
-    await store.delete(ref);
-    expect(await store.get(ref)).toBeNull();
+    const first = await store.put('u1', new Uint8Array([1, 2, 3]));
+    const second = await store.put('u1', new Uint8Array([4]));
+    expect(first.blobId).not.toBe(second.blobId);
+    expect(await store.get(first)).toEqual(new Uint8Array([1, 2, 3]));
+    await store.delete(first);
+    expect(await store.get(first)).toBeNull();
+    expect(await store.get(second)).toEqual(new Uint8Array([4]));
   });
 
   it('every repository put outcome maps to an HTTP status', () => {

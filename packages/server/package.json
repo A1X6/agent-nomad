@@ -14,9 +14,21 @@
   },
   "scripts": {
     "build": "tsc --build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "@agentnomad/contracts": "workspace:*"
+    "@agentnomad/contracts": "workspace:*",
+    "@hono/node-server": "2.1.1",
+    "@neondatabase/serverless": "1.1.0",
+    "drizzle-orm": "0.45.3",
+    "hono": "4.13.9",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "drizzle-kit": "0.31.11"
   }
 }

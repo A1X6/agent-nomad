@@ -1,4 +1,5 @@
 import {
+  GLOBAL_SCOPE_KEY,
   ProjectNameSchema,
   type AgentId,
   type BundleScope,
@@ -8,8 +9,8 @@ import { strFromU8, strToU8 } from 'fflate';
 
 import { DecryptionError, type Aead, type KeyedHash } from './crypto.ts';
 
-/** Scope key of the global setup. Project setups use a keyed hash instead. */
-export const GLOBAL_SCOPE_KEY = 'global';
+/** Scope key of the global setup (defined in contracts, shared with the server). */
+export { GLOBAL_SCOPE_KEY };
 
 /**
  * Labels for keys and associated data. Part of the stored format: changing them would make
