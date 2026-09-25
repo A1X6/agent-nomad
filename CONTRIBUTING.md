@@ -100,6 +100,16 @@ When testing by hand, use a temporary home folder (set `HOME` and, on Windows,
 
 `dev` is released to `main` when a set of changes is ready.
 
+## Keeping up with Claude Code
+
+Every Monday, `.github/workflows/drift-check.yml` compares the Claude Code paths data file
+(`packages/cli/src/agents/claude-code/claude-code-paths.data.ts`) with the newest Claude Code
+and, when something needs a look, opens or updates an issue labelled `drift`. To handle it:
+sort each new name into `neverSynced`, `knownState` or a synced list (never sync credentials,
+history, caches or machine state), read the listed changelog entries, set `reviewedVersion`
+to the version in the issue, and run `pnpm check`. Run the check locally with
+`node --experimental-strip-types packages/cli/scripts/drift/check-claude-code.ts`.
+
 ## Releases
 
 Maintainers release from `main`:

@@ -316,8 +316,13 @@ own question; programs that hooks start and npm installed are offered with
 `npm install -g name@version`.
 
 **Keeping up with Claude Code:** files Claude Code adds that the data file does not know
-are reported on push; the Claude Code version is stamped in every bundle; a weekly check
-(T41) compares the data file with the newest Claude Code.
+are reported on push; the Claude Code version is stamped in every bundle; and a weekly
+drift check (`.github/workflows/drift-check.yml`) compares the data file with the newest
+Claude Code. It reads the official
+[.claude directory docs](https://code.claude.com/docs/en/claude-directory), runs a fresh
+Claude Code in an empty folder to see what it creates, and collects the changelog entries
+about files and setup since the data file's `reviewedVersion`. Anything new goes into one
+open GitHub issue labelled `drift`; the fresh install runs with no write permissions.
 
 ## 8. The server
 
@@ -616,6 +621,8 @@ Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 | `.github/workflows/ci.yml`              | CI: checks on 3 OSes × 2 Node versions, Linux keychain, the npm package installed and run end to end, the cross-OS chains. |
 | `.github/workflows/release.yml`         | Release: verify on every OS, approval, publish to npm with provenance, check `npx` on every OS.                            |
 | `packages/cli/scripts/build-release.ts` | Builds the `agentnomad` npm package (esbuild bundle + manifest).                                                           |
+| `packages/cli/scripts/drift/`           | The weekly Claude Code drift check: `drift.ts` (comparison and report), `check-claude-code.ts` (fetches the sources).      |
+| `.github/workflows/drift-check.yml`     | Runs the drift check every Monday and files or updates the `drift` issue.                                                  |
 | `render.yaml`                           | The Render service (build, start, health check).                                                                           |
 | `pnpm-workspace.yaml`                   | Workspace packages and dependency overrides.                                                                               |
 | `tsconfig.base.json`, `tsconfig.json`   | Strict TypeScript settings and project references.                                                                         |
