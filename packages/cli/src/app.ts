@@ -48,6 +48,8 @@ export interface AppEnvironment {
   readonly prompter: Prompter;
   readonly reporter: Reporter;
   readonly fetch?: typeof fetch;
+  /** `--password-stdin`: the first line of standard input. */
+  readonly readPasswordStdin?: () => Promise<string>;
 }
 
 /** Runs `create` once, on first use. */
@@ -194,6 +196,7 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       passwordChecker: loadZxcvbnChecker,
       deviceName: deviceNameOf(app.hostname),
       localState,
+      ...(app.readPasswordStdin && { readPasswordStdin: app.readPasswordStdin }),
     }),
   };
 }

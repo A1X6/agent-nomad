@@ -332,6 +332,29 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     ).rejects.toThrow('No saved Claude Code project named "nope". Saved: my-app.');
   });
 
+  it('--yes with only a project saved restores that project, asking nothing', async () => {
+    const server = fakeServer();
+    const a = pc('solo-laptop');
+    await put(join(a.base, 'CLAUDE.md'), 'Global notes (not pushed).');
+    await put(join(a.project, 'CLAUDE.md'), 'Only project rules.');
+    await pushFrom(a, server, ['project', 'my-app', false])(none);
+
+    const b = pc('solo-desktop');
+    const t = pullOn(b, server, []);
+    await t.pull({ global: false, yes: true });
+    expect(t.asked).toEqual([]);
+    expect(await read(join(b.project, 'CLAUDE.md'))).toBe('Only project rules.');
+  });
+
+  it('scripted end to end: flags answer everything, nothing is asked', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('scripted');
+    const t = pullOn(b, server, []);
+    await t.pull({ global: true, project: 'my-app', yes: true, conflict: 'merge' });
+    expect(t.asked).toEqual([]);
+    expect(t.lines.filter((line) => line.startsWith('success: Restored'))).toHaveLength(2);
+  });
+
   it('says so when nothing is saved', async () => {
     const t = pullOn(pc('desktop'), fakeServer(), []);
     await t.pull(none);

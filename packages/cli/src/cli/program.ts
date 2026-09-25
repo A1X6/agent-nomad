@@ -1,8 +1,8 @@
 import { Command, Option } from '@commander-js/extra-typings';
 
 import { CLI_VERSION } from '../version.ts';
-import type { CommandHandlers, ScopeFlags } from './commands.ts';
-import { parseAgentList, parseProjectName } from './flags.ts';
+import type { CommandHandlers, CredentialOptions, ScopeFlags } from './commands.ts';
+import { parseAgentList, parseProjectName, parseUsername } from './flags.ts';
 
 /** Where commander writes help and errors; tests capture it instead of the terminal. */
 export interface ProgramOutput {
@@ -21,7 +21,12 @@ Examples:
   agentnomad push --agent claude-code --global      save the global Claude Code setup
   agentnomad pull --agent claude-code --project my-saas-app
                                                     restore a project into the current folder
-  agentnomad pull --global --merge --yes            restore without questions, merging files`;
+  agentnomad pull --global --merge --yes            restore without questions, merging files
+  echo "$PASSWORD" | agentnomad login --username me --password-stdin
+                                                    log in from a script
+
+With no terminal (a script or CI), nothing is asked: a question the flags do not
+answer stops the command with exit code 1 and names the flags to add.`;
 
 /** `--agent`, `--global`, `--project`: shared by the commands that work on saved setups. */
 function scopeOptions() {
@@ -37,6 +42,29 @@ function scopeOptions() {
 }
 
 const yesOption = () => new Option('-y, --yes', 'accept defaults instead of asking');
+
+/** `--username`, `--password-stdin`: register, login and account delete from a script. */
+function credentialOptions() {
+  return [
+    new Option('--username <name>', 'your username, instead of typing it').argParser(parseUsername),
+    new Option(
+      '--password-stdin',
+      'read the password from the first line of standard input (never pass it as an argument)',
+    ),
+  ] as const;
+}
+
+function credentials(options: {
+  username?: string | undefined;
+  passwordStdin?: true | undefined;
+  yes?: true | undefined;
+}): CredentialOptions {
+  return {
+    yes: options.yes === true,
+    passwordStdin: options.passwordStdin === true,
+    ...(options.username !== undefined && { username: options.username }),
+  };
+}
 
 function scope(options: {
   agent?: string[] | undefined;
@@ -70,15 +98,28 @@ export function createProgram({ handlers, output }: ProgramDeps) {
   program.addHelpText('after', EXAMPLES);
 
   // Settings above are copied to every command added below.
+  const [registerUsername, registerPassword] = credentialOptions();
   program
     .command('register')
     .description('create an account (there is no password recovery)')
-    .action(() => handlers.register());
+    .addOption(registerUsername)
+    .addOption(registerPassword)
+    .addOption(
+      new Option(
+        '-y, --yes',
+        'accept that there is no password recovery, and replace a login already on this PC',
+      ),
+    )
+    .action((options) => handlers.register(credentials(options)));
 
+  const [loginUsername, loginPassword] = credentialOptions();
   program
     .command('login')
     .description('log in on this PC')
-    .action(() => handlers.login());
+    .addOption(loginUsername)
+    .addOption(loginPassword)
+    .addOption(new Option('-y, --yes', 'replace a login already on this PC without asking'))
+    .action((options) => handlers.login(credentials(options)));
 
   program
     .command('logout')
@@ -149,11 +190,16 @@ export function createProgram({ handlers, output }: ProgramDeps) {
     .action((options) => handlers.delete({ ...scope(options), yes: options.yes === true }));
 
   const account = program.command('account').description('manage your account');
+  const [deleteUsername, deletePassword] = credentialOptions();
   account
     .command('delete')
     .description('delete your account and every saved setup (cannot be undone)')
-    .addOption(yesOption())
-    .action((options) => handlers.accountDelete({ yes: options.yes === true }));
+    .addOption(deleteUsername)
+    .addOption(deletePassword)
+    .addOption(
+      new Option('-y, --yes', 'confirm the deletion when username and password come from flags'),
+    )
+    .action((options) => handlers.accountDelete(credentials(options)));
 
   program
     .command('env')

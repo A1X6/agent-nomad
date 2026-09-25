@@ -1,3 +1,5 @@
+import type { Writable } from 'node:stream';
+
 import * as clack from '@clack/prompts';
 
 import { PromptCancelledError, type Choice, type Prompter, type Reporter } from './prompter.ts';
@@ -62,8 +64,19 @@ export function createClackPrompter(): Prompter {
   };
 }
 
+export interface ClackReporterOptions {
+  /** Where warnings and errors go; stderr, so a script can tell them from normal output. */
+  readonly diagnostics?: Writable;
+  /**
+   * false with no terminal (T36): a spinner then prints its message once instead of
+   * animating, so logs stay readable.
+   */
+  readonly interactive?: boolean;
+}
+
 /** Messages and spinners on @clack/prompts. */
-export function createClackReporter(): Reporter {
+export function createClackReporter(options: ClackReporterOptions = {}): Reporter {
+  const diagnostics = options.diagnostics && { output: options.diagnostics };
   return {
     info: (message) => {
       clack.log.info(message);
@@ -72,12 +85,22 @@ export function createClackReporter(): Reporter {
       clack.log.success(message);
     },
     warn: (message) => {
-      clack.log.warn(message);
+      clack.log.warn(message, diagnostics);
     },
     error: (message) => {
-      clack.log.error(message);
+      clack.log.error(message, diagnostics);
     },
     spinner: () => {
+      if (options.interactive === false) {
+        return {
+          start: (message) => {
+            clack.log.step(message);
+          },
+          stop: (message) => {
+            if (message) clack.log.step(message);
+          },
+        };
+      }
       const spinner = clack.spinner();
       return {
         start: (message) => {

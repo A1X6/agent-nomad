@@ -110,10 +110,13 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
           : options.global
             ? 'global'
             : 'project';
-    } else if (options.yes || projects.length === 0) {
+    } else if (projects.length === 0) {
       choice = 'global';
     } else if (!global) {
       choice = 'project';
+    } else if (options.yes) {
+      // --yes alone restores the global setup; a project is picked with --project.
+      choice = 'global';
     } else {
       choice = await prompter.select(`${adapter.displayName}: what to restore?`, [
         { value: 'global', label: 'Global setup' },

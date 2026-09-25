@@ -171,11 +171,19 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
     }
     const args = ['plugin', 'install', plugin.id, '--scope', plugin.scope, '--json'];
     if (plugin.commandSource) {
-      const accept = await deps.prompter.confirm(
-        `${plugin.id} is built by running a command from its marketplace. Allow it?`,
-        false,
-      );
+      // Never allowed unasked: --yes takes the safe answer (skip) instead of running it.
+      const accept =
+        !deps.assumeYes &&
+        (await deps.prompter.confirm(
+          `${plugin.id} is built by running a command from its marketplace. Allow it?`,
+          false,
+        ));
       if (!accept) {
+        if (deps.assumeYes) {
+          deps.reporter.warn(
+            `Skipped ${plugin.id}: it is built by running a command, which --yes never allows. Run pull without --yes to choose.`,
+          );
+        }
         result.declined.push(plugin.id);
         continue;
       }

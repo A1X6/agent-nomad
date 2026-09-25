@@ -29,6 +29,8 @@ import {
 } from '../src/index.ts';
 
 const STRONG = 'plum-garage-violin-47';
+/** Answered by typing: no flags. */
+const ASK = { yes: false, passwordStdin: false };
 
 let realCrypto: CryptoService;
 let zxcvbn: PasswordChecker;
@@ -176,6 +178,8 @@ function setup(
   options: {
     server?: ReturnType<typeof fakeServer>;
     secrets?: ReturnType<typeof memorySecrets>;
+    /** What `--password-stdin` reads. */
+    stdin?: string;
   } = {},
 ) {
   const server = options.server ?? fakeServer();
@@ -197,6 +201,9 @@ function setup(
     crypto: () => Promise.resolve(fastCrypto()),
     passwordChecker: () => Promise.resolve(zxcvbn),
     deviceName: 'laptop',
+    ...(options.stdin !== undefined && {
+      readPasswordStdin: () => Promise.resolve(options.stdin ?? ''),
+    }),
   });
   return { commands, server, secrets, script, lines };
 }
@@ -211,7 +218,7 @@ const registerAnswers = (username = 'ahmed', password = STRONG) => [
 describe('register', () => {
   it('creates the account, shows the no-recovery warning and saves the login', async () => {
     const t = setup(registerAnswers());
-    await t.commands.register();
+    await t.commands.register(ASK);
 
     const sent = t.server.users.get('ahmed');
     expect(sent?.kdfParams).toEqual(DEFAULT_KDF_PARAMS);
@@ -227,13 +234,13 @@ describe('register', () => {
 
   it('never sends the password itself', async () => {
     const t = setup(registerAnswers());
-    await t.commands.register();
+    await t.commands.register(ASK);
     expect(JSON.stringify(t.server.users.get('ahmed'))).not.toContain(STRONG);
   });
 
   it('stops without creating anything when the warning is not accepted', async () => {
     const t = setup(['ahmed', false]);
-    await t.commands.register();
+    await t.commands.register(ASK);
     expect(t.server.calls).toEqual([]);
     expect(t.secrets.saved.size).toBe(0);
     expect(t.lines.at(-1)).toBe('info: No account was created.');
@@ -241,7 +248,7 @@ describe('register', () => {
 
   it('asks again for a weak password and explains why', async () => {
     const t = setup(['ahmed', true, 'password123456', 'short', STRONG, STRONG]);
-    await t.commands.register();
+    await t.commands.register(ASK);
     expect(t.script.rejected).toHaveLength(2);
     expect(t.script.rejected[1]).toContain('at least 12 characters');
     expect(t.server.users.has('ahmed')).toBe(true);
@@ -249,28 +256,28 @@ describe('register', () => {
 
   it('asks again when the second password does not match', async () => {
     const t = setup(['ahmed', true, STRONG, 'plum-garage-violin-48', STRONG]);
-    await t.commands.register();
+    await t.commands.register(ASK);
     expect(t.script.rejected).toEqual(['The passwords do not match.']);
   });
 
   it('refuses an invalid username before anything else', async () => {
     const t = setup(['Ahmed Ali', ...registerAnswers()]);
-    await t.commands.register();
+    await t.commands.register(ASK);
     expect(t.script.rejected).toHaveLength(1);
     expect(t.server.users.has('ahmed')).toBe(true);
   });
 
   it('passes on "username taken" and saves nothing', async () => {
     const server = fakeServer();
-    await setup(registerAnswers(), { server }).commands.register();
+    await setup(registerAnswers(), { server }).commands.register(ASK);
     const t = setup(registerAnswers(), { server });
-    await expect(t.commands.register()).rejects.toMatchObject({ code: 'username_taken' });
+    await expect(t.commands.register(ASK)).rejects.toMatchObject({ code: 'username_taken' });
     expect(t.secrets.saved.size).toBe(0);
   });
 
   it('mentions the private file when there is no keychain', async () => {
     const t = setup(registerAnswers(), { secrets: memorySecrets('file') });
-    await t.commands.register();
+    await t.commands.register(ASK);
     expect(t.lines.at(-1)).toBe(`warn: ${FILE_BACKEND_NOTE}`);
   });
 });
@@ -278,23 +285,23 @@ describe('register', () => {
 describe('already logged in', () => {
   it('keeps the current login when the user says no', async () => {
     const t = setup(registerAnswers());
-    await t.commands.register();
+    await t.commands.register(ASK);
     const before = new Map(t.secrets.saved);
 
     const again = setup([false], { server: t.server, secrets: t.secrets });
-    await again.commands.login();
+    await again.commands.login(ASK);
     expect(t.secrets.saved).toEqual(before);
     expect(again.lines.at(-1)).toBe('info: Nothing changed.');
   });
 
   it('logs out first when the user says yes', async () => {
     const t = setup(registerAnswers());
-    await t.commands.register();
+    await t.commands.register(ASK);
     const again = setup([true, ...registerAnswers('second')], {
       server: t.server,
       secrets: t.secrets,
     });
-    await again.commands.register();
+    await again.commands.register(ASK);
     expect(t.server.calls).toEqual(['register', 'logout', 'register']);
     expect(t.server.sessions.size).toBe(1);
   });
@@ -304,10 +311,10 @@ describe('login', () => {
   it('unlocks the same data key on another PC with the same password', async () => {
     const server = fakeServer();
     const first = setup(registerAnswers(), { server });
-    await first.commands.register();
+    await first.commands.register(ASK);
 
     const otherPc = setup(['ahmed', STRONG], { server });
-    await otherPc.commands.login();
+    await otherPc.commands.login(ASK);
     expect(otherPc.secrets.saved.get('data-key')).toBe(first.secrets.saved.get('data-key'));
     expect(otherPc.secrets.saved.get('session-token')).not.toBe(
       first.secrets.saved.get('session-token'),
@@ -318,17 +325,88 @@ describe('login', () => {
 
   it('a wrong password saves nothing', async () => {
     const server = fakeServer();
-    await setup(registerAnswers(), { server }).commands.register();
+    await setup(registerAnswers(), { server }).commands.register(ASK);
     const t = setup(['ahmed', 'plum-garage-violin-99'], { server });
-    await expect(t.commands.login()).rejects.toThrow('Wrong username or password');
+    await expect(t.commands.login(ASK)).rejects.toThrow('Wrong username or password');
     expect(t.secrets.saved.size).toBe(0);
+  });
+});
+
+describe('from a script (--username, --password-stdin, --yes)', () => {
+  const flags = (extra: Partial<{ yes: boolean; username: string }> = {}) => ({
+    yes: true,
+    passwordStdin: true,
+    username: 'ahmed',
+    ...extra,
+  });
+
+  it('registers without asking anything, and the password is not asked twice', async () => {
+    const t = setup([], { stdin: STRONG });
+    await t.commands.register(flags());
+    expect(t.script.asked).toEqual([]);
+    expect(t.server.users.has('ahmed')).toBe(true);
+    expect(t.lines).toContain(`warn: ${NO_RECOVERY_WARNING}`);
+  });
+
+  it('a weak piped password stops register with the reason, creating nothing', async () => {
+    const t = setup([], { stdin: 'password123456' });
+    await expect(t.commands.register(flags())).rejects.toThrow();
+    expect(t.server.calls).toEqual([]);
+    expect(t.secrets.saved.size).toBe(0);
+  });
+
+  it('an empty standard input is refused', async () => {
+    const t = setup([], { stdin: '' });
+    await expect(t.commands.login(flags())).rejects.toThrow('no password on standard input');
+  });
+
+  it('an invalid --username is refused like a typed one', async () => {
+    const t = setup([], { stdin: STRONG });
+    await expect(t.commands.login(flags({ username: 'Ahmed Ali' }))).rejects.toThrow();
+    expect(t.server.calls).toEqual([]);
+  });
+
+  it('logs in on another PC with the same data key', async () => {
+    const server = fakeServer();
+    const first = setup([], { server, stdin: STRONG });
+    await first.commands.register(flags());
+    const otherPc = setup([], { server, stdin: STRONG });
+    await otherPc.commands.login(flags({ yes: false }));
+    expect(otherPc.script.asked).toEqual([]);
+    expect(otherPc.secrets.saved.get('data-key')).toBe(first.secrets.saved.get('data-key'));
+  });
+
+  it('--yes replaces a login already on this PC without asking', async () => {
+    const t = setup([], { stdin: STRONG });
+    await t.commands.register(flags());
+    const again = setup([], { server: t.server, secrets: t.secrets, stdin: STRONG });
+    await again.commands.login(flags());
+    expect(again.script.asked).toEqual([]);
+    expect(t.server.calls).toEqual(['register', 'logout', 'prelogin', 'login']);
+  });
+
+  it('without --yes, an existing login is still asked about', async () => {
+    const t = setup([], { stdin: STRONG });
+    await t.commands.register(flags());
+    const again = setup([false], { server: t.server, secrets: t.secrets, stdin: STRONG });
+    await again.commands.login(flags({ yes: false }));
+    expect(again.script.asked).toEqual([
+      'You are already logged in on this PC. Log out and continue?',
+    ]);
+  });
+
+  it('asks for what the flags leave out', async () => {
+    const t = setup(['ahmed'], { stdin: STRONG });
+    await t.commands.register({ yes: true, passwordStdin: true });
+    expect(t.script.asked).toEqual(['Choose a username']);
+    expect(t.server.users.has('ahmed')).toBe(true);
   });
 });
 
 describe('logout', () => {
   it('ends the session on the server and forgets it here', async () => {
     const t = setup(registerAnswers());
-    await t.commands.register();
+    await t.commands.register(ASK);
     const out = setup([], { server: t.server, secrets: t.secrets });
     await out.commands.logout();
     expect(t.server.sessions.size).toBe(0);
@@ -338,7 +416,7 @@ describe('logout', () => {
 
   it('still logs out this PC when the server cannot be reached', async () => {
     const t = setup(registerAnswers());
-    await t.commands.register();
+    await t.commands.register(ASK);
     t.server.failLogout(new NetworkError('unreachable', 'Could not reach the server.'));
     const out = setup([], { server: t.server, secrets: t.secrets });
     await out.commands.logout();
@@ -350,7 +428,7 @@ describe('logout', () => {
 
   it('quietly logs out when the server session had already expired', async () => {
     const t = setup(registerAnswers());
-    await t.commands.register();
+    await t.commands.register(ASK);
     t.server.sessions.clear();
     const out = setup([], { server: t.server, secrets: t.secrets });
     await out.commands.logout();
