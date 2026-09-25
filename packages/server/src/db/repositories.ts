@@ -15,11 +15,27 @@ export interface UserRecord {
 
 export type NewUser = Omit<UserRecord, 'id' | 'createdAt'>;
 
+/** Register with a username someone already has. */
+export class UsernameTakenError extends Error {
+  constructor() {
+    super('That username is taken');
+    this.name = 'UsernameTakenError';
+  }
+}
+
+/** A list cursor that was not produced by this server (or was changed). */
+export class InvalidCursorError extends Error {
+  constructor() {
+    super('Invalid cursor');
+    this.name = 'InvalidCursorError';
+  }
+}
+
 /** Accounts (T14). */
 export interface UserRepository {
   findByUsername(username: Username): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
-  /** Rejects when the username is taken. */
+  /** Throws UsernameTakenError when the username is taken. */
   create(user: NewUser): Promise<UserRecord>;
   /** Removes the user; their sessions and bundles go with them. */
   delete(id: string): Promise<void>;
@@ -63,6 +79,8 @@ export interface BundleMeta {
   readonly revision: number;
   readonly sizeBytes: number;
   readonly updatedAt: Date;
+  /** The BlobStore file holding this revision's bytes. Internal: never sent to clients. */
+  readonly blobId: string;
 }
 
 /** Metadata for a new revision. The bytes are written to the BlobStore first. */
@@ -74,14 +92,22 @@ export interface BundleMetaWrite {
   readonly contentHash: Uint8Array;
   readonly formatVersion: number;
   readonly sizeBytes: number;
+  /** The file just uploaded with BlobStore.put. */
+  readonly blobId: string;
 }
 
 export type PutMetaResult =
-  /** Stored as a new revision (`expectedRevision + 1`). */
-  | { readonly outcome: 'saved'; readonly meta: BundleMeta }
-  /** A retry of the upload that is already stored (same content hash); nothing changed. */
+  /**
+   * Stored as a new revision (`expectedRevision + 1`), now pointing at the new file.
+   * `replacedBlobId` is the previous revision's file, to delete; `null` on a first save.
+   */
+  | { readonly outcome: 'saved'; readonly meta: BundleMeta; readonly replacedBlobId: string | null }
+  /**
+   * The same bytes (same content hash) are already the current revision: a retry of a
+   * save that went through, or an identical push. Nothing changed; delete the new file.
+   */
   | { readonly outcome: 'unchanged'; readonly meta: BundleMeta }
-  /** Someone saved a newer revision first. */
+  /** Someone saved a newer revision first. Nothing changed; delete the new file. */
   | { readonly outcome: 'conflict'; readonly currentRevision: number };
 
 export interface BundlePage {
@@ -91,13 +117,16 @@ export interface BundlePage {
 
 /** Saved-setup metadata with the revision check, done atomically (T14, T16). */
 export interface BundleRepository {
-  /** Metadata only, newest first, one page at a time. */
+  /**
+   * Metadata only, newest first, one page at a time. Throws InvalidCursorError for a cursor
+   * this server did not produce.
+   */
   list(
     userId: string,
     page: { readonly cursor?: string; readonly limit: number },
   ): Promise<BundlePage>;
   get(key: BundleKey): Promise<BundleMeta | null>;
   putMeta(write: BundleMetaWrite): Promise<PutMetaResult>;
-  /** Returns `false` when there was nothing to delete. */
-  delete(key: BundleKey): Promise<boolean>;
+  /** Returns what was removed (so its file can be deleted next), or `null` if nothing was. */
+  delete(key: BundleKey): Promise<BundleMeta | null>;
 }
