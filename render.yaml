@@ -11,7 +11,9 @@ services:
     branch: main
     # Deploy only after GitHub CI passes on the commit.
     autoDeployTrigger: checksPass
-    buildCommand: corepack enable pnpm && pnpm install --frozen-lockfile && pnpm build
+    # Runs the pnpm version pinned in package.json through Corepack. `corepack enable` would
+    # try to write a shim into /usr/bin, which is read-only on Render.
+    buildCommand: corepack pnpm install --frozen-lockfile && corepack pnpm build
     startCommand: node packages/server/dist/src/main.js
     healthCheckPath: /health
     # Only changes that affect the server trigger a deploy.
@@ -27,6 +29,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: '24'
+      # Build runs unattended: let Corepack fetch the pinned pnpm without asking.
+      - key: COREPACK_ENABLE_DOWNLOAD_PROMPT
+        value: '0'
       # Neon POOLED connection string (host contains "-pooler"), not the direct one.
       - key: DATABASE_URL
         sync: false
