@@ -37,6 +37,14 @@ export interface Prompter {
   confirm(message: string, initial?: boolean): Promise<boolean>;
 }
 
+/** The user cancelled a question (Ctrl+C or Esc); the command stops without changing anything. */
+export class PromptCancelledError extends Error {
+  constructor() {
+    super('Cancelled');
+    this.name = 'PromptCancelledError';
+  }
+}
+
 /** A progress indicator for slow steps, e.g. key derivation or uploading. */
 export interface Spinner {
   start(message: string): void;
