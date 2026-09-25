@@ -54,27 +54,63 @@ const isScript = (path: string) => SCRIPT_EXTENSIONS.has(extensionOf(path));
 
 const refused = (reason: string): RestoreDestination => ({ kind: 'refused', reason });
 
-/** Home files a bundle may restore: known tool settings, or scripts outside secret folders. */
-function homeDestination(relative: string): RestoreDestination {
+/** Names Windows keeps for devices, in any folder and with any extension (`nul.txt`). */
+const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
+
+/** Control characters and `< > " | ? *`, which Windows file names cannot contain. */
+function hasWindowsForbiddenCharacter(name: string): boolean {
+  for (let index = 0; index < name.length; index += 1) {
+    if (name.charCodeAt(index) < 0x20 || '<>"|?*'.includes(name.charAt(index))) return true;
+  }
+  return false;
+}
+
+/**
+ * Why a bundle path cannot be written safely on Windows (T38), or `null`: a `:` would write
+ * a hidden alternate data stream, device names (`CON`, `NUL`, …) reach a device, and a
+ * trailing dot or space is dropped, so the file lands under another name.
+ */
+export function windowsNameProblem(path: string): string | null {
+  for (const segment of path.split('/')) {
+    if (segment.includes(':')) return 'a name with ":" cannot be written on Windows';
+    if (hasWindowsForbiddenCharacter(segment)) return 'a name Windows does not allow';
+    if (WINDOWS_DEVICE.test(segment)) return 'a name Windows keeps for devices';
+    if (/[. ]$/.test(segment)) return 'a name ending in a dot or space on Windows';
+  }
+  return null;
+}
+
+/**
+ * Home files a bundle may restore: known tool settings, or scripts that the setup's own hooks
+ * or status line run (`hookScripts`, T38). Any other file could be one that runs by itself
+ * (a Startup folder, a shell or PowerShell profile) without ever being shown for review.
+ */
+function homeDestination(relative: string, hookScripts: ReadonlySet<string>): RestoreDestination {
   const lower = relative.toLowerCase();
   if (SENSITIVE_HOME_DIRS.some((dir) => under(lower, dir.toLowerCase()))) {
     return refused('a folder for keys and logins');
   }
   const toolSettings = Object.values(TOOL_CONFIG_FILES).flat();
-  if (toolSettings.includes(relative) || isScript(relative))
+  if (toolSettings.includes(relative) || hookScripts.has(HOME_SCRIPTS_PREFIX + relative))
     return { kind: 'home', path: relative };
-  return refused('not a script or known tool settings file');
+  return refused('no hook or status line in this setup runs it');
 }
 
-/** Where a global bundle entry goes. */
-export function globalDestination(path: string): RestoreDestination {
+/**
+ * Where a global bundle entry goes. `hookScripts`: bundle paths of the scripts the setup's
+ * own hooks and status line run (from its `settings.json`).
+ */
+export function globalDestination(
+  path: string,
+  hookScripts: ReadonlySet<string>,
+): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
   if (path === CLAUDE_JSON_BUNDLE_PATH) return { kind: 'claude-json' };
   if (path === PROGRAMS_BUNDLE_PATH || path === PLUGINS_BUNDLE_PATH || path === ENV_BUNDLE_PATH) {
     return { kind: 'metadata' };
   }
   if (path.startsWith(HOME_SCRIPTS_PREFIX)) {
-    return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length));
+    return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length), hookScripts);
   }
   if (under(path, RESERVED_DIR)) return refused('unknown agentnomad entry');
   if (NEVER_SYNCED.some((entry) => under(path, entry))) return refused('never synced');

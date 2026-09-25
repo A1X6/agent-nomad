@@ -8,6 +8,7 @@ const validBundle: Bundle = {
   scope: { kind: 'global' },
   sourceOs: 'win32',
   agentVersion: '2.1.282',
+  revision: 3,
   files: [
     { path: 'settings.json', encoding: 'utf8', content: '{"theme":"dark"}', executable: false },
     {

@@ -1,5 +1,7 @@
 import type { AgentId, SourceOs } from '@agentnomad/contracts';
 
+import type { Prompter, Reporter } from '../ui/prompter.ts';
+
 /** Where a setup lives on this PC: the agent's global folder, or one project folder. */
 export type ScopeTarget =
   { readonly kind: 'global' } | { readonly kind: 'project'; readonly projectDir: string };
@@ -67,6 +69,8 @@ export interface RestoreReport {
 export interface RestoreContext {
   /** OS the setup was pushed from, to flag hooks that only run there. */
   readonly sourceOs?: SourceOs;
+  /** `--yes`: take the safe answer instead of asking (e.g. skip a file an open app rewrites). */
+  readonly assumeYes?: boolean;
 }
 
 /** Writes a pulled setup to disk, with per-OS permissions and line endings (T27). */
@@ -77,6 +81,30 @@ export interface Restorer {
     onConflict: ConflictResolver,
     context?: RestoreContext,
   ): Promise<RestoreReport>;
+}
+
+/** Agent-specific checks that commands show to the user (T31, T32). */
+export interface AgentInspector {
+  /** Entries the collector does not know, e.g. a folder a newer agent version added. */
+  unknownEntries(target: ScopeTarget): Promise<readonly string[]>;
+  /** Things to point out before push or pull, e.g. organization-managed settings. */
+  notices(command: 'push' | 'pull'): Promise<readonly string[]>;
+}
+
+/** What an agent's follow-up after a restore gets (T34), e.g. to reinstall plugins. */
+export interface AfterRestoreContext {
+  readonly target: ScopeTarget;
+  /** The restored setup's files, including agentnomad's own entries (plugins, programs). */
+  readonly files: readonly CollectedFile[];
+  readonly prompter: Prompter;
+  readonly reporter: Reporter;
+  /** `--yes`: accept without asking where that is safe. */
+  readonly assumeYes: boolean;
+  /**
+   * `--allow-commands`: also accept what installs or runs code (plugins, programs) without
+   * asking. Without it, `--yes` skips those with a note (T38).
+   */
+  readonly allowCommands: boolean;
 }
 
 /**
@@ -90,6 +118,9 @@ export interface AgentAdapter {
   readonly detector: Detector;
   readonly collector: Collector;
   readonly restorer: Restorer;
+  readonly inspector?: AgentInspector;
+  /** Runs after a pull restored a setup, e.g. plugin reinstalls (T34). */
+  readonly afterRestore?: (context: AfterRestoreContext) => Promise<void>;
 }
 
 /** The only place agents are registered (T28). */

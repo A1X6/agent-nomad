@@ -1,10 +1,17 @@
 import type { AgentAdapter, Collector } from '../adapter.ts';
+import { createClaudeCodeAfterRestore } from './after-restore.ts';
 import { claudeConfigDir, createClaudeCodeDetector, nodeDetectorSystem } from './detector.ts';
 import { createClaudeCodeGlobalCollector } from './global-collector.ts';
+import {
+  detectManagedSettings,
+  managedSettingsNotice,
+  nodeManagedSettingsSystem,
+} from './managed-settings.ts';
 import { createProgramLocator } from './programs.ts';
 import { createClaudeCodeProjectCollector } from './project-collector.ts';
 import { createClaudeCodeRestorer, type ClaudeRunningAnswer } from './restorer.ts';
 import { createClaudeRunningCheck, type ClaudeRunningCheck } from './running-claude.ts';
+import { findUnknownEntries } from './unknown-files.ts';
 
 export interface ClaudeCodeAdapterOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -49,5 +56,17 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       isClaudeRunning: options.isClaudeRunning ?? createClaudeRunningCheck(),
       onClaudeRunning: options.onClaudeRunning,
     }),
+    afterRestore: createClaudeCodeAfterRestore({ system }),
+    inspector: {
+      unknownEntries: (target) =>
+        findUnknownEntries(target, { baseDir, platform: options.platform }),
+      async notices(command) {
+        const found = await detectManagedSettings(
+          nodeManagedSettingsSystem(options.env, baseDir, options.platform),
+        );
+        const notice = managedSettingsNotice(found, command);
+        return notice === null ? [] : [notice];
+      },
+    },
   };
 }

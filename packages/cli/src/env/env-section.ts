@@ -11,8 +11,21 @@ export const ENV_BUNDLE_PATH = '.agentnomad/env.json';
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/**
+ * A value that could break the marked block in a shell profile (T38): a NUL byte, or a line
+ * that looks like agentnomad's own block start or end, which the next update would misread.
+ */
+const SafeValue = z
+  .string()
+  .max(32_768)
+  .refine((value) => !value.includes('\0'), 'A value must not contain a NUL byte')
+  .refine(
+    (value) => !/^# (>>>|<<<) agentnomad env (>>>|<<<)$/m.test(value),
+    'A value must not contain an agentnomad block marker line',
+  );
+
 export const EnvSectionSchema = z.strictObject({
-  variables: z.record(z.string().regex(NAME), z.string().max(32_768)),
+  variables: z.record(z.string().regex(NAME), SafeValue),
 });
 export type EnvSection = z.infer<typeof EnvSectionSchema>;
 

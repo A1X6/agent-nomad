@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { NOT_YET_AVAILABLE, type CommandHandlers } from '../src/cli/commands.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
+import { AnswerNeededError } from '../src/ui/no-terminal-prompter.ts';
 import { PromptCancelledError } from '../src/ui/prompter.ts';
 import { CLI_VERSION } from '../src/version.ts';
 
@@ -112,7 +113,7 @@ describe('help and version', () => {
 
 describe('routing and flags', () => {
   it('routes each simple command to its handler', async () => {
-    for (const command of ['register', 'login', 'logout', 'list', 'agents', 'env']) {
+    for (const command of ['logout', 'list', 'agents', 'env']) {
       const { code, calls } = await run([command]);
       expect(code).toBe(EXIT.ok);
       expect(calls).toEqual([{ command }]);
@@ -132,6 +133,14 @@ describe('routing and flags', () => {
     ]);
   });
 
+  it.each([
+    ['--memory', true],
+    ['--no-memory', false],
+  ])('passes %s to push', async (flag, memory) => {
+    const { calls } = await run(['push', '--global', flag]);
+    expect(calls).toEqual([{ command: 'push', options: { global: true, yes: false, memory } }]);
+  });
+
   it('leaves out what was not given, so the command can ask', async () => {
     const { calls } = await run(['push']);
     expect(calls).toEqual([{ command: 'push', options: { global: false, yes: false } }]);
@@ -149,7 +158,40 @@ describe('routing and flags', () => {
 
   it('routes account delete', async () => {
     const { calls } = await run(['account', 'delete', '--yes']);
-    expect(calls).toEqual([{ command: 'accountDelete', options: { yes: true } }]);
+    expect(calls).toEqual([
+      { command: 'accountDelete', options: { yes: true, passwordStdin: false } },
+    ]);
+  });
+
+  it('passes nothing to register and login when no flag is given, so they ask', async () => {
+    for (const command of ['register', 'login']) {
+      const { calls } = await run([command]);
+      expect(calls).toEqual([{ command, options: { yes: false, passwordStdin: false } }]);
+    }
+  });
+
+  it.each([
+    ['register', 'register'],
+    ['login', 'login'],
+    ['account delete', 'accountDelete'],
+  ])('passes --username, --password-stdin and --yes to %s', async (command, handler) => {
+    const { calls } = await run([
+      ...command.split(' '),
+      '--username',
+      'ahmed',
+      '--password-stdin',
+      '--yes',
+    ]);
+    expect(calls).toEqual([
+      { command: handler, options: { yes: true, passwordStdin: true, username: 'ahmed' } },
+    ]);
+  });
+
+  it('has no --password flag, so a password never lands in shell history', async () => {
+    const { code, calls, err } = await run(['login', '--password', 'secret']);
+    expect(code).toBe(EXIT.failed);
+    expect(calls).toEqual([]);
+    expect(err).toContain("unknown option '--password'");
   });
 
   it.each([
@@ -159,6 +201,7 @@ describe('routing and flags', () => {
     ['a project name with a line break', ['pull', '--project', 'a\nb'], ''],
     ['--merge with --overwrite', ['pull', '--merge', '--overwrite'], 'cannot be used with'],
     ['an unknown flag', ['push', '--force'], "unknown option '--force'"],
+    ['an invalid username', ['login', '--username', 'Ahmed Ali'], ''],
   ])('refuses %s without running the command', async (_, args, message) => {
     const { code, calls, err } = await run(args);
     expect(code).toBe(EXIT.failed);
@@ -183,6 +226,37 @@ describe('outcomes', () => {
     expect(code).toBe(EXIT.cancelled);
     expect(messages).toEqual(['warn: Cancelled.']);
   });
+
+  it.each([
+    [
+      ['push'],
+      'Use --agent, --global or --project <name>, --memory or --no-memory, and --yes. See `agentnomad push --help`.',
+    ],
+    [
+      ['pull', '--global'],
+      'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, and --yes. See `agentnomad pull --help`.',
+    ],
+    [
+      ['account', 'delete'],
+      'Use --username, --password-stdin and --yes. See `agentnomad account delete --help`.',
+    ],
+    [['list'], 'Answer it with flags. See `agentnomad list --help`.'],
+  ])(
+    'a question with no terminal to ask in fails with exit code 1 and the flags to add (%j)',
+    async (args, hint) => {
+      const fail = () => Promise.reject(new AnswerNeededError('Which agents?'));
+      const { code, messages } = await run(args, {
+        push: fail,
+        pull: fail,
+        accountDelete: fail,
+        list: fail,
+      });
+      expect(code).toBe(EXIT.failed);
+      expect(messages).toEqual([
+        `error: "Which agents?" needs an answer, but there is no terminal to ask in. ${hint}`,
+      ]);
+    },
+  );
 
   it('says which task brings a command that is not built yet', async () => {
     const messages: string[] = [];

@@ -9,8 +9,9 @@ import {
 
 import type { ApiClient } from '../api/api-client.ts';
 import { ApiError } from '../api/api-errors.ts';
-import type { CommandHandlers } from '../cli/commands.ts';
+import type { CommandHandlers, CredentialOptions } from '../cli/commands.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
+import type { LocalState } from '../state/local-state.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { clearLocalSession, hasLocalSession, saveLocalSession } from './local-session.ts';
 import type { PasswordChecker } from './password-policy.ts';
@@ -35,7 +36,15 @@ export interface AuthCommandDeps {
   readonly passwordChecker: () => Promise<PasswordChecker>;
   /** Shown in the server's session list, e.g. the PC's host name. */
   readonly deviceName: string;
+  /** This PC's remembered revisions and project names; cleared by account delete. */
+  readonly localState?: () => LocalState;
+  /** `--password-stdin` (T36): the first line of standard input. */
+  readonly readPasswordStdin?: () => Promise<string>;
 }
+
+export const ACCOUNT_DELETE_WARNING =
+  'This deletes your agentnomad account and every setup saved in it, on every PC. ' +
+  'Files on your PCs are not touched. It cannot be undone.';
 
 const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
 const fromBase64 = (text: string) => new Uint8Array(Buffer.from(text, 'base64'));
@@ -47,11 +56,44 @@ function validateUsername(value: string): string | undefined {
 
 const notEmpty = (value: string) => (value.length > 0 ? undefined : 'Enter your password.');
 
-/** register, login and logout (T23). */
+/** register, login and logout (T23), account delete (T35); scriptable with flags (T36). */
 export function createAuthCommands(
   deps: AuthCommandDeps,
-): Pick<CommandHandlers, 'register' | 'login' | 'logout'> {
+): Pick<CommandHandlers, 'register' | 'login' | 'logout' | 'accountDelete'> {
   const { prompter, reporter } = deps;
+
+  /** `--username`, checked like a typed one; asked only when the flag is not given. */
+  async function usernameFrom(options: CredentialOptions, question: string): Promise<string> {
+    if (options.username === undefined) {
+      return prompter.text(question, {
+        ...(question === 'Choose a username' && {
+          placeholder: 'lowercase letters, digits, . _ -',
+        }),
+        validate: validateUsername,
+      });
+    }
+    const problem = validateUsername(options.username);
+    if (problem !== undefined) throw new Error(problem);
+    return options.username;
+  }
+
+  /**
+   * `--password-stdin`, held to the same rules as a typed one; a rejected password stops
+   * the command (there is nobody to ask again). Asked only when the flag is not given.
+   */
+  async function passwordFrom(
+    options: CredentialOptions,
+    question: string,
+    validate: (value: string) => string | undefined,
+  ): Promise<string> {
+    if (!options.passwordStdin) return prompter.password(question, { validate });
+    if (!deps.readPasswordStdin) throw new Error('--password-stdin is not available here.');
+    const password = await deps.readPasswordStdin();
+    if (password === '') throw new Error('--password-stdin: no password on standard input.');
+    const problem = validate(password);
+    if (problem !== undefined) throw new Error(problem);
+    return password;
+  }
 
   /** Slow on purpose (Argon2id, 64 MiB); a spinner shows it is working. */
   async function deriveKeys(
@@ -73,12 +115,14 @@ export function createAuthCommands(
    * One PC holds one login. When one exists, offers to log out first, so two accounts'
    * keys never mix. Returns false when the user keeps the current login.
    */
-  async function readyForNewLogin(secrets: SecretStore): Promise<boolean> {
+  async function readyForNewLogin(secrets: SecretStore, yes: boolean): Promise<boolean> {
     if (!(await hasLocalSession(secrets))) return true;
-    const replace = await prompter.confirm(
-      'You are already logged in on this PC. Log out and continue?',
-      false,
-    );
+    const replace =
+      yes ||
+      (await prompter.confirm(
+        'You are already logged in on this PC. Log out and continue?',
+        false,
+      ));
     if (!replace) {
       reporter.info('Nothing changed.');
       return false;
@@ -110,28 +154,28 @@ export function createAuthCommands(
   }
 
   return {
-    async register() {
+    async register(options) {
       const secrets = await deps.secrets();
-      if (!(await readyForNewLogin(secrets))) return;
+      if (!(await readyForNewLogin(secrets, options.yes))) return;
 
-      const username = await prompter.text('Choose a username', {
-        placeholder: 'lowercase letters, digits, . _ -',
-        validate: validateUsername,
-      });
+      const username = await usernameFrom(options, 'Choose a username');
 
       reporter.warn(NO_RECOVERY_WARNING);
-      if (!(await prompter.confirm('I understand. Continue?', false))) {
+      if (!options.yes && !(await prompter.confirm('I understand. Continue?', false))) {
         reporter.info('No account was created.');
         return;
       }
 
       const checkPassword = await deps.passwordChecker();
-      const password = await prompter.password('Choose a password (12+ characters)', {
-        validate: (value) => checkPassword(value, [username]),
-      });
-      await prompter.password('Type the password again', {
-        validate: (value) => (value === password ? undefined : 'The passwords do not match.'),
-      });
+      const password = await passwordFrom(options, 'Choose a password (12+ characters)', (value) =>
+        checkPassword(value, [username]),
+      );
+      // Typed twice to catch a typo; a piped password was not typed here.
+      if (!options.passwordStdin) {
+        await prompter.password('Type the password again', {
+          validate: (value) => (value === password ? undefined : 'The passwords do not match.'),
+        });
+      }
 
       const crypto = await deps.crypto();
       const salt = crypto.randomBytes(KDF_SALT_BYTES);
@@ -157,12 +201,12 @@ export function createAuthCommands(
       finish(secrets, `Account "${username}" created. You are logged in on this PC.`);
     },
 
-    async login() {
+    async login(options) {
       const secrets = await deps.secrets();
-      if (!(await readyForNewLogin(secrets))) return;
+      if (!(await readyForNewLogin(secrets, options.yes))) return;
 
-      const username = await prompter.text('Username', { validate: validateUsername });
-      const password = await prompter.password('Password', { validate: notEmpty });
+      const username = await usernameFrom(options, 'Username');
+      const password = await passwordFrom(options, 'Password', notEmpty);
 
       const api = deps.api();
       // First, so a sleeping server's "waking up" notice never overlaps the key spinner.
@@ -211,6 +255,60 @@ export function createAuthCommands(
       }
       await logOut(secrets);
       reporter.success('Logged out. Your login was removed from this PC.');
+    },
+
+    /**
+     * Needs the username typed out, then the password, which the server needs as proof (a
+     * stolen session alone cannot delete the account). --yes never skips them; from a
+     * script they come from --username and --password-stdin, and then --yes must be given.
+     */
+    async accountDelete(options) {
+      const secrets = await deps.secrets();
+      if (!(await hasLocalSession(secrets))) {
+        reporter.info('Log in first (`agentnomad login`) to delete your account.');
+        return;
+      }
+      reporter.warn(ACCOUNT_DELETE_WARNING);
+      // Typing the username is the confirmation; given by flags, --yes confirms instead.
+      if ((options.username !== undefined || options.passwordStdin) && !options.yes) {
+        throw new Error('Nothing was deleted. Add --yes to confirm deleting the account.');
+      }
+      const username = await usernameFrom(options, 'Type your username to confirm');
+      const password = await passwordFrom(options, 'Password', notEmpty);
+
+      const api = deps.api();
+      const prelogin = await api.auth.prelogin({ username });
+      const crypto = await deps.crypto();
+      const keys = await deriveKeys(
+        crypto,
+        password,
+        fromBase64(prelogin.kdfSalt),
+        prelogin.kdfParams,
+      );
+      try {
+        await api.auth.deleteAccount({ authKey: toBase64(keys.authKey) });
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'unauthorized') {
+          // "Wrong password" keeps the login; any other 401 means the session itself ended.
+          if (error.message.startsWith('Wrong password')) {
+            throw new Error('Wrong username or password. Nothing was deleted.', { cause: error });
+          }
+          await clearLocalSession(secrets);
+          throw new Error('Your session has expired. Log in again, then delete the account.', {
+            cause: error,
+          });
+        }
+        // OutcomeUnknownError (a lost answer) passes through with its own advice (T21).
+        throw error;
+      } finally {
+        keys.passwordKey.fill(0);
+        keys.authKey.fill(0);
+      }
+      await clearLocalSession(secrets);
+      await deps.localState?.().forgetServer();
+      reporter.success(
+        `Account "${username}" and all its saved setups were deleted. Your login was removed from this PC.`,
+      );
     },
   };
 }

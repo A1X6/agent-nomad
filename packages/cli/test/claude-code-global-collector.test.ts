@@ -395,6 +395,8 @@ describe('global collector: programs the status line and hooks need', () => {
     ['bash ~/x.sh', null],
     ['~/bin/x.sh', null],
     ['node script.js', null],
+    ['echo done', null],
+    ['printf hi', null],
   ])('reads the program of %j', (command, expected) => {
     expect(programOf(command)).toEqual(expected);
   });

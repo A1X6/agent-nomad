@@ -1,4 +1,10 @@
-import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core';
+import { join } from 'node:path';
+
+import {
+  createGzipBundleCodec,
+  createSodiumCryptoService,
+  type CryptoService,
+} from '@agentnomad/core';
 
 import type { AgentRegistry } from './agents/adapter.ts';
 import { createAgentsCommand } from './agents/agents-command.ts';
@@ -14,11 +20,21 @@ import type { ApiClient } from './api/api-client.ts';
 import { resolveApiUrl } from './api/api-url.ts';
 import { createHttpApiClient } from './api/http-api-client.ts';
 import { createAuthCommands } from './auth/auth-commands.ts';
+import { createSetupCommands } from './commands/setup-commands.ts';
 import { loadZxcvbnChecker } from './auth/password-policy.ts';
 import { NOT_YET_AVAILABLE, type CommandHandlers } from './cli/commands.ts';
+import { configDir } from './config/config-dir.ts';
 import { createEnvCommand } from './env/env-command.ts';
+import {
+  createShellProfileWriter,
+  createWindowsEnvWriter,
+  shellProfileFor,
+} from './env/shell-profile.ts';
+import { createPullCommand } from './pull/pull-command.ts';
+import { createPushCommand } from './push/push-command.ts';
 import { createSecretStore } from './secrets/create-secret-store.ts';
 import type { SecretStore } from './secrets/secret-store.ts';
+import { createLocalState, STATE_FILE, type LocalState } from './state/local-state.ts';
 import type { Prompter, Reporter, Spinner } from './ui/prompter.ts';
 
 export interface AppEnvironment {
@@ -32,6 +48,8 @@ export interface AppEnvironment {
   readonly prompter: Prompter;
   readonly reporter: Reporter;
   readonly fetch?: typeof fetch;
+  /** `--password-stdin`: the first line of standard input. */
+  readonly readPasswordStdin?: () => Promise<string>;
 }
 
 /** Runs `create` once, on first use. */
@@ -102,8 +120,60 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
     ]),
   );
 
+  const localState = lazy<LocalState>(() =>
+    createLocalState({
+      path: join(configDir(app), STATE_FILE),
+      server: apiUrl().host,
+      platform: app.platform,
+    }),
+  );
+
+  const envWriter = () =>
+    app.platform === 'win32'
+      ? createWindowsEnvWriter()
+      : createShellProfileWriter(shellProfileFor(app.env['SHELL'], app.homedir, app.platform));
+
   return {
     ...NOT_YET_AVAILABLE,
+    ...createSetupCommands({
+      prompter: app.prompter,
+      reporter: app.reporter,
+      registry,
+      secrets,
+      api,
+      crypto,
+      localState,
+      cwd: app.cwd,
+    }),
+    ...createPullCommand({
+      prompter: app.prompter,
+      reporter: app.reporter,
+      registry,
+      secrets,
+      api,
+      crypto,
+      codec: createGzipBundleCodec(),
+      localState,
+      envWriter,
+      env: app.env,
+      cwd: app.cwd,
+      homedir: app.homedir,
+      platform: app.platform,
+    }),
+    ...createPushCommand({
+      prompter: app.prompter,
+      reporter: app.reporter,
+      registry,
+      secrets,
+      api,
+      crypto,
+      codec: createGzipBundleCodec(),
+      localState,
+      env: app.env,
+      cwd: app.cwd,
+      homedir: app.homedir,
+      platform: app.platform,
+    }),
     ...createAgentsCommand({
       registry,
       reporter: app.reporter,
@@ -125,6 +195,8 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       crypto,
       passwordChecker: loadZxcvbnChecker,
       deviceName: deviceNameOf(app.hostname),
+      localState,
+      ...(app.readPasswordStdin && { readPasswordStdin: app.readPasswordStdin }),
     }),
   };
 }

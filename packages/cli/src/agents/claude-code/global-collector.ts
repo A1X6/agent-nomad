@@ -5,7 +5,6 @@ import * as z from 'zod';
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import {
   commandsInSettings,
-  commandWords,
   createFileGatherer,
   jsonFile,
   programOf,
@@ -22,10 +21,9 @@ import {
   NEVER_SYNCED,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
-  SCRIPT_EXTENSIONS,
-  SENSITIVE_HOME_DIRS,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
+import { hookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import type { ProgramInfo, ProgramLocator } from './programs.ts';
 
@@ -58,43 +56,12 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
   const { path } = files;
   const { baseDir, homedir } = options;
 
-  /** Expands `~`, `$HOME`, `%USERPROFILE%` and `$CLAUDE_CONFIG_DIR` at the start of a word. */
-  function expand(word: string): string | null {
-    const home = /^(~|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?=[\\/]|$)/i;
-    const config = /^(\$CLAUDE_CONFIG_DIR|\$\{CLAUDE_CONFIG_DIR\}|%CLAUDE_CONFIG_DIR%)(?=[\\/]|$)/i;
-    const expanded = word.replace(home, () => homedir).replace(config, () => baseDir);
-    return path.isAbsolute(expanded) ? path.normalize(expanded) : null;
-  }
-
-  const isSensitive = (relativeToHome: string) =>
-    SENSITIVE_HOME_DIRS.some((dir) => {
-      const [relative, sensitive] = [relativeToHome.toLowerCase(), dir.toLowerCase()];
-      return relative === sensitive || relative.startsWith(`${sensitive}/`);
-    });
-
   /** Script files that hooks and the status line run, if they are in the home folder. */
-  async function hookScripts(settingsJson: string): Promise<CollectedFile[]> {
+  async function hookScriptFiles(settingsJson: string): Promise<CollectedFile[]> {
     const found: CollectedFile[] = [];
-    for (const command of commandsInSettings(settingsJson)) {
-      for (const word of commandWords(command)) {
-        const nativePath = expand(word);
-        if (nativePath === null) continue;
-        if (!SCRIPT_EXTENSIONS.has(path.extname(nativePath).toLowerCase())) continue;
-
-        const inBase = files.relativeInside(baseDir, nativePath);
-        const inHome = files.relativeInside(homedir, nativePath);
-        let bundlePath: string;
-        if (inBase !== null) {
-          if (isNeverSynced(inBase)) continue;
-          bundlePath = inBase;
-        } else if (inHome !== null && !isSensitive(inHome)) {
-          bundlePath = HOME_SCRIPTS_PREFIX + inHome;
-        } else {
-          continue;
-        }
-        const file = await files.readIfFile(nativePath, bundlePath);
-        if (file) found.push(file);
-      }
+    for (const script of hookScripts(settingsJson, options)) {
+      const file = await files.readIfFile(script.nativePath, script.bundlePath);
+      if (file) found.push(file);
     }
     return found;
   }
@@ -184,7 +151,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       const settings = found.find((file) => file.path === 'settings.json');
       if (settings) {
         const text = new TextDecoder().decode(settings.content);
-        found.push(...(await hookScripts(text)), ...(await programs(text)));
+        found.push(...(await hookScriptFiles(text)), ...(await programs(text)));
       }
 
       const selected = await claudeJson();

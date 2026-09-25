@@ -1,0 +1,18 @@
+{
+  "name": "@agentnomad/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end tests: the built agentnomad CLI against a local API, across operating systems (T37)",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "e2e": "vitest run"
+  },
+  "dependencies": {
+    "@agentnomad/cli": "workspace:*",
+    "@agentnomad/server": "workspace:*",
+    "@electric-sql/pglite": "0.5.8",
+    "@hono/node-server": "2.1.1",
+    "drizzle-orm": "0.45.3"
+  }
+}
