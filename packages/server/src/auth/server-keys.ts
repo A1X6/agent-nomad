@@ -9,6 +9,7 @@ import { fromHex, toHex, utf8 } from '../encoding.ts';
  */
 const AUTH_HASH_LABEL = 'agentnomad/server/auth-key-hash/v1';
 const FAKE_SALT_LABEL = 'agentnomad/server/prelogin-salt/v1';
+const PSEUDONYM_LABEL = 'agentnomad/server/rate-limit-key/v1';
 /** Prefix of stored auth hashes, so a later scheme can be told apart. */
 const AUTH_HASH_PREFIX = 'hmac-sha256-v1$';
 
@@ -19,6 +20,11 @@ export interface ServerKeys {
   verifyAuthKey(authKey: Uint8Array, storedHash: string): Promise<boolean>;
   /** Deterministic salt for a username with no account, so prelogin reveals nothing. */
   fakeSalt(username: string): Promise<Uint8Array>;
+  /**
+   * Stable keyed hash of an IP or username, so rate-limit rows never hold the readable value
+   * (a plain hash of an IPv4 address could be reversed by trying all of them).
+   */
+  pseudonym(value: string): Promise<string>;
 }
 
 const HMAC = { name: 'HMAC', hash: 'SHA-256' } as const;
@@ -46,6 +52,7 @@ export async function createServerKeys(serverSecret: Uint8Array): Promise<Server
     'verify',
   ]);
   const fakeSaltKey = await importHmacKey(await hmac(master, utf8(FAKE_SALT_LABEL)), ['sign']);
+  const pseudonymKey = await importHmacKey(await hmac(master, utf8(PSEUDONYM_LABEL)), ['sign']);
 
   return {
     async hashAuthKey(authKey) {
@@ -63,6 +70,10 @@ export async function createServerKeys(serverSecret: Uint8Array): Promise<Server
 
     async fakeSalt(username) {
       return (await hmac(fakeSaltKey, utf8(username))).slice(0, KDF_SALT_BYTES);
+    },
+
+    async pseudonym(value) {
+      return toHex(await hmac(pseudonymKey, utf8(value)));
     },
   };
 }

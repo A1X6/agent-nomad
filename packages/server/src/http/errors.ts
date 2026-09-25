@@ -3,6 +3,9 @@ import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
+import { describeError, type Logger } from '../logging/logger.ts';
+import { RateLimitedError } from '../rate-limit/rate-limiter.ts';
+
 /** An error the API reports to the client as `{ error: { code, message } }`. */
 export class ApiError extends Error {
   readonly status: ContentfulStatusCode;
@@ -43,14 +46,28 @@ function codeForStatus(status: number): ErrorCode {
   return 'internal_error';
 }
 
-/** Every uncaught error becomes the standard error body; details of 500s never leak. */
-export function handleError(error: Error, c: Context): Response {
-  if (error instanceof ApiError) return errorJson(c, error);
-  if (error instanceof HTTPException && error.status < 500) {
-    return errorJson(c, new ApiError(error.status, codeForStatus(error.status), error.message));
-  }
-  console.error(error);
-  return errorJson(c, new ApiError(500, 'internal_error', 'Something went wrong on the server'));
+/**
+ * Every uncaught error becomes the standard error body. Details of 500s never reach the
+ * client; they are logged with the request id the client sees in `X-Request-Id`.
+ */
+export function createErrorHandler(logger: Logger) {
+  return (error: Error, c: Context): Response => {
+    if (error instanceof ApiError) return errorJson(c, error);
+    if (error instanceof RateLimitedError) {
+      c.header('Retry-After', String(error.retryAfterSeconds));
+      return errorJson(c, new ApiError(429, 'rate_limited', error.message));
+    }
+    if (error instanceof HTTPException && error.status < 500) {
+      return errorJson(c, new ApiError(error.status, codeForStatus(error.status), error.message));
+    }
+    logger.error('unhandled_error', {
+      requestId: c.get('requestId') as string | undefined,
+      method: c.req.method,
+      path: c.req.path,
+      ...describeError(error),
+    });
+    return errorJson(c, new ApiError(500, 'internal_error', 'Something went wrong on the server'));
+  };
 }
 
 export function handleNotFound(c: Context): Response {

@@ -1,6 +1,7 @@
 import { DEFAULT_KDF_PARAMS, type KdfParams, type Username } from '@agentnomad/contracts';
 
 import type { NewUser, SessionRepository, UserRepository } from '../db/repositories.ts';
+import { RATE_LIMITS, RateLimitedError, type RateLimiter } from '../rate-limit/rate-limiter.ts';
 import type { ServerKeys } from './server-keys.ts';
 import { hashSessionToken, newSessionToken } from './session-tokens.ts';
 
@@ -68,10 +69,29 @@ export interface AuthServiceDeps {
   readonly keys: ServerKeys;
   readonly now: () => Date;
   readonly randomBytes: (length: number) => Uint8Array;
+  /** Counts failed logins and account deletes per account (T18). */
+  readonly limiter: RateLimiter;
 }
 
+const FAILED = RATE_LIMITS.failedLoginsPerAccount;
+
 export function createAuthService(deps: AuthServiceDeps): AuthService {
-  const { users, sessions, keys, now, randomBytes } = deps;
+  const { users, sessions, keys, now, randomBytes, limiter } = deps;
+
+  /**
+   * Runs a password check with the per-account failure limit: refused while the account has
+   * too many recent failures, a failure counts, a success clears the count. Unknown usernames
+   * are counted the same way, so the limit reveals nothing either.
+   */
+  async function guardedCheck(username: string, check: () => Promise<boolean>): Promise<void> {
+    const status = await limiter.check(FAILED, username);
+    if (!status.allowed) throw new RateLimitedError(status.retryAfterSeconds);
+    if (!(await check())) {
+      await limiter.hit(FAILED, username);
+      throw new InvalidCredentialsError();
+    }
+    await limiter.reset(FAILED, username);
+  }
 
   async function issueSession(userId: string, deviceName: string): Promise<IssuedSession> {
     const token = newSessionToken(randomBytes);
@@ -109,8 +129,11 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       const user = await users.findByUsername(username);
       // Do the same hashing work for an unknown user, so response time does not reveal
       // whether the account exists.
-      const matches = await keys.verifyAuthKey(authKey, user?.authHash ?? '');
-      if (!user || !matches) throw new InvalidCredentialsError();
+      await guardedCheck(
+        username,
+        async () => (await keys.verifyAuthKey(authKey, user?.authHash ?? '')) && user !== null,
+      );
+      if (!user) throw new InvalidCredentialsError();
       const session = await issueSession(user.id, deviceName);
       return { ...session, wrappedDataKey: user.wrappedDataKey };
     },
@@ -121,9 +144,8 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
 
     async deleteAccount(userId, authKey) {
       const user = await users.findById(userId);
-      if (!user || !(await keys.verifyAuthKey(authKey, user.authHash))) {
-        throw new InvalidCredentialsError();
-      }
+      if (!user) throw new InvalidCredentialsError();
+      await guardedCheck(user.username, () => keys.verifyAuthKey(authKey, user.authHash));
       // ON DELETE CASCADE removes sessions, setups and files in the same statement.
       await users.delete(user.id);
     },
