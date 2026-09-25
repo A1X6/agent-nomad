@@ -3,6 +3,7 @@ import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core'
 import type { AgentRegistry } from './agents/adapter.ts';
 import { createAgentsCommand } from './agents/agents-command.ts';
 import { createClaudeCodeAdapter } from './agents/claude-code/claude-code-adapter.ts';
+import { claudeConfigDir, nodeDetectorSystem } from './agents/claude-code/detector.ts';
 import {
   detectManagedSettings,
   managedSettingsNotice,
@@ -107,7 +108,10 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       registry,
       reporter: app.reporter,
       notices: async () => {
-        const found = await detectManagedSettings(nodeManagedSettingsSystem(app.env, app.platform));
+        const system = nodeDetectorSystem(app.env, app.homedir, app.platform);
+        const found = await detectManagedSettings(
+          nodeManagedSettingsSystem(app.env, claudeConfigDir(system), app.platform),
+        );
         const notice = managedSettingsNotice(found, 'agents');
         return notice === null ? [] : [notice];
       },

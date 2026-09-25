@@ -5,6 +5,7 @@ import {
   createAgentsCommand,
   detectManagedSettings,
   explainPluginFailure,
+  globalDestination,
   managedSettingsDir,
   managedSettingsNotice,
   syncPlugins,
@@ -23,6 +24,7 @@ function fakeSystem(pc: FakePc): ManagedSettingsSystem {
   return {
     platform: pc.platform,
     env: pc.env ?? {},
+    baseDir: pc.platform === 'win32' ? 'C:\\Users\\a\\.claude' : '/home/a/.claude',
     readText: (path) => Promise.resolve(pc.files?.[path] ?? null),
     exists: (path) => Promise.resolve(path in (pc.files ?? {})),
     listDir: (path) => Promise.resolve(pc.dirs?.[path] ?? []),
@@ -107,6 +109,40 @@ describe('finding managed settings', () => {
       restrictsMcpServers: false,
     });
     expect(managedSettingsNotice(found, 'push')).toBeNull();
+  });
+});
+
+describe('server-managed settings (claude.ai admin console)', () => {
+  it('are found through the copy Claude Code caches', async () => {
+    const found = await detectManagedSettings(
+      fakeSystem({
+        platform: 'linux',
+        files: {
+          '/home/a/.claude/remote-settings.json': JSON.stringify({
+            blockedMarketplaces: [{ source: 'github', repo: 'x/y' }],
+          }),
+        },
+      }),
+    );
+    expect(found.sources).toEqual([
+      { kind: 'remote', where: '/home/a/.claude/remote-settings.json' },
+    ]);
+    expect(found.restrictsPlugins).toBe(true);
+    expect(managedSettingsNotice(found, 'pull')).toContain('(the claude.ai admin console)');
+  });
+
+  it('an empty cache means none are set', async () => {
+    const found = await detectManagedSettings(
+      fakeSystem({ platform: 'linux', files: { '/home/a/.claude/remote-settings.json': '{}' } }),
+    );
+    expect(found.sources).toEqual([]);
+  });
+
+  it('the cache is never synced', () => {
+    expect(globalDestination('remote-settings.json')).toEqual({
+      kind: 'refused',
+      reason: 'never synced',
+    });
   });
 });
 

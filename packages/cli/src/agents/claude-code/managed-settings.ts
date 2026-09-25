@@ -7,11 +7,12 @@ import * as z from 'zod';
 /**
  * Settings an organization enforces on this PC (T31). They belong to the PC, not the user:
  * never synced, only detected so push and pull can say they exist and what they may block.
- * Server-managed settings (from the claude.ai console) are fetched by Claude Code and are
- * not visible on disk, so they cannot be detected here.
+ * Server-managed settings (from the claude.ai console) are seen through the copy Claude Code
+ * caches in `<base>/remote-settings.json`; before Claude Code's first start after the admin
+ * set them, only `claude doctor` can tell.
  */
 
-export type ManagedSourceKind = 'file' | 'drop-ins' | 'mcp' | 'plist' | 'hklm' | 'hkcu';
+export type ManagedSourceKind = 'remote' | 'file' | 'drop-ins' | 'mcp' | 'plist' | 'hklm' | 'hkcu';
 
 export interface ManagedSource {
   readonly kind: ManagedSourceKind;
@@ -33,12 +34,17 @@ export interface ManagedSettings {
 export interface ManagedSettingsSystem {
   readonly platform: NodeJS.Platform;
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** Claude Code's base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`), for the remote cache. */
+  readonly baseDir: string;
   readText(path: string): Promise<string | null>;
   exists(path: string): Promise<boolean>;
   listDir(path: string): Promise<readonly string[]>;
   /** The `Settings` value under `<hive>\SOFTWARE\Policies\ClaudeCode`, or `null`. */
   readRegistry(hive: 'HKLM' | 'HKCU'): Promise<string | null>;
 }
+
+/** Where Claude Code caches server-managed settings, inside its base folder. */
+export const REMOTE_SETTINGS_FILE = 'remote-settings.json';
 
 const PLUGIN_KEYS = ['strictKnownMarketplaces', 'blockedMarketplaces'];
 const MCP_KEYS = [
@@ -84,6 +90,11 @@ export async function detectManagedSettings(
     sources.push({ kind, where });
     for (const key of keysOf(text)) keys.add(key);
   };
+
+  // Server-managed settings from the claude.ai console, as Claude Code last cached them.
+  const remoteFile = path.join(system.baseDir, REMOTE_SETTINGS_FILE);
+  const remote = await system.readText(remoteFile);
+  if (remote !== null && keysOf(remote).length > 0) add('remote', remoteFile, remote);
 
   const settingsFile = path.join(dir, 'managed-settings.json');
   const settings = await system.readText(settingsFile);
@@ -135,7 +146,9 @@ export function managedSettingsNotice(
   command: 'push' | 'pull' | 'agents',
 ): string | null {
   if (found.sources.length === 0) return null;
-  const where = found.sources.map((source) => source.where).join(', ');
+  const where = found.sources
+    .map((source) => (source.kind === 'remote' ? 'the claude.ai admin console' : source.where))
+    .join(', ');
   const limits = [
     ...(found.restrictsPlugins ? ['which plugins can be installed'] : []),
     ...(found.restrictsMcpServers ? ['which MCP servers can run'] : []),
@@ -170,11 +183,13 @@ export function explainPluginFailure(reason: string, found: ManagedSettings | nu
 /** The real PC. */
 export function nodeManagedSettingsSystem(
   env: Readonly<Record<string, string | undefined>>,
+  baseDir: string,
   platform: NodeJS.Platform = process.platform,
 ): ManagedSettingsSystem {
   return {
     platform,
     env,
+    baseDir,
     async readText(file) {
       try {
         return await readFile(file, 'utf8');
