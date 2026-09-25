@@ -57,8 +57,9 @@ export interface BundlesApi {
 
 /**
  * The only way the CLI talks to the server (T21): strict timeouts, retries with backoff on
- * network errors only (never on 4xx), and every response checked against the shared
- * contracts. Error responses reject with the API's error code.
+ * network errors, timeouts and 502/503/504 only (never 4xx or 500; never register or
+ * account delete), and every response checked against the shared contracts. Error
+ * responses reject with the API's error code. Implemented by createHttpApiClient.
  */
 export interface ApiClient {
   readonly auth: AuthApi;
