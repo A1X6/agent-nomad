@@ -20,11 +20,13 @@ import {
   GLOBAL_MEMORY_FOLDERS,
   HOME_SCRIPTS_PREFIX,
   NEVER_SYNCED,
+  PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
   SCRIPT_EXTENSIONS,
   SENSITIVE_HOME_DIRS,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
+import { readPluginManifest } from './plugins.ts';
 import type { ProgramInfo, ProgramLocator } from './programs.ts';
 
 export interface GlobalCollectorOptions {
@@ -187,6 +189,13 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
 
       const selected = await claudeJson();
       if (selected) found.push(selected);
+
+      const plugins = await readPluginManifest({
+        baseDir,
+        platform: options.platform,
+        scope: { kind: 'global' },
+      });
+      if (plugins) found.push(jsonFile(PLUGINS_BUNDLE_PATH, plugins));
 
       // A hook may name a file already in a synced folder.
       return uniqueByPath(found);

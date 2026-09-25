@@ -17,6 +17,7 @@ import {
   GLOBAL_MEMORY_FOLDERS,
   HOME_SCRIPTS_PREFIX,
   NEVER_SYNCED,
+  PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
   RESERVED_DIR,
   SCRIPT_EXTENSIONS,
@@ -68,7 +69,7 @@ function homeDestination(relative: string): RestoreDestination {
 export function globalDestination(path: string): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
   if (path === CLAUDE_JSON_BUNDLE_PATH) return { kind: 'claude-json' };
-  if (path === PROGRAMS_BUNDLE_PATH) return { kind: 'metadata' };
+  if (path === PROGRAMS_BUNDLE_PATH || path === PLUGINS_BUNDLE_PATH) return { kind: 'metadata' };
   if (path.startsWith(HOME_SCRIPTS_PREFIX)) {
     return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length));
   }
@@ -113,6 +114,7 @@ export function projectDestination(
   hookScripts: ReadonlySet<string> = new Set(),
 ): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
+  if (path === PLUGINS_BUNDLE_PATH) return { kind: 'metadata' };
   if (path.startsWith(`${AUTO_MEMORY_BUNDLE_PREFIX}/`)) {
     return { kind: 'auto-memory', path: path.slice(AUTO_MEMORY_BUNDLE_PREFIX.length + 1) };
   }

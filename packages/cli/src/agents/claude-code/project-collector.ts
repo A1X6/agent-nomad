@@ -4,9 +4,11 @@ import {
   commandsInSettings,
   commandWords,
   createFileGatherer,
+  jsonFile,
   uniqueByPath,
 } from './file-gathering.ts';
-import { SCRIPT_EXTENSIONS } from './global-paths.ts';
+import { PLUGINS_BUNDLE_PATH, SCRIPT_EXTENSIONS } from './global-paths.ts';
+import { readPluginManifest } from './plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
   PROJECT_CLAUDE_FILES,
@@ -98,6 +100,13 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
           found.push(...(await hookScripts(projectDir, new TextDecoder().decode(file.content))));
       }
       if (collectOptions.includeMemory) found.push(...(await autoMemory(projectDir)));
+
+      const plugins = await readPluginManifest({
+        baseDir: options.baseDir,
+        platform: options.platform,
+        scope: { kind: 'project', projectDir },
+      });
+      if (plugins) found.push(jsonFile(PLUGINS_BUNDLE_PATH, plugins));
 
       return uniqueByPath(found);
     },
