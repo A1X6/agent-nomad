@@ -11,7 +11,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
 import { InvalidCredentialsError, type AuthService } from '../../auth/auth-service.ts';
-import { fromBase64, toBase64 } from '../../auth/encoding.ts';
+import { fromBase64, toBase64 } from '../../encoding.ts';
 import { UsernameTakenError } from '../../db/repositories.ts';
 import { ApiError } from '../errors.ts';
 import { requireSession, type SessionVariables } from '../session.ts';
