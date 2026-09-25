@@ -15,6 +15,7 @@ const bundle: Bundle = {
   agent: 'claude-code',
   scope: { kind: 'project', name: 'my-saas-app' },
   sourceOs: 'darwin',
+  agentVersion: '2.1.282',
   files: [
     {
       path: 'settings.json',

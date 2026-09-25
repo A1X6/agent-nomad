@@ -7,6 +7,7 @@ const validBundle: Bundle = {
   agent: 'claude-code',
   scope: { kind: 'global' },
   sourceOs: 'win32',
+  agentVersion: '2.1.282',
   files: [
     { path: 'settings.json', encoding: 'utf8', content: '{"theme":"dark"}', executable: false },
     {
@@ -28,6 +29,20 @@ function withFile(file: Record<string, unknown>): unknown {
 const fileAt = (path: string) => ({ path, encoding: 'utf8', content: '', executable: false });
 
 describe('BundleSchema', () => {
+  it('records the agent version it was saved from, or null when unknown (T32)', () => {
+    expect(BundleSchema.safeParse({ ...validBundle, agentVersion: null }).success).toBe(true);
+    expect(BundleSchema.safeParse({ ...validBundle, agentVersion: '2.0.0-beta.3' }).success).toBe(
+      true,
+    );
+    expect(BundleSchema.safeParse({ ...validBundle, agentVersion: '2.1 ; rm' }).success).toBe(
+      false,
+    );
+    const withoutVersion = Object.fromEntries(
+      Object.entries(validBundle).filter(([key]) => key !== 'agentVersion'),
+    );
+    expect(BundleSchema.safeParse(withoutVersion).success).toBe(false);
+  });
+
   it('accepts a valid global bundle', () => {
     expect(BundleSchema.parse(validBundle)).toEqual(validBundle);
   });
