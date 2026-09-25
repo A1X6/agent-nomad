@@ -1,5 +1,7 @@
 export * from './agents/adapter.ts';
+export * from './agents/agents-command.ts';
 export * from './agents/claude-code/auto-memory.ts';
+export * from './agents/claude-code/claude-code-adapter.ts';
 export * from './agents/claude-code/detector.ts';
 export * from './agents/claude-code/file-gathering.ts';
 export * from './agents/claude-code/global-collector.ts';
@@ -10,6 +12,7 @@ export * from './agents/claude-code/project-paths.ts';
 export * from './agents/claude-code/restore-rules.ts';
 export * from './agents/claude-code/restorer.ts';
 export * from './agents/claude-code/running-claude.ts';
+export * from './agents/registry.ts';
 export * from './api/api-client.ts';
 export * from './api/api-errors.ts';
 export * from './api/api-url.ts';

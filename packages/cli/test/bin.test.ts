@@ -45,3 +45,12 @@ describe('clack answers', () => {
     expect(() => unwrapAnswer(clack.CANCEL_SYMBOL)).toThrow(PromptCancelledError);
   });
 });
+
+describe('agentnomad agents (T28 done-when)', () => {
+  it('lists Claude Code', () => {
+    const result = agentnomad('agents');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Claude Code');
+    expect(result.stdout).toContain('supported agent');
+  });
+});

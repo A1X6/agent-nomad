@@ -1,5 +1,9 @@
 import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core';
 
+import type { AgentRegistry } from './agents/adapter.ts';
+import { createAgentsCommand } from './agents/agents-command.ts';
+import { createClaudeCodeAdapter } from './agents/claude-code/claude-code-adapter.ts';
+import { createAgentRegistry } from './agents/registry.ts';
 import type { ApiClient } from './api/api-client.ts';
 import { resolveApiUrl } from './api/api-url.ts';
 import { createHttpApiClient } from './api/http-api-client.ts';
@@ -73,8 +77,25 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
     });
   });
 
+  // Every supported agent; adding one means adding its adapter here (T28).
+  const registry = lazy<AgentRegistry>(() =>
+    createAgentRegistry([
+      createClaudeCodeAdapter({
+        env: app.env,
+        homedir: app.homedir,
+        platform: app.platform,
+        onClaudeRunning: () =>
+          app.prompter.select('Claude Code is running and rewrites ~/.claude.json while open.', [
+            { value: 'retry', label: 'I closed Claude Code, continue' },
+            { value: 'skip', label: 'Skip ~/.claude.json this time' },
+          ]),
+      }),
+    ]),
+  );
+
   return {
     ...NOT_YET_AVAILABLE,
+    ...createAgentsCommand({ registry, reporter: app.reporter }),
     ...createAuthCommands({
       prompter: app.prompter,
       reporter: app.reporter,
