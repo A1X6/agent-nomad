@@ -55,6 +55,16 @@ export function createApp(deps: AppDeps): Hono<{ Variables: RequestIdVariables }
         });
       })
       .get(API_ROUTES.health, (c) => c.json({ status: 'ok' } satisfies HealthResponse))
+      // TEMPORARY (T19): shows how the host forwards the caller's IP. Removed after the check.
+      .get('/__ip-probe', (c) => {
+        logger.info('ip_probe', {
+          xForwardedFor: c.req.header('x-forwarded-for'),
+          cfConnectingIp: c.req.header('cf-connecting-ip'),
+          trueClientIp: c.req.header('true-client-ip'),
+          xRealIp: c.req.header('x-real-ip'),
+        });
+        return c.body(null, 204);
+      })
       .route('/', authRoutes(deps.auth, deps))
       .route('/', bundleRoutes(deps.auth, deps.bundles))
       .route('/', accountRoutes(deps.auth))
