@@ -1,0 +1,345 @@
+import { type BundleScope, type SourceOs } from '@agentnomad/contracts';
+import { createPathResolver, type BundleCodec, type CryptoService } from '@agentnomad/core';
+
+import type {
+  AgentAdapter,
+  AgentRegistry,
+  ConflictChoice,
+  ConflictResolver,
+  DetectedAgent,
+  ScopeTarget,
+} from '../agents/adapter.ts';
+import { agentVersionNotice } from '../agents/claude-code/version-stamp.ts';
+import type { ApiClient } from '../api/api-client.ts';
+import { NotLoggedInError } from '../api/api-errors.ts';
+import { withSession } from '../auth/local-session.ts';
+import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
+import { restoreEnvValues } from '../env/env-restore.ts';
+import { ENV_BUNDLE_PATH, parseEnvSection } from '../env/env-section.ts';
+import type { EnvWriter } from '../env/shell-profile.ts';
+import { fromBundleFiles, preferLocalEquivalents } from '../push/bundle-files.ts';
+import type { SecretStore } from '../secrets/secret-store.ts';
+import type { LocalState } from '../state/local-state.ts';
+import type { Prompter, Reporter } from '../ui/prompter.ts';
+import { reviewRunnable } from './command-review.ts';
+import { downloadSetup, listSavedSetups, type SavedSetup } from './saved-setups.ts';
+
+export interface PullDeps {
+  readonly prompter: Prompter;
+  readonly reporter: Reporter;
+  readonly registry: () => AgentRegistry;
+  readonly secrets: () => Promise<SecretStore>;
+  readonly api: () => ApiClient;
+  readonly crypto: () => Promise<CryptoService>;
+  readonly codec: BundleCodec;
+  readonly localState: () => LocalState;
+  readonly envWriter: () => EnvWriter;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  /** A project is restored into this folder. */
+  readonly cwd: string;
+  readonly homedir: string;
+  readonly platform: NodeJS.Platform;
+}
+
+type ScopeChoice = 'global' | 'project' | 'both';
+type ConflictAnswer = ConflictChoice | 'merge-all' | 'overwrite-all';
+
+const sourceOsOf = (platform: NodeJS.Platform): SourceOs =>
+  platform === 'darwin' || platform === 'win32' ? platform : 'linux';
+
+const describe = (adapter: AgentAdapter, setup: SavedSetup) =>
+  `${adapter.displayName} ${setup.projectName === null ? 'global setup' : `project "${setup.projectName}"`}`;
+
+/**
+ * `agentnomad pull` (T34): choose saved setups, download and decrypt them on this PC,
+ * confirm what would run programs, restore with the user's merge / overwrite / skip
+ * choices, then offer plugins, programs and environment variables.
+ */
+export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'> {
+  const { prompter, reporter } = deps;
+
+  async function chooseAgents(
+    saved: readonly SavedSetup[],
+    options: PullOptions,
+  ): Promise<{ adapter: AgentAdapter; version: string | null }[]> {
+    const withSetups: { adapter: AgentAdapter; found: DetectedAgent }[] = [];
+    for (const adapter of deps.registry().list()) {
+      if (!saved.some((setup) => setup.agent === adapter.id)) continue;
+      const found = await adapter.detector.detect();
+      withSetups.push({ adapter, found });
+    }
+    if (options.agents) {
+      return options.agents.map((id) => {
+        const match = withSetups.find((entry) => entry.adapter.id === id);
+        if (!match) throw new Error(`No saved setup for agent "${id}".`);
+        return { adapter: match.adapter, version: match.found.version };
+      });
+    }
+    if (withSetups.length <= 1 || options.yes) {
+      return withSetups.map((entry) => ({ adapter: entry.adapter, version: entry.found.version }));
+    }
+    const count = (id: string) => saved.filter((setup) => setup.agent === id).length;
+    const chosen = await prompter.multiselect(
+      'Which agents?',
+      withSetups.map((entry) => ({
+        value: entry.adapter.id,
+        label: entry.adapter.displayName,
+        hint: `${entry.found.installed ? 'installed' : 'not installed here'}, ${String(count(entry.adapter.id))} saved`,
+      })),
+      { required: true, initial: withSetups.map((entry) => entry.adapter.id) },
+    );
+    return withSetups
+      .filter((entry) => chosen.includes(entry.adapter.id))
+      .map((entry) => ({ adapter: entry.adapter, version: entry.found.version }));
+  }
+
+  async function chooseSetups(
+    adapter: AgentAdapter,
+    saved: readonly SavedSetup[],
+    options: PullOptions,
+  ): Promise<SavedSetup[]> {
+    const mine = saved.filter((setup) => setup.agent === adapter.id);
+    const global = mine.find((setup) => setup.projectName === null);
+    const projects = mine.filter((setup) => setup.projectName !== null);
+
+    let choice: ScopeChoice;
+    if (options.global || options.project !== undefined) {
+      choice =
+        options.global && options.project !== undefined
+          ? 'both'
+          : options.global
+            ? 'global'
+            : 'project';
+    } else if (options.yes || projects.length === 0) {
+      choice = 'global';
+    } else if (!global) {
+      choice = 'project';
+    } else {
+      choice = await prompter.select(`${adapter.displayName}: what to restore?`, [
+        { value: 'global', label: 'Global setup' },
+        { value: 'project', label: 'A project', hint: `into this folder: ${deps.cwd}` },
+        { value: 'both', label: 'Both' },
+      ]);
+    }
+
+    const chosen: SavedSetup[] = [];
+    if (choice !== 'project') {
+      if (!global) throw new Error(`There is no saved ${adapter.displayName} global setup.`);
+      chosen.push(global);
+    }
+    if (choice !== 'global') {
+      let project: SavedSetup | undefined;
+      if (options.project !== undefined) {
+        project = projects.find((setup) => setup.projectName === options.project);
+        if (!project) {
+          const names = projects.map((setup) => setup.projectName).join(', ') || 'none';
+          throw new Error(
+            `No saved ${adapter.displayName} project named "${options.project}". Saved: ${names}.`,
+          );
+        }
+      } else if (projects.length === 1) {
+        project = projects[0];
+      } else {
+        const remembered = await deps.localState().projectNameFor(deps.cwd);
+        const pick = await prompter.select(
+          'Which project? It is restored into this folder.',
+          projects
+            .map((setup) => ({
+              value: setup.scopeKey,
+              label: setup.projectName ?? '',
+              ...(setup.projectName === remembered && { hint: 'saved from this folder' }),
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label)),
+        );
+        project = projects.find((setup) => setup.scopeKey === pick);
+      }
+      if (project) chosen.push(project);
+    }
+    return chosen;
+  }
+
+  /** Per file: merge, overwrite, skip; "… all remaining" answers the rest; flags answer all. */
+  function conflictResolver(options: PullOptions): ConflictResolver {
+    let sticky: ConflictChoice | undefined = options.conflict;
+    return async (path, question) => {
+      const fixed = sticky ?? (options.yes ? 'merge' : undefined);
+      if (fixed !== undefined)
+        return fixed === 'overwrite' && !question.overwriteAllowed ? 'merge' : fixed;
+      const answer: ConflictAnswer = await prompter.select(
+        question.overwriteAllowed
+          ? `${path} already exists here and is different.`
+          : `${path === '.agentnomad/claude.json' ? '~/.claude.json' : path}: add your MCP servers and preferences (your login and history stay)?`,
+        [
+          {
+            value: 'merge',
+            label: 'Merge',
+            hint: 'JSON: combine keys; other files: keep yours, add theirs next to it',
+          },
+          ...(question.overwriteAllowed
+            ? [{ value: 'overwrite' as const, label: 'Overwrite', hint: 'a backup is kept' }]
+            : []),
+          { value: 'skip', label: 'Skip', hint: 'leave it as it is' },
+          { value: 'merge-all', label: 'Merge all remaining files' },
+          ...(question.overwriteAllowed
+            ? [{ value: 'overwrite-all' as const, label: 'Overwrite all remaining files' }]
+            : []),
+        ],
+      );
+      if (answer === 'merge-all' || answer === 'overwrite-all') {
+        sticky = answer === 'merge-all' ? 'merge' : 'overwrite';
+        return sticky;
+      }
+      return answer;
+    };
+  }
+
+  async function restoreOne(
+    adapter: AgentAdapter,
+    version: string | null,
+    setup: SavedSetup,
+    context: {
+      secrets: SecretStore;
+      crypto: CryptoService;
+      dataKey: Uint8Array;
+      resolver: ConflictResolver;
+    },
+    options: PullOptions,
+  ): Promise<void> {
+    const spinner = reporter.spinner();
+    spinner.start(`Downloading and decrypting the ${describe(adapter, setup)}…`);
+    let downloaded;
+    try {
+      downloaded = await withSession(context.secrets, () =>
+        downloadSetup(setup, {
+          api: deps.api(),
+          crypto: context.crypto,
+          codec: deps.codec,
+          dataKey: context.dataKey,
+        }),
+      );
+    } finally {
+      spinner.stop();
+    }
+    const { bundle, revision } = downloaded;
+
+    const versionNote = agentVersionNotice(adapter.displayName, bundle.agentVersion, version);
+    if (versionNote !== null) reporter.warn(versionNote);
+
+    const scope: BundleScope = bundle.scope;
+    const target: ScopeTarget =
+      scope.kind === 'global' ? { kind: 'global' } : { kind: 'project', projectDir: deps.cwd };
+    const resolver = createPathResolver({ os: sourceOsOf(deps.platform), homeDir: deps.homedir });
+    let files = fromBundleFiles(bundle.files, resolver);
+
+    // What this PC has now: files that only differ in the home path's slashes stay as they
+    // are, and anything that runs programs and is new here is confirmed before writing.
+    const current = await adapter.collector.collect(target, { includeMemory: true });
+    files = preferLocalEquivalents(bundle.files, files, current, resolver);
+    const review = reviewRunnable(files, current);
+    if (review.length > 0) {
+      reporter.info(
+        [
+          `The ${describe(adapter, setup)} would add or change these, which run programs on this PC:`,
+          ...review.map(
+            (entry) =>
+              `  ${entry.change === 'new' ? '+' : '~'} ${entry.label}: ${entry.command}${entry.change === 'changed' ? '  (changed)' : ''}`,
+          ),
+        ].join('\n'),
+      );
+      const allow = options.yes || (await prompter.confirm('Allow them?', false));
+      if (!allow) {
+        const blocked = new Set(review.map((entry) => entry.file));
+        files = files.filter((file) => !blocked.has(file.path));
+        reporter.warn(`Skipped ${[...blocked].join(', ')}, which hold them. The rest is restored.`);
+      }
+    }
+
+    const report = await adapter.restorer.restore(target, files, context.resolver, {
+      sourceOs: bundle.sourceOs,
+    });
+    for (const warning of report.warnings) reporter.warn(warning);
+    const parts = [
+      `${String(report.written.length)} written`,
+      ...(report.skipped.length > 0 ? [`${String(report.skipped.length)} skipped`] : []),
+      ...(report.backups.length > 0 ? [`${String(report.backups.length)} backed up first`] : []),
+    ];
+    reporter.success(
+      `Restored the ${describe(adapter, setup)}: ${parts.join(', ')} (revision ${String(revision)}).`,
+    );
+
+    await deps.localState().setRevision(adapter.id, setup.scopeKey, revision);
+    if (setup.projectName !== null)
+      await deps.localState().rememberProject(deps.cwd, setup.projectName);
+
+    await adapter.afterRestore?.({ target, files, prompter, reporter, assumeYes: options.yes });
+
+    const envFile = files.find((file) => file.path === ENV_BUNDLE_PATH);
+    const section = envFile ? parseEnvSection(envFile.content) : null;
+    if (section) {
+      await restoreEnvValues({
+        section,
+        env: deps.env,
+        writer: deps.envWriter(),
+        prompter,
+        reporter,
+        assumeYes: options.yes,
+      });
+    }
+  }
+
+  return {
+    async pull(options) {
+      const secrets = await deps.secrets();
+      const [token, dataKeyText] = await Promise.all([
+        secrets.get('session-token'),
+        secrets.get('data-key'),
+      ]);
+      if (token === null || dataKeyText === null) throw new NotLoggedInError();
+      const dataKey = new Uint8Array(Buffer.from(dataKeyText, 'base64'));
+      try {
+        const crypto = await deps.crypto();
+        const saved = await withSession(secrets, () =>
+          listSavedSetups(deps.api(), crypto, dataKey),
+        );
+        if (saved.length === 0) {
+          reporter.info(
+            'Nothing is saved yet. Run `agentnomad push` on the PC that has your setup.',
+          );
+          return;
+        }
+        const agents = await chooseAgents(saved, options);
+        if (agents.length === 0) {
+          reporter.info('None of the saved setups are for an agent agentnomad supports here.');
+          return;
+        }
+        const plan: { adapter: AgentAdapter; version: string | null; setups: SavedSetup[] }[] = [];
+        for (const { adapter, version } of agents) {
+          plan.push({ adapter, version, setups: await chooseSetups(adapter, saved, options) });
+        }
+
+        const shown = new Set<string>();
+        for (const { adapter } of plan) {
+          for (const notice of (await adapter.inspector?.notices('pull')) ?? []) {
+            if (!shown.has(notice)) reporter.warn(notice);
+            shown.add(notice);
+          }
+        }
+
+        const resolver = conflictResolver(options);
+        for (const { adapter, version, setups } of plan) {
+          for (const setup of setups) {
+            await restoreOne(
+              adapter,
+              version,
+              setup,
+              { secrets, crypto, dataKey, resolver },
+              options,
+            );
+          }
+        }
+      } finally {
+        dataKey.fill(0);
+      }
+    },
+  };
+}

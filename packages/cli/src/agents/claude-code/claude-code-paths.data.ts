@@ -160,6 +160,18 @@ const RAW = {
     'py',
     'env',
     'exec',
+    // Shell built-ins: part of every shell, never installed separately.
+    'echo',
+    'printf',
+    'cd',
+    'exit',
+    'true',
+    'false',
+    'test',
+    'set',
+    'export',
+    'source',
+    'command',
   ],
 
   /** Run a package without installing it; the package name follows the options. */

@@ -1,5 +1,6 @@
 export * from './agents/adapter.ts';
 export * from './agents/agents-command.ts';
+export * from './agents/claude-code/after-restore.ts';
 export * from './agents/claude-code/auto-memory.ts';
 export * from './agents/claude-code/claude-code-adapter.ts';
 export * from './agents/claude-code/claude-code-paths.data.ts';
@@ -39,6 +40,9 @@ export * from './env/env-references.ts';
 export * from './env/env-restore.ts';
 export * from './env/env-section.ts';
 export * from './env/shell-profile.ts';
+export * from './pull/command-review.ts';
+export * from './pull/pull-command.ts';
+export * from './pull/saved-setups.ts';
 export * from './push/bundle-files.ts';
 export * from './push/push-command.ts';
 export * from './secrets/create-secret-store.ts';

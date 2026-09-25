@@ -1,4 +1,5 @@
 import type { AgentAdapter, Collector } from '../adapter.ts';
+import { createClaudeCodeAfterRestore } from './after-restore.ts';
 import { claudeConfigDir, createClaudeCodeDetector, nodeDetectorSystem } from './detector.ts';
 import { createClaudeCodeGlobalCollector } from './global-collector.ts';
 import {
@@ -55,6 +56,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       isClaudeRunning: options.isClaudeRunning ?? createClaudeRunningCheck(),
       onClaudeRunning: options.onClaudeRunning,
     }),
+    afterRestore: createClaudeCodeAfterRestore({ system }),
     inspector: {
       unknownEntries: (target) =>
         findUnknownEntries(target, { baseDir, platform: options.platform }),
