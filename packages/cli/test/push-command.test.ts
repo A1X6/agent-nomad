@@ -303,6 +303,65 @@ describe('agentnomad push', () => {
     expect(await t.state.projectNameFor(PROJECT)).toBe('renamed');
   });
 
+  describe('claude.ai skills (T42)', () => {
+    function withAccountSkills(names: string[]) {
+      const seen: (boolean | undefined)[] = [];
+      const base = fakeAdapter();
+      const adapter: AgentAdapter = {
+        ...base,
+        collector: {
+          collect: (target, options) => {
+            seen.push(options.includeAccountSkills);
+            return base.collector.collect(target, options);
+          },
+        },
+        inspector: {
+          unknownEntries: () => Promise.resolve([]),
+          notices: () => Promise.resolve([]),
+          accountSkills: () => Promise.resolve({ names, problem: null }),
+        },
+      };
+      return { adapter, seen };
+    }
+
+    it('asks about them only when there are some; no by default', async () => {
+      const some = withAccountSkills(['my-skill']);
+      const t = setup([false], { adapter: some.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
+      expect(t.script.asked).toEqual([
+        'Also save a copy of your 1 claude.ai skill (my-skill)? Your claude.ai account already syncs them; the copy is for PCs without that account.',
+      ]);
+      expect(some.seen).toEqual([false]);
+
+      const none = withAccountSkills([]);
+      const quiet = setup([], { adapter: none.adapter, pc: 'no-account-skills' });
+      await quiet.command.push({ global: true, yes: false, memory: false });
+      expect(quiet.script.asked).toEqual([]);
+    });
+
+    it('--account-skills includes them without asking, for the global setup only', async () => {
+      const some = withAccountSkills(['my-skill']);
+      const t = setup(['my-app'], { adapter: some.adapter });
+      await t.command.push({
+        global: true,
+        project: 'my-app',
+        yes: true,
+        memory: false,
+        accountSkills: true,
+      });
+      expect(t.script.asked).toEqual([]);
+      expect(some.seen).toEqual([true, false]);
+    });
+
+    it('--yes alone leaves them out without asking', async () => {
+      const some = withAccountSkills(['my-skill']);
+      const t = setup([], { adapter: some.adapter });
+      await t.command.push({ global: true, yes: true });
+      expect(t.script.asked).toEqual([]);
+      expect(some.seen).toEqual([false]);
+    });
+  });
+
   it.each([
     [true, true],
     [false, false],

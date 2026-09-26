@@ -230,11 +230,11 @@ describe('outcomes', () => {
   it.each([
     [
       ['push'],
-      'Use --agent, --global or --project <name>, --memory or --no-memory, and --yes. See `agentnomad push --help`.',
+      'Use --agent, --global or --project <name>, --memory or --no-memory, --account-skills or --no-account-skills, and --yes. See `agentnomad push --help`.',
     ],
     [
       ['pull', '--global'],
-      'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, and --yes. See `agentnomad pull --help`.',
+      'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, --account-skills or --no-account-skills, and --yes. See `agentnomad pull --help`.',
     ],
     [
       ['account', 'delete'],

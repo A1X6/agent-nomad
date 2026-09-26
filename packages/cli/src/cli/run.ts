@@ -16,8 +16,8 @@ export const EXIT = { ok: 0, failed: 1, cancelled: 130 } as const;
 export const ANSWER_FLAGS: Readonly<Record<string, string>> = {
   register: 'Use --username, --password-stdin and --yes.',
   login: 'Use --username and --password-stdin (and --yes to replace a login already here).',
-  push: 'Use --agent, --global or --project <name>, --memory or --no-memory, and --yes.',
-  pull: 'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, and --yes.',
+  push: 'Use --agent, --global or --project <name>, --memory or --no-memory, --account-skills or --no-account-skills, and --yes.',
+  pull: 'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, --account-skills or --no-account-skills, and --yes.',
   delete: 'Use --global or --project <name>, and --yes.',
   'account delete': 'Use --username, --password-stdin and --yes.',
 };

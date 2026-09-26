@@ -25,6 +25,7 @@ import {
   SENSITIVE_HOME_DIRS,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
+import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
   PROJECT_CLAUDE_FILES,
@@ -109,6 +110,8 @@ export function globalDestination(
   if (path === PROGRAMS_BUNDLE_PATH || path === PLUGINS_BUNDLE_PATH || path === ENV_BUNDLE_PATH) {
     return { kind: 'metadata' };
   }
+  // Saved claude.ai skills (T42): written only by pull's follow-up, after asking.
+  if (path.startsWith(ACCOUNT_SKILLS_PREFIX)) return { kind: 'metadata' };
   if (path.startsWith(HOME_SCRIPTS_PREFIX)) {
     return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length), hookScripts);
   }

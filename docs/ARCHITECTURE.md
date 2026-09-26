@@ -166,14 +166,15 @@ with `..`.
 **Reserved entries.** Things that are not plain files of the agent's folder live under
 `.agentnomad/` in the bundle:
 
-| Entry                         | What it holds                                                                                   | On pull                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `.agentnomad/claude.json`     | Selected `~/.claude.json` keys: MCP servers and documented preferences                          | Merged in by key; the file's login and project state are never touched  |
-| `.agentnomad/home/...`        | Scripts the hooks or status line run from elsewhere in the home folder, and known tool settings | Written back to the home folder, only if the setup's own hooks run them |
-| `.agentnomad/auto-memory/...` | The project's auto memory (opt-in)                                                              | Written to this PC's memory folder for the project                      |
-| `.agentnomad/plugins.json`    | Installed plugins and their marketplaces                                                        | Plugins are reinstalled with `claude plugin`, never copied              |
-| `.agentnomad/programs.json`   | Programs hooks start, and how npm installed them                                                | Missing ones are offered for install                                    |
-| `.agentnomad/env.json`        | Environment variable values the user chose to save                                              | Offered for the shell profile; never written as a file                  |
+| Entry                            | What it holds                                                                                   | On pull                                                                                                           |
+| -------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `.agentnomad/claude.json`        | Selected `~/.claude.json` keys: MCP servers and documented preferences                          | Merged in by key; the file's login and project state are never touched                                            |
+| `.agentnomad/home/...`           | Scripts the hooks or status line run from elsewhere in the home folder, and known tool settings | Written back to the home folder, only if the setup's own hooks run them                                           |
+| `.agentnomad/auto-memory/...`    | The project's auto memory (opt-in)                                                              | Written to this PC's memory folder for the project                                                                |
+| `.agentnomad/plugins.json`       | Installed plugins and their marketplaces                                                        | Plugins are reinstalled with `claude plugin`, never copied                                                        |
+| `.agentnomad/programs.json`      | Programs hooks start, and how npm installed them                                                | Missing ones are offered for install                                                                              |
+| `.agentnomad/env.json`           | Environment variable values the user chose to save                                              | Offered for the shell profile; never written as a file                                                            |
+| `.agentnomad/account-skills/...` | A copy of the user's own claude.ai skills (opt-in; never Anthropic's or an organization's)      | Offered as local skills in `~/.claude/skills/<name>/`, only on a PC that does not already get them from claude.ai |
 
 **From bundle to bytes:** JSON → gzip → XChaCha20-Poly1305 → upload. The encrypted size is
 capped at 5 MB; decompression stops at 64 MB (a guard against decompression bombs); the
@@ -309,6 +310,16 @@ Claude Code is running (it rewrites the file while open).
 **Review of runnable things** (`command-review.ts`): hooks, the status line, MCP servers
 and the scripts they run that are new or changed compared with this PC are listed before
 anything is written.
+
+**claude.ai skills (T42, opt-in):** Claude Code downloads the skills of the user's claude.ai
+account into `skills/synced/<account>/` and manages that folder; agentnomad never writes
+there. `push --account-skills` saves a copy of the user's **own** ones (the folder's
+`manifest.json` says `creatorType: user`; Anthropic's and an organization's are never
+saved) under `.agentnomad/account-skills/`. On pull they are listed and, after a yes (or
+`--account-skills`), written as normal local skills in `~/.claude/skills/<name>/`, skipping
+any this PC already gets from claude.ai and never replacing a local skill. A local skill
+runs its `!`command`` lines where a synced one does not, so such skills are marked, and a
+flag alone adds them only with `--allow-commands`.
 
 **After restore:** plugins are reinstalled with Claude Code's own `claude plugin
 marketplace add` and `claude plugin install`; a plugin built by running a command gets its
@@ -548,27 +559,28 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `agents/claude-code/`: the Claude Code adapter
 
-| File                                  | Responsible for                                                                                                         |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `claude-code-adapter.ts`              | Assembles the adapter from the parts below.                                                                             |
-| `claude-code-paths.data.ts`           | **The data file:** every list of what to sync, skip or refuse, schema-checked.                                          |
-| `global-paths.ts`, `project-paths.ts` | Named views of the data file for the global and project collectors.                                                     |
-| `detector.ts`                         | Finding `claude` and its version; the base folder (`CLAUDE_CONFIG_DIR`).                                                |
-| `file-gathering.ts`                   | Reading files and folders into bundle entries; parsing settings and command lines.                                      |
-| `global-collector.ts`                 | Collecting the global setup, `~/.claude.json` keys, hook scripts, tool settings, programs, plugins.                     |
-| `project-collector.ts`                | Collecting a project's setup and, when chosen, its auto memory.                                                         |
-| `hook-scripts.ts`                     | Which scripts the hooks and status line run: what push collects and pull allows back.                                   |
-| `auto-memory.ts`                      | Finding a project's auto memory folder the way Claude Code does.                                                        |
-| `restore-rules.ts`                    | Where each bundle entry may go, or why it is refused (including Windows name rules).                                    |
-| `restorer.ts`                         | Writing a setup: atomic writes, permissions, line endings, conflicts, `~/.claude.json` merge, the running-Claude check. |
-| `running-claude.ts`                   | Is Claude Code running (process list)?                                                                                  |
-| `plugins.ts`                          | Reading installed plugins and marketplaces into `.agentnomad/plugins.json`.                                             |
-| `plugin-sync.ts`                      | Reinstalling what is missing with `claude plugin` commands.                                                             |
-| `programs.ts`                         | Finding the programs hooks start and whether npm installed them.                                                        |
-| `after-restore.ts`                    | Pull's follow-up: plugins, then missing programs.                                                                       |
-| `managed-settings.ts`                 | Detecting organization-managed settings per OS (never synced) and explaining what they block.                           |
-| `unknown-files.ts`                    | Reporting files in Claude Code's folder that the data file does not know.                                               |
-| `version-stamp.ts`                    | Comparing Claude Code versions for pull's warning.                                                                      |
+| File                                  | Responsible for                                                                                                                    |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code-adapter.ts`              | Assembles the adapter from the parts below.                                                                                        |
+| `claude-code-paths.data.ts`           | **The data file:** every list of what to sync, skip or refuse, schema-checked.                                                     |
+| `global-paths.ts`, `project-paths.ts` | Named views of the data file for the global and project collectors.                                                                |
+| `detector.ts`                         | Finding `claude` and its version; the base folder (`CLAUDE_CONFIG_DIR`).                                                           |
+| `file-gathering.ts`                   | Reading files and folders into bundle entries; parsing settings and command lines.                                                 |
+| `global-collector.ts`                 | Collecting the global setup, `~/.claude.json` keys, hook scripts, tool settings, programs, plugins.                                |
+| `project-collector.ts`                | Collecting a project's setup and, when chosen, its auto memory.                                                                    |
+| `hook-scripts.ts`                     | Which scripts the hooks and status line run: what push collects and pull allows back.                                              |
+| `account-skills.ts`                   | claude.ai skills (T42): reading `skills/synced/` (only `creatorType: user`), saving a copy, and what pull may add as local skills. |
+| `auto-memory.ts`                      | Finding a project's auto memory folder the way Claude Code does.                                                                   |
+| `restore-rules.ts`                    | Where each bundle entry may go, or why it is refused (including Windows name rules).                                               |
+| `restorer.ts`                         | Writing a setup: atomic writes, permissions, line endings, conflicts, `~/.claude.json` merge, the running-Claude check.            |
+| `running-claude.ts`                   | Is Claude Code running (process list)?                                                                                             |
+| `plugins.ts`                          | Reading installed plugins and marketplaces into `.agentnomad/plugins.json`.                                                        |
+| `plugin-sync.ts`                      | Reinstalling what is missing with `claude plugin` commands.                                                                        |
+| `programs.ts`                         | Finding the programs hooks start and whether npm installed them.                                                                   |
+| `after-restore.ts`                    | Pull's follow-up: plugins, then missing programs.                                                                                  |
+| `managed-settings.ts`                 | Detecting organization-managed settings per OS (never synced) and explaining what they block.                                      |
+| `unknown-files.ts`                    | Reporting files in Claude Code's folder that the data file does not know.                                                          |
+| `version-stamp.ts`                    | Comparing Claude Code versions for pull's warning.                                                                                 |
 
 ## `packages/server/src`
 

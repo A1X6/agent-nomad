@@ -15,6 +15,11 @@ export interface PushOptions extends ScopeFlags {
   readonly yes: boolean;
   /** `--memory` / `--no-memory`: include memory or not, instead of asking (default with --yes: no). */
   readonly memory?: boolean;
+  /**
+   * `--account-skills` / `--no-account-skills`: save a copy of your own claude.ai skills or not,
+   * instead of asking (default with --yes: no) (T42).
+   */
+  readonly accountSkills?: boolean;
 }
 
 export interface PullOptions extends ScopeFlags {
@@ -26,6 +31,11 @@ export interface PullOptions extends ScopeFlags {
    * they run, and install plugins and programs, without asking. `--yes` alone skips them.
    */
   readonly allowCommands?: boolean;
+  /**
+   * `--account-skills` / `--no-account-skills`: add saved claude.ai skills as local skills or
+   * not, instead of asking (default with --yes: no) (T42).
+   */
+  readonly accountSkills?: boolean;
 }
 
 export interface DeleteOptions extends ScopeFlags {

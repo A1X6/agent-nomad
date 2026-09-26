@@ -138,12 +138,20 @@ export function createProgram({ handlers, output }: ProgramDeps) {
     .addOption(pushProject)
     .addOption(new Option('--memory', 'include memory (subagent and auto memory)'))
     .addOption(new Option('--no-memory', 'leave memory out'))
+    .addOption(
+      new Option(
+        '--account-skills',
+        'save a copy of your own claude.ai skills (normally synced by your account)',
+      ),
+    )
+    .addOption(new Option('--no-account-skills', 'leave claude.ai skills out'))
     .addOption(yesOption())
     .action((options) =>
       handlers.push({
         ...scope(options),
         yes: options.yes === true,
         ...(options.memory !== undefined && { memory: options.memory }),
+        ...(options.accountSkills !== undefined && { accountSkills: options.accountSkills }),
       }),
     );
 
@@ -168,11 +176,19 @@ export function createProgram({ handlers, output }: ProgramDeps) {
         'accept new or changed hooks, MCP servers and scripts, and install plugins and programs (--yes alone skips them)',
       ),
     )
+    .addOption(
+      new Option(
+        '--account-skills',
+        'add saved claude.ai skills as local skills (for a PC without that claude.ai account)',
+      ),
+    )
+    .addOption(new Option('--no-account-skills', 'do not add saved claude.ai skills'))
     .action((options) =>
       handlers.pull({
         ...scope(options),
         yes: options.yes === true,
         ...(options.allowCommands && { allowCommands: true }),
+        ...(options.accountSkills !== undefined && { accountSkills: options.accountSkills }),
         ...(options.merge && { conflict: 'merge' as const }),
         ...(options.overwrite && { conflict: 'overwrite' as const }),
       }),
