@@ -1,6 +1,16 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { posix } from 'node:path';
 
 import { BACKUP_MARKER } from '@agentnomad/core';
@@ -128,10 +138,12 @@ export function createShellProfileWriter(
     async write(variables) {
       // A profile linked from a dotfiles folder (stow, chezmoi) is written where it really
       // is, so the link stays (T46).
-      const target = await realpath(profile.path).catch((error: unknown) => {
-        if (isMissing(error)) return profile.path;
+      // Only a link is followed: a plain file keeps the path as given.
+      const link = await lstat(profile.path).catch((error: unknown) => {
+        if (isMissing(error)) return null;
         throw error;
       });
+      const target = link?.isSymbolicLink() ? await realpath(profile.path) : profile.path;
       let existing: string | null;
       // A new profile holds saved values, so only this user may read it (T46).
       let mode = 0o600;
