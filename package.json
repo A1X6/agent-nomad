@@ -1,0 +1,38 @@
+{
+  "name": "agentnomad-monorepo",
+  "private": true,
+  "type": "module",
+  "description": "agentnomad monorepo: contracts, core, cli and server packages",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/A1X6/agent-nomad.git"
+  },
+  "packageManager": "pnpm@12.6.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
+    "clean": "tsc --build --clean",
+    "test:e2e": "tsc --build && pnpm --filter @agentnomad/e2e run e2e",
+    "release:build": "node --experimental-strip-types packages/cli/scripts/build-release.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.4",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.9",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vite": "8.3.0",
+    "vitest": "^5.0.1"
+  }
+}

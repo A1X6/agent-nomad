@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+# Install scripts are off by default. esbuild (used by drizzle-kit) ships its binary as an
+# optional dependency, so its postinstall check is not needed.
+allowBuilds:
+  esbuild: false
+# T38: drizzle-kit (development only, for migrations) pulls an old esbuild through
+# @esbuild-kit/core-utils (GHSA-67mh-4wv8-2f99). Use the patched line drizzle-kit itself uses.
+overrides:
+  '@esbuild-kit/core-utils>esbuild': '^0.25.4'

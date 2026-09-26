@@ -1,0 +1,24 @@
+{
+  "name": "@agentnomad/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure business logic: bundles, crypto, merging, paths. No terminal, network or disk access",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "agentnomad-source": "./src/index.ts",
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agentnomad/contracts": "workspace:*",
+    "fflate": "0.8.3",
+    "libsodium-wrappers-sumo": "0.8.4"
+  }
+}
