@@ -158,7 +158,8 @@ A bundle is one agent's setup for one scope, as plain data before encryption:
 | `files`         | Every file: a relative forward-slash path, `executable`, and content as UTF-8 text or base64.                   |
 
 **Portable paths.** In text files, the user's home folder is replaced by `{{HOME}}` on push
-and by the other PC's home on pull, so `C:\Users\ana\.claude\hooks\check.sh` in a hook
+(a `{{HOME}}` already written in a file is stored as `{{HOME\}}` and comes back unchanged)
+and by the other PC's home on pull (with backslashes in `.bat` and `.cmd` files on Windows), so `C:\Users\ana\.claude\hooks\check.sh` in a hook
 becomes `/Users/ana/.claude/hooks/check.sh` on a Mac. Paths inside the bundle are relative
 to the agent's base folder (global) or the project root (project), never absolute and never
 with `..`.

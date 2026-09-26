@@ -296,12 +296,17 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
       const resolver = createPathResolver({ os: sourceOsOf(deps.platform), homeDir: deps.homedir });
       try {
         for (const item of items) {
+          const leftOut: string[] = [];
           const collected: CollectedFile[] = [
             ...(await item.adapter.collector.collect(item.target, {
               includeMemory,
               includeAccountSkills: includeAccountSkills && item.scope.kind === 'global',
+              onSkipped: (path, reason) => leftOut.push(`  - ${path}: ${reason}`),
             })),
           ];
+          if (leftOut.length > 0) {
+            reporter.warn([`${describe(item)}: left out`, ...leftOut].join('\n'));
+          }
           const unknown = unknownEntriesNotice(
             (await item.adapter.inspector?.unknownEntries(item.target)) ?? [],
           );
