@@ -448,7 +448,8 @@ the license. The build fails if anything but our own source is bundled or a libr
 not declared. **Releases:** pushing a tag `vX.Y.Z` on `main` runs
 `.github/workflows/release.yml`: build and test on every OS, install and run the packed
 package, wait for the owner's approval, publish the tested tarball through npm trusted
-publishing with provenance (no npm token exists), then check `npx agentnomad` on every OS.
+publishing with provenance (no npm token exists), then check `npx agentnomad` on every OS. The release starts only for a commit
+whose CI run on `main` passed, and verifies on Node 22.13 and 24.
 
 Deployment: Render builds `main` from `render.yaml` after CI; database migrations
 (`packages/server/drizzle`) are run by hand with the direct connection string, and the API

@@ -54,9 +54,11 @@ everything by design.
 
 **No plaintext leaves the PC.** The e2e run (T37) records every request the server receives, on
 macOS, Windows and Linux, and fails if any URL, header or body contains the password, file
-contents, commands, memory, the project name or the login state of `~/.claude.json`, whether as
-text or base64 at any alignment. A control check confirms the same search does find the username,
-which is sent readable.
+contents, commands, memory, the project name, the login state of `~/.claude.json`, the data key,
+the home folder, or a session token anywhere but the `Authorization` header: as text, JSON-escaped,
+URL-encoded, hex or base64 at any alignment, and inside gzip or deflate data, also within base64
+fields (T48). Every upload must not start like gzip, so a bundle that were only compressed fails
+too. A control check confirms the same search does find the username, which is sent readable.
 
 ## Findings
 
@@ -99,6 +101,9 @@ Found in the 2026-09-26 code review of 1.0.2 (T43–T48), each checked against t
 | 28  | High     | One account could save setups without limit and fill the database every user shares.                                                                                       | 100 setups and 50 MB per account, and 120 saves and deletes per hour (T47).                                                                    |
 | 29  | Medium   | The failed-login limit read the count before checking, so guesses sent at once all got through; an IPv6 /64 gave unlimited fresh per-IP limits.                            | Each attempt is counted first, atomically; per-IP limits count an IPv6 /64 as one (T47).                                                       |
 | 30  | Low      | A failed database query was logged with every parameter (auth hash, token hash, ciphertext); unused files could pile up; failed logins blocked the owner's account delete. | Only the SQL text is logged; unused files are swept; account deletes have their own count, keyed by the account (T47).                         |
+| 31  | Medium   | The e2e leak check could not see compressed or hex data, and never looked for the data key, the home folder or the session token.                                          | It inflates bodies and base64 fields, adds hex and escaped forms, and looks for the data key, home and token (T48).                            |
+| 32  | Low      | Release checks ran on Node 24 only and did not require CI to have passed; npm was upgraded to any 11.x in the publishing job; checkouts left the token in `.git/config`.   | Release verifies on Node 22.13 and 24 after a successful CI run; npm is pinned; `persist-credentials: false` everywhere (T48).                 |
+| 33  | Info     | The drift report took the version from a second registry lookup and copied changelog text as is.                                                                           | The installed version is used; @mentions and images are made inert; the run link is passed (T48).                                              |
 
 ## Accepted risks
 
