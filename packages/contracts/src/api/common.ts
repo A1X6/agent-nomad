@@ -14,6 +14,12 @@ export const MAX_NAME_ENC_BYTES = 512;
  */
 export const WRONG_PASSWORD_MESSAGE = 'Wrong password';
 
+/**
+ * What one account may keep (T47), so a single account cannot fill the database that every
+ * user shares: saved setups, and their encrypted bytes together.
+ */
+export const USER_STORAGE_LIMITS = { maxSetups: 100, maxBytes: 50 * 1024 * 1024 } as const;
+
 /** Largest encrypted bundle accepted by PUT /bundles. */
 export const MAX_BUNDLE_BYTES = 5 * 1024 * 1024;
 
