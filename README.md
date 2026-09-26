@@ -9,6 +9,10 @@
 machine and restore it on another in one command, on macOS, Linux and Windows. It is
 encrypted on your PC first: the server can never read it.
 
+<p align="center">
+  <img src="docs/images/demo.gif" alt="agentnomad push on a Mac, the encrypted setup the server stores, and agentnomad pull on Windows with the home paths rewritten" width="800">
+</p>
+
 ```sh
 # On your laptop
 agentnomad register
@@ -20,6 +24,21 @@ agentnomad pull
 ```
 
 > **Status:** 1.0 supports Claude Code. More agents are next: see the [roadmap](#roadmap).
+
+## See it work
+
+**Push** on the PC that has your setup: it is collected, encrypted on the PC and uploaded.
+
+![agentnomad push --global --yes: "Saved the Claude Code global setup: 8 files, 474 B (revision 1)."](docs/images/push.webp)
+
+**Pull** on any other PC, here Windows: anything that would run programs is listed first,
+then the setup is restored with this PC's paths.
+
+![agentnomad pull --global --merge --yes --allow-commands on PowerShell: the new hook and its script are listed, then "Restored the Claude Code global setup: 8 written (revision 1)."](docs/images/pull.webp)
+
+Every command, with `agentnomad --help`:
+
+![The agentnomad --help output: register, login, logout, push, pull, list, agents, status, delete, account and env.](docs/images/help.webp)
 
 ## Why
 
@@ -127,7 +146,8 @@ Run `agentnomad <command> --help` for every option.
 ### From scripts and CI
 
 With no terminal, agentnomad never asks: a question the flags do not answer stops the
-command with exit code 1 and names the flags to add.
+command with exit code 1 and names the flags to add. Push and pull look for every such
+question before they change anything, so a script never stops halfway.
 
 ```sh
 echo "$AGENTNOMAD_PASSWORD" | agentnomad login --username me --password-stdin
@@ -158,6 +178,8 @@ exist.
   leaves the PC.
 - Your login is kept in the OS keychain (Windows Credential Manager, macOS Keychain, Linux
   Secret Service), or in a file only you can read where there is none.
+- Each account keeps at most 100 saved setups and 50 MB, so one account cannot fill the
+  service for everyone.
 - **There is no password recovery.** If you forget your password, your saved setups cannot
   be opened by anyone, including us.
 
