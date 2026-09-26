@@ -302,10 +302,17 @@ file is a one-line change there:
 
 **Restore rules** (`restore-rules.ts`): a file is written only if a collector could have
 produced it. A home-folder file must be a known tool's settings or a script the setup's
-own hooks or status line run, so a bundle cannot drop a file that runs by itself (a Startup
-folder entry, a shell profile). On Windows, names with `:`, device names and trailing dots
-are refused. `~/.claude.json` is only ever merged, with a backup, and is skipped while
-Claude Code is running (it rewrites the file while open).
+own hooks or status line run, and never in a folder whose files run by themselves (Startup,
+`.config/autostart`, `Library/LaunchAgents`, fish and PowerShell profile folders), so a
+bundle cannot drop a file that runs by itself. Refusals ignore case. On Windows, names with
+`:`, device names, trailing dots and 8.3 short names are refused. Two entries that differ
+only in case or Unicode form are one file on Windows and macOS: only the first is written. An
+entry that cannot be written is skipped with a warning; the rest continue. `~/.claude.json`
+is only ever merged, with a backup: only `mcpServers` and the preference keys, never
+`projects` or account state. It is skipped while Claude Code is running (it rewrites the
+file while open) and read again once Claude Code is closed. Auto memory is Markdown only, and
+a folder chosen by the project's `autoMemoryDirectory` is used only inside the home folder
+and outside refused folders (`auto-memory.ts`).
 
 **Review of runnable things** (`command-review.ts`): hooks, the status line, MCP servers
 and the scripts they run that are new or changed compared with this PC are listed before

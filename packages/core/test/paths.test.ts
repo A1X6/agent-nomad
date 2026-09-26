@@ -49,6 +49,12 @@ describe('toNativePath: bundle path to a real path on each OS', () => {
     'less<.md',
     'trailing.',
     'trailing ',
+    // Microsoft's naming rules also reserve the superscript forms (T43).
+    'COM¹.md',
+    'skills/lpt³',
+    // 8.3 short names reach a folder under another name (T43).
+    'PROGRA~1/x.md',
+    'SSH~1',
   ])('refuses %j on Windows only', (path) => {
     expect(() => onWin.toNativePath('C:\\base', path)).toThrow(/Windows/);
     expect(onLinux.toNativePath('/base', path)).toBe(`/base/${path}`);

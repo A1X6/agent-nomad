@@ -62,9 +62,11 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
 
   async function autoMemory(projectDir: string): Promise<CollectedFile[]> {
     const location = await findAutoMemory({ ...options, projectDir });
-    // A shared or unknown folder is not this project's to take.
+    // A shared, unknown or refused folder is not this project's to take.
     if (location.kind !== 'folder') return [];
-    return files.walk(location.dir, AUTO_MEMORY_BUNDLE_PREFIX, () => false);
+    // Auto memory is Markdown notes (T43); pull restores nothing else there.
+    const found = await files.walk(location.dir, AUTO_MEMORY_BUNDLE_PREFIX, () => false);
+    return found.filter((file) => file.path.toLowerCase().endsWith('.md'));
   }
 
   return {
