@@ -299,6 +299,7 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
       reporter,
       assumeYes: options.yes,
       allowCommands: options.allowCommands === true,
+      ...(options.accountSkills !== undefined && { accountSkills: options.accountSkills }),
     });
 
     const envFile = files.find((file) => file.path === ENV_BUNDLE_PATH);

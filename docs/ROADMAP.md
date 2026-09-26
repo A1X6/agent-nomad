@@ -130,6 +130,17 @@ flowchart LR
 - The same safety rules as pull: anything that runs programs is shown first.
 - Works offline too: converting on one PC needs no account.
 
+## v1.x: claude.ai account items
+
+Claude Code also brings in things from the user's claude.ai account: skills, plugins and
+connectors. Saving a copy lets a PC with another claude.ai account, or none, have them too.
+
+| Item                               | Status                    | Notes                                                                                                                                               |
+| ---------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Skills you made on claude.ai**   | Done (`--account-skills`) | Only your own; restored as local skills where claude.ai does not already sync them.                                                                 |
+| **Plugins turned on in claude.ai** | Planned                   | No marketplace to reinstall from: their files would be restored as a local plugin, without organization plugins.                                    |
+| **Connectors**                     | Research                  | They are not files (Claude Code fetches them and their logins from claude.ai); at most the list could be offered as MCP servers to log in to again. |
+
 ## Later
 
 Ideas outside the v1 scope, in no fixed order:
