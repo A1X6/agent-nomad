@@ -217,6 +217,8 @@ export async function firstPc({ server, keychain }: StepContext): Promise<void> 
     );
     expect(pushed.stdout).toContain('Saved the Claude Code global setup');
     expect(pushed.stdout).toContain('Saved the Claude Code project "demo"');
+    // T49: a normal setup gets no false "not saved" warning (its hook script is saved).
+    expect(pushed.stderr).not.toContain('Not saved, because agentnomad does not know');
 
     const status = ok(await pc.run(['status']));
     expect(status.stdout).toContain('Claude Code global setup: up to date (revision 1)');
@@ -309,6 +311,7 @@ export async function secondPc({ server, keychain }: StepContext): Promise<void>
     await write(claude(pc, 'skills', 'review', 'SKILL.md'), REVIEW_SKILL);
     const pushed = ok(await pc.run(['push', '--global', '--yes']));
     expect(pushed.stdout).toContain('(revision 2)');
+    expect(pushed.stderr).not.toContain('Not saved, because agentnomad does not know');
     const status = ok(await pc.run(['status']));
     expect(status.stdout).toContain('Claude Code global setup: up to date (revision 2)');
     expectNothingReadable(server, secretsHere);
