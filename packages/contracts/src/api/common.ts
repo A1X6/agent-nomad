@@ -58,7 +58,8 @@ export const ErrorCodeSchema = z.enum([
 export const ErrorResponseSchema = z.strictObject({
   error: z.strictObject({
     code: ErrorCodeSchema,
-    message: z.string(),
+    /** Short by design: shown to the user, so a server cannot flood the terminal (T44). */
+    message: z.string().max(1000),
     /** Set on `revision_conflict` so the CLI can tell the user a newer copy exists. */
     currentRevision: z.int().min(1).optional(),
   }),
