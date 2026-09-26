@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createSecretStore } from '@agentnomad/cli';
+import { configDir, createFileStore, createKeychainStore, SECRETS_FILE } from '@agentnomad/cli';
 
 /**
  * The CLI to run: the workspace build (`pnpm test:e2e` builds it first), or, with
@@ -100,20 +100,27 @@ export async function newPc(
         });
         child.stdin.end(input);
       }),
+    // Read-only: never createSecretStore, which may move a login between the file and the
+    // keychain (T46), and the CLI's process may not reach the keychain the test's can.
     secret: async (name) => {
-      const store = await createSecretStore({
-        server: new URL(options.apiUrl).host,
-        platform: process.platform,
-        homedir: home,
-        env: { APPDATA: join(root, 'appdata') },
-        // Where the CLI ran without the keychain, it kept its login in the file.
-        ...(!options.keychain && {
-          keychain: () => {
-            throw new Error('no keychain in this test');
-          },
+      const server = new URL(options.apiUrl).host;
+      if (options.keychain) {
+        const fromKeychain = await createKeychainStore(server)
+          .get(name)
+          .catch(() => null);
+        if (fromKeychain !== null) return fromKeychain;
+      }
+      const file = join(
+        configDir({
+          platform: process.platform,
+          homedir: home,
+          env: { APPDATA: join(root, 'appdata') },
         }),
-      });
-      return store.get(name);
+        SECRETS_FILE,
+      );
+      return createFileStore({ path: file, server, restrictAccess: () => Promise.resolve() }).get(
+        name,
+      );
     },
     remove: () => rm(root, { recursive: true, force: true }),
   };
