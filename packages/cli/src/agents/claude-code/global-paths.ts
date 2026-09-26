@@ -58,14 +58,21 @@ export const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
  * Compared without case, since Windows and macOS ignore it.
  */
 export function homePathProblem(relative: string): string | null {
-  const lower = relative.toLowerCase();
-  const within = (dir: string) => {
-    const folder = dir.toLowerCase();
-    return lower === folder || lower.startsWith(`${folder}/`) || lower.includes(`/${folder}/`);
-  };
-  if (SENSITIVE_HOME_DIRS.some(within)) return 'a folder for keys and logins';
-  if (AUTOSTART_HOME_DIRS.some(within)) return 'a folder whose files run by themselves';
+  if (isSensitiveHomePath(relative)) return 'a folder for keys and logins';
+  if (AUTOSTART_HOME_DIRS.some((dir) => inFolder(relative, dir))) {
+    return 'a folder whose files run by themselves';
+  }
   return null;
+}
+
+/** A path from the home folder inside a folder for keys and logins (any case). */
+export function isSensitiveHomePath(relative: string): boolean {
+  return SENSITIVE_HOME_DIRS.some((dir) => inFolder(relative, dir));
+}
+
+function inFolder(relative: string, dir: string): boolean {
+  const [lower, folder] = [relative.toLowerCase(), dir.toLowerCase()];
+  return lower === folder || lower.startsWith(`${folder}/`) || lower.includes(`/${folder}/`);
 }
 
 /** Marketplaces and plugins to reinstall on pull (T29). */

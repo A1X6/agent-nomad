@@ -11,6 +11,9 @@ const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$
 /** An 8.3 short name (`PROGRA~1`, `SSH~1`), which can reach a folder under another name. */
 const SHORT_NAME = /~\d+(\.[^.]*)?$/;
 
+/** `{{HOME}}` and its kept forms `{{HOME\}}`, `{{HOME\\}}`, …; group 1 is the backslashes. */
+const PLACEHOLDER_FORMS = /\{\{HOME(\\*)\}\}/g;
+
 /** Characters that can be part of a folder name next to the home path (for exact matching). */
 const NAME_CHARACTER = '[A-Za-z0-9._-]';
 
@@ -70,7 +73,7 @@ function assertValidHome(environment: PathEnvironment): void {
   const valid =
     os === 'win32'
       ? /^[A-Za-z]:[\\/][^\\/]/.test(homeDir)
-      : homeDir.startsWith('/') && normalizePosix(homeDir) !== '/';
+      : homeDir.startsWith('/') && !['', '/'].includes(normalizePosix(homeDir));
   if (!valid)
     throw new PathError(`Home folder must be an absolute path below the root: "${homeDir}"`);
 }
@@ -151,11 +154,22 @@ export function createPathResolver(environment: PathEnvironment): PathResolver {
     },
 
     toPortableText(text) {
-      return windows ? windowsToPortable(text, homeDir) : posixToPortable(text, homeDir);
+      // A `{{HOME}}` already in the text gets one more backslash, so pull can tell it from
+      // the ones that stand for the home folder: `{{HOME}}` → `{{HOME\}}` (T45).
+      const kept = text.replace(
+        PLACEHOLDER_FORMS,
+        (_match, slashes: string) => `{{HOME${slashes}\\}}`,
+      );
+      return windows ? windowsToPortable(kept, homeDir) : posixToPortable(kept, homeDir);
     },
 
-    fromPortableText(text) {
-      return text.replaceAll(HOME_PLACEHOLDER, portableHome);
+    fromPortableText(text, options = {}) {
+      const backslashes = windows && options.backslashes === true;
+      const pattern = new RegExp(`${PLACEHOLDER_FORMS.source}((?:/${TEXT_SEGMENT})*)`, 'g');
+      return text.replace(pattern, (_match, slashes: string, rest: string) => {
+        if (slashes !== '') return `{{HOME${slashes.slice(1)}}}${rest}`;
+        return backslashes ? homeDir + rest.replace(/\//g, '\\') : portableHome + rest;
+      });
     },
   };
 }

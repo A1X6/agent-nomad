@@ -113,6 +113,15 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     return new Uint8Array(await readFile(nativePath));
   }
 
+  /** `''` when nothing is at `nativePath`, else the first free `-2`, `-3`, … (T45). */
+  async function freeSuffix(nativePath: string): Promise<string> {
+    const taken = async (candidate: string) => (await stat(candidate).catch(() => null)) !== null;
+    if (!(await taken(nativePath))) return '';
+    for (let number = 2; ; number += 1) {
+      if (!(await taken(`${nativePath}-${String(number)}`))) return `-${String(number)}`;
+    }
+  }
+
   /** Writes to a temporary file and swaps it in, so a crash never leaves half a file. */
   async function writeAtomically(nativePath: string, content: Uint8Array, mode: number | null) {
     await mkdir(path.dirname(nativePath), { recursive: true });
@@ -258,7 +267,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     );
     const mode = existing === null ? 0o600 : (await stat(claudeJsonFile)).mode & 0o777;
     if (existing !== null) {
-      const backup = `${claudeJsonFile}${BACKUP_MARKER}${stamp(options.now?.() ?? new Date())}`;
+      const name = `${claudeJsonFile}${BACKUP_MARKER}${stamp(options.now?.() ?? new Date())}`;
+      const backup = name + (await freeSuffix(name));
       await writeAtomically(backup, existing, mode);
       report.backups.push(backup);
     }
@@ -356,16 +366,20 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         }
 
         for (const write of writes) {
-          // Backups and side-by-side copies sit next to the file, with a marker suffix.
-          const writePath = nativePath + write.path.slice(file.path.length);
+          // Backups and side-by-side copies sit next to the file, with a marker suffix; a
+          // name already taken (two pulls in one second) gets a number, never replaced (T45).
           const replacing = write.path === file.path;
+          const suffix = replacing
+            ? ''
+            : await freeSuffix(nativePath + write.path.slice(file.path.length));
+          const writePath = nativePath + write.path.slice(file.path.length) + suffix;
           await writeAtomically(
             writePath,
             write.content,
             replacing ? modeFor(file, write.content, existingMode) : existingMode,
           );
-          if (write.path.includes(BACKUP_MARKER)) report.backups.push(write.path);
-          else report.written.push(write.path);
+          if (write.path.includes(BACKUP_MARKER)) report.backups.push(write.path + suffix);
+          else report.written.push(write.path + suffix);
         }
       }
 

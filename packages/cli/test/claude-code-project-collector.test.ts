@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -169,6 +169,57 @@ describe('project collector: what is taken', () => {
         { includeMemory: false },
       ),
     ).rejects.toThrow('project');
+  });
+});
+
+describe('project collector: links and size (T45)', () => {
+  /** A folder link; a junction on Windows, which needs no admin rights. */
+  const linkFolder = (target: string, path: string) =>
+    symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir');
+
+  it('never follows a link into a folder for keys, and says so', async () => {
+    await put(join(home, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
+    await mkdir(join(project, '.claude', 'skills'), { recursive: true });
+    await linkFolder(join(home, '.ssh'), join(project, '.claude', 'skills', 'x'));
+    const skipped: string[] = [];
+    const found = await createClaudeCodeProjectCollector(options()).collect(
+      { kind: 'project', projectDir: project },
+      { includeMemory: false, onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`) },
+    );
+    expect(paths(found).filter((path) => path.includes('skills'))).toEqual([]);
+    expect(skipped).toEqual(['.claude/skills/x: it links to a place outside the project']);
+  });
+
+  it('never follows a link out of the project', async () => {
+    await put(join(root, 'elsewhere', 'SKILL.md'), 'not this project');
+    await mkdir(join(project, '.claude', 'skills'), { recursive: true });
+    await linkFolder(join(root, 'elsewhere'), join(project, '.claude', 'skills', 'x'));
+    expect(paths(await collect()).filter((path) => path.includes('skills'))).toEqual([]);
+  });
+
+  it('follows a link that stays inside the project', async () => {
+    await put(join(project, 'shared', 'review', 'SKILL.md'), 'review');
+    await mkdir(join(project, '.claude', 'skills'), { recursive: true });
+    await linkFolder(
+      join(project, 'shared', 'review'),
+      join(project, '.claude', 'skills', 'review'),
+    );
+    expect(text(await collect(), '.claude/skills/review/SKILL.md')).toBe('review');
+  });
+
+  it('leaves out a file larger than 10 MB', async () => {
+    await put(
+      join(project, '.claude', 'skills', 'big', 'data.bin'),
+      'x'.repeat(10 * 1024 * 1024 + 1),
+    );
+    await put(join(project, '.claude', 'skills', 'big', 'SKILL.md'), 'small');
+    const skipped: string[] = [];
+    const found = await createClaudeCodeProjectCollector(options()).collect(
+      { kind: 'project', projectDir: project },
+      { includeMemory: false, onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`) },
+    );
+    expect(paths(found)).toContain('.claude/skills/big/SKILL.md');
+    expect(skipped).toEqual(['.claude/skills/big/data.bin: it is larger than 10 MB']);
   });
 });
 

@@ -298,6 +298,19 @@ describe('restorer: existing files', () => {
     expect(report.backups).toEqual([`CLAUDE.md.agentnomad-backup-${STAMP}`]);
   });
 
+  it('never replaces an earlier backup made in the same second (T45)', async () => {
+    await put(join(base, 'CLAUDE.md'), 'first');
+    await put(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`), 'older backup');
+    const report = await restorer().restorer.restore(
+      { kind: 'global' },
+      [file('CLAUDE.md', 'second')],
+      answer('overwrite').resolve,
+    );
+    expect(report.backups).toEqual([`CLAUDE.md.agentnomad-backup-${STAMP}-2`]);
+    expect(await read(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('older backup');
+    expect(await read(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}-2`))).toBe('first');
+  });
+
   it('merge combines JSON keys, the pulled values winning', async () => {
     await put(join(base, 'settings.json'), JSON.stringify({ theme: 'light', model: 'opus' }));
     await restorer().restorer.restore(
