@@ -7,6 +7,13 @@ export const AUTH_KEY_BYTES = 32;
 export const WRAPPED_DATA_KEY_BYTES = 72;
 /** Largest encrypted project name accepted (nonce + up to 400 bytes of name + tag). */
 export const MAX_NAME_ENC_BYTES = 512;
+/**
+ * The message of the 401 that DELETE /account sends for a wrong password, so the CLI can
+ * tell it from an ended session (T46). Part of the API: 1.0 CLIs know only the `unauthorized`
+ * code, so a new code would break them.
+ */
+export const WRONG_PASSWORD_MESSAGE = 'Wrong password';
+
 /** Largest encrypted bundle accepted by PUT /bundles. */
 export const MAX_BUNDLE_BYTES = 5 * 1024 * 1024;
 

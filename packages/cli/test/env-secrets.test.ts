@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -198,6 +198,37 @@ describe('writing the profile', () => {
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it('never replaces a profile it cannot read (T46)', async () => {
+    const profile = join(dir, '.bashrc');
+    await mkdir(profile);
+    await expect(
+      createShellProfileWriter({ path: profile, kind: 'posix', label: '~/.bashrc' }).write({
+        TOKEN: 'abc',
+      }),
+    ).rejects.toThrow();
+  });
+
+  it.runIf(posix)('writes through a linked profile, keeping the link (T46)', async () => {
+    const real = join(dir, 'dotfiles', 'bashrc');
+    await mkdir(join(dir, 'dotfiles'));
+    await writeFile(real, 'alias ll="ls -l"\n');
+    const profile = join(dir, '.bashrc');
+    await symlink(real, profile);
+    await createShellProfileWriter({ path: profile, kind: 'posix', label: '~/.bashrc' }).write({
+      TOKEN: 'abc',
+    });
+    expect((await lstat(profile)).isSymbolicLink()).toBe(true);
+    expect(await readFile(real, 'utf8')).toContain("export TOKEN='abc'");
+  });
+
+  it.runIf(posix)('a new profile is readable only by this user (T46)', async () => {
+    const profile = join(dir, '.profile');
+    await createShellProfileWriter({ path: profile, kind: 'posix', label: '~/.profile' }).write({
+      TOKEN: 'abc',
+    });
+    expect((await stat(profile)).mode & 0o777).toBe(0o600);
   });
 
   it('backs the profile up before changing it', async () => {
