@@ -444,7 +444,9 @@ the e2e steps with the installed `agentnomad` command. Actions are pinned by com
 
 **The npm package.** `packages/cli/scripts/build-release.ts` bundles our own code (cli,
 core, contracts) into one readable file with esbuild and writes `packages/cli/release/`:
-that file, a `package.json` naming every library as a normal dependency, the README and
+that file, a `package.json` naming every library as a normal dependency, an
+`npm-shrinkwrap.json` fixing every indirect version too (so users install the tree the release
+tested), the README and
 the license. The build fails if anything but our own source is bundled or a library is
 not declared. **Releases:** pushing a tag `vX.Y.Z` on `main` runs
 `.github/workflows/release.yml`: build and test on every OS, install and run the packed
