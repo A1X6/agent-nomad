@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { createSecretStore } from '@agentnomad/cli';
+
 /**
  * The CLI to run: the workspace build (`pnpm test:e2e` builds it first), or, with
  * `E2E_CLI`, another entry file, such as the npm package installed globally (T40).
@@ -43,6 +45,8 @@ export interface Pc {
   readonly project: string;
   /** Runs `agentnomad <args>` here with no terminal; `input` is piped to stdin. */
   run(args: readonly string[], input?: string): Promise<RunResult>;
+  /** A secret the CLI keeps on this PC after login, as it stores it (T48: leak check). */
+  secret(name: 'session-token' | 'data-key'): Promise<string | null>;
   remove(): Promise<void>;
 }
 
@@ -96,6 +100,21 @@ export async function newPc(
         });
         child.stdin.end(input);
       }),
+    secret: async (name) => {
+      const store = await createSecretStore({
+        server: new URL(options.apiUrl).host,
+        platform: process.platform,
+        homedir: home,
+        env: { APPDATA: join(root, 'appdata') },
+        // Where the CLI ran without the keychain, it kept its login in the file.
+        ...(!options.keychain && {
+          keychain: () => {
+            throw new Error('no keychain in this test');
+          },
+        }),
+      });
+      return store.get(name);
+    },
     remove: () => rm(root, { recursive: true, force: true }),
   };
 }
