@@ -312,6 +312,7 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
         prompter,
         reporter,
         assumeYes: options.yes,
+        allowCommands: options.allowCommands === true,
       });
     }
   }

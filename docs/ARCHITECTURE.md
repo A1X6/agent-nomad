@@ -314,9 +314,20 @@ file while open) and read again once Claude Code is closed. Auto memory is Markd
 a folder chosen by the project's `autoMemoryDirectory` is used only inside the home folder
 and outside refused folders (`auto-memory.ts`).
 
-**Review of runnable things** (`command-review.ts`): hooks, the status line, MCP servers
-and the scripts they run that are new or changed compared with this PC are listed before
-anything is written.
+**Review of runnable things** (`command-review.ts`): everything Claude Code's docs say it
+runs, when new or changed compared with this PC, is listed before anything is written: hooks
+(commands, and `http` hooks that send data to an address), the status line, settings that
+run a command (`apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`, `gcpAuthRefresh`,
+`otelHeadersHelper`, `fileSuggestion`), loader variables in a settings `env` block
+(`NODE_OPTIONS`, `LD_PRELOAD`, …), `bypassPermissions` in global settings and
+`enableAllProjectMcpServers`, MCP servers (the whole definition is compared, so a new `env`
+or `headersHelper` shows), scripts that commands here or in the bundle run and the scripts
+next to them, known tool settings (ccstatusline), and skill, command and subagent files with
+commands that run by themselves (`runnable-markdown.ts`: a `` !`command` `` placeholder, a
+` ```! ` block, frontmatter `hooks`). Commands written as instructions are never flagged.
+Declining skips the files that hold them. Saved environment values that make programs load
+code need their own yes, and `--yes` alone never adds them. Everything printed from a bundle
+or the server goes through `printable`, so escape sequences are shown, never acted on.
 
 **claude.ai skills (T42, opt-in):** Claude Code downloads the skills of the user's claude.ai
 account into `skills/synced/<account>/` and manages that folder; agentnomad never writes

@@ -40,8 +40,11 @@ new PC, and shows you anything that would run programs before writing it.
   flagged.
 - **Safe restores.** Identical files are left alone; different ones are merged, overwritten
   with a backup, or skipped: you choose, per file or for all. Pull never deletes files.
-- **Nothing runs unseen.** New or changed hooks, status line commands, MCP servers and the
-  scripts they run are listed and confirmed before they are written.
+- **Nothing runs unseen.** Everything new or changed that Claude Code would run is listed and
+  confirmed before it is written: hooks, the status line, MCP servers, settings that run a
+  command (such as `apiKeyHelper`), the scripts they run, and skills, commands or subagents
+  with commands that run by themselves. Commands written in a skill as instructions are never
+  flagged.
 - **Plugins reinstalled, not copied,** with Claude Code's own `claude plugin` commands.
 - **Opt-in memory and secrets.** Include Claude's memory, and save environment variable
   values (such as API keys for MCP servers) inside the encrypted setup.
@@ -109,17 +112,17 @@ Run `agentnomad <command> --help` for every option.
 
 ### Flags
 
-| Flag                                       | Commands                                            | Meaning                                                                                                                   |
-| ------------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `--agent <ids>`                            | push, pull, status, delete                          | Agents to use, comma-separated (e.g. `claude-code`).                                                                      |
-| `--global`                                 | push, pull, status, delete                          | The global setup (`~/.claude`).                                                                                           |
-| `--project <name>`                         | push, pull, status, delete                          | A project setup, by the name it was saved under.                                                                          |
-| `--memory` / `--no-memory`                 | push                                                | Include Claude's memory, or not.                                                                                          |
-| `--account-skills` / `--no-account-skills` | push, pull                                          | Push: save a copy of your own claude.ai skills. Pull: add them as local skills (for a PC without that claude.ai account). |
-| `--merge` / `--overwrite`                  | pull                                                | One answer for every existing file (overwrite keeps a backup).                                                            |
-| `--allow-commands`                         | pull                                                | Accept new hooks, MCP servers and scripts, and install plugins and programs, without asking. Only for setups you trust.   |
-| `-y`, `--yes`                              | push, pull, delete, register, login, account delete | Accept the safe defaults instead of asking. It never accepts new commands or installs.                                    |
-| `--username <name>`, `--password-stdin`    | register, login, account delete                     | Log in from a script; the password is read from standard input.                                                           |
+| Flag                                       | Commands                                            | Meaning                                                                                                                                          |
+| ------------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--agent <ids>`                            | push, pull, status, delete                          | Agents to use, comma-separated (e.g. `claude-code`).                                                                                             |
+| `--global`                                 | push, pull, status, delete                          | The global setup (`~/.claude`).                                                                                                                  |
+| `--project <name>`                         | push, pull, status, delete                          | A project setup, by the name it was saved under.                                                                                                 |
+| `--memory` / `--no-memory`                 | push                                                | Include Claude's memory, or not.                                                                                                                 |
+| `--account-skills` / `--no-account-skills` | push, pull                                          | Push: save a copy of your own claude.ai skills. Pull: add them as local skills (for a PC without that claude.ai account).                        |
+| `--merge` / `--overwrite`                  | pull                                                | One answer for every existing file (overwrite keeps a backup).                                                                                   |
+| `--allow-commands`                         | pull                                                | Accept new hooks, MCP servers, scripts and anything else that runs, and install plugins and programs, without asking. Only for setups you trust. |
+| `-y`, `--yes`                              | push, pull, delete, register, login, account delete | Accept the safe defaults instead of asking. It never accepts new commands or installs.                                                           |
+| `--username <name>`, `--password-stdin`    | register, login, account delete                     | Log in from a script; the password is read from standard input.                                                                                  |
 
 ### From scripts and CI
 
