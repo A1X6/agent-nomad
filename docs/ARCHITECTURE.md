@@ -216,13 +216,18 @@ sequenceDiagram
    offered as a project.
 3. Choose whether to include memory (`--memory` / `--no-memory`).
 4. Show organization-managed settings and files the adapter does not know yet.
-5. The adapter **collects** the files; the user may add saved environment values.
+5. The adapter **collects** the files; the user may add saved environment values. Links
+   into folders for keys, links out of a project and files over 10 MB are left out, and push
+   says so. Every setup is collected and every question asked before the first upload.
 6. Paths are made portable, the bundle is built, compressed and **encrypted for the exact
    revision it will become** (the one this PC last knew, plus one).
 7. Upload with that expected revision. If another PC saved a newer copy, the server refuses
    (`revision_conflict`): the user is asked whether to replace it (with `--yes`: never), and
    a replacement is encrypted again for the new revision.
 8. Remember the new revision for this PC.
+
+If this PC's last pull of a setup left out commands the user declined, pushing it would drop
+them for every PC: push asks first, and `--yes` skips it with a note.
 
 ### Pull
 
@@ -391,11 +396,11 @@ strings. There are no CORS headers and no cookies.
 
 ## 9. What the CLI keeps on a PC
 
-| What                         | Where                                                                                                                                 | Why                                                                                                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session token and data key   | OS keychain: Windows Credential Manager, macOS Keychain, Linux Secret Service. Service `agentnomad`, account `<secret>@<server host>` | So later commands work without the password; one entry per server                                                                                          |
-| The same, without a keychain | `%APPDATA%\agentnomad\secrets.json` or `~/.config/agentnomad/secrets.json`, readable only by the user (600 in a 700 folder)           | Servers, WSL, SSH sessions; the CLI says when it is used                                                                                                   |
-| Local state                  | `state.json` in the same folder                                                                                                       | Which name each project folder was saved under, and the last revision this PC pushed or pulled of each setup (for conflicts, `status` and rollback checks) |
+| What                         | Where                                                                                                                                                             | Why                                                                                                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session token and data key   | OS keychain: Windows Credential Manager, macOS Keychain, Linux Secret Service. Service `agentnomad`, account `<secret>@<server host>`                             | So later commands work without the password; one entry per server                                                                                          |
+| The same, without a keychain | `%APPDATA%\agentnomad\secrets.json` or `~/.config/agentnomad/secrets.json`, readable only by the user (600 in a 700 folder; on Windows an ACL for this user only) | Servers, WSL, SSH sessions; the CLI says when it is used. A login saved there while the keychain failed is moved into it once it works again               |
+| Local state                  | `state.json` in the same folder                                                                                                                                   | Which name each project folder was saved under, and the last revision this PC pushed or pulled of each setup (for conflicts, `status` and rollback checks) |
 
 `AGENTNOMAD_API_URL` points the CLI at another server (https, or http for localhost).
 
@@ -403,7 +408,9 @@ strings. There are no CORS headers and no cookies.
 
 When stdin or stdout is not a terminal, the CLI swaps its prompter for one that never asks:
 any question the flags leave open stops the command with exit code 1 and names the flags to
-add. Every command can be scripted:
+add. Push and pull look for such questions before they change anything: pull downloads and
+reviews every setup and checks for files that differ and missing environment values first;
+push collects every setup and compares revisions with the server first. Every command can be scripted:
 
 ```sh
 echo "$PASSWORD" | agentnomad login --username me --password-stdin
