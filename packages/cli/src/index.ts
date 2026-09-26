@@ -1,4 +1,5 @@
 export * from './agents/adapter.ts';
+export * from './agents/claude-code/account-skills.ts';
 export * from './agents/agents-command.ts';
 export * from './agents/claude-code/after-restore.ts';
 export * from './agents/claude-code/auto-memory.ts';

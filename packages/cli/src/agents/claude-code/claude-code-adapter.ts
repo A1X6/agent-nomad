@@ -1,6 +1,8 @@
 import type { AgentAdapter, Collector } from '../adapter.ts';
+import { readSyncedSkills } from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
 import { claudeConfigDir, createClaudeCodeDetector, nodeDetectorSystem } from './detector.ts';
+import { createFileGatherer } from './file-gathering.ts';
 import { createClaudeCodeGlobalCollector } from './global-collector.ts';
 import {
   detectManagedSettings,
@@ -44,19 +46,21 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       (target.kind === 'global' ? global : project).collect(target, collectOptions),
   };
 
+  const restorer = createClaudeCodeRestorer({
+    ...shared,
+    env: options.env,
+    customConfigDir,
+    isClaudeRunning: options.isClaudeRunning ?? createClaudeRunningCheck(),
+    onClaudeRunning: options.onClaudeRunning,
+  });
+
   return {
     id: 'claude-code',
     displayName: 'Claude Code',
     detector: createClaudeCodeDetector(system),
     collector,
-    restorer: createClaudeCodeRestorer({
-      ...shared,
-      env: options.env,
-      customConfigDir,
-      isClaudeRunning: options.isClaudeRunning ?? createClaudeRunningCheck(),
-      onClaudeRunning: options.onClaudeRunning,
-    }),
-    afterRestore: createClaudeCodeAfterRestore({ system }),
+    restorer,
+    afterRestore: createClaudeCodeAfterRestore({ system, restorer }),
     inspector: {
       unknownEntries: (target) =>
         findUnknownEntries(target, { baseDir, platform: options.platform }),
@@ -66,6 +70,10 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
         );
         const notice = managedSettingsNotice(found, command);
         return notice === null ? [] : [notice];
+      },
+      async accountSkills() {
+        const synced = await readSyncedSkills(createFileGatherer(options.platform), baseDir);
+        return { names: synced.own.map((skill) => skill.name), problem: synced.problem };
       },
     },
   };

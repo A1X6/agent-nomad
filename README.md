@@ -45,6 +45,8 @@ new PC, and shows you anything that would run programs before writing it.
 - **Plugins reinstalled, not copied,** with Claude Code's own `claude plugin` commands.
 - **Opt-in memory and secrets.** Include Claude's memory, and save environment variable
   values (such as API keys for MCP servers) inside the encrypted setup.
+- **Your claude.ai skills too (opt-in).** Save a copy of the skills you made on claude.ai and
+  add them as local skills on a PC that uses another claude.ai account, or none.
 - **Scriptable.** Every command runs from a script or CI with flags and clear exit codes.
 
 ## Install
@@ -107,16 +109,17 @@ Run `agentnomad <command> --help` for every option.
 
 ### Flags
 
-| Flag                                    | Commands                                            | Meaning                                                                                                                 |
-| --------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `--agent <ids>`                         | push, pull, status, delete                          | Agents to use, comma-separated (e.g. `claude-code`).                                                                    |
-| `--global`                              | push, pull, status, delete                          | The global setup (`~/.claude`).                                                                                         |
-| `--project <name>`                      | push, pull, status, delete                          | A project setup, by the name it was saved under.                                                                        |
-| `--memory` / `--no-memory`              | push                                                | Include Claude's memory, or not.                                                                                        |
-| `--merge` / `--overwrite`               | pull                                                | One answer for every existing file (overwrite keeps a backup).                                                          |
-| `--allow-commands`                      | pull                                                | Accept new hooks, MCP servers and scripts, and install plugins and programs, without asking. Only for setups you trust. |
-| `-y`, `--yes`                           | push, pull, delete, register, login, account delete | Accept the safe defaults instead of asking. It never accepts new commands or installs.                                  |
-| `--username <name>`, `--password-stdin` | register, login, account delete                     | Log in from a script; the password is read from standard input.                                                         |
+| Flag                                       | Commands                                            | Meaning                                                                                                                   |
+| ------------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `--agent <ids>`                            | push, pull, status, delete                          | Agents to use, comma-separated (e.g. `claude-code`).                                                                      |
+| `--global`                                 | push, pull, status, delete                          | The global setup (`~/.claude`).                                                                                           |
+| `--project <name>`                         | push, pull, status, delete                          | A project setup, by the name it was saved under.                                                                          |
+| `--memory` / `--no-memory`                 | push                                                | Include Claude's memory, or not.                                                                                          |
+| `--account-skills` / `--no-account-skills` | push, pull                                          | Push: save a copy of your own claude.ai skills. Pull: add them as local skills (for a PC without that claude.ai account). |
+| `--merge` / `--overwrite`                  | pull                                                | One answer for every existing file (overwrite keeps a backup).                                                            |
+| `--allow-commands`                         | pull                                                | Accept new hooks, MCP servers and scripts, and install plugins and programs, without asking. Only for setups you trust.   |
+| `-y`, `--yes`                              | push, pull, delete, register, login, account delete | Accept the safe defaults instead of asking. It never accepts new commands or installs.                                    |
+| `--username <name>`, `--password-stdin`    | register, login, account delete                     | Log in from a script; the password is read from standard input.                                                           |
 
 ### From scripts and CI
 
@@ -138,7 +141,7 @@ Exit codes: `0` done, `1` failed (or an answer was needed), `130` cancelled.
 | **`~/.claude.json`**     | Your MCP servers and documented preferences, merged in                                                                                                                           | Your login, project list, usage and onboarding state                                                                                 |
 | **Plugins**              | Which plugins and marketplaces you use (reinstalled on the other PC)                                                                                                             | Plugin files and caches                                                                                                              |
 | **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings and folders, scripts the project's hooks run                                   | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
-| **Opt-in**               | Memory (subagent and auto memory), environment variable values                                                                                                                   |                                                                                                                                      |
+| **Opt-in**               | Memory (subagent and auto memory), environment variable values, a copy of your own claude.ai skills (`--account-skills`; never Anthropic's or your organization's)               |                                                                                                                                      |
 
 Settings your organization manages on a PC are never synced; agentnomad tells you when they
 exist.

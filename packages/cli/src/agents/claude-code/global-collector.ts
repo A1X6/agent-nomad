@@ -23,6 +23,7 @@ import {
   PROGRAMS_BUNDLE_PATH,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
+import { collectAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import type { ProgramInfo, ProgramLocator } from './programs.ts';
@@ -163,6 +164,11 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         scope: { kind: 'global' },
       });
       if (plugins) found.push(jsonFile(PLUGINS_BUNDLE_PATH, plugins));
+
+      // Opt-in (T42): a copy of the user's own claude.ai skills, never skills/synced itself.
+      if (collectOptions.includeAccountSkills) {
+        found.push(...(await collectAccountSkills(files, await readSyncedSkills(files, baseDir))));
+      }
 
       // A hook may name a file already in a synced folder.
       return uniqueByPath(found);

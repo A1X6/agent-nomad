@@ -19,6 +19,9 @@ const SKILL = '---\nname: deploy\ndescription: Deploy the app\n---\nRun the depl
 const REVIEW_SKILL = '---\nname: review\ndescription: Review a change\n---\nRead the diff.\n';
 const MEMORY = '# Memory\n- The demo app uses port 5173.\n';
 const EDIT = 'Edited on the second PC.\n';
+/** A skill from the user's claude.ai account, as Claude Code syncs it (T42). */
+const ACCOUNT_SKILL =
+  '---\nname: my-account-skill\ndescription: From claude.ai\n---\nWrite release notes.\n';
 
 export interface StepContext {
   readonly server: LocalServer;
@@ -60,6 +63,7 @@ function expectNothingReadable(server: LocalServer): void {
     'echo ok',
     EDIT.trim(),
     'Old notes on the third PC',
+    'Write release notes.',
     'first@example.com',
     'second@example.com',
     'demo',
@@ -147,6 +151,19 @@ export async function firstPc({ server, keychain }: StepContext): Promise<void> 
       JSON.stringify({ mcpServers: { db: { command: 'node', args: ['db.js'] } } }),
     );
     await write(memoryFile(pc), MEMORY);
+    // Skills Claude Code synced from claude.ai (T42): the user's own and one of Anthropic's.
+    const synced = (...parts: string[]) => claude(pc, 'skills', 'synced', 'account-1', ...parts);
+    await write(
+      synced('manifest.json'),
+      JSON.stringify({
+        skills: [
+          { name: 'my-account-skill', creatorType: 'user' },
+          { name: 'pdf', creatorType: 'anthropic' },
+        ],
+      }),
+    );
+    await write(synced('my-account-skill', 'SKILL.md'), ACCOUNT_SKILL);
+    await write(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic.\n');
 
     ok(await pc.run(['register', ...LOGIN, '--yes'], stdin));
 
@@ -157,7 +174,17 @@ export async function firstPc({ server, keychain }: StepContext): Promise<void> 
     expect(unanswered.stderr).toContain('--global or --project <name>');
     expect(await server.count('bundles')).toBe(0);
 
-    const pushed = ok(await pc.run(['push', '--global', '--project', 'demo', '--memory', '--yes']));
+    const pushed = ok(
+      await pc.run([
+        'push',
+        '--global',
+        '--project',
+        'demo',
+        '--memory',
+        '--account-skills',
+        '--yes',
+      ]),
+    );
     expect(pushed.stdout).toContain('Saved the Claude Code global setup');
     expect(pushed.stdout).toContain('Saved the Claude Code project "demo"');
 
@@ -206,11 +233,18 @@ export async function secondPc({ server, keychain }: StepContext): Promise<void>
         '--merge',
         '--yes',
         '--allow-commands',
+        '--account-skills',
       ]),
     );
     expect(pulled.stdout).toContain('Restored the Claude Code global setup');
     expect(pulled.stdout).toContain('Restored the Claude Code project "demo"');
     await expectRestored(pc, false);
+    // T42: the user's own claude.ai skill is a local skill here; Anthropic's never came along.
+    expect(await read(claude(pc, 'skills', 'my-account-skill', 'SKILL.md'))).toBe(ACCOUNT_SKILL);
+    await expect(read(claude(pc, 'skills', 'pdf', 'SKILL.md'))).rejects.toThrow();
+    await expect(
+      read(claude(pc, 'skills', 'synced', 'account-1', 'manifest.json')),
+    ).rejects.toThrow();
     // --merge: incoming keys win, this PC's other keys stay.
     expect(settingsOf(await read(claude(pc, 'settings.json')))).toMatchObject({ model: 'opus' });
     const claudeJson = JSON.parse(await read(join(pc.home, '.claude.json'))) as Record<

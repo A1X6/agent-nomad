@@ -31,6 +31,11 @@ export interface CollectedFile {
 export interface CollectOptions {
   /** Include opt-in memory folders (subagent and auto memory). */
   readonly includeMemory: boolean;
+  /**
+   * Include a copy of the user's own skills that the agent's online account syncs to this PC
+   * (T42: Claude Code's claude.ai skills). Opt-in; global setup only.
+   */
+  readonly includeAccountSkills?: boolean;
 }
 
 /** Which files belong to a setup. Never collects credentials or machine state (T25, T26). */
@@ -89,6 +94,11 @@ export interface AgentInspector {
   unknownEntries(target: ScopeTarget): Promise<readonly string[]>;
   /** Things to point out before push or pull, e.g. organization-managed settings. */
   notices(command: 'push' | 'pull'): Promise<readonly string[]>;
+  /**
+   * The user's own skills the agent's online account syncs to this PC, which push can save
+   * a copy of (T42), or why they cannot be read.
+   */
+  accountSkills?(): Promise<{ readonly names: readonly string[]; readonly problem: string | null }>;
 }
 
 /** What an agent's follow-up after a restore gets (T34), e.g. to reinstall plugins. */
@@ -105,6 +115,11 @@ export interface AfterRestoreContext {
    * asking. Without it, `--yes` skips those with a note (T38).
    */
   readonly allowCommands: boolean;
+  /**
+   * `--account-skills` / `--no-account-skills`: add saved account skills as local skills, or
+   * not, without asking (T42). `undefined` asks (`--yes` alone: no).
+   */
+  readonly accountSkills?: boolean;
 }
 
 /**

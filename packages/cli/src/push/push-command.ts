@@ -259,6 +259,31 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
               false,
             ));
 
+      // T42: a copy of the user's own claude.ai skills, for PCs without that account. Only
+      // asked when there are some, and only for the global setup.
+      const pushesGlobal = items.some((item) => item.scope.kind === 'global');
+      let includeAccountSkills = false;
+      if (pushesGlobal && options.accountSkills !== false) {
+        const names: string[] = [];
+        for (const { adapter } of agents) {
+          const found = await adapter.inspector?.accountSkills?.();
+          if (found?.problem)
+            reporter.warn(`${found.problem} Your claude.ai skills were not saved.`);
+          names.push(...(found?.names ?? []));
+        }
+        if (names.length > 0) {
+          includeAccountSkills =
+            options.accountSkills ??
+            (!options.yes &&
+              (await prompter.confirm(
+                `Also save a copy of your ${String(names.length)} claude.ai skill${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account.`,
+                false,
+              )));
+        } else if (options.accountSkills === true) {
+          reporter.info('No claude.ai skills of your own were found on this PC.');
+        }
+      }
+
       const shown = new Set<string>();
       for (const { adapter } of agents) {
         for (const notice of (await adapter.inspector?.notices('push')) ?? []) {
@@ -272,7 +297,10 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
       try {
         for (const item of items) {
           const collected: CollectedFile[] = [
-            ...(await item.adapter.collector.collect(item.target, { includeMemory })),
+            ...(await item.adapter.collector.collect(item.target, {
+              includeMemory,
+              includeAccountSkills: includeAccountSkills && item.scope.kind === 'global',
+            })),
           ];
           const unknown = unknownEntriesNotice(
             (await item.adapter.inspector?.unknownEntries(item.target)) ?? [],
