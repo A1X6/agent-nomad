@@ -49,6 +49,25 @@ export const SCRIPT_EXTENSIONS: ReadonlySet<string> = new Set(DATA.scriptExtensi
 /** Home folders never read for hook scripts, whatever a command names: keys and cloud logins. */
 export const SENSITIVE_HOME_DIRS: readonly string[] = DATA.sensitiveHomeDirs;
 
+/** Home folders the OS or a shell runs files from by itself (T43). */
+export const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
+
+/**
+ * Why a path from the home folder (`/`-separated) must never be read or written for a
+ * setup, or `null`: a folder for keys and logins, or one whose files run by themselves.
+ * Compared without case, since Windows and macOS ignore it.
+ */
+export function homePathProblem(relative: string): string | null {
+  const lower = relative.toLowerCase();
+  const within = (dir: string) => {
+    const folder = dir.toLowerCase();
+    return lower === folder || lower.startsWith(`${folder}/`) || lower.includes(`/${folder}/`);
+  };
+  if (SENSITIVE_HOME_DIRS.some(within)) return 'a folder for keys and logins';
+  if (AUTOSTART_HOME_DIRS.some(within)) return 'a folder whose files run by themselves';
+  return null;
+}
+
 /** Marketplaces and plugins to reinstall on pull (T29). */
 export const PLUGINS_BUNDLE_PATH = `${RESERVED_DIR}/plugins.json`;
 

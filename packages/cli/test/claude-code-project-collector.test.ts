@@ -214,6 +214,32 @@ describe('auto memory location', () => {
     expect(text(await collect(true), '.agentnomad/auto-memory/MEMORY.md')).toBe('custom');
   });
 
+  it('takes only Markdown files from auto memory (T43)', async () => {
+    await put(
+      join(project, '.claude', 'settings.local.json'),
+      JSON.stringify({ autoMemoryDirectory: '~/notes/my-app-memory' }),
+    );
+    await put(join(home, 'notes', 'my-app-memory', 'MEMORY.md'), 'notes');
+    await put(join(home, 'notes', 'my-app-memory', 'run.sh'), 'echo hi');
+    expect(paths(await collect(true)).filter((path) => path.includes('auto-memory'))).toEqual([
+      '.agentnomad/auto-memory/MEMORY.md',
+    ]);
+  });
+
+  it('never reads a memory folder that is a folder for keys (T43)', async () => {
+    await put(
+      join(project, '.claude', 'settings.json'),
+      JSON.stringify({ autoMemoryDirectory: '~/.ssh' }),
+    );
+    await put(join(home, '.ssh', 'notes.md'), 'secret');
+    expect(await findAutoMemory({ ...options(), projectDir: project })).toEqual({
+      kind: 'refused',
+      dir: join(home, '.ssh'),
+      reason: 'it is a folder for keys and logins',
+    });
+    expect(paths(await collect(true))).toEqual(['.claude/settings.json']);
+  });
+
   it('skips a memory folder set in user settings, since every project shares it', async () => {
     await put(join(base, 'settings.json'), JSON.stringify({ autoMemoryDirectory: '~/all-memory' }));
     await put(join(home, 'all-memory', 'MEMORY.md'), 'shared');
