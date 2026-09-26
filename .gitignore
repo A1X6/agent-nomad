@@ -12,3 +12,6 @@ Thumbs.db
 # The npm package built by packages/cli/scripts/build-release.ts (T40)
 packages/cli/release/
 *.tgz
+
+# Launch video and marketing images made with the brag skill (not part of the project)
+/brag-output/
