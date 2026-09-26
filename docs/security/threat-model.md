@@ -104,6 +104,7 @@ Found in the 2026-09-26 code review of 1.0.2 (T43–T48), each checked against t
 | 31  | Medium   | The e2e leak check could not see compressed or hex data, and never looked for the data key, the home folder or the session token.                                          | It inflates bodies and base64 fields, adds hex and escaped forms, and looks for the data key, home and token (T48).                            |
 | 32  | Low      | Release checks ran on Node 24 only and did not require CI to have passed; npm was upgraded to any 11.x in the publishing job; checkouts left the token in `.git/config`.   | Release verifies on Node 22.13 and 24 after a successful CI run; npm is pinned; `persist-credentials: false` everywhere (T48).                 |
 | 33  | Info     | The drift report took the version from a second registry lookup and copied changelog text as is.                                                                           | The installed version is used; @mentions and images are made inert; the run link is passed (T48).                                              |
+| 34  | Low      | Push reported a folder such as `hooks/` as "not saved" even though the scripts the hooks run in it were saved.                                                             | Folders holding a script the global hooks or status line run are not reported; e2e checks a normal push has no such warning (T49).             |
 
 ## Accepted risks
 

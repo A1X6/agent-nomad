@@ -351,7 +351,8 @@ own question; programs that hooks start and npm installed are offered with
 `npm install -g name@version`.
 
 **Keeping up with Claude Code:** files Claude Code adds that the data file does not know
-are reported on push; the Claude Code version is stamped in every bundle; and a weekly
+are reported on push (a folder holding a script the hooks or status line run is not: push saves
+that script); the Claude Code version is stamped in every bundle; and a weekly
 drift check (`.github/workflows/drift-check.yml`) compares the data file with the newest
 Claude Code. It reads the official
 [.claude directory docs](https://code.claude.com/docs/en/claude-directory), runs a fresh
