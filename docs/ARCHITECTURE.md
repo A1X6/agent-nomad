@@ -389,10 +389,17 @@ pseudonyms). Keeping bytes apart from metadata means `list` never reads cipherte
 upload is stored first, then the revision check switches the pointer, then the old file is
 deleted, so two PCs saving at once can never overwrite or delete each other's file.
 
-**Limits and logs:** 30 auth requests per minute per IP, 5 registrations per hour per IP,
-10 failed logins or account deletes per account per 15 minutes; `429` with `Retry-After`.
-Logs are one JSON line per request with a request id, never headers, bodies or query
-strings. There are no CORS headers and no cookies.
+**Limits and logs:** 30 auth requests per minute per IP, 5 registrations per hour per IP
+(an IPv6 address counts by its /64), 10 failed logins per account and 10 wrong-password
+account deletes per account per 15 minutes (counted before the check, so parallel guesses
+cannot slip past), 120 saves and deletes per account per hour; `429` with `Retry-After`.
+Each account keeps at most 100 setups and 50 MB of encrypted bytes (checked before storing
+anything and again inside the save's transaction, with the user row locked); over it,
+`413 payload_too_large` says which limit. The visitor's IP is Cloudflare's
+`CF-Connecting-IP` (`True-Client-IP` when that is missing). About one save in 50 also deletes
+files no setup points to that are over an hour old. Logs are one JSON line per request with
+a request id, never headers, bodies or query strings; a failed query logs its SQL text, never
+its parameters. There are no CORS headers and no cookies.
 
 ## 9. What the CLI keeps on a PC
 
