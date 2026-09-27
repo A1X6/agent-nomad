@@ -4,16 +4,18 @@
 [![CI](https://github.com/A1X6/agent-nomad/actions/workflows/ci.yml/badge.svg)](https://github.com/A1X6/agent-nomad/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**Take your AI coding agent's setup to any PC, encrypted.** Save your Claude Code setup
-(settings, instructions, skills, subagents, commands, hooks, MCP servers, plugins) from one
-machine and restore it on another in one command, on macOS, Linux and Windows. It is
-encrypted on your PC first: the server can never read it.
+**Move your Claude Code setup to a new PC with one command.** Save your settings,
+instructions, skills, subagents, commands, hooks, MCP servers and plugins from one machine
+and restore them on another, on macOS, Linux and Windows. It is encrypted on your PC first:
+the server can never read it.
 
 <p align="center">
   <img src="docs/images/demo.gif" alt="agentnomad push on a Mac, the encrypted setup the server stores, and agentnomad pull on Windows with the home paths rewritten" width="800">
 </p>
 
 ```sh
+npm install -g agentnomad   # needs Node.js 22.13 or newer
+
 # On your laptop
 agentnomad register
 agentnomad push
@@ -24,6 +26,10 @@ agentnomad pull
 ```
 
 > **Status:** 1.0 supports Claude Code. More agents are next: see the [roadmap](#roadmap).
+
+> **Feedback welcome!** Tried it? Tell me what broke or what you missed in
+> [Issues](https://github.com/A1X6/agent-nomad/issues/new/choose), or ask and share ideas in
+> [Discussions](https://github.com/A1X6/agent-nomad/discussions).
 
 ## See it work
 
@@ -211,8 +217,9 @@ The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Contributing
 
-Issues and pull requests are welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md). Please
-report security issues privately, as described in [SECURITY.md](SECURITY.md).
+Issues and pull requests are welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md).
+Questions and ideas are welcome in [Discussions](https://github.com/A1X6/agent-nomad/discussions).
+Please report security issues privately, as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
