@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest an idea or a new agent to support
+labels: ['enhancement']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: What were you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Which agent is this about?
+      placeholder: Claude Code, Codex CLI, Gemini CLI, Cursor, ...
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything else? (alternatives, examples, links)

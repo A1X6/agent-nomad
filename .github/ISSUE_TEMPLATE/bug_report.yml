@@ -1,0 +1,61 @@
+name: Bug report
+description: Something did not work as expected
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Security problems:** please do not open an issue, use
+        [Report a vulnerability](https://github.com/A1X6/agent-nomad/security/advisories/new).
+        Never paste passwords, API keys or tokens here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. agentnomad push --global
+        2. On the other PC: agentnomad pull --global
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Command output
+      description: Paste the output (remove anything private first).
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: agentnomad version
+      description: Output of `agentnomad --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system(s)
+      multiple: true
+      options:
+        - macOS
+        - Linux
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`
+  - type: input
+    id: claude-code
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`
