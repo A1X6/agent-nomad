@@ -110,7 +110,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### UX-01 · Low · The "partial pull" messages blame declined commands when the cause can be something else
 
-- [ ] **Where:** `packages/cli/src/push/push-command.ts:343-352`; set at `packages/cli/src/pull/pull-command.ts:526-528`; stale comments in `packages/cli/src/state/local-state.ts:9`, `:29-31`, `:77`, `:84`; `docs/ARCHITECTURE.md:253-254`, `:533`
+- [x] **Where:** `packages/cli/src/push/push-command.ts:343-352`; set at `packages/cli/src/pull/pull-command.ts:526-528`; stale comments in `packages/cli/src/state/local-state.ts:9`, `:29-31`, `:77`, `:84`; `docs/ARCHITECTURE.md:253-254`, `:533`
 - **Problem:** Push's question, warning and skip reason all say the last pull "left out commands you declined" and advise `pull --allow-commands`. Since T46 a pull is also marked partial when a file question was left unanswered (kept files). For that case the advice does nothing.
 - **Why it matters:** The user follows the advice, pulls again with `--allow-commands` (which accepts all new commands), and push still refuses.
 - **Fix:** Say "the last pull here did not restore everything" and advise a plain `pull`; or store the reason in the partial note is not possible without changing `state.json`, so keep one wording that is true for both. Update the comments and the two doc lines. Add a push test for a partial note caused by a kept file.
@@ -128,7 +128,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### UX-03 · Low · Two plugin and managed-settings messages are less clear than their neighbours
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/plugin-sync.ts:211-216`; `packages/cli/src/agents/claude-code/managed-settings.ts:174-177`
+- [x] **Where:** `packages/cli/src/agents/claude-code/plugin-sync.ts:211-216`; `packages/cli/src/agents/claude-code/managed-settings.ts:174-177`
 - **Problem:** A failed `marketplace add` prints the raw output; a failed plugin install next to it goes through `explainFailure`, which names the organization policy. For settings managed from the claude.ai admin console, the notice names the local cache file path beside the words "the claude.ai admin console".
 - **Why it matters:** On a managed PC the user sees a raw CLI error for the marketplace and a file path they cannot edit.
 - **Fix:** Pass the marketplace failure through `explainFailure`; for the remote source show only "the claude.ai admin console". One test each.
@@ -191,7 +191,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### READ-03 · Low · The help text writes "over 5 MB" by hand
 
-- [ ] **Where:** `packages/cli/src/cli/program.ts:43`
+- [x] **Where:** `packages/cli/src/cli/program.ts:43`
 - **Problem:** The limit is `MAX_BUNDLE_BYTES` in contracts; the help text repeats it as a literal (review 4 fixed the same thing on the server).
 - **Fix:** Build the text from the constant.
 - **Effort:** S
@@ -201,7 +201,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### ARCH-01 · Low · The agent boundary lint rule does not cover the generic files in `agents/`
 
-- [ ] **Where:** `eslint.config.js:64-66`, `:83`
+- [x] **Where:** `eslint.config.js:64-66`, `:83`
 - **Problem:** The rule stops `push/`, `pull/`, `cli/` and `env/` from importing an adapter's folder. `packages/cli/src/agents/adapter.ts`, `notices.ts`, `registry.ts` and `agents-command.ts` are generic too and are not in the rule's file list.
 - **Why it matters:** An import of `./claude-code/…` in one of them would pass lint and quietly tie every agent to Claude Code. None does today.
 - **Fix:** Add `packages/cli/src/agents/*.ts` to the rule's `files`.
@@ -210,7 +210,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### ARCH-02 · Low · The `--memory` help text repeats Claude Code's description in generic code
 
-- [ ] **Where:** `packages/cli/src/cli/program.ts:176`
+- [x] **Where:** `packages/cli/src/cli/program.ts:176`
 - **Problem:** "include memory (subagent and auto memory)" is Claude Code wording; the adapter already has `memoryDescription` for this.
 - **Why it matters:** The second agent's memory is something else, and the two texts can drift.
 - **Fix:** Say "include the agent's memory" in the help, and leave the detail to the adapter's question.
