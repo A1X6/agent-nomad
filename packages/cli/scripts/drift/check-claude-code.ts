@@ -7,7 +7,6 @@
  * - DRIFT_LATEST: the newest Claude Code version (else read from the npm registry)
  * - DRIFT_FRESH_ENTRIES: a file listing, one per line, what a fresh Claude Code created
  * - DRIFT_OUT: where to write the Markdown report (else only printed)
- * - DRIFT_RUN_URL: link to the CI run, added to the report
  * - GITHUB_OUTPUT / GITHUB_STEP_SUMMARY: set by GitHub Actions
  *
  * Fails (exit 1) when a source cannot be fetched or no longer looks as expected, so a
@@ -71,7 +70,7 @@ const report = driftReport({
   latestVersion: latest,
   freshEntries: fresh,
 });
-const markdown = reportMarkdown(report, process.env['DRIFT_RUN_URL']);
+const markdown = reportMarkdown(report);
 
 console.log(markdown);
 const out = process.env['DRIFT_OUT'];
