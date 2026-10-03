@@ -9,7 +9,7 @@ import type {
   BundleRepository,
   PutMetaResult,
 } from './repositories.ts';
-import { USER_STORAGE_LIMITS } from '@agentnomad/contracts';
+import { USER_STORAGE_LIMITS, sameBytes } from '@agentnomad/contracts';
 
 import { bundles, users } from './schema.ts';
 
@@ -43,10 +43,6 @@ function toBundleMeta(row: MetaRow): BundleMeta {
     updatedAt: row.updatedAt,
     blobId: row.blobId,
   };
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
 
 const matchesKey = (key: BundleKey) =>

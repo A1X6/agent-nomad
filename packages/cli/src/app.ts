@@ -16,7 +16,7 @@ import { createHttpApiClient } from './api/http-api-client.ts';
 import { createAuthCommands } from './auth/auth-commands.ts';
 import { createSetupCommands } from './commands/setup-commands.ts';
 import { loadZxcvbnChecker } from './auth/password-policy.ts';
-import { NOT_YET_AVAILABLE, type CommandHandlers } from './cli/commands.ts';
+import type { CommandHandlers } from './cli/commands.ts';
 import { configDir } from './config/config-dir.ts';
 import { createEnvCommand } from './env/env-command.ts';
 import {
@@ -124,7 +124,6 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       : createShellProfileWriter(shellProfileFor(app.env['SHELL'], app.homedir, app.platform));
 
   return {
-    ...NOT_YET_AVAILABLE,
     ...createSetupCommands({
       prompter: app.prompter,
       reporter: app.reporter,

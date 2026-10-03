@@ -1,8 +1,6 @@
 import { posix, win32 } from 'node:path';
 
-import { BundlePathSchema } from '@agentnomad/contracts';
-
-import { commandsInSettings, commandWords } from './file-gathering.ts';
+import { bundlePathInside, commandsInSettings, commandWords } from './file-gathering.ts';
 import {
   GLOBAL_REFUSED,
   HOME_SCRIPTS_PREFIX,
@@ -43,12 +41,7 @@ export function hookScripts(settingsJson: string, context: HookScriptContext): H
   const home = /^(~|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?=[\\/]|$)/i;
   const config = /^(\$CLAUDE_CONFIG_DIR|\$\{CLAUDE_CONFIG_DIR\}|%CLAUDE_CONFIG_DIR%)(?=[\\/]|$)/i;
 
-  const relativeInside = (folder: string, file: string): string | null => {
-    const relative = path.relative(folder, file);
-    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return null;
-    const bundlePath = relative.split(path.sep).join('/');
-    return BundlePathSchema.safeParse(bundlePath).success ? bundlePath : null;
-  };
+  const relativeInside = (folder: string, file: string) => bundlePathInside(path, folder, file);
 
   const found = new Map<string, HookScript>();
   for (const command of commandsInSettings(settingsJson)) {

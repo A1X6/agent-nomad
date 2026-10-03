@@ -6,12 +6,13 @@ import {
   type LoginResponse,
   type PreloginResponse,
   type SessionResponse,
+  fromBase64,
+  toBase64,
 } from '@agentnomad/contracts';
 import { Hono } from 'hono';
 
 import { InvalidCredentialsError, type AuthService } from '../../auth/auth-service.ts';
 import { UsernameTakenError } from '../../db/repositories.ts';
-import { fromBase64, toBase64 } from '../../encoding.ts';
 import {
   RATE_LIMITS,
   type RateLimiter,

@@ -1,19 +1,10 @@
-import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import {
-  chmod,
-  lstat,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { posix } from 'node:path';
 
-import { BACKUP_MARKER } from '@agentnomad/core';
+import { BACKUP_MARKER, backupStamp } from '@agentnomad/core';
+
+import { isMissing, writeFileAtomically, writeTargetOf } from '../system/files.ts';
+import { runProgram } from '../system/run-program.ts';
 
 /** Adds variables where new terminals (and the programs they start) will see them. */
 export interface EnvWriter {
@@ -124,29 +115,6 @@ export function shellProfileFor(
   return { path: posix.join(homedir, '.profile'), kind: 'posix', label: '~/.profile' };
 }
 
-const isMissing = (error: unknown) =>
-  error instanceof Error && 'code' in error && error.code === 'ENOENT';
-
-/**
- * Where to write `path`: a file linked from a dotfiles folder (stow, chezmoi) is written where
- * it really is, so the link stays (T46). Only a link is followed: a plain or missing file
- * keeps the path as given.
- */
-export async function writeTargetOf(path: string): Promise<string> {
-  const link = await lstat(path).catch((error: unknown) => {
-    if (isMissing(error)) return null;
-    throw error;
-  });
-  return link?.isSymbolicLink() ? realpath(path) : path;
-}
-
-/** `20260925T120000Z`, as in the T11 backup names. */
-const stamp = (date: Date) =>
-  date
-    .toISOString()
-    .replace(/\.\d{3}Z$/, 'Z')
-    .replace(/[-:]/g, '');
-
 /** macOS and Linux: an agentnomad block in the shell profile, backed up first. */
 export function createShellProfileWriter(
   profile: { readonly path: string; readonly kind: ShellKind; readonly label: string },
@@ -184,24 +152,16 @@ export function createShellProfileWriter(
       await mkdir(posix.dirname(target), { recursive: true });
       let backup: string | null = null;
       if (existing !== null) {
-        backup = `${target}${BACKUP_MARKER}${stamp(now())}`;
+        backup = `${target}${BACKUP_MARKER}${backupStamp(now())}`;
         await writeFile(backup, existing, { mode });
       }
-      const temp = `${target}.agentnomad-tmp-${randomBytes(4).toString('hex')}`;
-      try {
-        await writeFile(temp, updated, { flag: 'wx', mode });
-        await chmod(temp, mode);
-        await rename(temp, target);
-      } catch (error) {
-        await rm(temp, { force: true });
-        throw error;
-      }
+      await writeFileAtomically(target, updated, { mode });
       return { backup };
     },
   };
 }
 
-/** Runs one PowerShell statement; name and value travel as environment variables, not arguments. */
+/** Runs one PowerShell statement; names and values travel as environment variables, not arguments. */
 export type PowerShellRunner = (
   script: string,
   env: Readonly<Record<string, string>>,
@@ -211,18 +171,15 @@ export type PowerShellRunner = (
 export function realPowerShell(
   baseEnv: Readonly<Record<string, string | undefined>>,
 ): PowerShellRunner {
-  return (script, env) =>
-    new Promise((done, fail) => {
-      execFile(
-        'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command', script],
-        { env: { ...baseEnv, ...env }, windowsHide: true, encoding: 'utf8', timeout: 30_000 },
-        (error, stdout) => {
-          if (error) fail(new Error(`PowerShell failed: ${error.message}`, { cause: error }));
-          else done(stdout);
-        },
-      );
-    });
+  return async (script, env) => {
+    const { stdout, error } = await runProgram(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { env: { ...baseEnv, ...env }, timeoutMs: 30_000 },
+    );
+    if (error) throw new Error(`PowerShell failed: ${error.message}`, { cause: error });
+    return stdout;
+  };
 }
 
 /**
@@ -252,13 +209,18 @@ export function createWindowsEnvWriter(run: PowerShellRunner): EnvWriter {
     async write(variables) {
       // A user variable that already has the value is left as it is (T56).
       const here = await current(Object.keys(variables));
-      for (const [name, value] of Object.entries(variables)) {
-        if (here.get(name) === value) continue;
-        await run(
-          "[Environment]::SetEnvironmentVariable($env:AGENTNOMAD_ENV_NAME, $env:AGENTNOMAD_ENV_VALUE, 'User')",
-          { AGENTNOMAD_ENV_NAME: name, AGENTNOMAD_ENV_VALUE: value },
-        );
-      }
+      const changed = Object.entries(variables).filter(([name, value]) => here.get(name) !== value);
+      if (changed.length === 0) return { backup: null };
+      // One PowerShell for all of them (PERF-02): names and values as numbered variables.
+      const env: Record<string, string> = { AGENTNOMAD_ENV_COUNT: String(changed.length) };
+      changed.forEach(([name, value], index) => {
+        env[`AGENTNOMAD_ENV_NAME_${String(index)}`] = name;
+        env[`AGENTNOMAD_ENV_VALUE_${String(index)}`] = value;
+      });
+      await run(
+        'for ($i = 0; $i -lt [int]$env:AGENTNOMAD_ENV_COUNT; $i++) { [Environment]::SetEnvironmentVariable([Environment]::GetEnvironmentVariable("AGENTNOMAD_ENV_NAME_$i"), [Environment]::GetEnvironmentVariable("AGENTNOMAD_ENV_VALUE_$i"), \'User\') }',
+        env,
+      );
       return { backup: null };
     },
   };

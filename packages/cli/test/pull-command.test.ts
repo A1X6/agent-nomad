@@ -27,6 +27,7 @@ import {
   createShellProfileWriter,
   AnswerNeededError,
   MislabelledSetupError,
+  NotLoggedInError,
   SetupUnreadableError,
   type AgentAdapter,
   type ApiClient,
@@ -115,6 +116,7 @@ function loggedIn(key = dataKey): SecretStore {
     backend: 'keychain',
     get: (name) => Promise.resolve(saved.get(name) ?? null),
     set: () => Promise.resolve(),
+    setMany: () => Promise.resolve(),
     delete: () => Promise.resolve(),
   };
 }
@@ -724,6 +726,19 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(t.lines).toEqual([
       'info: Nothing is saved yet. Run `agentnomad push` on the PC that has your setup.',
     ]);
+  });
+
+  it('needs a login first, in its own words (T62)', async () => {
+    const empty: SecretStore = {
+      backend: 'keychain',
+      get: () => Promise.resolve(null),
+      set: () => Promise.resolve(),
+      setMany: () => Promise.resolve(),
+      delete: () => Promise.resolve(),
+    };
+    const t = pullOn(pc('desktop'), fakeServer(), [], { secrets: empty });
+    await expect(t.pull(none)).rejects.toBeInstanceOf(NotLoggedInError);
+    await expect(t.pull(none)).rejects.toThrow(/^Not logged in\. Run `agentnomad login` first\.$/);
   });
 
   it('a setup that cannot be opened with this key writes nothing', async () => {

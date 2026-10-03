@@ -1,19 +1,26 @@
 import { type Bundle, type BundleScope, type SourceOs } from '@agentnomad/contracts';
-import { createPathResolver, type BundleCodec, type CryptoService } from '@agentnomad/core';
+import {
+  createPathResolver,
+  sourceOsOf,
+  type BundleCodec,
+  type CryptoService,
+} from '@agentnomad/core';
 
-import type {
-  AgentAdapter,
-  AgentRegistry,
-  AgentRestorePlan,
-  CollectedFile,
-  ConflictChoice,
-  ConflictResolver,
-  DetectedAgent,
-  ScopeTarget,
+import {
+  chosenAgent,
+  type AgentAdapter,
+  type AgentRegistry,
+  type AgentRestorePlan,
+  type ChosenAgent,
+  type CollectedFile,
+  type ConflictChoice,
+  type ConflictResolver,
+  type DetectedAgent,
+  type ScopeTarget,
 } from '../agents/adapter.ts';
+import { showNotices } from '../agents/notices.ts';
 import type { ApiClient } from '../api/api-client.ts';
-import { NotLoggedInError } from '../api/api-errors.ts';
-import { withSession } from '../auth/local-session.ts';
+import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
 import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
 import { finishSetups, type SetupOutcome } from '../cli/setup-outcomes.ts';
@@ -54,19 +61,6 @@ export interface PullKeys {
 }
 
 type ScopeChoice = 'global' | 'project' | 'both';
-
-/** An agent chosen for this pull, with what its detector found. */
-interface ChosenAgent {
-  readonly adapter: AgentAdapter;
-  readonly version: string | null;
-  readonly baseDir: string | null;
-}
-
-const chosenAgent = (entry: { adapter: AgentAdapter; found: DetectedAgent }): ChosenAgent => ({
-  adapter: entry.adapter,
-  version: entry.found.version,
-  baseDir: entry.found.baseDir,
-});
 
 /** A setup downloaded, checked and reviewed. */
 interface Prepared {
@@ -111,9 +105,6 @@ export interface PullPlan {
 }
 
 type ConflictAnswer = ConflictChoice | 'merge-all' | 'overwrite-all';
-
-const sourceOsOf = (platform: NodeJS.Platform): SourceOs =>
-  platform === 'darwin' || platform === 'win32' ? platform : 'linux';
 
 const describe = (adapter: AgentAdapter, setup: SavedSetup) =>
   `${adapter.displayName} ${setup.projectName === null ? 'global setup' : `project "${setup.projectName}"`}`;
@@ -430,13 +421,11 @@ export function createPullPlanner(deps: PullDeps) {
         chosen.push({ adapter, version, setups: await chooseSetups(agent, saved, options) });
       }
 
-      const shown = new Set<string>();
-      for (const { adapter } of chosen) {
-        for (const notice of (await adapter.inspector?.notices('pull')) ?? []) {
-          if (!shown.has(notice)) reporter.warn(notice);
-          shown.add(notice);
-        }
-      }
+      await showNotices(
+        chosen.map(({ adapter }) => adapter),
+        'pull',
+        reporter,
+      );
 
       const outcomes: SetupOutcome[] = [];
       const prepared: Prepared[] = [];
@@ -582,12 +571,7 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
   return {
     async pull(options) {
       const secrets = await deps.secrets();
-      const [token, dataKeyText] = await Promise.all([
-        secrets.get('session-token'),
-        secrets.get('data-key'),
-      ]);
-      if (token === null || dataKeyText === null) throw new NotLoggedInError();
-      const dataKey = new Uint8Array(Buffer.from(dataKeyText, 'base64'));
+      const dataKey = await readDataKey(secrets);
       try {
         const plan = await planner.plan(options, {
           secrets,

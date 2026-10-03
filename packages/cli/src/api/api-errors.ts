@@ -69,10 +69,10 @@ export class InvalidResponseError extends Error {
   }
 }
 
-/** A command needs a session but none is stored on this PC. */
+/** A command needs a session but none is stored on this PC; a command may word it its own way. */
 export class NotLoggedInError extends Error {
-  constructor() {
-    super('Not logged in. Run `agentnomad login` first.');
+  constructor(message = 'Not logged in. Run `agentnomad login` first.') {
+    super(message);
     this.name = 'NotLoggedInError';
   }
 }

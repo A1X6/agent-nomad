@@ -1,6 +1,7 @@
 import type { CommandHandlers } from '../cli/commands.ts';
 import type { Reporter } from '../ui/prompter.ts';
 import type { AgentRegistry, DetectedAgent } from './adapter.ts';
+import { showNotices } from './notices.ts';
 
 export interface AgentsCommandDeps {
   readonly registry: () => AgentRegistry;
@@ -30,13 +31,7 @@ export function createAgentsCommand(deps: AgentsCommandDeps): Pick<CommandHandle
       const installed = found.filter((agent) => agent.installed).length;
       deps.reporter.info(['Supported agents:', ...lines.map((line) => `  ${line}`)].join('\n'));
       // Each agent's own notes, e.g. organization-managed settings (T31), once each.
-      const shown = new Set<string>();
-      for (const adapter of adapters) {
-        for (const notice of (await adapter.inspector?.notices('agents')) ?? []) {
-          if (!shown.has(notice)) deps.reporter.warn(notice);
-          shown.add(notice);
-        }
-      }
+      await showNotices(adapters, 'agents', deps.reporter);
       deps.reporter.success(
         `${String(installed)} of ${String(adapters.length)} supported agent${adapters.length === 1 ? '' : 's'} found on this PC.`,
       );

@@ -31,6 +31,7 @@ import {
   type ClaudeCli,
 } from './plugin-sync.ts';
 import { PluginManifestSchema } from './plugins.ts';
+import { NPM_PACKAGE_NAME, NPM_VERSION } from './programs.ts';
 
 /** `.agentnomad/programs.json`, checked before anything from it reaches a command line. */
 const ProgramsFileSchema = z.strictObject({
@@ -39,8 +40,8 @@ const ProgramsFileSchema = z.strictObject({
       command: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
       npm: z
         .strictObject({
-          package: z.string().regex(/^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/),
-          version: z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/),
+          package: z.string().regex(NPM_PACKAGE_NAME),
+          version: z.string().regex(NPM_VERSION),
         })
         .nullable(),
     }),

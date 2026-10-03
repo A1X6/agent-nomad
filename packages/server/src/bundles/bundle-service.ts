@@ -1,4 +1,4 @@
-import { GLOBAL_SCOPE_KEY, USER_STORAGE_LIMITS } from '@agentnomad/contracts';
+import { GLOBAL_SCOPE_KEY, USER_STORAGE_LIMITS, sameBytes } from '@agentnomad/contracts';
 
 import type {
   BundleKey,
@@ -99,10 +99,6 @@ const ORPHAN_AGE_SECONDS = 60 * 60;
 
 async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
 
 export function createBundleService(deps: BundleServiceDeps): BundleService {

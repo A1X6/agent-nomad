@@ -23,7 +23,7 @@ import {
   createPushApplier,
   createPushCommand,
   createPushPlanner,
-  NotLoggedInPushError,
+  NotLoggedInError,
   ProjectFolderError,
   PromptCancelledError,
   SetupsNotDoneError,
@@ -149,6 +149,7 @@ function loggedIn(): SecretStore {
     backend: 'keychain',
     get: (name) => Promise.resolve(saved.get(name) ?? null),
     set: () => Promise.resolve(),
+    setMany: () => Promise.resolve(),
     delete: () => Promise.resolve(),
   };
 }
@@ -712,10 +713,15 @@ describe('agentnomad push', () => {
       backend: 'keychain',
       get: () => Promise.resolve(null),
       set: () => Promise.resolve(),
+      setMany: () => Promise.resolve(),
       delete: () => Promise.resolve(),
     };
     await expect(setup([], { secrets: empty }).command.push(noFlags)).rejects.toBeInstanceOf(
-      NotLoggedInPushError,
+      NotLoggedInError,
+    );
+    // Push keeps its own wording with the shared error (T62).
+    await expect(setup([], { secrets: empty }).command.push(noFlags)).rejects.toThrow(
+      /^You are not logged in on this PC\. Run `agentnomad login` first\.$/,
     );
   });
 });

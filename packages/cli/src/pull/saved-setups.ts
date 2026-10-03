@@ -1,4 +1,5 @@
 import {
+  fromBase64,
   GLOBAL_SCOPE_KEY,
   type AgentId,
   type Bundle,
@@ -93,15 +94,10 @@ export async function listSavedSetups(
     if (item.scopeKey !== GLOBAL_SCOPE_KEY) {
       if (item.nameEnc === null) continue;
       try {
-        projectName = decryptProjectName(
-          crypto,
-          new Uint8Array(Buffer.from(item.nameEnc, 'base64')),
-          dataKey,
-          {
-            agent: item.agent,
-            scopeKey: item.scopeKey,
-          },
-        );
+        projectName = decryptProjectName(crypto, fromBase64(item.nameEnc), dataKey, {
+          agent: item.agent,
+          scopeKey: item.scopeKey,
+        });
       } catch (error) {
         if (error instanceof DecryptionError) continue;
         throw error;

@@ -21,6 +21,11 @@ export interface PathEnvironment {
   readonly homeDir: string;
 }
 
+/** A platform name (Node's `process.platform`): `darwin` and `win32` stay, anything else counts as Linux. */
+export function sourceOsOf(platform: string): SourceOs {
+  return platform === 'darwin' || platform === 'win32' ? platform : 'linux';
+}
+
 /** Converts between bundle paths and OS paths, and between real and portable home paths (T10). */
 export interface PathResolver {
   readonly environment: PathEnvironment;

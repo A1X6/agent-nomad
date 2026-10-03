@@ -4,6 +4,9 @@
  * PC's, and entries in the agent's folder that its adapter does not know (T32).
  */
 
+import type { Reporter } from '../ui/prompter.ts';
+import type { AgentAdapter } from './adapter.ts';
+
 /** `2.1.282` → [2, 1, 282]; pre-release suffixes are ignored for the comparison. */
 function numbers(version: string): number[] {
   return (/^(\d+(?:\.\d+)*)/.exec(version)?.[1] ?? '').split('.').filter(Boolean).map(Number);
@@ -46,4 +49,19 @@ export function unknownEntriesNotice(
     `Not saved, because agentnomad does not know ${entries.length === 1 ? 'this' : 'these'} yet: ${entries.join(', ')}.`,
     `A newer ${displayName} may have added them; if they matter to you, update agentnomad.`,
   ].join(' ');
+}
+
+/** Each adapter's notices for `command`, each said once even when several agents report it (DUP-03). */
+export async function showNotices(
+  adapters: readonly AgentAdapter[],
+  command: 'push' | 'pull' | 'agents',
+  reporter: Pick<Reporter, 'warn'>,
+): Promise<void> {
+  const shown = new Set<string>();
+  for (const adapter of adapters) {
+    for (const notice of (await adapter.inspector?.notices(command)) ?? []) {
+      if (!shown.has(notice)) reporter.warn(notice);
+      shown.add(notice);
+    }
+  }
 }

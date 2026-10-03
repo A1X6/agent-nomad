@@ -1,9 +1,11 @@
+import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
+import { MCP_FILES, SETTINGS_FILES } from '../../env/env-references.ts';
 import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
 import { commandWords } from './file-gathering.ts';
-import { HOME_SCRIPTS_PREFIX, SCRIPT_EXTENSIONS, TOOL_CONFIG_FILES } from './global-paths.ts';
+import { HOME_SCRIPTS_PREFIX, isScript, TOOL_CONFIG_FILES } from './global-paths.ts';
 import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 
@@ -14,13 +16,6 @@ import { runnableInMarkdown } from './runnable-markdown.ts';
  * that run by themselves. Pull shows the new or changed ones and asks before writing them;
  * it reaches this review through the restorer (T61).
  */
-
-const SETTINGS_FILES = new Set([
-  'settings.json',
-  '.claude/settings.json',
-  '.claude/settings.local.json',
-]);
-const MCP_FILES = new Set(['.mcp.json', '.agentnomad/claude.json']);
 
 /**
  * `permissions.defaultMode` values that let Claude act without asking (T56, Claude Code's
@@ -212,11 +207,6 @@ export function runnableEntries(files: readonly CollectedFile[]): RunnableEntry[
   return entries;
 }
 
-const sameBytes = (a: Uint8Array, b: Uint8Array) =>
-  a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index]);
-
-const isScript = (path: string) =>
-  SCRIPT_EXTENSIONS.has(/(\.[^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? '');
 const folderOf = (path: string) => path.slice(0, path.lastIndexOf('/') + 1);
 
 /**
@@ -244,14 +234,16 @@ function scriptsRun(incoming: readonly CollectedFile[], commands: readonly strin
   );
   const relativeOf = (path: string) =>
     path.startsWith(HOME_SCRIPTS_PREFIX) ? path.slice(HOME_SCRIPTS_PREFIX.length) : path;
-  const run = incoming.filter((file) => {
-    if (!isProgram(file)) return false;
-    const relative = relativeOf(file.path);
-    return words.some((word) => word === relative || word.endsWith(`/${relative}`));
-  });
-  const folders = new Set(run.map((file) => folderOf(file.path)).filter((folder) => folder));
+  const run = new Set(
+    incoming.filter((file) => {
+      if (!isProgram(file)) return false;
+      const relative = relativeOf(file.path);
+      return words.some((word) => word === relative || word.endsWith(`/${relative}`));
+    }),
+  );
+  const folders = new Set([...run].map((file) => folderOf(file.path)).filter((folder) => folder));
   return incoming.filter(
-    (file) => run.includes(file) || (isScript(file.path) && folders.has(folderOf(file.path))),
+    (file) => run.has(file) || (isScript(file.path) && folders.has(folderOf(file.path))),
   );
 }
 
@@ -267,24 +259,27 @@ export function reviewRunnable(
 ): ReviewedEntry[] {
   const here = runnableEntries(current);
   const entries = runnableEntries(incoming);
+  // Lookup tables, not a search per entry or file: a setup may hold thousands (PERF-01).
+  const hereLabels = new Map<string, Set<string>>();
+  for (const existing of here) {
+    const identities = hereLabels.get(existing.label) ?? new Set<string>();
+    identities.add(existing.identity);
+    hereLabels.set(existing.label, identities);
+  }
+  const currentByPath = new Map(current.map((file) => [file.path, file]));
   const commands: ReviewedEntry[] = entries
-    .filter(
-      (item) =>
-        !here.some(
-          (existing) => existing.label === item.label && existing.identity === item.identity,
-        ),
-    )
+    .filter((item) => hereLabels.get(item.label)?.has(item.identity) !== true)
     .map((item) => ({
       ...item,
       // A named entry (not one of a list) that is here with another definition is a change.
       change:
-        !LIST_LABELS.test(item.label) && here.some((existing) => existing.label === item.label)
+        !LIST_LABELS.test(item.label) && hereLabels.has(item.label)
           ? ('changed' as const)
           : ('new' as const),
     }));
 
   const newOrChanged = (file: CollectedFile) => {
-    const existing = current.find((item) => item.path === file.path);
+    const existing = currentByPath.get(file.path);
     if (existing && sameBytes(existing.content, file.content)) return null;
     return existing ? ('changed' as const) : ('new' as const);
   };

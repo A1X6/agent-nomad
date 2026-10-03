@@ -13,6 +13,14 @@ import {
   SKIPPED_NAMES,
 } from './global-paths.ts';
 
+/** `file` as a bundle path from `folder` (forward slashes), or `null` when it is not inside it. */
+export function bundlePathInside(path: PlatformPath, folder: string, file: string): string | null {
+  const relative = path.relative(folder, file);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  const bundlePath = relative.split(path.sep).join('/');
+  return BundlePathSchema.safeParse(bundlePath).success ? bundlePath : null;
+}
+
 /** Reading files for a bundle; shared by the global (T25) and project (T26) collectors. */
 export interface FileGatherer {
   /** Path rules of the PC being collected. */
@@ -58,12 +66,7 @@ export function createFileGatherer(
 ): FileGatherer {
   const path = platform === 'win32' ? win32 : posix;
 
-  const relativeInside = (folder: string, file: string): string | null => {
-    const relative = path.relative(folder, file);
-    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return null;
-    const bundlePath = relative.split(path.sep).join('/');
-    return BundlePathSchema.safeParse(bundlePath).success ? bundlePath : null;
-  };
+  const relativeInside = (folder: string, file: string) => bundlePathInside(path, folder, file);
 
   const realOrSelf = (folder: string) => realpath(folder).catch(() => folder);
   const realHome = limits.homedir === undefined ? null : realOrSelf(limits.homedir);

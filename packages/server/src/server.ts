@@ -1,3 +1,4 @@
+import { fromBase64 } from '@agentnomad/contracts';
 import { Pool } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 
@@ -8,7 +9,7 @@ import { createBundleRepository } from './db/bundle-repository.ts';
 import { readServerEnv } from './db/env.ts';
 import { createSessionRepository } from './db/session-repository.ts';
 import { createUserRepository } from './db/user-repository.ts';
-import { fromBase64 } from './encoding.ts';
+
 import { createApp } from './http/app.ts';
 import type { ClientIp } from './http/rate-limit.ts';
 import { createJsonLogger, describeError, type Logger } from './logging/logger.ts';

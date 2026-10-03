@@ -2,11 +2,11 @@ import {
   API_ROUTES,
   DeleteAccountRequestSchema,
   WRONG_PASSWORD_MESSAGE,
+  fromBase64,
 } from '@agentnomad/contracts';
 import { Hono } from 'hono';
 
 import { InvalidCredentialsError, type AuthService } from '../../auth/auth-service.ts';
-import { fromBase64 } from '../../encoding.ts';
 import { ApiError } from '../errors.ts';
 import { requireSession, type SessionVariables } from '../session.ts';
 import { smallBody } from '../small-body.ts';

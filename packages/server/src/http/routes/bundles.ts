@@ -8,6 +8,10 @@ import {
   type BundleParams,
   type ListBundlesResponse,
   type PutBundleResponse,
+  fromBase64,
+  fromHex,
+  toBase64,
+  toHex,
 } from '@agentnomad/contracts';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -21,7 +25,6 @@ import {
   type BundleService,
 } from '../../bundles/bundle-service.ts';
 import { InvalidCursorError, type BundleKey, type BundleMeta } from '../../db/repositories.ts';
-import { fromBase64, fromHex, toBase64, toHex } from '../../encoding.ts';
 import { RATE_LIMITS, RateLimitedError, type RateLimiter } from '../../rate-limit/rate-limiter.ts';
 import { ApiError } from '../errors.ts';
 import { requireSession, type SessionVariables } from '../session.ts';

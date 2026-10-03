@@ -1,9 +1,10 @@
-import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { posix, win32 } from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 import { ProjectNameSchema, UsernameSchema } from '@agentnomad/contracts';
 import * as z from 'zod';
+
+import { isMissing, writeFileAtomically } from '../system/files.ts';
+import { pathKey } from '../system/paths.ts';
 
 /** Suffix of the note that a pull left out declined commands (T46). */
 const PARTIAL = '#partial';
@@ -103,12 +104,8 @@ export interface LocalStateOptions {
 }
 
 export function createLocalState(options: LocalStateOptions): LocalState {
-  const path = options.platform === 'win32' ? win32 : posix;
   /** Windows paths ignore case, so `E:\Projects` and `e:\projects` are the same folder. */
-  const folderKey = (folder: string) => {
-    const resolved = path.resolve(folder);
-    return options.platform === 'win32' ? resolved.toLowerCase() : resolved;
-  };
+  const folderKey = (folder: string) => pathKey(folder, options.platform);
 
   async function load(): Promise<StateFile> {
     let text: string;
@@ -116,7 +113,7 @@ export function createLocalState(options: LocalStateOptions): LocalState {
       text = await readFile(options.path, 'utf8');
     } catch (error) {
       // Only a missing file is "no state yet"; anything else would be written over (BUG-06).
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      if (isMissing(error)) {
         return { version: 1, servers: {} };
       }
       throw new LocalStateReadError(options.path, { cause: error });
@@ -140,15 +137,9 @@ export function createLocalState(options: LocalStateOptions): LocalState {
           Object.entries(state.servers).filter(([host]) => host !== options.server),
         )
       : { ...state.servers, [options.server]: server };
-    await mkdir(path.dirname(options.path), { recursive: true, mode: 0o700 });
-    const temp = `${options.path}.${randomBytes(4).toString('hex')}.tmp`;
-    try {
-      await writeFile(temp, `${JSON.stringify(state, null, 2)}\n`, { flag: 'wx' });
-      await rename(temp, options.path);
-    } catch (error) {
-      await rm(temp, { force: true });
-      throw error;
-    }
+    await writeFileAtomically(options.path, `${JSON.stringify(state, null, 2)}\n`, {
+      dirMode: 0o700,
+    });
   }
 
   const server = async () => (await load()).servers[options.server];

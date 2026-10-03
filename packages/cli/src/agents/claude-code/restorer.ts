@@ -1,12 +1,13 @@
-import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 
-import type { SourceOs } from '@agentnomad/contracts';
+import { sameBytes } from '@agentnomad/contracts';
 import {
   BACKUP_MARKER,
+  backupStamp,
   createMergeStrategies,
   createPathResolver,
   selectMergeStrategy,
+  sourceOsOf,
   type PlannedWrite,
 } from '@agentnomad/core';
 import * as z from 'zod';
@@ -21,7 +22,7 @@ import type {
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
-import { writeTargetOf } from '../../env/shell-profile.ts';
+import { writeFileAtomically } from '../../system/files.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { reviewRunnable } from './command-review.ts';
@@ -30,6 +31,7 @@ import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
   CLAUDE_JSON_PREFERENCE_KEYS,
+  extensionOf,
 } from './global-paths.ts';
 import { ClaudeJsonError } from './global-collector.ts';
 import {
@@ -94,9 +96,6 @@ const CRLF_SCRIPTS = new Set(['.bat', '.cmd']);
 const WINDOWS_ONLY = /(\.ps1|\.psm1|\.bat|\.cmd)$|^(powershell|pwsh|cmd)(\.exe)?$/i;
 const POSIX_ONLY = /(\.sh|\.bash|\.zsh|\.fish)$|^(bash|sh|zsh|fish)$/i;
 
-const sameBytes = (a: Uint8Array, b: Uint8Array) =>
-  a.length === b.length && a.every((byte, index) => byte === b[index]);
-
 const isJsonObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -106,7 +105,7 @@ export function lineEndingsFor(
   path: string,
   content: Uint8Array,
 ): Uint8Array {
-  const extension = /(\.[^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
+  const extension = extensionOf(path);
   const crlf = platform === 'win32' && CRLF_SCRIPTS.has(extension);
   if (!crlf && !LF_SCRIPTS.has(extension)) return content;
   const text = new TextDecoder().decode(content);
@@ -147,8 +146,7 @@ export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform)
 export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRestorer {
   const files = createFileGatherer(options.platform);
   const { path } = files;
-  const os: SourceOs =
-    options.platform === 'win32' || options.platform === 'darwin' ? options.platform : 'linux';
+  const os = sourceOsOf(options.platform);
   const resolver = createPathResolver({ os, homeDir: options.homedir });
   const strategies = createMergeStrategies(options.now ? { now: options.now } : {});
   const claudeJsonFile = options.customConfigDir
@@ -176,20 +174,11 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
    * file is written where it really is, so the link stays (T53).
    */
   async function writeAtomically(nativePath: string, content: Uint8Array, mode: number | null) {
-    const target = await writeTargetOf(nativePath);
-    await mkdir(path.dirname(target), { recursive: true });
-    const temp = path.join(
-      path.dirname(target),
-      `.${path.basename(target)}.agentnomad-tmp-${randomBytes(4).toString('hex')}`,
-    );
-    try {
-      await writeFile(temp, content, { flag: 'wx', ...(mode !== null && { mode }) });
-      if (mode !== null && options.platform !== 'win32') await chmod(temp, mode);
-      await rename(temp, target);
-    } catch (error) {
-      await rm(temp, { force: true });
-      throw error;
-    }
+    await writeFileAtomically(nativePath, content, {
+      followLink: true,
+      platform: options.platform,
+      ...(mode !== null && { mode }),
+    });
   }
 
   /** Permissions: a replaced file keeps its own; new scripts may run on macOS and Linux. */
@@ -324,7 +313,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     );
     const mode = existing === null ? 0o600 : (await stat(claudeJsonFile)).mode & 0o777;
     if (existing !== null) {
-      const name = `${claudeJsonFile}${BACKUP_MARKER}${stamp(options.now?.() ?? new Date())}`;
+      const name = `${claudeJsonFile}${BACKUP_MARKER}${backupStamp(options.now?.() ?? new Date())}`;
       const backup = name + (await freeSuffix(name));
       await writeAtomically(backup, existing, mode);
       report.backups.push(backup);
@@ -344,8 +333,10 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
      */
     conflicts(incoming, current): FileConflict[] {
       const found: FileConflict[] = [];
+      // One lookup table, not a search per file: a setup may hold thousands (PERF-01).
+      const byPath = new Map(current.map((entry) => [entry.path, entry]));
       for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
-        const here = current.find((entry) => entry.path === file.path);
+        const here = byPath.get(file.path);
         const claudeJson = file.path === CLAUDE_JSON_BUNDLE_PATH;
         if (here === undefined && !claudeJson) continue;
         if (
@@ -553,10 +544,3 @@ interface MutableReport {
   backups: string[];
   warnings: string[];
 }
-
-/** Same format as the T11 backup names: `20260925T120000Z`. */
-const stamp = (date: Date) =>
-  date
-    .toISOString()
-    .replace(/\.\d{3}Z$/, 'Z')
-    .replace(/[-:]/g, '');

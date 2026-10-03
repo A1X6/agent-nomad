@@ -110,6 +110,7 @@ function loggedIn(): SecretStore {
     backend: 'keychain',
     get: (name) => Promise.resolve(saved.get(name) ?? null),
     set: () => Promise.resolve(),
+    setMany: () => Promise.resolve(),
     delete: () => Promise.resolve(),
   };
 }

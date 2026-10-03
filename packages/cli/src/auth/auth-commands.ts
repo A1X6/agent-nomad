@@ -1,4 +1,11 @@
-import { DEFAULT_KDF_PARAMS, UsernameSchema, WRONG_PASSWORD_MESSAGE } from '@agentnomad/contracts';
+import {
+  DEFAULT_KDF_PARAMS,
+  fromBase64,
+  KDF_SALT_BYTES,
+  toBase64,
+  UsernameSchema,
+  WRONG_PASSWORD_MESSAGE,
+} from '@agentnomad/contracts';
 import {
   DATA_KEY_BYTES,
   DecryptionError,
@@ -15,8 +22,6 @@ import type { LocalState } from '../state/local-state.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { clearLocalSession, hasLocalSession, saveLocalSession } from './local-session.ts';
 import type { PasswordChecker } from './password-policy.ts';
-
-const KDF_SALT_BYTES = 16;
 
 export const NO_RECOVERY_WARNING =
   'There is no password reset. Your setups are encrypted with your password on this PC, ' +
@@ -48,9 +53,6 @@ export interface AuthCommandDeps {
 export const ACCOUNT_DELETE_WARNING =
   'This deletes your agentnomad account and every setup saved in it, on every PC. ' +
   'Files on your PCs are not touched. It cannot be undone.';
-
-const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-const fromBase64 = (text: string) => new Uint8Array(Buffer.from(text, 'base64'));
 
 function validateUsername(value: string): string | undefined {
   const parsed = UsernameSchema.safeParse(value);

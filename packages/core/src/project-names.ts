@@ -4,6 +4,7 @@ import {
   type AgentId,
   type BundleScope,
   type ScopeKey,
+  toHex,
 } from '@agentnomad/contracts';
 import { strFromU8, strToU8 } from 'fflate';
 
@@ -23,10 +24,6 @@ const NAME_LABEL = 'agentnomad/project-name/v1';
 export interface ProjectNameContext {
   readonly agent: AgentId;
   readonly scopeKey: ScopeKey;
-}
-
-function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /** Validated project name as UTF-8 bytes, NFC-normalised so every OS types it the same. */

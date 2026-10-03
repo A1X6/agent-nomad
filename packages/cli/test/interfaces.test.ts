@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { stubRestorer } from './stub-restorer.ts';
-import type {
-  AgentAdapter,
-  AgentRegistry,
-  ConflictResolver,
-  SecretName,
-  SecretStore,
+import {
+  SECRET_NAMES,
+  type AgentAdapter,
+  type AgentRegistry,
+  type ConflictResolver,
+  type SecretName,
+  type SecretStore,
 } from '../src/index.ts';
 
 /** In-memory SecretStore, the kind of fake later command tests will use. */
@@ -17,6 +18,13 @@ function memorySecretStore(): SecretStore {
     get: (name) => Promise.resolve(secrets.get(name) ?? null),
     set: (name, value) => {
       secrets.set(name, value);
+      return Promise.resolve();
+    },
+    setMany: (values) => {
+      for (const name of SECRET_NAMES) {
+        const value = values[name];
+        if (value !== undefined) secrets.set(name, value);
+      }
       return Promise.resolve();
     },
     delete: (name) => {

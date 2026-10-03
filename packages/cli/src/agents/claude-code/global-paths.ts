@@ -53,6 +53,12 @@ export const HOME_SCRIPTS_PREFIX = `${RESERVED_DIR}/home/`;
 /** A hook argument is only taken as a script with one of these extensions. */
 export const SCRIPT_EXTENSIONS: ReadonlySet<string> = new Set(DATA.scriptExtensions);
 
+/** `hooks/check.SH` → `.sh`; `''` when the name has no extension. */
+export const extensionOf = (path: string) => /(\.[^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
+
+/** Has one of the script extensions above. */
+export const isScript = (path: string) => SCRIPT_EXTENSIONS.has(extensionOf(path));
+
 /** Home folders never read for hook scripts, whatever a command names: keys and cloud logins. */
 export const SENSITIVE_HOME_DIRS: readonly string[] = DATA.sensitiveHomeDirs;
 
