@@ -14,13 +14,13 @@ export const AgentIdSchema = z
   .regex(/^[a-z][a-z0-9-]{0,39}$/, 'Agent id must be lowercase letters, digits and dashes');
 
 /** An agent's version as it reports it, e.g. `2.1.282` or `2.0.0-beta.3`. */
-export const AgentVersionSchema = z
+const AgentVersionSchema = z
   .string()
   .max(64)
   .regex(/^[0-9A-Za-z.+-]+$/, 'Agent version must be letters, digits, dots, plus or dashes');
 
 /** OS the bundle was pushed from, as reported by Node's `process.platform`. */
-export const SourceOsSchema = z.enum(['darwin', 'linux', 'win32']);
+const SourceOsSchema = z.enum(['darwin', 'linux', 'win32']);
 
 /** Bytes `text` takes as UTF-8. */
 function utf8Length(text: string): number {
@@ -41,12 +41,14 @@ export const ProjectNameSchema = z
   .refine((name) => !hasControlCharacter(name), 'Project name must not contain control characters')
   // The name is stored NFC-normalised, which can make it longer (T45): the stored form must
   // fit too, so it can always be read back and its encrypted form stays within the API limit.
+  // The 100-unit rule already bounds it at 300 bytes (one unit is at most 3 bytes of UTF-8);
+  // the byte check stays as a guard.
   .refine((name) => {
     const stored = name.normalize('NFC');
     return stored.length <= 100 && utf8Length(stored) <= 400;
   }, 'Project name is too long');
 
-export const BundleScopeSchema = z.discriminatedUnion('kind', [
+const BundleScopeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('global') }),
   z.strictObject({ kind: z.literal('project'), name: ProjectNameSchema }),
 ]);
@@ -77,7 +79,7 @@ const fileFields = { path: BundlePathSchema, executable: z.boolean() };
  * One file in a bundle. Text files are stored as UTF-8 so `{{HOME}}` placeholders can be
  * rewritten per OS; anything else is stored as base64.
  */
-export const BundleFileSchema = z.discriminatedUnion('encoding', [
+const BundleFileSchema = z.discriminatedUnion('encoding', [
   z.strictObject({ ...fileFields, encoding: z.literal('utf8'), content: z.string() }),
   z.strictObject({ ...fileFields, encoding: z.literal('base64'), content: z.base64() }),
 ]);

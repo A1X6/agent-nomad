@@ -8,10 +8,13 @@ import {
   type BundleParams,
   type ListBundlesResponse,
   type PutBundleResponse,
+  fromBase64,
+  fromHex,
+  toBase64,
+  toHex,
 } from '@agentnomad/contracts';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { createMiddleware } from 'hono/factory';
 
 import type { AuthService } from '../../auth/auth-service.ts';
 import {
@@ -21,9 +24,9 @@ import {
   type BundleService,
 } from '../../bundles/bundle-service.ts';
 import { InvalidCursorError, type BundleKey, type BundleMeta } from '../../db/repositories.ts';
-import { fromBase64, fromHex, toBase64, toHex } from '../../encoding.ts';
-import { RATE_LIMITS, RateLimitedError, type RateLimiter } from '../../rate-limit/rate-limiter.ts';
+import { RATE_LIMITS, type RateLimiter } from '../../rate-limit/rate-limiter.ts';
 import { ApiError } from '../errors.ts';
+import { limitPerAccount } from '../rate-limit.ts';
 import { requireSession, type SessionVariables } from '../session.ts';
 import { validHeaders, validParams, validQuery } from '../validate.ts';
 
@@ -69,14 +72,12 @@ export function bundleRoutes(
   limiter: RateLimiter,
 ): Hono<{ Variables: SessionVariables }> {
   const routes = new Hono<{ Variables: SessionVariables }>();
-  routes.use(API_ROUTES.bundles, requireSession(auth));
-  /** Saves and deletes per account (T47); runs after the session check, before the body. */
-  const writeLimit = createMiddleware<{ Variables: SessionVariables }>(async (c, next) => {
-    const status = await limiter.hit(RATE_LIMITS.writesPerAccount, c.get('session').userId);
-    if (!status.allowed) throw new RateLimitedError(status.retryAfterSeconds);
-    await next();
-  });
+  // `/bundles/*` also matches `/bundles`, so the list runs the session check once (DB-01).
   routes.use(`${API_ROUTES.bundles}/*`, requireSession(auth));
+  // Per account, after the session check and before the body: saves and deletes (T47) and
+  // downloads (SEC-03). The list moves only metadata and has no limit.
+  const writeLimit = limitPerAccount(limiter, RATE_LIMITS.writesPerAccount);
+  const readLimit = limitPerAccount(limiter, RATE_LIMITS.readsPerAccount);
 
   return routes
     .get(API_ROUTES.bundles, validQuery(ListBundlesQuerySchema), async (c) => {
@@ -101,13 +102,12 @@ export function bundleRoutes(
       return c.json(body);
     })
 
-    .get(bundlePath, validParams(BundleParamsSchema), async (c) => {
+    .get(bundlePath, readLimit, validParams(BundleParamsSchema), async (c) => {
       const key = keyFor(c.get('session').userId, c.req.valid('param'));
       const { meta, ciphertext } = await service.download(key).catch((error: unknown) => {
         throw toApiError(error);
       });
-      // A copy backed by a plain ArrayBuffer, which is what Response bodies accept.
-      return c.body(new Uint8Array(ciphertext), 200, {
+      return c.body(ciphertext, 200, {
         'content-type': OCTET_STREAM,
         ...metaHeaders(meta),
       });
@@ -121,7 +121,11 @@ export function bundleRoutes(
       bodyLimit({
         maxSize: MAX_BUNDLE_BYTES,
         onError: () => {
-          throw new ApiError(413, 'payload_too_large', 'A saved setup can be at most 5 MB');
+          throw new ApiError(
+            413,
+            'payload_too_large',
+            `A saved setup can be at most ${String(MAX_BUNDLE_BYTES / 1024 / 1024)} MB`,
+          );
         },
       }),
       validParams(BundleParamsSchema),

@@ -1,5 +1,8 @@
 import type { ErrorCode } from '@agentnomad/contracts';
 
+/** The API's error codes, plus `unknown` for a code added to the server after this CLI. */
+export type ApiErrorCode = ErrorCode | 'unknown';
+
 export interface ApiErrorDetails {
   /** Set on `revision_conflict`: the revision now saved on the server. */
   readonly currentRevision?: number;
@@ -10,11 +13,11 @@ export interface ApiErrorDetails {
 /** The server answered with an error, e.g. wrong password, conflict or rate limit (T21). */
 export class ApiError extends Error {
   readonly status: number;
-  readonly code: ErrorCode;
+  readonly code: ApiErrorCode;
   readonly currentRevision: number | undefined;
   readonly retryAfterSeconds: number | undefined;
 
-  constructor(status: number, code: ErrorCode, message: string, details: ApiErrorDetails = {}) {
+  constructor(status: number, code: ApiErrorCode, message: string, details: ApiErrorDetails = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -66,10 +69,10 @@ export class InvalidResponseError extends Error {
   }
 }
 
-/** A command needs a session but none is stored on this PC. */
+/** A command needs a session but none is stored on this PC; a command may word it its own way. */
 export class NotLoggedInError extends Error {
-  constructor() {
-    super('Not logged in. Run `agentnomad login` first.');
+  constructor(message = 'Not logged in. Run `agentnomad login` first.') {
+    super(message);
     this.name = 'NotLoggedInError';
   }
 }

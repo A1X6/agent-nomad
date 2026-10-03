@@ -28,7 +28,7 @@ const DATA_KEY_ASSOCIATED_DATA = ascii('agentnomad/data-key/v1');
  * `agentnomad/bundle/v1/<formatVersion>/<agent>/<scopeKey>`. Unambiguous because agent ids
  * and scope keys cannot contain `/` (see the contracts schemas).
  */
-export function bundleAssociatedData(context: BundleContext): Uint8Array {
+function bundleAssociatedData(context: BundleContext): Uint8Array {
   return ascii(
     `agentnomad/bundle/v1/${String(context.formatVersion)}/${context.agent}/${context.scopeKey}`,
   );
@@ -49,7 +49,10 @@ export function unwrapDataKey(
   passwordKey: Uint8Array,
 ): Uint8Array {
   const dataKey = aead.open(wrapped, passwordKey, DATA_KEY_ASSOCIATED_DATA);
-  if (dataKey.length !== DATA_KEY_BYTES) throw new DecryptionError();
+  if (dataKey.length !== DATA_KEY_BYTES) {
+    dataKey.fill(0);
+    throw new DecryptionError();
+  }
   return dataKey;
 }
 

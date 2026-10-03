@@ -4,13 +4,14 @@ import * as z from 'zod';
 
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import {
-  commandsInSettings,
   createFileGatherer,
   type FileGatherer,
   jsonFile,
-  programOf,
   uniqueByPath,
-} from './file-gathering.ts';
+} from '../shared/file-gathering.ts';
+import { pathsOf } from '../shared/detector-system.ts';
+import { underFolder } from '../shared/bundle-paths.ts';
+import { commandsInSettings, programOf } from './settings-commands.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
@@ -22,12 +23,14 @@ import {
   NEVER_SYNCED,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
+  SKIPPED_NAMES,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
-import { collectAccountSkills, readSyncedSkills } from './account-skills.ts';
+import { ClaudeJsonError } from './claude-json-merge.ts';
+import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
-import type { ProgramInfo, ProgramLocator } from './programs.ts';
+import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
 
 export interface GlobalCollectorOptions {
   /** Claude Code's base folder, from the detector (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -40,21 +43,13 @@ export interface GlobalCollectorOptions {
   readonly findProgram?: ProgramLocator;
 }
 
-/** `~/.claude.json` could not be read as JSON (e.g. Claude Code was writing it). */
-export class ClaudeJsonError extends Error {
-  constructor(path: string, options?: ErrorOptions) {
-    super(`Could not read ${path}. If Claude Code is running, try again in a moment.`, options);
-    this.name = 'ClaudeJsonError';
-  }
-}
-
 /** True when `bundlePath` is a never-synced entry or inside one. */
 const isNeverSynced = (bundlePath: string) =>
-  NEVER_SYNCED.some((entry) => bundlePath === entry || bundlePath.startsWith(`${entry}/`));
+  NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry));
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {
-  const { path } = createFileGatherer(options.platform);
+  const path = pathsOf(options.platform);
   const { baseDir, homedir } = options;
 
   /** Script files that hooks and the status line run, if they are in the home folder. */
@@ -74,11 +69,16 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
    * For each program the commands run: its known settings file (e.g. ccstatusline's) and,
    * unless it runs through npx, what it is and how it was installed, so pull can check it.
    */
-  async function programs(files: FileGatherer, settingsJson: string): Promise<CollectedFile[]> {
+  async function programs(
+    files: FileGatherer,
+    settingsJson: string,
+    onSkipped: CollectOptions['onSkipped'],
+  ): Promise<CollectedFile[]> {
     const found: CollectedFile[] = [];
-    const programsFound = new Map<string, ProgramInfo>();
-    for (const command of commandsInSettings(settingsJson)) {
-      const program = programOf(command);
+    // `null`: left out, as pull would refuse it.
+    const programsFound = new Map<string, ProgramInfo | null>();
+    for (const words of commandsInSettings(settingsJson)) {
+      const program = programOf(words);
       if (program === null) continue;
       for (const relative of TOOL_CONFIG_FILES[program.name] ?? []) {
         const file = await files.readIfFile(
@@ -87,18 +87,21 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         );
         if (file) found.push(file);
       }
-      if (!program.runner && !programsFound.has(program.name)) {
-        const info = (await options.findProgram?.(program.name)) ?? {
+      if (!program.runner && !programsFound.has(program.name) && options.findProgram) {
+        const info = (await options.findProgram(program.name)) ?? {
           command: program.name,
           npm: null,
         };
-        programsFound.set(program.name, info);
+        // Checked as pull checks it (BUG-01): an entry pull refuses is said here, not saved.
+        const accepted = ProgramEntrySchema.safeParse(info).success;
+        if (!accepted) onSkipped?.(`program ${program.name}`, 'pull refuses its name or package');
+        programsFound.set(program.name, accepted ? info : null);
       }
     }
-    if (programsFound.size > 0 && options.findProgram) {
-      const list = [...programsFound.values()].sort((a, b) => a.command.localeCompare(b.command));
-      found.push(jsonFile(PROGRAMS_BUNDLE_PATH, { programs: list }));
-    }
+    const list = [...programsFound.values()]
+      .filter((info): info is ProgramInfo => info !== null)
+      .sort((a, b) => a.command.localeCompare(b.command));
+    if (list.length > 0) found.push(jsonFile(PROGRAMS_BUNDLE_PATH, { programs: list }));
     return found;
   }
 
@@ -142,6 +145,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       // Links into folders for keys and logins are never followed, and huge files are left
       // out (T45); the user's own links elsewhere (a dotfiles repo) still come along.
       const files = createFileGatherer(options.platform, {
+        skippedNames: SKIPPED_NAMES,
         homedir,
         ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),
       });
@@ -161,7 +165,10 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       const settings = found.find((file) => file.path === 'settings.json');
       if (settings) {
         const text = new TextDecoder().decode(settings.content);
-        found.push(...(await hookScriptFiles(files, text)), ...(await programs(files, text)));
+        found.push(
+          ...(await hookScriptFiles(files, text)),
+          ...(await programs(files, text, collectOptions.onSkipped)),
+        );
       }
 
       const selected = await claudeJson();
@@ -175,8 +182,8 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       if (plugins) found.push(jsonFile(PLUGINS_BUNDLE_PATH, plugins));
 
       // Opt-in (T42): a copy of the user's own claude.ai skills, never skills/synced itself.
-      if (collectOptions.includeAccountSkills) {
-        found.push(...(await collectAccountSkills(files, await readSyncedSkills(files, baseDir))));
+      if (collectOptions.include?.has(ACCOUNT_SKILLS_PART) === true) {
+        found.push(...(await collectAccountSkills(files, await readSyncedSkills(path, baseDir))));
       }
 
       // A hook may name a file already in a synced folder.

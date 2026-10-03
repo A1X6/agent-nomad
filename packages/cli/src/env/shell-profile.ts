@@ -1,25 +1,22 @@
-import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import {
-  chmod,
-  lstat,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { posix } from 'node:path';
 
-import { BACKUP_MARKER } from '@agentnomad/core';
+import { BACKUP_MARKER, backupStamp } from '@agentnomad/core';
+
+import { freeSuffix, isMissing, writeFileAtomically, writeTargetOf } from '../system/files.ts';
+import { runProgram } from '../system/run-program.ts';
 
 /** Adds variables where new terminals (and the programs they start) will see them. */
 export interface EnvWriter {
   /** Where they go, for the question and the summary, e.g. `~/.zshrc`. */
   readonly where: string;
-  /** Adds or updates the variables; returns the backup made, if any. */
+  /**
+   * The values already there for these names (T56): agentnomad's block in the profile, or the
+   * Windows user variables. A name whose saved value is here counts as set, even when the
+   * terminal running the pull started before it was added.
+   */
+  current(names: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  /** Adds or updates the variables, and writes nothing when none changes; returns the backup made, if any. */
   write(variables: Readonly<Record<string, string>>): Promise<{ readonly backup: string | null }>;
 }
 
@@ -31,8 +28,7 @@ export const BLOCK_END = '# <<< agentnomad env <<<';
 /** `it's` → `'it'\''s'`: safe in sh, bash and zsh whatever the value holds. */
 export const quotePosix = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 /** fish single quotes only treat `\\` and `\'` specially. */
-export const quoteFish = (value: string) =>
-  `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+const quoteFish = (value: string) => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
 function unquotePosix(quoted: string): string {
   return [...quoted.matchAll(/'([^']*)'|\\(.)/g)].map((part) => part[1] ?? part[2] ?? '').join('');
@@ -118,16 +114,6 @@ export function shellProfileFor(
   return { path: posix.join(homedir, '.profile'), kind: 'posix', label: '~/.profile' };
 }
 
-const isMissing = (error: unknown) =>
-  error instanceof Error && 'code' in error && error.code === 'ENOENT';
-
-/** `20260925T120000Z`, as in the T11 backup names. */
-const stamp = (date: Date) =>
-  date
-    .toISOString()
-    .replace(/\.\d{3}Z$/, 'Z')
-    .replace(/[-:]/g, '');
-
 /** macOS and Linux: an agentnomad block in the shell profile, backed up first. */
 export function createShellProfileWriter(
   profile: { readonly path: string; readonly kind: ShellKind; readonly label: string },
@@ -135,15 +121,19 @@ export function createShellProfileWriter(
 ): EnvWriter {
   return {
     where: profile.label,
-    async write(variables) {
-      // A profile linked from a dotfiles folder (stow, chezmoi) is written where it really
-      // is, so the link stays (T46).
-      // Only a link is followed: a plain file keeps the path as given.
-      const link = await lstat(profile.path).catch((error: unknown) => {
-        if (isMissing(error)) return null;
+    async current(names) {
+      let text: string;
+      try {
+        text = await readFile(await writeTargetOf(profile.path), 'utf8');
+      } catch (error) {
+        if (isMissing(error)) return new Map();
         throw error;
-      });
-      const target = link?.isSymbolicLink() ? await realpath(profile.path) : profile.path;
+      }
+      const block = readBlock(text, profile.kind);
+      return new Map([...block].filter(([name]) => names.includes(name)));
+    },
+    async write(variables) {
+      const target = await writeTargetOf(profile.path);
       let existing: string | null;
       // A new profile holds saved values, so only this user may read it (T46).
       let mode = 0o600;
@@ -155,60 +145,84 @@ export function createShellProfileWriter(
         if (!isMissing(error)) throw error;
         existing = null;
       }
+      const updated = upsertBlock(existing ?? '', variables, profile.kind);
+      // Same block as before (T56): no backup and no write, so a repeated pull leaves no trace.
+      if (updated === existing) return { backup: null };
       await mkdir(posix.dirname(target), { recursive: true });
       let backup: string | null = null;
       if (existing !== null) {
-        backup = `${target}${BACKUP_MARKER}${stamp(now())}`;
-        await writeFile(backup, existing, { mode });
+        // Two writes in one second (global and project values) keep both backups (BUG-01);
+        // `wx` never replaces a file that appeared meanwhile.
+        const name = `${target}${BACKUP_MARKER}${backupStamp(now())}`;
+        backup = name + (await freeSuffix(name));
+        await writeFile(backup, existing, { mode, flag: 'wx' });
       }
-      const updated = upsertBlock(existing ?? '', variables, profile.kind);
-      const temp = `${target}.agentnomad-tmp-${randomBytes(4).toString('hex')}`;
-      try {
-        await writeFile(temp, updated, { flag: 'wx', mode });
-        await chmod(temp, mode);
-        await rename(temp, target);
-      } catch (error) {
-        await rm(temp, { force: true });
-        throw error;
-      }
+      await writeFileAtomically(target, updated, { mode });
       return { backup };
     },
   };
 }
 
-/** Runs one PowerShell statement; name and value travel as environment variables, not arguments. */
+/** Runs one PowerShell statement; names and values travel as environment variables, not arguments. */
 export type PowerShellRunner = (
   script: string,
   env: Readonly<Record<string, string>>,
 ) => Promise<string>;
 
-export const realPowerShell: PowerShellRunner = (script, env) =>
-  new Promise((done, fail) => {
-    execFile(
+/** The real PowerShell, started with the CLI's (injected) environment plus the statement's. */
+export function realPowerShell(
+  baseEnv: Readonly<Record<string, string | undefined>>,
+): PowerShellRunner {
+  return async (script, env) => {
+    const { stdout, error } = await runProgram(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command', script],
-      { env: { ...process.env, ...env }, windowsHide: true, encoding: 'utf8', timeout: 30_000 },
-      (error, stdout) => {
-        if (error) fail(new Error(`PowerShell failed: ${error.message}`, { cause: error }));
-        else done(stdout);
-      },
+      { env: { ...baseEnv, ...env }, timeoutMs: 30_000 },
     );
-  });
+    if (error) throw new Error(`PowerShell failed: ${error.message}`, { cause: error });
+    return stdout;
+  };
+}
 
 /**
  * Windows: the user's environment variables (like "Edit environment variables for your
  * account"). Values never appear on a command line, where other programs could see them.
  */
-export function createWindowsEnvWriter(run: PowerShellRunner = realPowerShell): EnvWriter {
+export function createWindowsEnvWriter(run: PowerShellRunner): EnvWriter {
+  async function current(names: readonly string[]): Promise<ReadonlyMap<string, string>> {
+    if (names.length === 0) return new Map();
+    // Names in, values out as base64 UTF-8 JSON, so no console code page can change them.
+    const output = await run(
+      '$found = @{}; foreach ($name in ($env:AGENTNOMAD_ENV_NAMES -split "`n")) { $value = [Environment]::GetEnvironmentVariable($name, \'User\'); if ($null -ne $value) { $found[$name] = $value } }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $found -Compress)))',
+      { AGENTNOMAD_ENV_NAMES: names.join('\n') },
+    );
+    const parsed: unknown = JSON.parse(Buffer.from(output.trim(), 'base64').toString('utf8'));
+    const found = new Map<string, string>();
+    if (typeof parsed === 'object' && parsed !== null) {
+      for (const [name, value] of Object.entries(parsed)) {
+        if (names.includes(name) && typeof value === 'string') found.set(name, value);
+      }
+    }
+    return found;
+  }
   return {
     where: 'your Windows user environment variables',
+    current,
     async write(variables) {
-      for (const [name, value] of Object.entries(variables)) {
-        await run(
-          "[Environment]::SetEnvironmentVariable($env:AGENTNOMAD_ENV_NAME, $env:AGENTNOMAD_ENV_VALUE, 'User')",
-          { AGENTNOMAD_ENV_NAME: name, AGENTNOMAD_ENV_VALUE: value },
-        );
-      }
+      // A user variable that already has the value is left as it is (T56).
+      const here = await current(Object.keys(variables));
+      const changed = Object.entries(variables).filter(([name, value]) => here.get(name) !== value);
+      if (changed.length === 0) return { backup: null };
+      // One PowerShell for all of them (PERF-02): names and values as numbered variables.
+      const env: Record<string, string> = { AGENTNOMAD_ENV_COUNT: String(changed.length) };
+      changed.forEach(([name, value], index) => {
+        env[`AGENTNOMAD_ENV_NAME_${String(index)}`] = name;
+        env[`AGENTNOMAD_ENV_VALUE_${String(index)}`] = value;
+      });
+      await run(
+        'for ($i = 0; $i -lt [int]$env:AGENTNOMAD_ENV_COUNT; $i++) { [Environment]::SetEnvironmentVariable([Environment]::GetEnvironmentVariable("AGENTNOMAD_ENV_NAME_$i"), [Environment]::GetEnvironmentVariable("AGENTNOMAD_ENV_VALUE_$i"), \'User\') }',
+        env,
+      );
       return { backup: null };
     },
   };

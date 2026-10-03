@@ -1,11 +1,18 @@
-import { GLOBAL_SCOPE_KEY, USER_STORAGE_LIMITS } from '@agentnomad/contracts';
+import { GLOBAL_SCOPE_KEY, USER_STORAGE_LIMITS, sameBytes } from '@agentnomad/contracts';
 
-import { overLimit } from '../db/bundle-repository.ts';
-import type { BundleKey, BundleMeta, BundlePage, BundleRepository } from '../db/repositories.ts';
+import {
+  storageLimitPassed,
+  type BundleKey,
+  type BundleMeta,
+  type BundlePage,
+  type BundleRepository,
+  type StorageLimit,
+} from '../db/repositories.ts';
+import { sha256 } from '../encoding.ts';
 import type { BlobStore } from '../storage/blob-store.ts';
 
 /** Nonce (24) + Poly1305 tag (16): anything shorter cannot be an encrypted bundle. */
-export const MIN_CIPHERTEXT_BYTES = 40;
+const MIN_CIPHERTEXT_BYTES = 40;
 
 /** The upload does not match what its headers claim (hash, size or name rules). */
 export class InvalidUploadError extends Error {
@@ -23,6 +30,16 @@ export class StorageLimitError extends Error {
   }
 }
 
+/**
+ * Why a save is refused by the storage limits, in words the CLI shows as they are. Installed
+ * CLIs print this text, so it must not change.
+ */
+export function overLimit(limit: StorageLimit): string {
+  return limit === 'setups'
+    ? `An account keeps at most ${String(USER_STORAGE_LIMITS.maxSetups)} saved setups. Delete some with \`agentnomad delete\` first.`
+    : `An account keeps at most ${String(USER_STORAGE_LIMITS.maxBytes / 1024 / 1024)} MB of saved setups. Delete some with \`agentnomad delete\` or make this one smaller.`;
+}
+
 /** No saved setup for that agent and scope. */
 export class BundleNotFoundError extends Error {
   constructor() {
@@ -31,10 +48,10 @@ export class BundleNotFoundError extends Error {
   }
 }
 
-export interface BundleUploadInput {
+interface BundleUploadInput {
   readonly key: BundleKey;
   readonly expectedRevision: number;
-  readonly ciphertext: Uint8Array;
+  readonly ciphertext: Uint8Array<ArrayBuffer>;
   /** SHA-256 the client computed; must match the bytes that arrived. */
   readonly contentHash: Uint8Array;
   readonly formatVersion: number;
@@ -42,15 +59,15 @@ export interface BundleUploadInput {
   readonly nameEnc: Uint8Array | null;
 }
 
-export type UploadResult =
+type UploadResult =
   /** Stored (`saved`) or already stored by an earlier try of the same upload (`unchanged`). */
   | { readonly outcome: 'stored'; readonly meta: BundleMeta }
   /** Someone saved a newer revision first; `currentRevision` is 0 if the setup is gone. */
   | { readonly outcome: 'conflict'; readonly currentRevision: number };
 
-export interface DownloadedBundle {
+interface DownloadedBundle {
   readonly meta: BundleMeta;
-  readonly ciphertext: Uint8Array;
+  readonly ciphertext: Uint8Array<ArrayBuffer>;
 }
 
 /** Saved setups (T16), free of HTTP. Owns the safe upload order from T14. */
@@ -81,14 +98,6 @@ export interface BundleServiceDeps {
 
 /** Files left unused for this long are swept: far longer than any upload takes. */
 const ORPHAN_AGE_SECONDS = 60 * 60;
-
-async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, index) => byte === b[index]);
-}
 
 export function createBundleService(deps: BundleServiceDeps): BundleService {
   const { bundles, blobs, logError } = deps;
@@ -146,15 +155,9 @@ export function createBundleService(deps: BundleServiceDeps): BundleService {
       // 0. Over the account's limits already: refuse before storing anything (T47). The
       // same check runs again inside the save, where it cannot be raced.
       const { userId } = input.key;
-      const used = await bundles.usage(userId);
-      const current = await bundles.get(input.key);
-      if (!current && used.setups >= USER_STORAGE_LIMITS.maxSetups) {
-        throw new StorageLimitError(overLimit('setups'));
-      }
-      const growth = input.ciphertext.length - (current?.sizeBytes ?? 0);
-      if (growth > 0 && used.bytes + growth > USER_STORAGE_LIMITS.maxBytes) {
-        throw new StorageLimitError(overLimit('bytes'));
-      }
+      const [used, current] = await Promise.all([bundles.usage(userId), bundles.get(input.key)]);
+      const limit = storageLimitPassed(used, current?.sizeBytes ?? null, input.ciphertext.length);
+      if (limit) throw new StorageLimitError(overLimit(limit));
 
       // 1. Store the bytes under a new random id; the current copy is untouched.
       const uploaded = await blobs.put(userId, input.ciphertext);
@@ -190,7 +193,7 @@ export function createBundleService(deps: BundleServiceDeps): BundleService {
           return { outcome: 'conflict', currentRevision: result.currentRevision };
         case 'over-limit':
           await deleteQuietly(userId, uploaded.blobId);
-          throw new StorageLimitError(result.reason);
+          throw new StorageLimitError(overLimit(result.limit));
       }
     },
 

@@ -10,41 +10,76 @@ export interface RestoreEnvDeps {
   readonly writer: EnvWriter;
   readonly prompter: Pick<Prompter, 'confirm'>;
   readonly reporter: Pick<Reporter, 'info' | 'success' | 'warn'>;
-  /** `--yes`: add them without asking, except ones that make programs load code. */
+  /** `--yes`: add them without asking, except ones that load code or redirect traffic. */
   readonly assumeYes?: boolean;
-  /** `--allow-commands`: add those too without asking (T44). */
+  /** `--allow-commands`: add those too without asking (T44, T56). */
   readonly allowCommands?: boolean;
+  /** Names that send programs' requests elsewhere, from the agent's restorer (T61). */
+  readonly isRedirectVariable: (name: string) => boolean;
 }
 
-export interface RestoreEnvResult {
-  readonly added: readonly string[];
+/**
+ * Which saved variables this PC already has (T56): set in this process's environment, or
+ * with the saved value already where the writer puts it (the shell profile block or the
+ * Windows user variables), which a terminal opened before the last pull does not see yet.
+ * Used by `planEnvRestore`.
+ */
+async function splitEnvValues(
+  variables: Readonly<Record<string, string>>,
+  env: Readonly<Record<string, string | undefined>>,
+  writer: Pick<EnvWriter, 'current'>,
+): Promise<{ readonly alreadySet: string[]; readonly missing: string[] }> {
+  const names = Object.keys(variables).sort();
+  const unset = names.filter((name) => (env[name] ?? '') === '');
+  const written = unset.length > 0 ? await writer.current(unset) : new Map<string, string>();
+  const missing = unset.filter((name) => written.get(name) !== variables[name]);
+  return { alreadySet: names.filter((name) => !missing.includes(name)), missing };
+}
+
+/** Which saved values pull will add, chosen before it writes anything (T59). */
+export interface EnvRestorePlan {
+  readonly toAdd: readonly string[];
   readonly alreadySet: readonly string[];
   readonly declined: boolean;
 }
 
 /**
- * On pull (T30): adds the saved variables that are missing on this PC to the shell profile
- * (or Windows user variables), after asking. Values are never shown. Variables that make a
- * shell or runtime load code (`NODE_OPTIONS`, `PROMPT_COMMAND`, …) get their own question
- * with "no" as the default, and `--yes` alone never adds them (T44).
+ * On pull (T30, plan step of T59): shows the saved variables that are missing on this PC and
+ * asks which to add to the shell profile (or Windows user variables); writes nothing. Values
+ * are never shown. Variables that make a shell or runtime load code (`NODE_OPTIONS`,
+ * `PROMPT_COMMAND`, …) or send programs' requests elsewhere (`HTTPS_PROXY`,
+ * `ANTHROPIC_BASE_URL`, …) get their own question with "no" as the default, and `--yes`
+ * alone never adds them (T44, T56).
  */
-export async function restoreEnvValues(deps: RestoreEnvDeps): Promise<RestoreEnvResult> {
-  const names = Object.keys(deps.section.variables).sort();
-  const alreadySet = names.filter((name) => (deps.env[name] ?? '') !== '');
-  const missing = names.filter((name) => !alreadySet.includes(name));
+export async function planEnvRestore(
+  deps: Omit<RestoreEnvDeps, 'writer'> & {
+    readonly writer: Pick<EnvWriter, 'current' | 'where'>;
+  },
+): Promise<EnvRestorePlan> {
+  const names = Object.keys(deps.section.variables);
+  const { alreadySet, missing } = await splitEnvValues(
+    deps.section.variables,
+    deps.env,
+    deps.writer,
+  );
   if (missing.length === 0) {
     if (names.length > 0)
       deps.reporter.info('The saved environment variables are already set here.');
-    return { added: [], alreadySet, declined: false };
+    return { toAdd: [], alreadySet, declined: false };
   }
   const loaders = missing.filter((name) => LOADER_VARIABLE.test(name));
-  const plain = missing.filter((name) => !LOADER_VARIABLE.test(name));
+  const redirects = missing.filter(
+    (name) => !loaders.includes(name) && deps.isRedirectVariable(name),
+  );
+  const gated = [...loaders, ...redirects].sort();
+  const plain = missing.filter((name) => !gated.includes(name));
 
   deps.reporter.info(
     [
       `Saved environment variables missing on this PC (values hidden):`,
       ...plain.map((name) => `  + ${name}`),
       ...loaders.map((name) => `  + ${name}  (makes programs load or run code)`),
+      ...redirects.map((name) => `  + ${name}  (sends programs’ requests elsewhere)`),
       `They would be added to ${deps.writer.where}, as plain text on this PC.`,
     ].join('\n'),
   );
@@ -57,26 +92,45 @@ export async function restoreEnvValues(deps: RestoreEnvDeps): Promise<RestoreEnv
       toAdd.push(...plain);
     } else declined = true;
   }
-  if (loaders.length > 0) {
+  if (gated.length > 0) {
+    const one = gated.length === 1;
+    const what =
+      redirects.length === 0
+        ? `make${one ? 's' : ''} programs load or run code`
+        : loaders.length === 0
+          ? `send${one ? 's' : ''} programs’ requests elsewhere`
+          : 'make programs run code or send their requests elsewhere';
     const allow =
       deps.allowCommands === true ||
       (!deps.assumeYes &&
         (await deps.prompter.confirm(
-          `${loaders.join(', ')} make${loaders.length === 1 ? 's' : ''} programs load or run code. Add ${loaders.length === 1 ? 'it' : 'them'} too?`,
+          `${gated.join(', ')} ${what}. Add ${one ? 'it' : 'them'} too?`,
           false,
         )));
-    if (allow) toAdd.push(...loaders);
+    if (allow) toAdd.push(...gated);
     else {
       declined = true;
       if (deps.assumeYes) {
         deps.reporter.warn(
-          `Not added: ${loaders.join(', ')}. --yes never adds variables that make programs run code; add --allow-commands to accept them.`,
+          `Not added: ${gated.join(', ')}. --yes never adds variables that make programs run code or send their requests elsewhere; add --allow-commands to accept them.`,
         );
       }
     }
   }
-  if (toAdd.length === 0) return { added: [], alreadySet, declined };
+  return { toAdd, alreadySet, declined };
+}
 
+/** Writes the values `planEnvRestore` chose (pull's apply step); asks nothing. */
+export async function writeEnvValues(
+  deps: {
+    readonly section: EnvSection;
+    readonly writer: Pick<EnvWriter, 'write' | 'where'>;
+    readonly reporter: Pick<Reporter, 'success'>;
+    /** The agent the values were saved for, e.g. `Claude Code`: it reads them on its next start. */
+    readonly agentName: string;
+  },
+  toAdd: readonly string[],
+): Promise<void> {
   const values = Object.fromEntries(
     toAdd.map((name) => [name, deps.section.variables[name] ?? '']),
   );
@@ -85,8 +139,7 @@ export async function restoreEnvValues(deps: RestoreEnvDeps): Promise<RestoreEnv
     [
       `Added ${toAdd.join(', ')} to ${deps.writer.where}.`,
       ...(backup ? [`Backup of the old file: ${backup}`] : []),
-      'Open a new terminal (and restart Claude Code) so they take effect.',
+      `Open a new terminal (and restart ${deps.agentName}) so they take effect.`,
     ].join('\n'),
   );
-  return { added: toAdd, alreadySet, declined };
 }

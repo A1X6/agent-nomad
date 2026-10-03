@@ -4,6 +4,7 @@ import {
   HOME_PLACEHOLDER,
   PathError,
   createPathResolver,
+  windowsNameProblem,
   type PathEnvironment,
 } from '../src/index.ts';
 
@@ -55,6 +56,10 @@ describe('toNativePath: bundle path to a real path on each OS', () => {
     // 8.3 short names reach a folder under another name (T43).
     'PROGRA~1/x.md',
     'SSH~1',
+    'backup~1.txt',
+    'skills/ABCDEF~1.MD',
+    'AB12~123.md',
+    'plan~2.md',
   ])('refuses %j on Windows only', (path) => {
     expect(() => onWin.toNativePath('C:\\base', path)).toThrow(/Windows/);
     expect(onLinux.toNativePath('/base', path)).toBe(`/base/${path}`);
@@ -64,6 +69,14 @@ describe('toNativePath: bundle path to a real path on each OS', () => {
     expect(onWin.toNativePath('C:\\b', 'console.md')).toBe('C:\\b\\console.md');
     expect(onWin.toNativePath('C:\\b', 'com10.md')).toBe('C:\\b\\com10.md');
   });
+
+  // An 8.3 short name has at most 8 characters before the dot and 3 after it (UX-05).
+  it.each(['release-notes~3.md', 'notes~2024.md', 'abcdefg~1.md', 'x~1.json', 'a~1.b.md'])(
+    'allows %j on Windows, which is too long to be a short name',
+    (path) => {
+      expect(onWin.toNativePath('C:\\b', path)).toBe(`C:\\b\\${path}`);
+    },
+  );
 });
 
 describe('toBundlePath: real path back to a bundle path', () => {
@@ -250,4 +263,29 @@ describe('environment checks', () => {
   ])('refuses home folder %j', (environment) => {
     expect(() => createPathResolver(environment)).toThrow(PathError);
   });
+});
+
+describe('windowsNameProblem: names Windows cannot write safely (T38)', () => {
+  it.each([
+    ['skills/a/notes:secret.md', 'a name with ":" cannot be written on Windows'],
+    ['skills/CON/SKILL.md', 'a name Windows keeps for devices'],
+    ['skills/a/nul.txt', 'a name Windows keeps for devices'],
+    ['skills/a/COM1.md', 'a name Windows keeps for devices'],
+    ['skills/a/COM¹.md', 'a name Windows keeps for devices'],
+    ['skills/lpt³', 'a name Windows keeps for devices'],
+    ['.agentnomad/home/SSH~1/run.sh', 'a Windows short name (like PROGRA~1)'],
+    ['skills/PROGRA~1/SKILL.md', 'a Windows short name (like PROGRA~1)'],
+    ['skills/a/file?.md', 'a name Windows does not allow'],
+    ['skills/a/trailing.', 'a name ending in a dot or space on Windows'],
+    ['skills/a/space ', 'a name ending in a dot or space on Windows'],
+  ])('%s', (path, reason) => {
+    expect(windowsNameProblem(path)).toBe(reason);
+  });
+
+  it.each(['skills/deploy/SKILL.md', 'skills/a/console.md', 'hooks/check.sh', 'CLAUDE.md'])(
+    'allows %s',
+    (path) => {
+      expect(windowsNameProblem(path)).toBeNull();
+    },
+  );
 });

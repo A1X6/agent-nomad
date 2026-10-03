@@ -11,20 +11,24 @@ export function unwrapAnswer<T>(answer: T): Exclude<T, symbol> {
   return answer as Exclude<T, symbol>;
 }
 
-const toOptions = <T extends string>(choices: readonly Choice<T>[]) =>
+/**
+ * clack's `Option<T>` is a conditional type (`T extends Primitive ? … : …`) that TypeScript
+ * cannot resolve while `T` is still generic, so the one cast lives here: for a string `T` it
+ * is exactly this shape.
+ */
+const toOptions = <T extends string>(choices: readonly Choice<T>[]): clack.Option<T>[] =>
   choices.map((choice) => ({
     value: choice.value,
     label: printable(choice.label),
     ...(choice.hint !== undefined && { hint: printable(choice.hint) }),
-  }));
+  })) as clack.Option<T>[];
 
 /** The Prompter on @clack/prompts (T04 decision). Commands only see the Prompter interface. */
 export function createClackPrompter(): Prompter {
   return {
     async select(message, choices) {
-      // clack types options loosely for generic values; the answer is one of `choices`.
       return unwrapAnswer(
-        await clack.select({ message: printable(message), options: toOptions(choices) as never }),
+        await clack.select({ message: printable(message), options: toOptions(choices) }),
       );
     },
 
@@ -32,7 +36,7 @@ export function createClackPrompter(): Prompter {
       return unwrapAnswer(
         await clack.multiselect({
           message: printable(message),
-          options: toOptions(choices) as never,
+          options: toOptions(choices),
           required: options.required ?? true,
           ...(options.initial && { initialValues: [...options.initial] }),
         }),

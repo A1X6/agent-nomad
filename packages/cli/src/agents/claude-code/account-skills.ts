@@ -1,10 +1,11 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
+import type { PlatformPath } from 'node:path';
 
 import * as z from 'zod';
 
-import type { CollectedFile } from '../adapter.ts';
-import type { FileGatherer } from './file-gathering.ts';
-import { RESERVED_DIR } from './global-paths.ts';
+import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { RESERVED_DIR, type CollectedFile } from '../adapter.ts';
+import type { FileGatherer } from '../shared/file-gathering.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 
 /**
@@ -14,7 +15,9 @@ import { runnableInMarkdown } from './runnable-markdown.ts';
  * an organization's) under a reserved bundle folder, and pull can add them back as normal
  * local skills on a PC that does not get them from its own claude.ai sync.
  */
-export const SYNCED_SKILLS_DIR = 'skills/synced';
+const SYNCED_SKILLS_DIR = 'skills/synced';
+/** The id of the optional part for saved claude.ai skills (T42, T61); also the flag name. */
+export const ACCOUNT_SKILLS_PART = 'account-skills';
 export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
 
 /**
@@ -29,7 +32,7 @@ const EntrySchema = z.looseObject({ name: z.string(), creatorType: z.string().op
 /** A skill folder name that is safe everywhere and not one Claude Code reserves. */
 const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const RESERVED_NAMES = new Set(['synced', 'anthropic-skills']);
-export const isUsableSkillName = (name: string) =>
+const isUsableSkillName = (name: string) =>
   SKILL_NAME.test(name) &&
   !RESERVED_NAMES.has(name.toLowerCase()) &&
   !name.toLowerCase().startsWith('anthropic-skills:');
@@ -47,11 +50,7 @@ const isDirectory = async (path: string) =>
   (await stat(path).catch(() => null))?.isDirectory() ?? false;
 
 /** What `~/.claude/skills/synced/` holds on this PC. Never throws; unreadable parts are skipped. */
-export async function readSyncedSkills(
-  files: FileGatherer,
-  baseDir: string,
-): Promise<SyncedSkills> {
-  const { path } = files;
+export async function readSyncedSkills(path: PlatformPath, baseDir: string): Promise<SyncedSkills> {
   const root = path.join(baseDir, ...SYNCED_SKILLS_DIR.split('/'));
   const own = new Map<string, string>();
   const allNames = new Set<string>();
@@ -61,15 +60,7 @@ export async function readSyncedSkills(
     if (!account.isDirectory() || account.name.startsWith('.')) continue;
     const accountDir = path.join(root, account.name);
     const text = await readFile(path.join(accountDir, 'manifest.json'), 'utf8').catch(() => null);
-    let manifest: z.infer<typeof ManifestSchema> | null = null;
-    if (text !== null) {
-      try {
-        const parsed = ManifestSchema.safeParse(JSON.parse(text));
-        if (parsed.success) manifest = parsed.data;
-      } catch {
-        // Treated like an unknown format below.
-      }
-    }
+    const manifest = text === null ? null : valueOrNull(parseJsonWith(ManifestSchema, text));
     if (manifest === null) {
       problem = `Claude Code's list of synced skills (${SYNCED_SKILLS_DIR}/${account.name}/manifest.json) is missing or in a format agentnomad does not know.`;
       continue;

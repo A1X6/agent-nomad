@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { posix, win32 } from 'node:path';
 
-import { parseSettings } from './file-gathering.ts';
+import { pathsOf } from '../shared/detector-system.ts';
+import { parseSettings } from './settings-commands.ts';
 import { homePathProblem } from './global-paths.ts';
 import { MAX_PROJECT_DIR_NAME } from './project-paths.ts';
 
@@ -30,8 +30,6 @@ export type AutoMemoryLocation =
  * letter or digit becomes `-` (Claude Code's rule, checked against real folders).
  */
 export const projectDirName = (root: string) => root.replace(/[^A-Za-z0-9]/g, '-');
-
-const pathsOf = (platform: NodeJS.Platform) => (platform === 'win32' ? win32 : posix);
 
 async function readText(file: string): Promise<string | null> {
   try {

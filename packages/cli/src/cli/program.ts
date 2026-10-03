@@ -1,5 +1,8 @@
-import { Command, Option } from '@commander-js/extra-typings';
+import { MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
+import { Command, Option, type CommandUnknownOpts } from '@commander-js/extra-typings';
 
+import type { OptionalPart } from '../agents/adapter.ts';
+import { formatSize } from '../ui/format-size.ts';
 import { CLI_VERSION } from '../version.ts';
 import type { CommandHandlers, CredentialOptions, ScopeFlags } from './commands.ts';
 import { parseAgentList, parseProjectName, parseUsername } from './flags.ts';
@@ -10,8 +13,16 @@ export interface ProgramOutput {
   writeErr(text: string): void;
 }
 
+/** An agent's optional part as the command line needs it: its id and its flags' help. */
+export type PartFlags = Pick<OptionalPart, 'id' | 'flagHelp'>;
+
 export interface ProgramDeps {
   readonly handlers: CommandHandlers;
+  /**
+   * The registered agents' optional parts (T61): each gets `--<id>` and `--no-<id>` in push
+   * and pull (ARCH-02). A part id two agents share gets one pair of flags.
+   */
+  readonly optionalParts: readonly PartFlags[];
   readonly output?: ProgramOutput;
 }
 
@@ -29,7 +40,34 @@ Examples:
                                                     log in from a script
 
 With no terminal (a script or CI), nothing is asked: a question the flags do not
-answer stops the command with exit code 1 and names the flags to add.`;
+answer stops the command with exit code 1 and names the flags to add. Push and pull
+also exit with code 1 when a setup was skipped or refused without a "no" from you
+(a newer or older copy, over ${formatSize(MAX_BUNDLE_BYTES)}, or skipped by --yes); the rest is done first.`;
+
+/** `--<id>` and `--no-<id>` for each optional part, with the command's help texts. */
+function addPartOptions(
+  command: CommandUnknownOpts,
+  parts: readonly PartFlags[],
+  which: 'push' | 'pull',
+): void {
+  for (const part of parts) {
+    command.addOption(new Option(`--${part.id}`, part.flagHelp[which].include));
+    command.addOption(new Option(`--no-${part.id}`, part.flagHelp[which].leaveOut));
+  }
+}
+
+/** The part flags given, mapped to the part's id (T61). */
+function partsOf(
+  command: CommandUnknownOpts,
+  parts: readonly PartFlags[],
+): { parts?: ReadonlyMap<string, boolean> } {
+  const given = new Map<string, boolean>();
+  for (const part of parts) {
+    const value = command.getOptionValue(new Option(`--${part.id}`).attributeName());
+    if (typeof value === 'boolean') given.set(part.id, value);
+  }
+  return given.size === 0 ? {} : { parts: given };
+}
 
 /** `--agent`, `--global`, `--project`: shared by the commands that work on saved setups. */
 function scopeOptions() {
@@ -85,7 +123,8 @@ function scope(options: {
  * The `agentnomad` command line (T20): every command from the PRD, its flags and help.
  * Parsing only; each command's work is done by the injected handlers.
  */
-export function createProgram({ handlers, output }: ProgramDeps) {
+export function createProgram({ handlers, optionalParts, output }: ProgramDeps) {
+  const parts = [...new Map(optionalParts.map((part) => [part.id, part])).values()];
   const program = new Command('agentnomad')
     .description(
       'Save your AI agent setup to the cloud, encrypted on your PC, and restore it on any other PC.\nThe server can never read your data. There is no password recovery: keep your password safe.',
@@ -130,33 +169,26 @@ export function createProgram({ handlers, output }: ProgramDeps) {
     .action(() => handlers.logout());
 
   const [pushAgent, pushGlobal, pushProject] = scopeOptions();
-  program
+  const push = program
     .command('push')
     .description('save setups to the cloud (encrypted on this PC first)')
     .addOption(pushAgent)
     .addOption(pushGlobal)
     .addOption(pushProject)
-    .addOption(new Option('--memory', 'include memory (subagent and auto memory)'))
-    .addOption(new Option('--no-memory', 'leave memory out'))
-    .addOption(
-      new Option(
-        '--account-skills',
-        'save a copy of your own claude.ai skills (normally synced by your account)',
-      ),
-    )
-    .addOption(new Option('--no-account-skills', 'leave claude.ai skills out'))
-    .addOption(yesOption())
-    .action((options) =>
-      handlers.push({
-        ...scope(options),
-        yes: options.yes === true,
-        ...(options.memory !== undefined && { memory: options.memory }),
-        ...(options.accountSkills !== undefined && { accountSkills: options.accountSkills }),
-      }),
-    );
+    .addOption(new Option('--memory', "include the agent's memory"))
+    .addOption(new Option('--no-memory', 'leave memory out'));
+  addPartOptions(push, parts, 'push');
+  push.addOption(yesOption()).action((options, command) =>
+    handlers.push({
+      ...scope(options),
+      yes: options.yes === true,
+      ...(options.memory !== undefined && { memory: options.memory }),
+      ...partsOf(command, parts),
+    }),
+  );
 
   const [pullAgent, pullGlobal, pullProject] = scopeOptions();
-  program
+  const pull = program
     .command('pull')
     .description('restore saved setups onto this PC (a project goes into the current folder)')
     .addOption(pullAgent)
@@ -175,24 +207,18 @@ export function createProgram({ handlers, output }: ProgramDeps) {
         '--allow-commands',
         'accept new or changed hooks, MCP servers and scripts, and install plugins and programs (--yes alone skips them)',
       ),
-    )
-    .addOption(
-      new Option(
-        '--account-skills',
-        'add saved claude.ai skills as local skills (for a PC without that claude.ai account)',
-      ),
-    )
-    .addOption(new Option('--no-account-skills', 'do not add saved claude.ai skills'))
-    .action((options) =>
-      handlers.pull({
-        ...scope(options),
-        yes: options.yes === true,
-        ...(options.allowCommands && { allowCommands: true }),
-        ...(options.accountSkills !== undefined && { accountSkills: options.accountSkills }),
-        ...(options.merge && { conflict: 'merge' as const }),
-        ...(options.overwrite && { conflict: 'overwrite' as const }),
-      }),
     );
+  addPartOptions(pull, parts, 'pull');
+  pull.action((options, command) =>
+    handlers.pull({
+      ...scope(options),
+      yes: options.yes === true,
+      ...(options.allowCommands && { allowCommands: true }),
+      ...partsOf(command, parts),
+      ...(options.merge && { conflict: 'merge' as const }),
+      ...(options.overwrite && { conflict: 'overwrite' as const }),
+    }),
+  );
 
   program
     .command('list')

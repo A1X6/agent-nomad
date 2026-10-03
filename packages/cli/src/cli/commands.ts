@@ -16,10 +16,11 @@ export interface PushOptions extends ScopeFlags {
   /** `--memory` / `--no-memory`: include memory or not, instead of asking (default with --yes: no). */
   readonly memory?: boolean;
   /**
-   * `--account-skills` / `--no-account-skills`: save a copy of your own claude.ai skills or not,
-   * instead of asking (default with --yes: no) (T42).
+   * An agent's optional parts answered by flags, by part id (T61), e.g. `--account-skills` /
+   * `--no-account-skills` → `account-skills`: save it or not instead of asking (default with
+   * --yes: no).
    */
-  readonly accountSkills?: boolean;
+  readonly parts?: ReadonlyMap<string, boolean>;
 }
 
 export interface PullOptions extends ScopeFlags {
@@ -32,17 +33,18 @@ export interface PullOptions extends ScopeFlags {
    */
   readonly allowCommands?: boolean;
   /**
-   * `--account-skills` / `--no-account-skills`: add saved claude.ai skills as local skills or
-   * not, instead of asking (default with --yes: no) (T42).
+   * An agent's optional parts answered by flags, by part id (T61), e.g. `--account-skills` /
+   * `--no-account-skills` → `account-skills`: add saved claude.ai skills as local skills or
+   * not, instead of asking (default with --yes: no).
    */
-  readonly accountSkills?: boolean;
+  readonly parts?: ReadonlyMap<string, boolean>;
 }
 
-export interface DeleteOptions extends ScopeFlags {
+interface DeleteOptions extends ScopeFlags {
   readonly yes: boolean;
 }
 
-export interface ConfirmOptions {
+interface ConfirmOptions {
   readonly yes: boolean;
 }
 
@@ -71,29 +73,3 @@ export interface CommandHandlers {
   accountDelete(options: CredentialOptions): Promise<void>;
   env(): Promise<void>;
 }
-
-/** The command exists but is built in a later task. */
-export class NotAvailableYetError extends Error {
-  constructor(command: string, task: string) {
-    super(`"agentnomad ${command}" is not available yet (coming in ${task}).`);
-    this.name = 'NotAvailableYetError';
-  }
-}
-
-const later = (command: string, task: string) => () =>
-  Promise.reject(new NotAvailableYetError(command, task));
-
-/** Placeholders until each command's task replaces it. */
-export const NOT_YET_AVAILABLE: CommandHandlers = {
-  register: later('register', 'T23'),
-  login: later('login', 'T23'),
-  logout: later('logout', 'T23'),
-  push: later('push', 'T33'),
-  pull: later('pull', 'T34'),
-  list: later('list', 'T35'),
-  agents: later('agents', 'T35'),
-  status: later('status', 'T35'),
-  delete: later('delete', 'T35'),
-  accountDelete: later('account delete', 'T35'),
-  env: later('env', 'T30'),
-};

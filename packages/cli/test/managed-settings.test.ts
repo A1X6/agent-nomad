@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import { recordingReporter } from './fakes.ts';
 import {
   createAgentRegistry,
   createAgentsCommand,
+  createClaudeCodeAdapter,
   detectManagedSettings,
   explainPluginFailure,
   globalDestination,
   managedSettingsDir,
   managedSettingsNotice,
-  syncPlugins,
+  installPlugins,
+  parseRegSettings,
   type ManagedSettingsSystem,
 } from '../src/index.ts';
 
@@ -112,6 +115,34 @@ describe('finding managed settings', () => {
   });
 });
 
+describe('the Settings value in reg query output (QA-07)', () => {
+  /** What 'reg query <hive>\SOFTWARE\Policies\ClaudeCode /v Settings' prints. */
+  const regOutput = (line: string) =>
+    ['', 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\ClaudeCode', line, '', ''].join('\r\n');
+
+  it.each([
+    ['a REG_SZ value', '    Settings    REG_SZ    {"model":"opus"}', '{"model":"opus"}'],
+    [
+      'REG_EXPAND_SZ',
+      '    Settings    REG_EXPAND_SZ    {"env":{"A":"%HOME%"}}',
+      '{"env":{"A":"%HOME%"}}',
+    ],
+    [
+      'a value with spaces',
+      '    Settings    REG_SZ    { "permissions": { "deny": ["Bash(rm -rf)"] } }',
+      '{ "permissions": { "deny": ["Bash(rm -rf)"] } }',
+    ],
+  ])('reads %s', (_, line, value) => {
+    expect(parseRegSettings(regOutput(line))).toBe(value);
+  });
+
+  it('answers null when there is no text value, so no source without keys is listed', () => {
+    expect(parseRegSettings(regOutput('    Settings    REG_MULTI_SZ    a\\0b'))).toBeNull();
+    expect(parseRegSettings(regOutput('    Other    REG_SZ    {}'))).toBeNull();
+    expect(parseRegSettings('')).toBeNull();
+  });
+});
+
 describe('server-managed settings (claude.ai admin console)', () => {
   it('are found through the copy Claude Code caches', async () => {
     const found = await detectManagedSettings(
@@ -129,6 +160,22 @@ describe('server-managed settings (claude.ai admin console)', () => {
     ]);
     expect(found.restrictsPlugins).toBe(true);
     expect(managedSettingsNotice(found, 'pull')).toContain('(the claude.ai admin console)');
+  });
+
+  it('a plugin they block names the admin console, not the cached file (UX-03)', async () => {
+    const found = await detectManagedSettings(
+      fakeSystem({
+        platform: 'linux',
+        files: {
+          '/home/a/.claude/remote-settings.json': JSON.stringify({
+            blockedMarketplaces: [{ source: 'github', repo: 'x/y' }],
+          }),
+        },
+      }),
+    );
+    expect(explainPluginFailure('Marketplace y is blocked', found)).toBe(
+      "blocked by your organization's Claude Code policy (the claude.ai admin console). Ask your admin to allow it. Details: Marketplace y is blocked",
+    );
   });
 
   it('an empty cache means none are set', async () => {
@@ -166,24 +213,34 @@ describe('warnings (T31 done-when)', () => {
     );
   });
 
-  it('agentnomad agents shows the notice', async () => {
-    const lines: string[] = [];
+  it('agentnomad agents shows the notice, from the adapter’s inspector (SOLID-01)', async () => {
+    const { reporter, lines: reported } = recordingReporter();
+    const adapter = createClaudeCodeAdapter({
+      env: { PATH: '' },
+      homedir: '/nowhere',
+      platform: 'linux',
+      isClaudeRunning: () => Promise.resolve(false),
+      managedSystem: fakeSystem({
+        platform: 'linux',
+        files: { '/etc/claude-code/managed-settings.json': policy },
+      }),
+    });
     await createAgentsCommand({
-      registry: () => createAgentRegistry([]),
-      reporter: { info: () => undefined, success: () => undefined, warn: (m) => lines.push(m) },
-      notices: () => Promise.resolve([managedSettingsNotice(found, 'agents') ?? '']),
+      registry: () => createAgentRegistry([adapter]),
+      reporter,
     }).agents();
+    const lines = reported.filter((line) => line.startsWith('warn: '));
     expect(lines[0]).toContain('never synced');
+    expect(managedSettingsNotice(found, 'agents')).toContain('never synced');
   });
 
   it('a plugin blocked by policy gets a clear reason', async () => {
-    const result = await syncPlugins({
-      manifest: {
-        marketplaces: [],
-        plugins: [{ id: 'tool@evil-market', scope: 'user', commandSource: false }],
-        skipped: [],
-      },
-      current: { marketplaces: new Set(['evil-market']), installed: new Set() },
+    const choice = {
+      marketplaces: [],
+      plugins: [{ id: 'tool@evil-market', scope: 'user' as const, commandSource: false }],
+      declined: [],
+    };
+    const result = await installPlugins(choice, {
       claude: {
         run: () =>
           Promise.resolve({
@@ -195,8 +252,7 @@ describe('warnings (T31 done-when)', () => {
             stderr: '',
           }),
       },
-      prompter: { confirm: () => Promise.resolve(true) },
-      reporter: { info: () => undefined, success: () => undefined, warn: () => undefined },
+      reporter: recordingReporter().reporter,
       cwd: '/',
       explainFailure: (reason) => explainPluginFailure(reason, found),
     });

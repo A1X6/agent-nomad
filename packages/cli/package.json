@@ -1,6 +1,6 @@
 {
   "name": "@agentnomad/cli",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "agentnomad command-line interface: commands, prompts, file system, API client, agent adapters",
   "license": "MIT",
@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "tsc --build",
-    "test": "vitest run"
+    "test": "vitest run --root ../.. --project @agentnomad/cli"
   },
   "dependencies": {
     "@agentnomad/contracts": "workspace:*",

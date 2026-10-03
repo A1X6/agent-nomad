@@ -1,43 +1,67 @@
-import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 
-import type { SourceOs } from '@agentnomad/contracts';
+import { sameBytes } from '@agentnomad/contracts';
 import {
   BACKUP_MARKER,
   createMergeStrategies,
   createPathResolver,
   selectMergeStrategy,
+  sourceOsOf,
+  windowsNameProblem,
+  type MergeChoices,
   type PlannedWrite,
 } from '@agentnomad/core';
-import * as z from 'zod';
 
 import type {
   CollectedFile,
   ConflictResolver,
+  ConflictToAsk,
   RestoreContext,
+  RestoreReport,
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
-import { hookScripts } from './hook-scripts.ts';
+import { freeSuffix, writeFileAtomically } from '../../system/files.ts';
+import { printableLine } from '../../ui/printable.ts';
+import { pathsOf } from '../shared/detector-system.ts';
+import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
-import { commandsInSettings, commandWords, createFileGatherer } from './file-gathering.ts';
+import { reviewRunnable } from './command-review.ts';
 import {
-  CLAUDE_JSON_BUNDLE_PATH,
-  CLAUDE_JSON_MCP_KEY,
-  CLAUDE_JSON_PREFERENCE_KEYS,
-} from './global-paths.ts';
-import { ClaudeJsonError } from './global-collector.ts';
-import {
-  globalDestination,
-  projectDestination,
-  projectHookScripts,
-  type RestoreDestination,
-  windowsNameProblem,
-} from './restore-rules.ts';
+  CLAUDE_JSON_QUESTION,
+  createClaudeJsonMerge,
+  type MutableReport,
+} from './claude-json-merge.ts';
+import { pathWords, settingsCommands } from './settings-commands.ts';
+import { CLAUDE_JSON_BUNDLE_PATH, extensionOf } from './global-paths.ts';
+import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
+import { globalDestination, projectDestination, type RestoreDestination } from './restore-rules.ts';
+import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
 
-/** The user's answer while Claude Code is running: try again after closing it, or skip. */
-export type ClaudeRunningAnswer = 'retry' | 'skip';
+/** What pull's plan step decided for this restore (T61). */
+interface ClaudeRestoreContext extends RestoreContext {
+  /**
+   * Leave `~/.claude.json` as it is, with the "was running" warning: Claude Code was open
+   * when the plan asked, and the user chose to skip it.
+   */
+  readonly leaveClaudeJson?: boolean;
+}
+
+/** The Claude Code restorer, and what its plan step needs to know about `~/.claude.json`. */
+export interface ClaudeCodeRestorer extends Restorer {
+  restore(
+    target: ScopeTarget,
+    files: readonly CollectedFile[],
+    onConflict: ConflictResolver,
+    context?: ClaudeRestoreContext,
+  ): Promise<RestoreReport>;
+  /**
+   * What restoring `files` would do to `~/.claude.json` here as it is now: nothing, create
+   * it, or merge into it (only after the answer to its conflict question).
+   */
+  claudeJsonChange(files: readonly CollectedFile[]): Promise<'none' | 'new' | 'merge'>;
+}
 
 export interface RestorerOptions {
   /** Claude Code's base folder on this PC (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -47,9 +71,8 @@ export interface RestorerOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** Whether `CLAUDE_CONFIG_DIR` is set: `.claude.json` then lives in the base folder. */
   readonly customConfigDir: boolean;
+  /** Checked right before `~/.claude.json` is written: never while Claude Code runs. */
   readonly isClaudeRunning: ClaudeRunningCheck;
-  /** Asks the user to close Claude Code (then `retry`) or to leave `~/.claude.json` alone. */
-  readonly onClaudeRunning: () => Promise<ClaudeRunningAnswer>;
   /** Clock for backup names; injectable for tests. */
   readonly now?: () => Date;
 }
@@ -58,15 +81,13 @@ export interface RestorerOptions {
 const LF_SCRIPTS = new Set(['.sh', '.bash', '.zsh', '.fish', '.py', '.rb', '.pl', '.lua']);
 const CRLF_SCRIPTS = new Set(['.bat', '.cmd']);
 
-/** Commands that only run on one side. */
-const WINDOWS_ONLY = /(\.ps1|\.psm1|\.bat|\.cmd)$|^(powershell|pwsh|cmd)(\.exe)?$/i;
-const POSIX_ONLY = /(\.sh|\.bash|\.zsh|\.fish)$|^(bash|sh|zsh|fish)$/i;
-
-const sameBytes = (a: Uint8Array, b: Uint8Array) =>
-  a.length === b.length && a.every((byte, index) => byte === b[index]);
-
-const isJsonObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+/** Commands that only run on one side: their program, or a script they run. */
+const ONLY_ON = {
+  windows: { programs: /^(powershell|pwsh|cmd)(\.exe)?$/i, scripts: /\.(ps1|psm1|bat|cmd)$/i },
+  posix: { programs: /^(bash|sh|zsh|fish)$/i, scripts: /\.(sh|bash|zsh|fish)$/i },
+};
+/** `NAME=value` words a shell command may start with, before its program. */
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /** Line endings of scripts for this OS; every other file stays byte-for-byte. */
 export function lineEndingsFor(
@@ -74,7 +95,7 @@ export function lineEndingsFor(
   path: string,
   content: Uint8Array,
 ): Uint8Array {
-  const extension = /(\.[^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
+  const extension = extensionOf(path);
   const crlf = platform === 'win32' && CRLF_SCRIPTS.has(extension);
   if (!crlf && !LF_SCRIPTS.has(extension)) return content;
   const text = new TextDecoder().decode(content);
@@ -82,26 +103,57 @@ export function lineEndingsFor(
   return new TextEncoder().encode(crlf ? lf.replace(/\n/g, '\r\n') : lf);
 }
 
-/** Hook and status line commands that will likely not run on `platform` (from another OS). */
-export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform): string[] {
-  const foreign = platform === 'win32' ? POSIX_ONLY : WINDOWS_ONLY;
-  return commandsInSettings(settingsJson).filter((command) =>
-    commandWords(command).some((word) => foreign.test(word)),
+/**
+ * Whether the file on disk already is the pulled one: equal as saved, or after the line-ending
+ * fix above. A script kept with the other line endings (a CRLF `.py` from Git's autocrlf, an
+ * LF `.cmd`) is then left alone instead of conflicting on every pull (T53).
+ */
+export function sameForRestore(
+  platform: NodeJS.Platform,
+  path: string,
+  existing: Uint8Array,
+  incoming: Uint8Array,
+): boolean {
+  return (
+    sameBytes(existing, incoming) || sameBytes(existing, lineEndingsFor(platform, path, incoming))
   );
+}
+
+/**
+ * Hook and status line commands that will likely not run on `platform` (from another OS), as
+ * written. Only the program and the scripts a command runs count (review 6 UX-02): a shell
+ * name in an argument's text (`echo "use bash here"`) is not one.
+ */
+export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform): string[] {
+  const foreign = platform === 'win32' ? ONLY_ON.posix : ONLY_ON.windows;
+  return settingsCommands(settingsJson)
+    .filter(({ words }) => {
+      const program = words.find((word) => !ASSIGNMENT.test(word)) ?? '';
+      return (
+        foreign.programs.test(program.split(/[\\/]/).pop() ?? '') ||
+        pathWords(words).some((word) => foreign.scripts.test(word))
+      );
+    })
+    .map(({ text }) => text);
 }
 
 /**
  * Writes a pulled Claude Code setup to this PC (T27). Only paths a collector could have
  * produced are written; existing files that differ are resolved with the user's choice
  * (T11 strategies); `~/.claude.json` is only ever merged, and never while Claude Code runs.
+ * It never asks: every answer comes from pull's plan step (T61).
  */
-export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
-  const files = createFileGatherer(options.platform);
-  const { path } = files;
-  const os: SourceOs =
-    options.platform === 'win32' || options.platform === 'darwin' ? options.platform : 'linux';
+export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRestorer {
+  const path = pathsOf(options.platform);
+  const os = sourceOsOf(options.platform);
   const resolver = createPathResolver({ os, homeDir: options.homedir });
   const strategies = createMergeStrategies(options.now ? { now: options.now } : {});
+  /** Claude Code's settings and MCP files are JSON: the one merge its files need (SOLID-07). */
+  const mergeChoices: MergeChoices = {
+    merges: [strategies.jsonMerge],
+    fallback: strategies.textSideBySide,
+    overwrite: strategies.overwrite,
+  };
   const claudeJsonFile = options.customConfigDir
     ? path.join(options.baseDir, '.claude.json')
     : path.join(options.homedir, '.claude.json');
@@ -113,31 +165,26 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     return new Uint8Array(await readFile(nativePath));
   }
 
-  /** `''` when nothing is at `nativePath`, else the first free `-2`, `-3`, … (T45). */
-  async function freeSuffix(nativePath: string): Promise<string> {
-    const taken = async (candidate: string) => (await stat(candidate).catch(() => null)) !== null;
-    if (!(await taken(nativePath))) return '';
-    for (let number = 2; ; number += 1) {
-      if (!(await taken(`${nativePath}-${String(number)}`))) return `-${String(number)}`;
-    }
+  /**
+   * Writes to a temporary file and swaps it in, so a crash never leaves half a file. A linked
+   * file is written where it really is, so the link stays (T53).
+   */
+  async function writeAtomically(nativePath: string, content: Uint8Array, mode: number | null) {
+    await writeFileAtomically(nativePath, content, {
+      followLink: true,
+      platform: options.platform,
+      ...(mode !== null && { mode }),
+    });
   }
 
-  /** Writes to a temporary file and swaps it in, so a crash never leaves half a file. */
-  async function writeAtomically(nativePath: string, content: Uint8Array, mode: number | null) {
-    await mkdir(path.dirname(nativePath), { recursive: true });
-    const temp = path.join(
-      path.dirname(nativePath),
-      `.${path.basename(nativePath)}.agentnomad-tmp-${randomBytes(4).toString('hex')}`,
-    );
-    try {
-      await writeFile(temp, content, { flag: 'wx', ...(mode !== null && { mode }) });
-      if (mode !== null && options.platform !== 'win32') await chmod(temp, mode);
-      await rename(temp, nativePath);
-    } catch (error) {
-      await rm(temp, { force: true });
-      throw error;
-    }
-  }
+  const claudeJson = createClaudeJsonMerge({
+    claudeJsonFile,
+    isClaudeRunning: options.isClaudeRunning,
+    readExisting,
+    writeAtomically,
+    freeSuffix,
+    ...(options.now && { now: options.now }),
+  });
 
   /** Permissions: a replaced file keeps its own; new scripts may run on macOS and Linux. */
   function modeFor(file: CollectedFile, content: Uint8Array, existingMode: number | null) {
@@ -171,120 +218,68 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     }
   }
 
-  /** `~/.claude.json` as it is now, parsed: `existing` is `null` when missing. */
-  async function readClaudeJson() {
-    const existing = await readExisting(claudeJsonFile);
-    if (existing === null || existing === 'folder') return { existing, current: {} };
-    try {
-      const current = z
-        .record(z.string(), z.unknown())
-        .parse(JSON.parse(new TextDecoder().decode(existing)));
-      return { existing, current };
-    } catch (error) {
-      throw new ClaudeJsonError(claudeJsonFile, { cause: error });
-    }
-  }
-
-  /**
-   * `current` with the incoming keys merged in: servers by name (incoming wins), preference
-   * keys replaced. A Map keeps a key named "__proto__" plain data. `unchanged` compares the
-   * keys, not the bytes, since Claude Code formats the file its own way.
-   */
-  function mergeInto(current: Record<string, unknown>, incoming: Record<string, unknown>) {
-    const merged = new Map(Object.entries(current));
-    for (const [key, value] of Object.entries(incoming)) {
-      const before = merged.get(key);
-      merged.set(
-        key,
-        key === CLAUDE_JSON_MCP_KEY && isJsonObject(before) && isJsonObject(value)
-          ? Object.fromEntries([...Object.entries(before), ...Object.entries(value)])
-          : value,
-      );
-    }
-    const unchanged = Object.keys(incoming).every(
-      (key) => JSON.stringify(current[key]) === JSON.stringify(merged.get(key)),
-    );
-    return { merged, unchanged };
-  }
-
-  /**
-   * Merges the selected keys into `~/.claude.json`, keeping everything else in it. Only the
-   * keys push saves are taken (T43): the MCP servers and the preference keys. Anything else,
-   * such as `projects` (local MCP servers and folder trust) or account state, is left out.
-   */
-  async function mergeClaudeJson(
-    file: CollectedFile,
-    onConflict: ConflictResolver,
-    report: MutableReport,
-    assumeYes: boolean,
-  ): Promise<void> {
-    const parsed = z
-      .record(z.string(), z.unknown())
-      .parse(JSON.parse(new TextDecoder().decode(file.content)));
-    const allowed = new Set([CLAUDE_JSON_MCP_KEY, ...CLAUDE_JSON_PREFERENCE_KEYS]);
-    const incoming = Object.fromEntries(Object.entries(parsed).filter(([key]) => allowed.has(key)));
-    const ignored = Object.keys(parsed).filter((key) => !allowed.has(key));
-    if (ignored.length > 0) {
-      report.warnings.push(
-        `Left out of ${claudeJsonFile}: ${ignored.map((key) => JSON.stringify(key)).join(', ')} (only MCP servers and preferences are restored there).`,
-      );
-    }
-    if (Object.keys(incoming).length === 0) return;
-
-    const before = await readClaudeJson();
-    if (before.existing === 'folder') {
-      report.skipped.push(file.path);
-      return;
-    }
-    if (before.existing !== null) {
-      if (mergeInto(before.current, incoming).unchanged) return;
-      const choice = await onConflict(CLAUDE_JSON_BUNDLE_PATH, { overwriteAllowed: false });
-      if (choice === 'skip') {
-        report.skipped.push(file.path);
-        return;
-      }
-    }
-    while (await options.isClaudeRunning()) {
-      // --yes never waits for the user to close Claude Code: the file is skipped instead.
-      if (assumeYes || (await options.onClaudeRunning()) === 'skip') {
-        report.skipped.push(file.path);
-        report.warnings.push(
-          `${claudeJsonFile} was left as it is because Claude Code was running; pull again later to add your MCP servers and preferences.`,
-        );
-        return;
-      }
-    }
-    // Read again now that Claude Code is closed: it may have saved the file meanwhile (T43).
-    const { existing, current } = await readClaudeJson();
-    if (existing === 'folder') {
-      report.skipped.push(file.path);
-      return;
-    }
-    const { merged, unchanged } = mergeInto(current, incoming);
-    if (existing !== null && unchanged) return;
-    const content = new TextEncoder().encode(
-      `${JSON.stringify(Object.fromEntries(merged), null, 2)}\n`,
-    );
-    const mode = existing === null ? 0o600 : (await stat(claudeJsonFile)).mode & 0o777;
-    if (existing !== null) {
-      const name = `${claudeJsonFile}${BACKUP_MARKER}${stamp(options.now?.() ?? new Date())}`;
-      const backup = name + (await freeSuffix(name));
-      await writeAtomically(backup, existing, mode);
-      report.backups.push(backup);
-    }
-    await writeAtomically(claudeJsonFile, content, mode);
-    report.written.push(file.path);
-  }
-
   return {
-    async restore(target, incoming, onConflict, context: RestoreContext = {}) {
+    reviewRunnable,
+    isRedirectVariable,
+
+    /**
+     * Each file here that differs, in the order `restore` meets them. `~/.claude.json` is
+     * listed whenever the setup has it: its other keys are not collected, so whether it
+     * would change is only known while writing.
+     */
+    conflicts(incoming, current): ConflictToAsk[] {
+      const found: ConflictToAsk[] = [];
+      // One lookup table, not a search per file: a setup may hold thousands (PERF-01).
+      const byPath = new Map(current.map((entry) => [entry.path, entry]));
+      for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+        const here = byPath.get(file.path);
+        const claudeJson = file.path === CLAUDE_JSON_BUNDLE_PATH;
+        if (here === undefined && !claudeJson) continue;
+        if (
+          here !== undefined &&
+          sameForRestore(options.platform, file.path, here.content, file.content)
+        )
+          continue;
+        found.push({
+          path: file.path,
+          question: claudeJson ? CLAUDE_JSON_QUESTION : { overwriteAllowed: true },
+        });
+      }
+      return found;
+    },
+
+    async claudeJsonChange(incoming) {
+      const file = incoming.find((entry) => entry.path === CLAUDE_JSON_BUNDLE_PATH);
+      return file === undefined ? 'none' : claudeJson.change(file);
+    },
+
+    async restore(target, incoming, onConflict, context: ClaudeRestoreContext = {}) {
       const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
-      const projectScripts = projectHookScripts(
-        incoming
-          .filter((entry) =>
-            ['.claude/settings.json', '.claude/settings.local.json'].includes(entry.path),
-          )
-          .map((entry) => new TextDecoder().decode(entry.content)),
+      // A question the user cancelled (Ctrl+C) or that cannot be asked without a terminal
+      // stops the whole restore; only a problem with the entry itself is skipped (T53).
+      let stopped: { readonly error: unknown } | undefined;
+      const stopping =
+        <A extends unknown[], R>(question: (...args: A) => Promise<R>) =>
+        async (...args: A): Promise<R> => {
+          try {
+            return await question(...args);
+          } catch (error) {
+            stopped = { error };
+            throw error;
+          }
+        };
+      const ask = stopping(onConflict);
+      const projectScripts = new Set(
+        target.kind === 'project'
+          ? incoming
+              .filter((entry) => PROJECT_SETTINGS_FILES.includes(entry.path))
+              .flatMap((entry) =>
+                projectHookScripts(new TextDecoder().decode(entry.content), {
+                  projectDir: target.projectDir,
+                  platform: options.platform,
+                }).map((script) => script.bundlePath),
+              )
+          : [],
       );
       const settings = incoming.find((entry) => entry.path === 'settings.json');
       const globalScripts = new Set(
@@ -312,7 +307,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
             location.kind === 'shared'
               ? 'Auto memory was not restored: autoMemoryDirectory in your user settings is shared by every project.'
               : location.kind === 'refused'
-                ? `Auto memory was not restored to ${location.dir}, the folder autoMemoryDirectory names: ${location.reason}.`
+                ? `Auto memory was not restored to ${printableLine(location.dir)}, the folder autoMemoryDirectory names: ${location.reason}.`
                 : 'Auto memory was not restored: this project path is too long to find its memory folder.',
           );
           return null;
@@ -323,12 +318,14 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         const destination = destinationOf(file.path);
         if (destination.kind === 'refused') {
           report.skipped.push(file.path);
-          report.warnings.push(`Refused "${file.path}": ${destination.reason}.`);
+          report.warnings.push(
+            `Refused "${printableLine(file.path)}": ${printableLine(destination.reason)}.`,
+          );
           return;
         }
         if (destination.kind === 'metadata') return;
         if (destination.kind === 'claude-json') {
-          await mergeClaudeJson(file, onConflict, report, context.assumeYes === true);
+          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true);
           return;
         }
 
@@ -342,7 +339,9 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         const existing = await readExisting(nativePath);
         if (existing === 'folder') {
           report.skipped.push(file.path);
-          report.warnings.push(`Skipped "${file.path}": a folder with that name exists.`);
+          report.warnings.push(
+            `Skipped "${printableLine(file.path)}": a folder with that name exists.`,
+          );
           return;
         }
         const existingMode = existing === null ? null : (await stat(nativePath)).mode & 0o777;
@@ -350,15 +349,15 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         let writes: readonly PlannedWrite[];
         if (existing === null) {
           writes = [{ path: file.path, content }];
-        } else if (sameBytes(existing, content)) {
+        } else if (sameForRestore(options.platform, file.path, existing, file.content)) {
           return;
         } else {
-          const choice = await onConflict(file.path, { overwriteAllowed: true });
+          const choice = await ask(file.path, { overwriteAllowed: true });
           if (choice === 'skip') {
             report.skipped.push(file.path);
             return;
           }
-          writes = selectMergeStrategy(strategies, choice, file.path).resolve({
+          writes = selectMergeStrategy(mergeChoices, choice, file.path).resolve({
             path: file.path,
             existing,
             incoming: content,
@@ -394,7 +393,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
           if (first !== undefined) {
             report.skipped.push(file.path);
             report.warnings.push(
-              `Skipped "${file.path}": on this PC it is the same file as "${first}".`,
+              `Skipped "${printableLine(file.path)}": on this PC it is the same file as "${printableLine(first)}".`,
             );
             continue;
           }
@@ -404,16 +403,17 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         try {
           await restoreEntry(file);
         } catch (error) {
+          if (stopped !== undefined) throw stopped.error;
           report.skipped.push(file.path);
-          report.warnings.push(`Skipped "${file.path}": ${(error as Error).message}.`);
+          report.warnings.push(
+            // A file error quotes the path as it is: its message is kept on one line too.
+            `Skipped "${printableLine(file.path)}": ${printableLine(error instanceof Error ? error.message : String(error))}.`,
+          );
         }
       }
 
       if (context.sourceOs !== undefined && context.sourceOs !== os) {
-        const settingsPaths =
-          target.kind === 'global'
-            ? ['settings.json']
-            : ['.claude/settings.json', '.claude/settings.local.json'];
+        const settingsPaths = target.kind === 'global' ? ['settings.json'] : PROJECT_SETTINGS_FILES;
         for (const file of incoming.filter((entry) => settingsPaths.includes(entry.path))) {
           for (const command of hooksForOtherOs(
             new TextDecoder().decode(file.content),
@@ -429,17 +429,3 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     },
   };
 }
-
-interface MutableReport {
-  written: string[];
-  skipped: string[];
-  backups: string[];
-  warnings: string[];
-}
-
-/** Same format as the T11 backup names: `20260925T120000Z`. */
-const stamp = (date: Date) =>
-  date
-    .toISOString()
-    .replace(/\.\d{3}Z$/, 'Z')
-    .replace(/[-:]/g, '');

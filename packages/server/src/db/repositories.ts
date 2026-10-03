@@ -1,4 +1,10 @@
-import type { AgentId, KdfParams, ScopeKey, Username } from '@agentnomad/contracts';
+import {
+  USER_STORAGE_LIMITS,
+  type AgentId,
+  type KdfParams,
+  type ScopeKey,
+  type Username,
+} from '@agentnomad/contracts';
 
 /** A stored account. Holds nothing that can decrypt the user's data. */
 export interface UserRecord {
@@ -23,7 +29,7 @@ export class UsernameTakenError extends Error {
   }
 }
 
-/** A list cursor that was not produced by this server (or was changed). */
+/** A list cursor that is not well-formed. */
 export class InvalidCursorError extends Error {
   constructor() {
     super('Invalid cursor');
@@ -35,8 +41,14 @@ export class InvalidCursorError extends Error {
 export interface UserRepository {
   findByUsername(username: Username): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
-  /** Throws UsernameTakenError when the username is taken. */
-  create(user: NewUser): Promise<UserRecord>;
+  /**
+   * Creates the user and their first session in one transaction, so a failed session
+   * leaves no account behind. Throws UsernameTakenError when the username is taken.
+   */
+  createWithSession(
+    user: NewUser,
+    session: Omit<NewSession, 'userId'>,
+  ): Promise<{ readonly user: UserRecord; readonly session: SessionRecord }>;
   /** Removes the user; their sessions and bundles go with them. */
   delete(id: string): Promise<void>;
 }
@@ -71,6 +83,8 @@ export interface SessionRepository {
    * nothing else would ever remove them.
    */
   deleteStale(userId: string, idleTimeoutMs: number): Promise<void>;
+  /** Deletes every user's expired sessions, also of users who never log in again. */
+  deleteExpired(): Promise<void>;
 }
 
 /** Identifies one saved setup: one user, one agent, one scope. */
@@ -120,8 +134,34 @@ export type PutMetaResult =
   | { readonly outcome: 'unchanged'; readonly meta: BundleMeta }
   /** Someone saved a newer revision first. Nothing changed; delete the new file. */
   | { readonly outcome: 'conflict'; readonly currentRevision: number }
-  /** Saving it would take the account past its storage limits (T47). Nothing changed. */
-  | { readonly outcome: 'over-limit'; readonly reason: string };
+  /** Saving it would take the account past one of its storage limits (T47). Nothing changed. */
+  | { readonly outcome: 'over-limit'; readonly limit: StorageLimit };
+
+/** Which per-account limit a save would pass: the number of setups or their bytes. */
+export type StorageLimit = 'setups' | 'bytes';
+
+/** What an account keeps now: how many setups, and their bytes. */
+export interface StorageUsage {
+  readonly setups: number;
+  readonly bytes: number;
+}
+
+/**
+ * The storage rule (T47) in one place (DUP-06): the limit a save would pass, or `null`.
+ * `currentSize` is the size of the setup it replaces, `null` for a new setup. A new revision
+ * of an existing setup never passes the count, and a save that does not grow never passes
+ * the bytes, so nobody gets stuck at a limit.
+ */
+export function storageLimitPassed(
+  used: StorageUsage,
+  currentSize: number | null,
+  newSize: number,
+): StorageLimit | null {
+  if (currentSize === null && used.setups >= USER_STORAGE_LIMITS.maxSetups) return 'setups';
+  const growth = newSize - (currentSize ?? 0);
+  if (growth > 0 && used.bytes + growth > USER_STORAGE_LIMITS.maxBytes) return 'bytes';
+  return null;
+}
 
 export interface BundlePage {
   readonly items: readonly BundleMeta[];
@@ -132,7 +172,7 @@ export interface BundlePage {
 export interface BundleRepository {
   /**
    * Metadata only, newest first, one page at a time. Throws InvalidCursorError for a cursor
-   * this server did not produce.
+   * that is not well-formed.
    */
   list(
     userId: string,
@@ -145,7 +185,7 @@ export interface BundleRepository {
    */
   putMeta(write: BundleMetaWrite): Promise<PutMetaResult>;
   /** How many setups the user keeps and their encrypted bytes together (T47). */
-  usage(userId: string): Promise<{ readonly setups: number; readonly bytes: number }>;
+  usage(userId: string): Promise<StorageUsage>;
   /** Returns what was removed (so its file can be deleted next), or `null` if nothing was. */
   delete(key: BundleKey): Promise<BundleMeta | null>;
 }

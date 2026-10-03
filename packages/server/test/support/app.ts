@@ -1,18 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
-import { createAuthService, type AuthService } from '../../src/auth/auth-service.ts';
+import { createApi } from '../../src/api.ts';
+import type { AuthService } from '../../src/auth/auth-service.ts';
 import { createServerKeys } from '../../src/auth/server-keys.ts';
-import { createBundleService } from '../../src/bundles/bundle-service.ts';
-import { createBundleRepository } from '../../src/db/bundle-repository.ts';
-import { createSessionRepository } from '../../src/db/session-repository.ts';
-import { createUserRepository } from '../../src/db/user-repository.ts';
-import { createApp } from '../../src/http/app.ts';
+import type { createApp } from '../../src/http/app.ts';
 import { createJsonLogger } from '../../src/logging/logger.ts';
-import { createPostgresRateLimiter } from '../../src/rate-limit/postgres-rate-limiter.ts';
-import { createPostgresBlobStore } from '../../src/storage/postgres-blob-store.ts';
 import { createTestDatabase, type TestDatabase } from './database.ts';
 
-export const TEST_SERVER_SECRET = new Uint8Array(32).fill(42);
+const TEST_SERVER_SECRET = new Uint8Array(32).fill(42);
 
 /** Tests pick the visitor's IP with this header (a real host sets its own). */
 export const TEST_IP_HEADER = 'x-test-client-ip';
@@ -30,34 +25,24 @@ export interface TestApp {
 /** The full API on a fresh PGlite database, with a clock tests can move. */
 export async function createTestApp(serverSecret = TEST_SERVER_SECRET): Promise<TestApp> {
   const database = await createTestDatabase();
-  const keys = await createServerKeys(serverSecret);
-  const limiter = createPostgresRateLimiter({ db: database.db, keys, shouldPrune: () => false });
   const logs: Record<string, unknown>[] = [];
-  const logger = createJsonLogger((line) => logs.push(JSON.parse(line) as Record<string, unknown>));
   let now = new Date();
-  const auth = createAuthService({
-    users: createUserRepository(database.db),
-    sessions: createSessionRepository(database.db),
-    keys,
-    limiter,
+  const { app, auth } = createApi({
+    db: database.db,
+    keys: await createServerKeys(serverSecret),
+    clientIp: (c) => c.req.header(TEST_IP_HEADER),
+    logger: createJsonLogger((line) => logs.push(JSON.parse(line) as Record<string, unknown>)),
     now: () => now,
     randomBytes: (length) => new Uint8Array(randomBytes(length)),
-  });
-  const bundles = createBundleService({
-    bundles: createBundleRepository(database.db),
-    blobs: createPostgresBlobStore(database.db),
+    // No housekeeping at random moments: a test that wants it builds its own limiter.
+    shouldPrune: () => false,
+    shouldSweep: () => false,
     logError: (message, error) => {
       throw new Error(`Unexpected cleanup failure: ${message}`, { cause: error });
     },
   });
   return {
-    app: createApp({
-      auth,
-      bundles,
-      limiter,
-      clientIp: (c) => c.req.header(TEST_IP_HEADER),
-      logger,
-    }),
+    app,
     auth,
     database,
     logs,

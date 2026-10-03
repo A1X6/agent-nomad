@@ -1,8 +1,11 @@
-import { execFile } from 'node:child_process';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { posix, win32 } from 'node:path';
+import { win32 } from 'node:path';
 
 import * as z from 'zod';
+
+import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { runProgram } from '../../system/run-program.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 
 /**
  * Settings an organization enforces on this PC (T31). They belong to the PC, not the user:
@@ -12,9 +15,9 @@ import * as z from 'zod';
  * set them, only `claude doctor` can tell.
  */
 
-export type ManagedSourceKind = 'remote' | 'file' | 'drop-ins' | 'mcp' | 'plist' | 'hklm' | 'hkcu';
+type ManagedSourceKind = 'remote' | 'file' | 'drop-ins' | 'mcp' | 'plist' | 'hklm' | 'hkcu';
 
-export interface ManagedSource {
+interface ManagedSource {
   readonly kind: ManagedSourceKind;
   /** Where it is, for the message, e.g. `/etc/claude-code/managed-settings.json`. */
   readonly where: string;
@@ -44,7 +47,7 @@ export interface ManagedSettingsSystem {
 }
 
 /** Where Claude Code caches server-managed settings, inside its base folder. */
-export const REMOTE_SETTINGS_FILE = 'remote-settings.json';
+const REMOTE_SETTINGS_FILE = 'remote-settings.json';
 
 const PLUGIN_KEYS = ['strictKnownMarketplaces', 'blockedMarketplaces'];
 const MCP_KEYS = [
@@ -70,19 +73,14 @@ export function managedSettingsDir(
 
 function keysOf(text: string | null): string[] {
   if (text === null) return [];
-  try {
-    const parsed = z.record(z.string(), z.unknown()).safeParse(JSON.parse(text));
-    return parsed.success ? Object.keys(parsed.data) : [];
-  } catch {
-    return [];
-  }
+  return Object.keys(valueOrNull(parseJsonWith(z.record(z.string(), z.unknown()), text)) ?? {});
 }
 
 /** Finds every managed settings source on this PC and which policy keys they set. */
 export async function detectManagedSettings(
   system: ManagedSettingsSystem,
 ): Promise<ManagedSettings> {
-  const path = system.platform === 'win32' ? win32 : posix;
+  const path = pathsOf(system.platform);
   const dir = managedSettingsDir(system.platform, system.env);
   const sources: ManagedSource[] = [];
   const keys = new Set<string>();
@@ -140,15 +138,22 @@ export async function detectManagedSettings(
   };
 }
 
+/**
+ * Where the settings come from, for a message: the admin console for server-managed ones,
+ * not the cache file the user cannot edit (UX-03), and the path for the rest.
+ */
+const sourcesText = (found: ManagedSettings) =>
+  found.sources
+    .map((source) => (source.kind === 'remote' ? 'the claude.ai admin console' : source.where))
+    .join(', ');
+
 /** What push and pull say when this PC has managed settings; `null` when it has none. */
 export function managedSettingsNotice(
   found: ManagedSettings,
   command: 'push' | 'pull' | 'agents',
 ): string | null {
   if (found.sources.length === 0) return null;
-  const where = found.sources
-    .map((source) => (source.kind === 'remote' ? 'the claude.ai admin console' : source.where))
-    .join(', ');
+  const where = sourcesText(found);
   const limits = [
     ...(found.restrictsPlugins ? ['which plugins can be installed'] : []),
     ...(found.restrictsMcpServers ? ['which MCP servers can run'] : []),
@@ -173,10 +178,7 @@ const POLICY_WORDS =
 /** A clearer reason for a failed plugin install when the organization's policy blocked it. */
 export function explainPluginFailure(reason: string, found: ManagedSettings | null): string {
   if (!POLICY_WORDS.test(reason)) return reason;
-  const where =
-    found && found.sources.length > 0
-      ? ` (${found.sources.map((source) => source.where).join(', ')})`
-      : '';
+  const where = found && found.sources.length > 0 ? ` (${sourcesText(found)})` : '';
   return `blocked by your organization's Claude Code policy${where}. Ask your admin to allow it. Details: ${reason}`;
 }
 
@@ -203,22 +205,22 @@ export function nodeManagedSettingsSystem(
     async listDir(dir) {
       return readdir(dir).catch(() => []);
     },
-    readRegistry(hive) {
-      return new Promise((done) => {
-        execFile(
-          'reg',
-          ['query', `${hive}\\SOFTWARE\\Policies\\ClaudeCode`, '/v', 'Settings'],
-          { windowsHide: true, encoding: 'utf8', timeout: 10_000 },
-          (error, stdout) => {
-            if (error) {
-              done(null);
-              return;
-            }
-            // "    Settings    REG_SZ    {...}"
-            done(/Settings\s+REG_(?:EXPAND_)?SZ\s+(.*)$/m.exec(stdout)?.[1]?.trim() ?? '');
-          },
-        );
-      });
+    async readRegistry(hive) {
+      const { stdout, error } = await runProgram(
+        'reg',
+        ['query', `${hive}\\SOFTWARE\\Policies\\ClaudeCode`, '/v', 'Settings'],
+        { timeoutMs: 10_000 },
+      );
+      return error ? null : parseRegSettings(stdout);
     },
   };
+}
+
+/**
+ * The `Settings` value in `reg query` output, or `null` when there is no text value
+ * (`REG_SZ` or `REG_EXPAND_SZ`), e.g. a `REG_MULTI_SZ`: nothing to read keys from.
+ */
+export function parseRegSettings(stdout: string): string | null {
+  // "    Settings    REG_SZ    {...}"
+  return /Settings\s+REG_(?:EXPAND_)?SZ\s+(.*)$/m.exec(stdout)?.[1]?.trim() ?? null;
 }

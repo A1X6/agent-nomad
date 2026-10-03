@@ -7,13 +7,14 @@
  * - DRIFT_LATEST: the newest Claude Code version (else read from the npm registry)
  * - DRIFT_FRESH_ENTRIES: a file listing, one per line, what a fresh Claude Code created
  * - DRIFT_OUT: where to write the Markdown report (else only printed)
- * - DRIFT_RUN_URL: link to the CI run, added to the report
  * - GITHUB_OUTPUT / GITHUB_STEP_SUMMARY: set by GitHub Actions
  *
  * Fails (exit 1) when a source cannot be fetched or no longer looks as expected, so a
  * broken check is noticed instead of quietly finding nothing.
  */
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
+
+import * as z from 'zod';
 
 import { CLAUDE_CODE_PATHS } from '../../src/agents/claude-code/claude-code-paths.data.ts';
 import { docsTopLevelNames, driftReport, reportMarkdown } from './drift.ts';
@@ -31,9 +32,11 @@ async function fetchText(url: string): Promise<string> {
 async function latestVersion(): Promise<string> {
   const given = process.env['DRIFT_LATEST']?.trim();
   if (given) return given;
-  const body = JSON.parse(await fetchText(REGISTRY_URL)) as { version?: unknown };
-  if (typeof body.version !== 'string') throw new Error(`${REGISTRY_URL}: no version`);
-  return body.version;
+  const body = z
+    .object({ version: z.string() })
+    .safeParse(JSON.parse(await fetchText(REGISTRY_URL)));
+  if (!body.success) throw new Error(`${REGISTRY_URL}: no version`);
+  return body.data.version;
 }
 
 async function freshEntries(): Promise<string[] | null> {
@@ -67,7 +70,7 @@ const report = driftReport({
   latestVersion: latest,
   freshEntries: fresh,
 });
-const markdown = reportMarkdown(report, process.env['DRIFT_RUN_URL']);
+const markdown = reportMarkdown(report);
 
 console.log(markdown);
 const out = process.env['DRIFT_OUT'];

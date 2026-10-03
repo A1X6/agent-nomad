@@ -20,6 +20,7 @@ worked example.
 packages/cli/src/agents/
 ├── adapter.ts                  the interfaces you implement (do not change)
 ├── registry.ts                 the registry (do not change)
+├── shared/                     helpers for every adapter (PATH lookup, reading files)
 ├── claude-code/                the reference adapter
 └── example/                    ← your new folder
     ├── example-paths.data.ts   what to sync, skip and refuse, as data
@@ -98,7 +99,7 @@ export const EXAMPLE_PATHS = z
 
 ## Step 3 · The detector
 
-Implement `Detector` from `adapter.ts`. Reuse the helpers in `claude-code/detector.ts`:
+Implement `Detector` from `adapter.ts`. Reuse the helpers in `shared/detector-system.ts`:
 `findExecutable(system, command)` searches PATH like a shell (PATHEXT on Windows), and
 `nodeDetectorSystem(env, homedir, platform)` gives the real file system and a safe
 `--version` runner (no shell, time-limited).
@@ -108,7 +109,7 @@ Implement `Detector` from `adapter.ts`. Reuse the helpers in `claude-code/detect
 import { join } from 'node:path';
 
 import type { DetectedAgent, Detector } from '../adapter.ts';
-import { findExecutable, type DetectorSystem } from '../claude-code/detector.ts';
+import { findExecutable, type DetectorSystem } from '../shared/detector-system.ts';
 
 export const exampleBaseDir = (system: DetectorSystem) =>
   system.env['EXAMPLE_HOME']?.trim() || join(system.homedir, '.example');
@@ -134,22 +135,24 @@ export function createExampleDetector(system: DetectorSystem): Detector {
 
 Implement `Collector`: return `CollectedFile`s whose `path` is relative to the base folder
 (global) or the project root (project), with forward slashes. `createFileGatherer` from
-`claude-code/file-gathering.ts` reads single files and walks folders (following links
-once, skipping clutter and agentnomad's own backup copies).
+`shared/file-gathering.ts` reads single files and walks folders (following links once,
+never into a folder for keys and logins, skipping the clutter your data file names and
+agentnomad's own backup copies).
 
 ```ts
 // packages/cli/src/agents/example/collector.ts
 import type { CollectedFile, Collector } from '../adapter.ts';
-import { createFileGatherer, uniqueByPath } from '../claude-code/file-gathering.ts';
+import { underFolder } from '../shared/bundle-paths.ts';
+import { createFileGatherer, uniqueByPath } from '../shared/file-gathering.ts';
 import { EXAMPLE_PATHS } from './example-paths.data.ts';
-
-const under = (path: string, entry: string) => path === entry || path.startsWith(`${entry}/`);
 
 export function createExampleCollector(options: {
   baseDir: string;
   platform: NodeJS.Platform;
 }): Collector {
-  const files = createFileGatherer(options.platform);
+  const files = createFileGatherer(options.platform, {
+    skippedNames: new Set(EXAMPLE_PATHS.skippedNames),
+  });
   const { path } = files;
 
   return {
@@ -158,7 +161,7 @@ export function createExampleCollector(options: {
       const scope = target.kind === 'global' ? EXAMPLE_PATHS.global : EXAMPLE_PATHS.project;
       const root = target.kind === 'global' ? options.baseDir : target.projectDir;
       const excluded = (bundlePath: string) =>
-        scope.neverSynced.some((entry) => under(bundlePath, entry));
+        scope.neverSynced.some((entry) => underFolder(bundlePath, entry));
 
       const single =
         target.kind === 'global' ? EXAMPLE_PATHS.global.files : EXAMPLE_PATHS.project.rootFiles;
@@ -185,14 +188,28 @@ refused. Allow only what your collector could have produced. This is what stops 
 or tampered bundle from writing credentials, state or files outside the setup. See
 `claude-code/restore-rules.ts`, including `windowsNameProblem` for Windows-unsafe names.
 
-**The restorer** implements `Restorer.restore(target, files, onConflict, context)`:
+**The restorer** also tells pull's plan step what to ask before anything is written, and
+never asks anything itself:
+
+- `reviewRunnable(files, current)`: what in the pulled files runs programs (hooks, MCP
+  servers, the scripts they run) and is new or changed against this PC. Pull lists these
+  and asks; this is the main safety step of pull, so list everything the agent runs.
+- `conflicts(files, current)`: each file here that differs, in the order `restore` meets
+  them, with the question (`overwriteAllowed`, and a `message` when the default
+  "`<path>` already exists here and is different." does not fit).
+- `isRedirectVariable(name)`: saved environment variables that send programs' requests
+  elsewhere (a proxy, another endpoint); pull gives them their own question.
+
+It implements `Restorer.restore(target, files, onConflict, context)`:
 
 1. For each file, ask the restore rules; report refused ones in `warnings`.
 2. Skip files that are identical to what is on disk.
-3. For a different existing file, call `onConflict(path, { overwriteAllowed })`: it asks the
-   user or answers from `--merge` / `--overwrite` / `--yes`. Use `createMergeStrategies`
-   and `selectMergeStrategy` from `@agentnomad/core` to plan merge (JSON by key; others
-   side by side) and overwrite (with a timestamped backup).
+3. For a different existing file, call `onConflict(path, question)`: it answers from what
+   the plan asked (or `--merge` / `--overwrite` / `--yes`). Use `createMergeStrategies`
+   and `selectMergeStrategy` from `@agentnomad/core` to plan merge and overwrite (with a
+   timestamped backup): pass it the merges your formats need in a `MergeChoices` (Claude
+   Code: `[jsonMerge]`); anything none of them handles is kept side by side. A merge for
+   another format (TOML, Markdown) is one more `MergeStrategy` in that list.
 4. Write atomically (temporary file, then rename), keep a replaced file's permissions,
    use LF for scripts (CRLF for `.bat`/`.cmd` on Windows), set the executable bit on
    macOS and Linux.
@@ -206,10 +223,24 @@ loop) into a shared `agents/shared/` module rather than copying them.
 
 - **`inspector.unknownEntries(target)`:** entries in the agent's folder that the data file
   does not know, so push can tell the user (see `claude-code/unknown-files.ts`).
-- **`inspector.notices('push' | 'pull')`:** anything to point out, such as
+- **`inspector.notices('push' | 'pull' | 'agents')`:** anything to point out, such as
   organization-managed settings (see `claude-code/managed-settings.ts`).
-- **`afterRestore(context)`:** follow-up after a pull, such as reinstalling extensions with
-  the agent's own commands. Respect `context.assumeYes` and `context.allowCommands`:
+- **`inspector.versionNotice(savedWith, here)`:** what pull says about the version a setup
+  was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text).
+- **`optionalParts`:** what push saves only after a yes, as data (an id, its scope, what
+  there is, the question, and `flagHelp`, the help for `--<id>` / `--no-<id>` in push and
+  pull); the collector gets the chosen ids in `options.include`. The command line builds
+  the flags from the registered adapters: nothing to add in `cli/`.
+- **`memoryDescription`:** what push's memory question names.
+- **`envReferences`:** which bundle files hold MCP servers (`mcp`) and settings with an
+  `env` block (`settings`) that can use `${VAR}`, the variables the agent sets itself
+  (`ownVariables`), and an optional `label` for messages. Push offers to save the values
+  these files use and `agentnomad env` lists them; without it, both find none (see
+  `claude-code/env-files.ts`).
+- **`planRestore(context)`:** the agent's own questions in pull's plan step, before anything
+  is written, such as reinstalling extensions with the agent's own commands. It returns how
+  to write the setup (usually the restorer's `restore`) and a follow-up that runs after
+  writing and gets no prompter. Respect `context.assumeYes` and `context.allowCommands`:
   without `allowCommands`, never install or run anything unasked.
 
 ## Step 7 · Put the adapter together
@@ -217,7 +248,7 @@ loop) into a shared `agents/shared/` module rather than copying them.
 ```ts
 // packages/cli/src/agents/example/example-adapter.ts
 import type { AgentAdapter } from '../adapter.ts';
-import { nodeDetectorSystem } from '../claude-code/detector.ts';
+import { nodeDetectorSystem } from '../shared/detector-system.ts';
 import { createExampleCollector } from './collector.ts';
 import { createExampleDetector, exampleBaseDir } from './detector.ts';
 import { createExampleRestorer } from './restorer.ts';
@@ -246,9 +277,13 @@ export function createExampleAdapter(options: {
 The `id` is permanent: it is part of every saved bundle's key. Use lowercase letters,
 digits and dashes.
 
+Import only `../adapter.ts`, `../shared/` and generic code (`../../system/`, `@agentnomad/core`),
+never another adapter's folder: a lint rule in `eslint.config.js` refuses it, so a change
+made for one agent cannot change another. A helper two adapters need goes in `shared/`.
+
 ## Step 8 · Register it (the one line)
 
-In `packages/cli/src/app.ts`, add the adapter to the registry list:
+In `packages/cli/src/app.ts`, add the adapter to the registry list in `createAppRegistry`:
 
 ```ts
 createAgentRegistry([
@@ -286,10 +321,9 @@ the fakes the existing tests use.
 - [ ] `pnpm test:e2e` passes.
 - [ ] Push and pull tried by hand on at least two operating systems (a temporary home
       folder is enough), including a pull onto a PC that already has a different setup.
-- [ ] Anything that runs programs is shown by pull before it is written. The review in
-      `pull/command-review.ts` understands Claude Code's formats today; if your agent's
-      setup can run programs (hooks, MCP servers), add its format there, or better, move
-      the review behind the adapter as the [roadmap](ROADMAP.md#v1x-more-agents) plans.
+- [ ] Anything that runs programs is shown by pull before it is written: your restorer's
+      `reviewRunnable` lists it (Claude Code's is `claude-code/command-review.ts`).
+- [ ] `pnpm lint` passes: `push/`, `pull/`, `cli/`, `env/` and `commands/` (and every other generic folder) must not import your folder.
 - [ ] README (supported agents), [ROADMAP.md](ROADMAP.md) and
       [ARCHITECTURE.md](ARCHITECTURE.md) (file reference) updated.
 - [ ] The [threat model](security/threat-model.md) still holds: no credentials collected,

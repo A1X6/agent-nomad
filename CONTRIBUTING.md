@@ -28,6 +28,8 @@ node packages/cli/dist/src/bin.js --help
 | --------------------------- | ---------------------------------------------------------------------------------------- |
 | `pnpm build`                | Compiles every package (`tsc --build`).                                                  |
 | `pnpm test`                 | All unit and integration tests (Vitest).                                                 |
+| `pnpm test:coverage`        | The tests with a coverage report (in `coverage/`).                                       |
+| `pnpm knip`                 | Lists unused files, dependencies and exports (mark a kept export `@public`).             |
 | `pnpm test:e2e`             | Builds, then runs the built CLI end to end against a local API (three simulated PCs).    |
 | `pnpm check`                | Typecheck, lint, format check and tests: what CI runs. Run it before every pull request. |
 | `pnpm lint` / `pnpm format` | ESLint / Prettier on their own.                                                          |
@@ -84,7 +86,16 @@ When testing by hand, use a temporary home folder (set `HOME` and, on Windows,
 - Every change comes with tests: a failing test first for a bug, tests for each new
   behaviour and its edge cases.
 - Tests use temporary folders and fakes. They must never read or write the real home
-  folder, the real keychain or the hosted API.
+  folder, the real keychain or the hosted API. The one exception, the real OS keychain test
+  in `packages/cli/test/secret-store.test.ts`, runs only with `AGENTNOMAD_TEST_REAL_KEYCHAIN=1`,
+  which CI sets on every OS.
+- Shared test fakes (secret store, scripted prompter, recording reporter, bundle server, a
+  typed partial API client, an env writer, collected-file builders, `writeTestFile` and the
+  file readers `readText`, `readJson` and `exists`) live in `packages/cli/test/fakes.ts`; the
+  server's request builders (register, login, `putSetup`, account delete) live in
+  `packages/server/test/support/fixtures.ts`. Use them instead of a new copy.
+- A module's tests go in the test file named after it (see the file reference in
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), so they are found by name.
 - Anything that touches paths runs on macOS, Linux and Windows in CI; write it so it passes
   on all three (use `path.join`, never assume `/`).
 - A change to push, pull or the bundle belongs in the end-to-end steps too

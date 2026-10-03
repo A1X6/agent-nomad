@@ -1,7 +1,7 @@
 import { and, eq, gt, lt, lte, or, sql } from 'drizzle-orm';
 
 import type { Database } from './database.ts';
-import type { SessionRecord, SessionRepository } from './repositories.ts';
+import type { NewSession, SessionRecord, SessionRepository } from './repositories.ts';
 import { sessions } from './schema.ts';
 
 function toSessionRecord(row: typeof sessions.$inferSelect): SessionRecord {
@@ -16,22 +16,25 @@ function toSessionRecord(row: typeof sessions.$inferSelect): SessionRecord {
   };
 }
 
+/** Inserts a session; `db` may be a transaction (register writes the user with it). */
+export async function insertSession(db: Database, session: NewSession): Promise<SessionRecord> {
+  const [row] = await db
+    .insert(sessions)
+    .values({
+      userId: session.userId,
+      tokenHash: session.tokenHash,
+      deviceName: session.deviceName,
+      expiresAt: session.expiresAt,
+    })
+    .returning();
+  if (!row) throw new Error('Session insert returned no row');
+  return toSessionRecord(row);
+}
+
 /** Logins in Postgres (T14). Only token hashes are stored. */
 export function createSessionRepository(db: Database): SessionRepository {
   return {
-    async create(session) {
-      const [row] = await db
-        .insert(sessions)
-        .values({
-          userId: session.userId,
-          tokenHash: session.tokenHash,
-          deviceName: session.deviceName,
-          expiresAt: session.expiresAt,
-        })
-        .returning();
-      if (!row) throw new Error('Session insert returned no row');
-      return toSessionRecord(row);
-    },
+    create: (session) => insertSession(db, session),
 
     async findByTokenHash(tokenHash) {
       // The database clock decides expiry, so every server instance agrees.
@@ -68,6 +71,11 @@ export function createSessionRepository(db: Database): SessionRepository {
             ),
           ),
         );
+    },
+
+    async deleteExpired() {
+      // Every user's, through sessions_expires_at_idx; runs with the rate limiter's prune.
+      await db.delete(sessions).where(lte(sessions.expiresAt, sql`now()`));
     },
   };
 }

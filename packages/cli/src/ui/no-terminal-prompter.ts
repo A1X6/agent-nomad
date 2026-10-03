@@ -16,12 +16,12 @@ export class AnswerNeededError extends Error {
 
 /**
  * The flags-only prompter (T36): used when stdin or stdout is not a terminal. It never
- * asks; every question the flags did not answer fails with AnswerNeededError.
+ * asks; every question the flags did not answer fails with AnswerNeededError. Push and pull
+ * only ask while planning, so such a question stops them before anything changes (T59).
  */
 export function createNoTerminalPrompter(): Prompter {
   const fail = (message: string) => Promise.reject(new AnswerNeededError(message));
   return {
-    canAsk: false,
     select: (message) => fail(message),
     multiselect: (message) => fail(message),
     text: (message) => fail(message),

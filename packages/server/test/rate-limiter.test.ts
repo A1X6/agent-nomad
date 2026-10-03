@@ -10,6 +10,9 @@ const rule: RateLimitRule = { name: 'test', limit: 3, windowSeconds: 60 };
 let database: TestDatabase;
 let limiter: RateLimiter;
 let prune = false;
+let alsoPruned = 0;
+let pruneFails = false;
+let logged: string[] = [];
 
 beforeEach(async () => {
   database = await createTestDatabase();
@@ -17,8 +20,16 @@ beforeEach(async () => {
     db: database.db,
     keys: await createServerKeys(new Uint8Array(32).fill(1)),
     shouldPrune: () => prune,
+    alsoPrune: () => {
+      alsoPruned++;
+      return pruneFails ? Promise.reject(new Error('connection lost')) : Promise.resolve();
+    },
+    logError: (message) => logged.push(message),
   });
   prune = false;
+  alsoPruned = 0;
+  pruneFails = false;
+  logged = [];
 });
 
 afterEach(async () => {
@@ -55,14 +66,6 @@ describe('PostgresRateLimiter', () => {
     expect((await limiter.hit(rule, '203.0.113.7')).allowed).toBe(true);
   });
 
-  it('check reports the state without counting', async () => {
-    await hits(2);
-    expect((await limiter.check(rule, '203.0.113.7')).allowed).toBe(true);
-    expect((await limiter.check(rule, '203.0.113.7')).allowed).toBe(true);
-    await hits(1);
-    expect((await limiter.check(rule, '203.0.113.7')).allowed).toBe(false);
-  });
-
   it('reset forgets the count', async () => {
     await hits(4);
     await limiter.reset(rule, '203.0.113.7');
@@ -89,5 +92,23 @@ describe('PostgresRateLimiter', () => {
     await hits(1, 'new');
     const { rows } = await database.client.query('select key from rate_limits');
     expect(rows).toHaveLength(1);
+  });
+
+  it('runs the other housekeeping only with a prune (DB-02)', async () => {
+    await hits(2);
+    expect(alsoPruned).toBe(0);
+    prune = true;
+    await hits(1);
+    expect(alsoPruned).toBe(1);
+  });
+
+  it('still answers the hit when the housekeeping fails, and logs it (BUG-02)', async () => {
+    await hits(2);
+    prune = true;
+    pruneFails = true;
+    expect(await hits(1)).toEqual([{ allowed: true, retryAfterSeconds: 0 }]);
+    expect(logged).toEqual(['Could not prune expired rate limits and sessions']);
+    // The failed prune did not undo the count: the next hit is over the limit.
+    expect((await hits(1))[0]?.allowed).toBe(false);
   });
 });

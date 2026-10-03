@@ -2,6 +2,8 @@
  * What the Claude Code global collector takes from `~/.claude` (T25). The lists come from
  * the paths data file (T32); this module only gives them names and fast lookups.
  */
+import { RESERVED_DIR } from '../adapter.ts';
+import { inHomeFolder, isSensitiveHomePath } from '../shared/file-gathering.ts';
 import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
 
 /** Single files in the base folder. */
@@ -18,6 +20,13 @@ export const NEVER_SYNCED: readonly string[] = DATA.global.neverSynced;
 
 /** Known base-folder entries left out on purpose, so the unknown-file check stays quiet. */
 export const GLOBAL_KNOWN_STATE: readonly string[] = DATA.global.knownState;
+
+/**
+ * Never read for a hook nor written by pull, even when a hook names a file there (T55): the
+ * never-synced entries and Claude Code's own state, e.g. `chrome/` (a launcher Chrome starts)
+ * and `local/` (Claude Code itself).
+ */
+export const GLOBAL_REFUSED: readonly string[] = [...NEVER_SYNCED, ...GLOBAL_KNOWN_STATE];
 
 /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
 export const SKIPPED_NAMES: ReadonlySet<string> = new Set(DATA.skippedNames);
@@ -36,8 +45,6 @@ export const CLAUDE_JSON_PREFERENCE_KEYS: readonly string[] = DATA.claudeJsonPre
 /** User-scope MCP servers, also kept in `~/.claude.json`. */
 export const CLAUDE_JSON_MCP_KEY = 'mcpServers';
 
-/** Reserved bundle folder for files that do not live in the base folder. */
-export const RESERVED_DIR = '.agentnomad';
 /** The selected `~/.claude.json` keys. */
 export const CLAUDE_JSON_BUNDLE_PATH = `${RESERVED_DIR}/claude.json`;
 /** Hook and status line scripts elsewhere in the home folder, by path from home. */
@@ -46,11 +53,14 @@ export const HOME_SCRIPTS_PREFIX = `${RESERVED_DIR}/home/`;
 /** A hook argument is only taken as a script with one of these extensions. */
 export const SCRIPT_EXTENSIONS: ReadonlySet<string> = new Set(DATA.scriptExtensions);
 
-/** Home folders never read for hook scripts, whatever a command names: keys and cloud logins. */
-export const SENSITIVE_HOME_DIRS: readonly string[] = DATA.sensitiveHomeDirs;
+/** `hooks/check.SH` → `.sh`; `''` when the name has no extension. */
+export const extensionOf = (path: string) => /(\.[^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
+
+/** Has one of the script extensions above. */
+export const isScript = (path: string) => SCRIPT_EXTENSIONS.has(extensionOf(path));
 
 /** Home folders the OS or a shell runs files from by itself (T43). */
-export const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
+const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
 
 /**
  * Why a path from the home folder (`/`-separated) must never be read or written for a
@@ -59,20 +69,10 @@ export const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
  */
 export function homePathProblem(relative: string): string | null {
   if (isSensitiveHomePath(relative)) return 'a folder for keys and logins';
-  if (AUTOSTART_HOME_DIRS.some((dir) => inFolder(relative, dir))) {
+  if (AUTOSTART_HOME_DIRS.some((dir) => inHomeFolder(relative, dir))) {
     return 'a folder whose files run by themselves';
   }
   return null;
-}
-
-/** A path from the home folder inside a folder for keys and logins (any case). */
-export function isSensitiveHomePath(relative: string): boolean {
-  return SENSITIVE_HOME_DIRS.some((dir) => inFolder(relative, dir));
-}
-
-function inFolder(relative: string, dir: string): boolean {
-  const [lower, folder] = [relative.toLowerCase(), dir.toLowerCase()];
-  return lower === folder || lower.startsWith(`${folder}/`) || lower.includes(`/${folder}/`);
 }
 
 /** Marketplaces and plugins to reinstall on pull (T29). */

@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto';
 
-import { API_HEADERS, DEFAULT_KDF_PARAMS, type BundleParams } from '@agentnomad/contracts';
+import {
+  API_HEADERS,
+  DEFAULT_KDF_PARAMS,
+  PutBundleRequestHeadersSchema,
+  type BundleParams,
+  type PutBundleRequestHeaders,
+} from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
+import { ZodError } from 'zod';
 
 import {
   ApiError,
@@ -9,6 +16,7 @@ import {
   createHttpApiClient,
   DEFAULT_API_TIMEOUTS,
   DEFAULT_RETRY_POLICY,
+  describeError,
   InvalidResponseError,
   NetworkError,
   NotLoggedInError,
@@ -18,6 +26,7 @@ import {
   type HttpApiClientOptions,
   type Sleep,
 } from '../src/index.ts';
+import { CLI_VERSION } from '../src/version.ts';
 
 const BASE = new URL('https://api.test');
 const TOKEN = 'a'.repeat(43);
@@ -154,6 +163,67 @@ describe('ApiClient: requests and answers', () => {
     await expect(client.auth.login(loginRequest)).rejects.toBeInstanceOf(InvalidResponseError);
   });
 
+  it('accepts answers with fields it does not know, at any level (ARCH-03)', async () => {
+    const item = {
+      agent: 'claude-code',
+      scopeKey: 'global',
+      nameEnc: null,
+      revision: 3,
+      formatVersion: 1,
+      sizeBytes: 2048,
+      updatedAt: '2026-09-24T13:00:00Z',
+    };
+    const { client } = fakeServer([
+      json({ ...SESSION, wrappedDataKey: WRAPPED, devices: 3 }),
+      json({ items: [{ ...item, pinned: true }], nextCursor: null, storageUsed: 2048 }),
+      json({ kdfSalt: SALT, kdfParams: { ...DEFAULT_KDF_PARAMS, hint: 'x' } }),
+    ]);
+    expect(await client.auth.login(loginRequest)).toEqual({ ...SESSION, wrappedDataKey: WRAPPED });
+    expect(await client.bundles.list()).toEqual({ items: [item], nextCursor: null });
+    expect(await client.auth.prelogin({ username: 'ahmed' })).toEqual({
+      kdfSalt: SALT,
+      kdfParams: DEFAULT_KDF_PARAMS,
+    });
+  });
+
+  it('still refuses KDF settings outside the safe bounds', async () => {
+    const { client } = fakeServer([
+      json({ kdfSalt: SALT, kdfParams: { ...DEFAULT_KDF_PARAMS, memoryKiB: 8_000_000 } }),
+    ]);
+    await expect(client.auth.prelogin({ username: 'ahmed' })).rejects.toBeInstanceOf(
+      InvalidResponseError,
+    );
+  });
+
+  it('turns an error code it does not know into a generic ApiError with the server message', async () => {
+    const { client } = fakeServer([
+      json({ error: { code: 'storage_full', message: 'Your storage is full.', limit: 9 } }, 507),
+    ]);
+    const error = await client.bundles.put(PARAMS, upload()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 507, code: 'unknown', message: 'Your storage is full.' });
+    expect(describeError(error)).toBe('Your storage is full.');
+  });
+
+  it('keeps known error codes as they are, even with extra fields', async () => {
+    const { client } = fakeServer([
+      json({ error: { code: 'unauthorized', message: 'Log in again', hint: 'x' } }, 401),
+    ]);
+    const error = await client.bundles.list().catch((e: unknown) => e);
+    expect(error).toMatchObject({ status: 401, code: 'unauthorized', message: 'Log in again' });
+  });
+
+  it('sends its version in x-an-client on every request, health check included', async () => {
+    const { client, calls } = fakeServer([json({ items: [], nextCursor: null })]);
+    await client.bundles.list();
+    expect(calls.map((call) => call.url.pathname)).toEqual(['/health', '/bundles']);
+    for (const call of calls) {
+      const headers = call.init.headers as Record<string, string>;
+      expect(headers[API_HEADERS.client]).toBe(CLI_VERSION);
+      expect(headers['user-agent']).toBe(`agentnomad/${CLI_VERSION}`);
+    }
+  });
+
   it('rejects an answer that is not JSON (e.g. a proxy page)', async () => {
     const { client } = fakeServer([new Response('<html>hi</html>', { status: 200 })]);
     await expect(client.auth.prelogin({ username: 'ahmed' })).rejects.toBeInstanceOf(
@@ -162,10 +232,11 @@ describe('ApiClient: requests and answers', () => {
   });
 
   it('builds bundle paths only from valid params', async () => {
-    const { client } = fakeServer([]);
+    const { client, calls } = fakeServer([]);
     await expect(
       client.bundles.get({ agent: 'claude-code', scopeKey: '../../account' }),
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(calls).toHaveLength(0);
   });
 });
 
@@ -189,6 +260,12 @@ describe('ApiClient: bundles', () => {
     expect(headers[API_HEADERS.contentSha256]).toBe(bundle.contentSha256);
     expect(headers[API_HEADERS.nameEnc]).toBe('bmFtZQ==');
     expect(call?.init.body).toEqual(bundle.ciphertext);
+    // What the client sent is what the server's schema accepts (QA-05).
+    const accepted: PutBundleRequestHeaders = PutBundleRequestHeadersSchema.parse(headers);
+    expect(accepted).toMatchObject({
+      [API_HEADERS.expectedRevision]: 0,
+      [API_HEADERS.contentSha256]: bundle.contentSha256,
+    });
   });
 
   it('refuses to upload when the hash does not match the bytes', async () => {
@@ -353,6 +430,31 @@ describe('ApiClient: requests that are never retried', () => {
   it('register: success returns the session', async () => {
     const { client } = fakeServer([json(SESSION, 201)]);
     expect(await client.auth.register(registerRequest)).toEqual(SESSION);
+  });
+
+  it('logout with a given token: sends that token, not the stored one (T66)', async () => {
+    const given = 'b'.repeat(43);
+    let storeRead = false;
+    const { client, apiCalls } = fakeServer([empty(204)], {
+      getSessionToken: () => {
+        storeRead = true;
+        return Promise.resolve(TOKEN);
+      },
+    });
+    await expect(client.auth.logout(given)).resolves.toBeUndefined();
+    expect(apiCalls()).toHaveLength(1);
+    expect(apiCalls()[0]?.url.pathname).toBe('/auth/logout');
+    expect(new Headers(apiCalls()[0]?.init.headers).get('authorization')).toBe(`Bearer ${given}`);
+    expect(storeRead).toBe(false);
+  });
+
+  it('logout with a given token: sent once, a timeout or 503 is not retried (T66)', async () => {
+    for (const step of [timedOut, () => Promise.resolve(empty(503))]) {
+      const { client, apiCalls, waits } = fakeServer([step]);
+      await expect(client.auth.logout('b'.repeat(43))).rejects.toBeInstanceOf(NetworkError);
+      expect(apiCalls()).toHaveLength(1);
+      expect(waits).toEqual([]);
+    }
   });
 
   it('account delete: a timeout is "result unknown", sent once', async () => {

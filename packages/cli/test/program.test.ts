@@ -1,20 +1,41 @@
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+import { MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { NOT_YET_AVAILABLE, type CommandHandlers } from '../src/cli/commands.ts';
+import { createApp, createAppRegistry } from '../src/app.ts';
+import type { CommandHandlers } from '../src/cli/commands.ts';
+import type { PartFlags } from '../src/cli/program.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
+import { SetupsNotDoneError } from '../src/cli/setup-outcomes.ts';
+import { formatSize } from '../src/ui/format-size.ts';
 import { AnswerNeededError } from '../src/ui/no-terminal-prompter.ts';
 import { PromptCancelledError } from '../src/ui/prompter.ts';
 import { CLI_VERSION } from '../src/version.ts';
+import { recordingReporter, scriptedPrompter } from './fakes.ts';
 
 interface Call {
   readonly command: string;
   readonly options?: unknown;
 }
 
+/** The optional parts of the agents an installed CLI registers (Claude Code's claude.ai skills). */
+const REGISTERED_PARTS = createAppRegistry({
+  env: {},
+  homedir: join(tmpdir(), 'agentnomad-program-home'),
+  platform: process.platform,
+})
+  .list()
+  .flatMap((adapter) => adapter.optionalParts ?? []);
+
 /** Runs the CLI with handlers that record what they were called with. */
-async function run(args: string[], overrides: Partial<CommandHandlers> = {}) {
+async function run(
+  args: string[],
+  overrides: Partial<CommandHandlers> = {},
+  optionalParts: readonly PartFlags[] = REGISTERED_PARTS,
+) {
   const calls: Call[] = [];
   let out = '';
   let err = '';
@@ -41,6 +62,7 @@ async function run(args: string[], overrides: Partial<CommandHandlers> = {}) {
   };
   const code = await runCli(args, {
     handlers,
+    optionalParts,
     reporter: {
       error: (message) => messages.push(`error: ${message}`),
       warn: (message) => messages.push(`warn: ${message}`),
@@ -77,6 +99,17 @@ describe('help and version', () => {
       expect(out).toMatch(new RegExp(`^  ${command}\\b`, 'm'));
     }
     expect(out).toContain('no password recovery');
+  });
+
+  it('gives the size limit from the shared constant (READ-03)', async () => {
+    const { out } = await run(['--help']);
+    expect(out).toContain(`over ${formatSize(MAX_BUNDLE_BYTES)}`);
+  });
+
+  it("describes --memory without one agent's words (ARCH-02)", async () => {
+    const { out } = await run(['push', '--help']);
+    expect(out).toMatch(/--memory +include the agent's memory/);
+    expect(out).not.toContain('subagent');
   });
 
   it('shows the flags of a command', async () => {
@@ -156,6 +189,107 @@ describe('routing and flags', () => {
     ]);
   });
 
+  it('passes --allow-commands to pull only when given', async () => {
+    const withFlag = await run(['pull', '--global', '--yes', '--allow-commands']);
+    expect(withFlag.calls).toEqual([
+      { command: 'pull', options: { global: true, yes: true, allowCommands: true } },
+    ]);
+    const without = await run(['pull']);
+    expect(without.calls).toEqual([{ command: 'pull', options: { global: false, yes: false } }]);
+  });
+
+  it.each([
+    ['push', '--account-skills', true],
+    ['push', '--no-account-skills', false],
+    ['pull', '--account-skills', true],
+    ['pull', '--no-account-skills', false],
+  ])('passes %s %s as the account-skills part', async (command, flag, value) => {
+    const { calls } = await run([command, '--global', flag]);
+    expect(calls).toEqual([
+      {
+        command,
+        options: { global: true, yes: false, parts: new Map([['account-skills', value]]) },
+      },
+    ]);
+  });
+
+  it('gives every optional part of an agent its flags, help and hint (ARCH-02)', async () => {
+    const parts: PartFlags[] = [
+      ...REGISTERED_PARTS,
+      {
+        id: 'prompts',
+        flagHelp: {
+          push: { include: 'save the prompts library', leaveOut: 'leave the prompts out' },
+          pull: { include: 'add the prompts library', leaveOut: 'do not add the prompts' },
+        },
+      },
+    ];
+    const both = await run(['push', '--global', '--no-account-skills', '--prompts'], {}, parts);
+    expect(both.calls).toEqual([
+      {
+        command: 'push',
+        options: {
+          global: true,
+          yes: false,
+          parts: new Map([
+            ['account-skills', false],
+            ['prompts', true],
+          ]),
+        },
+      },
+    ]);
+    const pull = await run(['pull', '--global', '--no-prompts'], {}, parts);
+    expect(pull.calls).toEqual([
+      {
+        command: 'pull',
+        options: { global: true, yes: false, parts: new Map([['prompts', false]]) },
+      },
+    ]);
+    expect((await run(['push', '--help'], {}, parts)).out).toMatch(
+      /--prompts +save the prompts library.*--no-prompts +leave the prompts out/s,
+    );
+    expect((await run(['pull', '--help'], {}, parts)).out).toMatch(
+      /--prompts +add the prompts library.*--no-prompts +do not add the prompts/s,
+    );
+    const { messages } = await run(
+      ['push'],
+      { push: () => Promise.reject(new AnswerNeededError('Which agents?')) },
+      parts,
+    );
+    expect(messages[0]).toContain(
+      '--account-skills or --no-account-skills, --prompts or --no-prompts, and --yes.',
+    );
+  });
+
+  it('offers no part flags, and still runs, where the agents cannot be built (ARCH-02)', () => {
+    // A home folder of `/` makes the agents throw; only the commands that need them fail.
+    const { handlers, optionalParts } = createApp({
+      env: {},
+      platform: 'linux',
+      homedir: '/',
+      hostname: 'pc',
+      cwd: '/',
+      prompter: scriptedPrompter([]).prompter,
+      reporter: recordingReporter().reporter,
+    });
+    expect(optionalParts).toEqual([]);
+    expect(Object.keys(handlers)).toContain('login');
+  });
+
+  it('passes --merge to pull as the conflict choice', async () => {
+    const { calls } = await run(['pull', '--global', '--merge']);
+    expect(calls).toEqual([
+      { command: 'pull', options: { global: true, yes: false, conflict: 'merge' } },
+    ]);
+  });
+
+  it('routes status and delete with their scope and --yes', async () => {
+    const status = await run(['status', '--project', 'x']);
+    expect(status.calls).toEqual([{ command: 'status', options: { global: false, project: 'x' } }]);
+    const removal = await run(['delete', '--global', '--yes']);
+    expect(removal.calls).toEqual([{ command: 'delete', options: { global: true, yes: true } }]);
+  });
+
   it('routes account delete', async () => {
     const { calls } = await run(['account', 'delete', '--yes']);
     expect(calls).toEqual([
@@ -197,11 +331,23 @@ describe('routing and flags', () => {
   it.each([
     ['an invalid agent id', ['push', '--agent', 'Claude Code'], 'not a valid agent id'],
     ['an empty agent list', ['push', '--agent', ','], 'at least one agent'],
-    ['an empty project name', ['pull', '--project', ''], ''],
-    ['a project name with a line break', ['pull', '--project', 'a\nb'], ''],
+    [
+      'an empty project name',
+      ['pull', '--project', ''],
+      "option '--project <name>' argument '' is invalid. Too small",
+    ],
+    [
+      'a project name with a line break',
+      ['pull', '--project', 'a\nb'],
+      "option '--project <name>' argument 'a\nb' is invalid. Project name must not contain control characters",
+    ],
     ['--merge with --overwrite', ['pull', '--merge', '--overwrite'], 'cannot be used with'],
     ['an unknown flag', ['push', '--force'], "unknown option '--force'"],
-    ['an invalid username', ['login', '--username', 'Ahmed Ali'], ''],
+    [
+      'an invalid username',
+      ['login', '--username', 'Ahmed Ali'],
+      "option '--username <name>' argument 'Ahmed Ali' is invalid. Username must be 3–32 lowercase",
+    ],
   ])('refuses %s without running the command', async (_, args, message) => {
     const { code, calls, err } = await run(args);
     expect(code).toBe(EXIT.failed);
@@ -225,6 +371,20 @@ describe('outcomes', () => {
     });
     expect(code).toBe(EXIT.cancelled);
     expect(messages).toEqual(['warn: Cancelled.']);
+  });
+
+  it('a setup push or pull did not do is exit code 1, with one message listing them (BUG-03)', async () => {
+    const notDone = new SetupsNotDoneError('push', [
+      { setup: 'Claude Code global setup', reason: 'a newer copy exists' },
+      { setup: 'Claude Code project "my-app"', reason: '6.2 MB, over the 5 MB limit' },
+    ]);
+    const { code, messages } = await run(['push', '--global', '--yes'], {
+      push: () => Promise.reject(notDone),
+    });
+    expect(code).toBe(EXIT.failed);
+    expect(messages).toEqual([
+      'error: Not saved:\n  - the Claude Code global setup: a newer copy exists\n  - the Claude Code project "my-app": 6.2 MB, over the 5 MB limit',
+    ]);
   });
 
   it.each([
@@ -257,14 +417,4 @@ describe('outcomes', () => {
       ]);
     },
   );
-
-  it('says which task brings a command that is not built yet', async () => {
-    const messages: string[] = [];
-    const code = await runCli(['push'], {
-      handlers: NOT_YET_AVAILABLE,
-      reporter: { error: (m) => messages.push(m), warn: (m) => messages.push(m) },
-    });
-    expect(code).toBe(EXIT.failed);
-    expect(messages).toEqual(['"agentnomad push" is not available yet (coming in T33).']);
-  });
 });

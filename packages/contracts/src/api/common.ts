@@ -50,10 +50,20 @@ export const API_HEADERS = {
   formatVersion: 'x-an-format-version',
   /** PUT and GET: base64 encrypted project name (project scopes only). */
   nameEnc: 'x-an-name-enc',
+  /** Every request from the CLI: its version (`CLI_VERSION`), logged by the server (T57). */
+  client: 'x-an-client',
 } as const;
 
 /** `Authorization: Bearer <token>` carries the session token on authenticated routes. */
 export const AUTHORIZATION_SCHEME = 'Bearer';
+
+/**
+ * A CLI version as sent in `x-an-client`: `1.2.3` or `1.2.3-beta.1`. Anything else is not
+ * logged as sent, so the header cannot write into the logs.
+ */
+export const ClientVersionSchema = z
+  .string()
+  .regex(/^\d{1,5}\.\d{1,5}\.\d{1,5}(-[0-9A-Za-z.]{1,32})?$/);
 
 /** Machine-readable error codes returned by the API. */
 export const ErrorCodeSchema = z.enum([

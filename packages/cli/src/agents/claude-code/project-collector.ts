@@ -1,14 +1,15 @@
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
+import { pathsOf } from '../shared/detector-system.ts';
+import { underFolder } from '../shared/bundle-paths.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import {
-  commandsInSettings,
-  commandWords,
   createFileGatherer,
   type FileGatherer,
   jsonFile,
   uniqueByPath,
-} from './file-gathering.ts';
-import { PLUGINS_BUNDLE_PATH, SCRIPT_EXTENSIONS } from './global-paths.ts';
+} from '../shared/file-gathering.ts';
+import { PLUGINS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
+import { projectHookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
@@ -17,6 +18,7 @@ import {
   PROJECT_MEMORY_FOLDERS,
   PROJECT_NEVER_SYNCED,
   PROJECT_ROOT_FILES,
+  PROJECT_SETTINGS_FILES,
 } from './project-paths.ts';
 
 export interface ProjectCollectorOptions {
@@ -29,37 +31,28 @@ export interface ProjectCollectorOptions {
 
 /** True when `bundlePath` is a never-synced project entry or inside one. */
 const isNeverSynced = (bundlePath: string) =>
-  PROJECT_NEVER_SYNCED.some((entry) => bundlePath === entry || bundlePath.startsWith(`${entry}/`));
+  PROJECT_NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry));
 
 /**
  * A Claude Code project collector (T26). Bundle paths are relative to the project folder;
  * opt-in auto memory goes under `.agentnomad/auto-memory/`.
  */
 export function createClaudeCodeProjectCollector(options: ProjectCollectorOptions): Collector {
-  const { path } = createFileGatherer(options.platform);
+  const path = pathsOf(options.platform);
 
-  /**
-   * Scripts the project's hooks run, when they are inside the project: written as
-   * `$CLAUDE_PROJECT_DIR/...` or relative to the project (hooks start there).
-   */
-  async function hookScripts(
+  /** The script files the project's hooks run, when they are inside the project. */
+  async function projectHookScriptFiles(
     files: FileGatherer,
     projectDir: string,
     settingsJson: string,
   ): Promise<CollectedFile[]> {
     const found: CollectedFile[] = [];
-    const projectVariable =
-      /^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\}|%CLAUDE_PROJECT_DIR%)(?=[\\/]|$)/i;
-    for (const command of commandsInSettings(settingsJson)) {
-      for (const word of commandWords(command)) {
-        const expanded = word.replace(projectVariable, () => projectDir);
-        if (!SCRIPT_EXTENSIONS.has(path.extname(expanded).toLowerCase())) continue;
-        const nativePath = path.resolve(projectDir, expanded);
-        const bundlePath = files.relativeInside(projectDir, nativePath);
-        if (bundlePath === null || isNeverSynced(bundlePath)) continue;
-        const file = await files.readIfFile(nativePath, bundlePath);
-        if (file) found.push(file);
-      }
+    for (const script of projectHookScripts(settingsJson, {
+      projectDir,
+      platform: options.platform,
+    })) {
+      const file = await files.readIfFile(script.nativePath, script.bundlePath);
+      if (file) found.push(file);
     }
     return found;
   }
@@ -72,6 +65,7 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
     // A shared, unknown or refused folder is not this project's to take.
     if (location.kind !== 'folder') return [];
     const files = createFileGatherer(options.platform, {
+      skippedNames: SKIPPED_NAMES,
       homedir: options.homedir,
       within: location.dir,
       ...(onSkipped && { onSkipped }),
@@ -91,6 +85,7 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
       const found: CollectedFile[] = [];
       // A cloned repository is not trusted: its links must stay inside the project (T45).
       const files = createFileGatherer(options.platform, {
+        skippedNames: SKIPPED_NAMES,
         homedir: options.homedir,
         within: projectDir,
         ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),
@@ -114,11 +109,15 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
         );
       }
 
-      for (const settings of ['.claude/settings.json', '.claude/settings.local.json']) {
+      for (const settings of PROJECT_SETTINGS_FILES) {
         const file = found.find((entry) => entry.path === settings);
         if (file)
           found.push(
-            ...(await hookScripts(files, projectDir, new TextDecoder().decode(file.content))),
+            ...(await projectHookScriptFiles(
+              files,
+              projectDir,
+              new TextDecoder().decode(file.content),
+            )),
           );
       }
       if (collectOptions.includeMemory) {

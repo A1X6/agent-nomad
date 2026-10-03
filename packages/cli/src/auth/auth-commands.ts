@@ -1,22 +1,34 @@
-import { DEFAULT_KDF_PARAMS, UsernameSchema, WRONG_PASSWORD_MESSAGE } from '@agentnomad/contracts';
+import {
+  DEFAULT_KDF_PARAMS,
+  fromBase64,
+  KDF_SALT_BYTES,
+  toBase64,
+  UsernameSchema,
+  WRONG_PASSWORD_MESSAGE,
+} from '@agentnomad/contracts';
 import {
   DATA_KEY_BYTES,
   DecryptionError,
   unwrapDataKey,
   wrapDataKey,
   type CryptoService,
+  type DerivedKeys,
 } from '@agentnomad/core';
 
 import type { ApiClient } from '../api/api-client.ts';
-import { ApiError } from '../api/api-errors.ts';
+import { ApiError, NetworkError } from '../api/api-errors.ts';
 import type { CommandHandlers, CredentialOptions } from '../cli/commands.ts';
+import { describeError } from '../cli/error-messages.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
-import { clearLocalSession, hasLocalSession, saveLocalSession } from './local-session.ts';
+import {
+  clearLocalSession,
+  hasLocalSession,
+  saveLocalSession,
+  type LocalSession,
+} from './local-session.ts';
 import type { PasswordChecker } from './password-policy.ts';
-
-const KDF_SALT_BYTES = 16;
 
 export const NO_RECOVERY_WARNING =
   'There is no password reset. Your setups are encrypted with your password on this PC, ' +
@@ -36,18 +48,18 @@ export interface AuthCommandDeps {
   readonly passwordChecker: () => Promise<PasswordChecker>;
   /** Shown in the server's session list, e.g. the PC's host name. */
   readonly deviceName: string;
-  /** This PC's remembered revisions and project names; cleared by account delete. */
+  /**
+   * This PC's remembered revisions and project names; cleared by account delete, and the
+   * revisions by a login or register as another account (T56).
+   */
   readonly localState?: () => LocalState;
   /** `--password-stdin` (T36): the first line of standard input. */
   readonly readPasswordStdin?: () => Promise<string>;
 }
 
-export const ACCOUNT_DELETE_WARNING =
+const ACCOUNT_DELETE_WARNING =
   'This deletes your agentnomad account and every setup saved in it, on every PC. ' +
   'Files on your PCs are not touched. It cannot be undone.';
-
-const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-const fromBase64 = (text: string) => new Uint8Array(Buffer.from(text, 'base64'));
 
 function validateUsername(value: string): string | undefined {
   const parsed = UsernameSchema.safeParse(value);
@@ -62,13 +74,18 @@ export function createAuthCommands(
 ): Pick<CommandHandlers, 'register' | 'login' | 'logout' | 'accountDelete'> {
   const { prompter, reporter } = deps;
 
-  /** `--username`, checked like a typed one; asked only when the flag is not given. */
-  async function usernameFrom(options: CredentialOptions, question: string): Promise<string> {
+  /**
+   * `--username`, checked like a typed one; asked only when the flag is not given, with
+   * `placeholder` as the hint (register shows the allowed characters).
+   */
+  async function usernameFrom(
+    options: CredentialOptions,
+    question: string,
+    placeholder?: string,
+  ): Promise<string> {
     if (options.username === undefined) {
       return prompter.text(question, {
-        ...(question === 'Choose a username' && {
-          placeholder: 'lowercase letters, digits, . _ -',
-        }),
+        ...(placeholder !== undefined && { placeholder }),
         validate: validateUsername,
       });
     }
@@ -95,28 +112,43 @@ export function createAuthCommands(
     return password;
   }
 
-  /** Slow on purpose (Argon2id, 64 MiB); a spinner shows it is working. */
-  async function deriveKeys(
+  /**
+   * Derives the password's keys and runs `use` with them; both keys are wiped when it ends,
+   * however it ends. Slow on purpose (Argon2id, 64 MiB); a spinner shows it is working.
+   */
+  async function withDerivedKeys<T>(
     crypto: CryptoService,
     password: string,
     salt: Uint8Array,
     params: Parameters<CryptoService['deriveKeys']>[2],
-  ) {
+    use: (keys: DerivedKeys) => Promise<T>,
+  ): Promise<T> {
     const spinner = reporter.spinner();
     spinner.start('Securing your password (takes a few seconds)…');
+    let keys: DerivedKeys;
     try {
-      return await crypto.deriveKeys(password, salt, params);
+      keys = await crypto.deriveKeys(password, salt, params);
     } finally {
       spinner.stop('Password secured.');
+    }
+    try {
+      return await use(keys);
+    } finally {
+      keys.authKey.fill(0);
+      keys.passwordKey.fill(0);
     }
   }
 
   /**
-   * One PC holds one login. When one exists, offers to log out first, so two accounts'
-   * keys never mix. Returns false when the user keeps the current login.
+   * One PC holds one login. When one exists, asks whether to replace it, so two accounts'
+   * keys never mix: `replace` (the old login ends once the new one works, UX-01), `free`
+   * (no login here) or `keep` (the user keeps the current login).
    */
-  async function readyForNewLogin(secrets: SecretStore, yes: boolean): Promise<boolean> {
-    if (!(await hasLocalSession(secrets))) return true;
+  async function readyForNewLogin(
+    secrets: SecretStore,
+    yes: boolean,
+  ): Promise<'free' | 'replace' | 'keep'> {
+    if (!(await hasLocalSession(secrets))) return 'free';
     const replace =
       yes ||
       (await prompter.confirm(
@@ -125,10 +157,22 @@ export function createAuthCommands(
       ));
     if (!replace) {
       reporter.info('Nothing changed.');
-      return false;
+      return 'keep';
     }
-    await logOut(secrets);
-    return true;
+    return 'replace';
+  }
+
+  /**
+   * Saves a new login that already works (session and data key in hand). Only now is the
+   * login it replaces ended, so a typo, a refusal or Ctrl+C before this keeps it (UX-01).
+   */
+  async function saveNewLogin(
+    secrets: SecretStore,
+    slot: 'free' | 'replace',
+    session: LocalSession,
+  ): Promise<void> {
+    if (slot === 'replace') await logOut(secrets);
+    await saveLocalSession(secrets, session);
   }
 
   function finish(secrets: SecretStore, message: string): void {
@@ -143,8 +187,12 @@ export function createAuthCommands(
     } catch (error) {
       // unauthorized = the session had already ended on the server: nothing to do there.
       if (!(error instanceof ApiError && error.code === 'unauthorized')) {
+        const why =
+          error instanceof NetworkError
+            ? 'Could not reach the server'
+            : `The server did not end the session (${describeError(error).replace(/\.$/, '')})`;
         reporter.warn(
-          'Could not reach the server, so only this PC was logged out. ' +
+          `${why}, so only this PC was logged out. ` +
             'The session on the server ends by itself after 30 days unused.',
         );
       }
@@ -156,9 +204,14 @@ export function createAuthCommands(
   return {
     async register(options) {
       const secrets = await deps.secrets();
-      if (!(await readyForNewLogin(secrets, options.yes))) return;
+      const slot = await readyForNewLogin(secrets, options.yes);
+      if (slot === 'keep') return;
 
-      const username = await usernameFrom(options, 'Choose a username');
+      const username = await usernameFrom(
+        options,
+        'Choose a username',
+        'lowercase letters, digits, . _ -',
+      );
 
       reporter.warn(NO_RECOVERY_WARNING);
       if (!options.yes && !(await prompter.confirm('I understand. Continue?', false))) {
@@ -180,30 +233,32 @@ export function createAuthCommands(
       const crypto = await deps.crypto();
       const salt = crypto.randomBytes(KDF_SALT_BYTES);
       const dataKey = crypto.randomBytes(DATA_KEY_BYTES);
-      const keys = await deriveKeys(crypto, password, salt, DEFAULT_KDF_PARAMS);
       try {
-        const session = await deps.api().auth.register({
-          username,
-          kdfSalt: toBase64(salt),
-          kdfParams: DEFAULT_KDF_PARAMS,
-          authKey: toBase64(keys.authKey),
-          wrappedDataKey: toBase64(wrapDataKey(crypto, dataKey, keys.passwordKey)),
-          deviceName: deps.deviceName,
-        });
-        await saveLocalSession(secrets, {
-          sessionToken: session.sessionToken,
-          dataKey: toBase64(dataKey),
+        await withDerivedKeys(crypto, password, salt, DEFAULT_KDF_PARAMS, async (keys) => {
+          const session = await deps.api().auth.register({
+            username,
+            kdfSalt: toBase64(salt),
+            kdfParams: DEFAULT_KDF_PARAMS,
+            authKey: toBase64(keys.authKey),
+            wrappedDataKey: toBase64(wrapDataKey(crypto, dataKey, keys.passwordKey)),
+            deviceName: deps.deviceName,
+          });
+          await saveNewLogin(secrets, slot, {
+            sessionToken: session.sessionToken,
+            dataKey: toBase64(dataKey),
+          });
         });
       } finally {
-        keys.passwordKey.fill(0);
         dataKey.fill(0);
       }
+      await deps.localState?.().useAccount(username);
       finish(secrets, `Account "${username}" created. You are logged in on this PC.`);
     },
 
     async login(options) {
       const secrets = await deps.secrets();
-      if (!(await readyForNewLogin(secrets, options.yes))) return;
+      const slot = await readyForNewLogin(secrets, options.yes);
+      if (slot === 'keep') return;
 
       const username = await usernameFrom(options, 'Username');
       const password = await passwordFrom(options, 'Password', notEmpty);
@@ -212,38 +267,43 @@ export function createAuthCommands(
       // First, so a sleeping server's "waking up" notice never overlaps the key spinner.
       const prelogin = await api.auth.prelogin({ username });
       const crypto = await deps.crypto();
-      const keys = await deriveKeys(
+      await withDerivedKeys(
         crypto,
         password,
         fromBase64(prelogin.kdfSalt),
         prelogin.kdfParams,
+        async (keys) => {
+          const answer = await api.auth.login({
+            username,
+            authKey: toBase64(keys.authKey),
+            deviceName: deps.deviceName,
+          });
+          let dataKey: Uint8Array;
+          try {
+            dataKey = unwrapDataKey(crypto, fromBase64(answer.wrappedDataKey), keys.passwordKey);
+          } catch (error) {
+            if (!(error instanceof DecryptionError)) throw error;
+            // This PC cannot use the new session and never saves it, so end it on the server
+            // with its own token. Best effort: a failed logout never replaces this error.
+            await api.auth.logout(answer.sessionToken).catch(() => undefined);
+            throw new Error(
+              'Logged in, but your data key could not be unlocked with this password.',
+              {
+                cause: error,
+              },
+            );
+          }
+          try {
+            await saveNewLogin(secrets, slot, {
+              sessionToken: answer.sessionToken,
+              dataKey: toBase64(dataKey),
+            });
+          } finally {
+            dataKey.fill(0);
+          }
+        },
       );
-      try {
-        const answer = await api.auth.login({
-          username,
-          authKey: toBase64(keys.authKey),
-          deviceName: deps.deviceName,
-        });
-        let dataKey: Uint8Array;
-        try {
-          dataKey = unwrapDataKey(crypto, fromBase64(answer.wrappedDataKey), keys.passwordKey);
-        } catch (error) {
-          if (!(error instanceof DecryptionError)) throw error;
-          throw new Error(
-            'Logged in, but your data key could not be unlocked with this password.',
-            {
-              cause: error,
-            },
-          );
-        }
-        await saveLocalSession(secrets, {
-          sessionToken: answer.sessionToken,
-          dataKey: toBase64(dataKey),
-        });
-        dataKey.fill(0);
-      } finally {
-        keys.passwordKey.fill(0);
-      }
+      await deps.localState?.().useAccount(username);
       finish(secrets, `Logged in as "${username}".`);
     },
 
@@ -279,14 +339,14 @@ export function createAuthCommands(
       const api = deps.api();
       const prelogin = await api.auth.prelogin({ username });
       const crypto = await deps.crypto();
-      const keys = await deriveKeys(
-        crypto,
-        password,
-        fromBase64(prelogin.kdfSalt),
-        prelogin.kdfParams,
-      );
       try {
-        await api.auth.deleteAccount({ authKey: toBase64(keys.authKey) });
+        await withDerivedKeys(
+          crypto,
+          password,
+          fromBase64(prelogin.kdfSalt),
+          prelogin.kdfParams,
+          (keys) => api.auth.deleteAccount({ authKey: toBase64(keys.authKey) }),
+        );
       } catch (error) {
         if (error instanceof ApiError && error.code === 'unauthorized') {
           // "Wrong password" keeps the login; any other 401 means the session itself ended.
@@ -300,9 +360,6 @@ export function createAuthCommands(
         }
         // OutcomeUnknownError (a lost answer) passes through with its own advice (T21).
         throw error;
-      } finally {
-        keys.passwordKey.fill(0);
-        keys.authKey.fill(0);
       }
       await clearLocalSession(secrets);
       await deps.localState?.().forgetServer();

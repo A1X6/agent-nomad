@@ -14,20 +14,23 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
+import * as z from 'zod';
 
-interface Manifest {
-  readonly version: string;
-  readonly dependencies?: Record<string, string>;
-}
+/** The parts of a package.json this script reads. */
+const ManifestSchema = z.object({
+  version: z.string(),
+  dependencies: z.record(z.string(), z.string()).optional(),
+});
+type Manifest = z.infer<typeof ManifestSchema>;
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const cliDir = join(root, 'packages', 'cli');
 const outDir = join(cliDir, 'release');
 
 const readManifest = async (packageDir: string): Promise<Manifest> =>
-  JSON.parse(
-    await readFile(join(root, 'packages', packageDir, 'package.json'), 'utf8'),
-  ) as Manifest;
+  ManifestSchema.parse(
+    JSON.parse(await readFile(join(root, 'packages', packageDir, 'package.json'), 'utf8')),
+  );
 
 /** The libraries the bundle needs at run time: every non-workspace dependency, one version each. */
 async function runtimeDependencies(): Promise<Record<string, string>> {

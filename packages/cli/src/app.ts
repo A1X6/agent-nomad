@@ -6,15 +6,9 @@ import {
   type CryptoService,
 } from '@agentnomad/core';
 
-import type { AgentRegistry } from './agents/adapter.ts';
+import type { AgentRegistry, OptionalPart } from './agents/adapter.ts';
 import { createAgentsCommand } from './agents/agents-command.ts';
 import { createClaudeCodeAdapter } from './agents/claude-code/claude-code-adapter.ts';
-import { claudeConfigDir, nodeDetectorSystem } from './agents/claude-code/detector.ts';
-import {
-  detectManagedSettings,
-  managedSettingsNotice,
-  nodeManagedSettingsSystem,
-} from './agents/claude-code/managed-settings.ts';
 import { createAgentRegistry } from './agents/registry.ts';
 import type { ApiClient } from './api/api-client.ts';
 import { resolveApiUrl } from './api/api-url.ts';
@@ -22,12 +16,13 @@ import { createHttpApiClient } from './api/http-api-client.ts';
 import { createAuthCommands } from './auth/auth-commands.ts';
 import { createSetupCommands } from './commands/setup-commands.ts';
 import { loadZxcvbnChecker } from './auth/password-policy.ts';
-import { NOT_YET_AVAILABLE, type CommandHandlers } from './cli/commands.ts';
+import type { CommandHandlers } from './cli/commands.ts';
 import { configDir } from './config/config-dir.ts';
 import { createEnvCommand } from './env/env-command.ts';
 import {
   createShellProfileWriter,
   createWindowsEnvWriter,
+  realPowerShell,
   shellProfileFor,
 } from './env/shell-profile.ts';
 import { createPullCommand } from './pull/pull-command.ts';
@@ -69,11 +64,52 @@ export function deviceNameOf(hostname: string): string {
 }
 
 /**
+ * Every supported agent; adding one means adding its adapter here (T28). Building them reads
+ * nothing yet, so the command line can take their optional parts' flags from them (ARCH-02).
+ * It throws when the home folder cannot be used (e.g. `/`).
+ */
+export function createAppRegistry(
+  app: Pick<AppEnvironment, 'env' | 'homedir' | 'platform'>,
+): AgentRegistry {
+  return createAgentRegistry([
+    createClaudeCodeAdapter({
+      env: app.env,
+      homedir: app.homedir,
+      platform: app.platform,
+    }),
+  ]);
+}
+
+/**
+ * The command handlers, and the registered agents' optional parts for the command line's
+ * flags (ARCH-02). When the agents cannot be built here, there are no part flags; the
+ * commands that need the agents say why, and the others (`--help`, login) still work.
+ */
+export function createApp(app: AppEnvironment): {
+  readonly handlers: CommandHandlers;
+  readonly optionalParts: readonly OptionalPart[];
+} {
+  const registry = lazy(() => createAppRegistry(app));
+  let optionalParts: readonly OptionalPart[] = [];
+  try {
+    optionalParts = registry()
+      .list()
+      .flatMap((adapter) => adapter.optionalParts ?? []);
+  } catch {
+    // Left empty: building the registry again in the command reports the error.
+  }
+  return { handlers: createAppHandlers(app, registry), optionalParts };
+}
+
+/**
  * The composition root: builds the real services and the command handlers from them.
  * Nothing (keychain, crypto, network) is touched until a command needs it, so `--help`
  * stays instant and never fails.
  */
-export function createAppHandlers(app: AppEnvironment): CommandHandlers {
+export function createAppHandlers(
+  app: AppEnvironment,
+  registry: () => AgentRegistry = lazy(() => createAppRegistry(app)),
+): CommandHandlers {
   const apiUrl = lazy(() => resolveApiUrl(app.env));
   const secrets = lazy<Promise<SecretStore>>(() =>
     createSecretStore({
@@ -81,6 +117,7 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       env: app.env,
       platform: app.platform,
       homedir: app.homedir,
+      endReplacedSession: (sessionToken): Promise<void> => api().auth.logout(sessionToken),
     }),
   );
   const crypto = lazy<Promise<CryptoService>>(() => createSodiumCryptoService());
@@ -104,22 +141,6 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
     });
   });
 
-  // Every supported agent; adding one means adding its adapter here (T28).
-  const registry = lazy<AgentRegistry>(() =>
-    createAgentRegistry([
-      createClaudeCodeAdapter({
-        env: app.env,
-        homedir: app.homedir,
-        platform: app.platform,
-        onClaudeRunning: () =>
-          app.prompter.select('Claude Code is running and rewrites ~/.claude.json while open.', [
-            { value: 'retry', label: 'I closed Claude Code, continue' },
-            { value: 'skip', label: 'Skip ~/.claude.json this time' },
-          ]),
-      }),
-    ]),
-  );
-
   const localState = lazy<LocalState>(() =>
     createLocalState({
       path: join(configDir(app), STATE_FILE),
@@ -130,11 +151,10 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
 
   const envWriter = () =>
     app.platform === 'win32'
-      ? createWindowsEnvWriter()
+      ? createWindowsEnvWriter(realPowerShell(app.env))
       : createShellProfileWriter(shellProfileFor(app.env['SHELL'], app.homedir, app.platform));
 
   return {
-    ...NOT_YET_AVAILABLE,
     ...createSetupCommands({
       prompter: app.prompter,
       reporter: app.reporter,
@@ -174,19 +194,15 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       homedir: app.homedir,
       platform: app.platform,
     }),
-    ...createAgentsCommand({
+    ...createAgentsCommand({ registry, reporter: app.reporter }),
+    ...createEnvCommand({
       registry,
       reporter: app.reporter,
-      notices: async () => {
-        const system = nodeDetectorSystem(app.env, app.homedir, app.platform);
-        const found = await detectManagedSettings(
-          nodeManagedSettingsSystem(app.env, claudeConfigDir(system), app.platform),
-        );
-        const notice = managedSettingsNotice(found, 'agents');
-        return notice === null ? [] : [notice];
-      },
+      env: app.env,
+      cwd: app.cwd,
+      homedir: app.homedir,
+      platform: app.platform,
     }),
-    ...createEnvCommand({ registry, reporter: app.reporter, env: app.env, cwd: app.cwd }),
     ...createAuthCommands({
       prompter: app.prompter,
       reporter: app.reporter,

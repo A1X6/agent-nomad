@@ -1,55 +1,33 @@
-import { fileURLToPath } from 'node:url';
-
-import { PGlite } from '@electric-sql/pglite';
-import type { KdfParams } from '@agentnomad/contracts';
+import { DEFAULT_KDF_PARAMS, MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { Database } from '../src/db/database.ts';
 import { bundleBlobs, bundles, sessions, users } from '../src/db/schema.ts';
+import { createTestDatabase, migrationsFolder, type TestDatabase } from './support/database.ts';
+import { bytes, newUser } from './support/fixtures.ts';
 
-const migrationsFolder = fileURLToPath(new URL('../drizzle', import.meta.url));
-
-const kdfParams: KdfParams = {
-  algorithm: 'argon2id',
-  version: 19,
-  memoryKiB: 65536,
-  passes: 3,
-  parallelism: 1,
-};
-
-const bytes = (length: number, fill = 7) => new Uint8Array(length).fill(fill);
-
-let client: PGlite;
-let db: ReturnType<typeof drizzle>;
+let database: TestDatabase;
+let db: Database;
 
 /** A fresh, empty Postgres with every migration applied: what a new Neon branch gets. */
 beforeEach(async () => {
-  client = new PGlite();
-  db = drizzle({ client });
-  await migrate(db, { migrationsFolder });
+  database = await createTestDatabase();
+  db = database.db;
 });
 
 afterEach(async () => {
-  await client.close();
+  await database.close();
 });
 
 async function rows<T>(query: string): Promise<T[]> {
-  return (await client.query<T>(query)).rows;
+  return (await database.client.query<T>(query)).rows;
 }
 
 async function insertUser(username = 'ahmed') {
-  const [user] = await db
-    .insert(users)
-    .values({
-      username,
-      kdfSalt: bytes(16),
-      kdfParams,
-      authHash: 'hash',
-      wrappedDataKey: bytes(72),
-    })
-    .returning();
+  const [user] = await db.insert(users).values(newUser(username)).returning();
   if (!user) throw new Error('insert returned nothing');
   return user;
 }
@@ -70,7 +48,8 @@ describe('migrations', () => {
   });
 
   it('can run again on an up-to-date database without changing anything', async () => {
-    await expect(migrate(db, { migrationsFolder })).resolves.toBeUndefined();
+    const again = migrate(drizzle({ client: database.client }), { migrationsFolder });
+    await expect(again).resolves.toBeUndefined();
   });
 
   it('create the indexes the queries rely on', async () => {
@@ -86,6 +65,7 @@ describe('migrations', () => {
       'bundles_user_updated_idx',
       'rate_limits_pkey',
       'rate_limits_window_started_at_idx',
+      'sessions_expires_at_idx',
       'sessions_pkey',
       'sessions_token_hash_key',
       'sessions_user_id_idx',
@@ -117,7 +97,7 @@ describe('users', () => {
     expect(found?.kdfSalt).toBeInstanceOf(Uint8Array);
     expect(found?.kdfSalt).toEqual(bytes(16));
     expect(found?.wrappedDataKey).toEqual(bytes(72));
-    expect(found?.kdfParams).toEqual(kdfParams);
+    expect(found?.kdfParams).toEqual(DEFAULT_KDF_PARAMS);
     expect(found?.createdAt).toBeInstanceOf(Date);
   });
 
@@ -130,16 +110,7 @@ describe('users', () => {
     ['a salt of the wrong length', { kdfSalt: bytes(15) }],
     ['a wrapped data key of the wrong length', { wrappedDataKey: bytes(71) }],
   ])('rejects %s', async (_, override) => {
-    await expect(
-      db.insert(users).values({
-        username: 'ahmed',
-        kdfSalt: bytes(16),
-        kdfParams,
-        authHash: 'hash',
-        wrappedDataKey: bytes(72),
-        ...override,
-      }),
-    ).rejects.toThrow();
+    await expect(db.insert(users).values({ ...newUser('ahmed'), ...override })).rejects.toThrow();
   });
 });
 
@@ -224,7 +195,7 @@ describe('bundles and bundle_blobs', () => {
     ['revision 0', { revision: 0 }],
     ['a content hash that is not 32 bytes', { contentHash: bytes(31) }],
     ['a size of 0', { sizeBytes: 0 }],
-    ['a size over the 5 MB cap', { sizeBytes: 5 * 1024 * 1024 + 1 }],
+    ['a size over the 5 MB cap', { sizeBytes: MAX_BUNDLE_BYTES + 1 }],
     ['an encrypted name over 512 bytes', { nameEnc: bytes(513) }],
   ])('reject %s', async (_, override) => {
     const user = await insertUser();

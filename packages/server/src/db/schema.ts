@@ -27,9 +27,10 @@ const SHA256_BYTES = 32;
  * Raw bytes (Postgres `bytea`) as `Uint8Array`. Drizzle 0.45 has no built-in bytea column;
  * 1.0 adds one, and switching to it later does not change the database.
  */
-export const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
   dataType: () => 'bytea',
-  // Node drivers return a Buffer (a Uint8Array subclass); copy to a plain Uint8Array.
+  // Node drivers return a Buffer (a Uint8Array subclass, maybe a view into a shared pool);
+  // copy to a plain Uint8Array, backed by its own ArrayBuffer.
   fromDriver: (value) => new Uint8Array(value),
 });
 
@@ -83,6 +84,8 @@ export const sessions = pgTable(
   (table) => [
     uniqueIndex('sessions_token_hash_key').on(table.tokenHash),
     index('sessions_user_id_idx').on(table.userId),
+    /** Deleting every user's expired sessions (DB-02). */
+    index('sessions_expires_at_idx').on(table.expiresAt),
   ],
 );
 
@@ -117,8 +120,11 @@ export const bundleBlobs = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    /** 24-byte nonce followed by the encrypted bundle. */
-    ciphertext: bytea('ciphertext').notNull(),
+    /**
+     * 24-byte nonce followed by the encrypted bundle. Typed with the ArrayBuffer that
+     * `fromDriver` gives it, so a download can be sent as it is, without a copy (PERF-01).
+     */
+    ciphertext: bytea('ciphertext').$type<Uint8Array<ArrayBuffer>>().notNull(),
     createdAt: createdAt(),
   },
   (table) => [

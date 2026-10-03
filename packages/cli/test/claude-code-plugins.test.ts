@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join, sep } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -13,10 +13,15 @@ import {
   projectDestination,
   readCurrentPlugins,
   readPluginManifest,
-  syncPlugins,
-  type ClaudeCli,
+  askPluginSync,
+  installPlugins,
+  type AskPluginSyncDeps,
+  type InstallPluginsDeps,
+  type ProgramCli,
   type PluginManifest,
 } from '../src/index.ts';
+
+import { recordingReporter, scriptedPrompter, writeTestFile } from './fakes.ts';
 
 let root: string;
 let base: string;
@@ -28,10 +33,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function put(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(value));
-}
+const putJson = (path: string, value: unknown) => writeTestFile(path, JSON.stringify(value));
 
 const project = () => join(root, 'work', 'app');
 
@@ -40,7 +42,7 @@ async function realisticPlugins(): Promise<void> {
   const install = (scope: string, extra: object = {}) => [
     { scope, installPath: 'x', version: '1.0.0', installedAt: '2026-09-21T00:00:00Z', ...extra },
   ];
-  await put(join(base, 'plugins', 'installed_plugins.json'), {
+  await putJson(join(base, 'plugins', 'installed_plugins.json'), {
     version: 2,
     plugins: {
       'brag@brag': install('user'),
@@ -64,8 +66,8 @@ async function realisticPlugins(): Promise<void> {
       installLocation: join(base, 'plugins', 'marketplaces', 'company'),
     },
   };
-  await put(join(base, 'plugins', 'known_marketplaces.json'), marketplaces);
-  await put(
+  await putJson(join(base, 'plugins', 'known_marketplaces.json'), marketplaces);
+  await putJson(
     join(base, 'plugins', 'marketplaces', 'company', '.claude-plugin', 'marketplace.json'),
     {
       name: 'company',
@@ -160,22 +162,61 @@ describe('plugin list on push', () => {
   ])('marketplace %j is added as %j', (source, expected) => {
     expect(marketplaceAddArgument(source)).toBe(expected);
   });
+});
 
-  it('refuses a manifest that could smuggle options or shell characters', () => {
-    const bad = (add: string) =>
+describe('plugin ids in the manifest (T44)', () => {
+  it('a normal plugin id is accepted (control for the next test)', () => {
+    expect(
       PluginManifestSchema.safeParse({
-        marketplaces: [{ name: 'm', add }],
-        plugins: [],
+        marketplaces: [],
+        plugins: [{ id: 'x@market', scope: 'user', commandSource: false }],
         skipped: [],
-      }).success;
-    expect(bad('--scope')).toBe(false);
-    expect(bad('a/b & calc')).toBe(false);
-    expect(bad('a/b"')).toBe(false);
-    expect(bad('a/b')).toBe(true);
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each(['-x@market', 'x@-market', '--help@x'])(
+    'a plugin id that starts like an option is refused: %s',
+    (id) => {
+      expect(
+        PluginManifestSchema.safeParse({
+          marketplaces: [],
+          plugins: [{ id, scope: 'user', commandSource: false }],
+          skipped: [],
+        }).success,
+      ).toBe(false);
+    },
+  );
+});
+
+describe('marketplace sources: only the forms push writes (T44)', () => {
+  const addAccepted = (add: string) =>
+    PluginManifestSchema.safeParse({ marketplaces: [{ name: 'm', add }], plugins: [], skipped: [] })
+      .success;
+  it.each([
+    'owner/repo',
+    'owner/repo#v1.2',
+    'https://example.com/marketplace.json',
+    'git@github.com:owner/repo.git#main',
+  ])('accepts %s', (add) => {
+    expect(addAccepted(add)).toBe(true);
+  });
+  it.each([
+    '/home/me/marketplace',
+    'C:\\market',
+    './local',
+    'http://example.com/m.json',
+    '--help',
+    '--scope',
+    'owner/repo; rm -rf ~',
+    'owner/repo & calc',
+    'owner/repo"',
+  ])('refuses %s', (add) => {
+    expect(addAccepted(add)).toBe(false);
   });
 });
 
-const manifest: PluginManifest = {
+const savedManifest: PluginManifest = {
   marketplaces: [
     { name: 'brag', add: 'latent-spaces/brag' },
     { name: 'company', add: 'https://gitlab.example.com/team/plugins.git' },
@@ -190,7 +231,7 @@ const manifest: PluginManifest = {
 
 function fakeClaude(failures: Record<string, string> = {}) {
   const runs: string[] = [];
-  const claude: ClaudeCli = {
+  const claude: ProgramCli = {
     run: (args, cwd) => {
       runs.push(`${args.join(' ')} @ ${cwd}`);
       const key = args.join(' ');
@@ -218,29 +259,21 @@ function run(options: {
   assumeYes?: boolean;
   allowCommands?: boolean;
 }) {
-  const answers = [...(options.answers ?? [true, true])];
-  const asked: string[] = [];
-  const lines: string[] = [];
+  const { prompter, asked } = scriptedPrompter(options.answers ?? [true, true]);
+  const { reporter, lines } = recordingReporter({ levels: false });
   const { claude, runs } = fakeClaude(options.failures);
-  const done = syncPlugins({
-    manifest,
+  const deps: AskPluginSyncDeps & InstallPluginsDeps = {
+    manifest: savedManifest,
     current: options.current ?? { marketplaces: new Set(), installed: new Set() },
     claude,
-    prompter: {
-      confirm: (question) => {
-        asked.push(question);
-        return Promise.resolve(answers.shift() ?? false);
-      },
-    },
-    reporter: {
-      info: (m) => lines.push(m),
-      success: (m) => lines.push(m),
-      warn: (m) => lines.push(m),
-    },
+    prompter,
+    reporter,
     cwd: '/work/app',
     ...(options.assumeYes !== undefined && { assumeYes: options.assumeYes }),
     ...(options.allowCommands !== undefined && { allowCommands: options.allowCommands }),
-  });
+  };
+  // As pull does it: the questions in the plan step, the installs after writing (T61).
+  const done = askPluginSync(deps).then((choice) => installPlugins(choice, deps));
   return { done, asked, lines, runs };
 }
 
@@ -321,25 +354,92 @@ describe('plugin reinstall on pull', () => {
     ]);
   });
 
+  it('a failed marketplace gets the same clearer reason as a failed plugin (UX-03)', async () => {
+    const { claude } = fakeClaude({ 'gitlab.example.com': 'blocked by strictKnownMarketplaces' });
+    const { reporter } = recordingReporter();
+    const result = await installPlugins(
+      { marketplaces: savedManifest.marketplaces, plugins: savedManifest.plugins, declined: [] },
+      { claude, reporter, cwd: '/work/app', explainFailure: (reason) => `explained: ${reason}` },
+    );
+    expect(result.failed[0]).toEqual({
+      what: 'marketplace company',
+      reason: 'explained: blocked by strictKnownMarketplaces',
+    });
+  });
+
   it('plans only what is missing', () => {
     expect(
-      planPluginSync(manifest, {
+      planPluginSync(savedManifest, {
         marketplaces: new Set(['brag']),
         installed: new Set(['brag@brag|user']),
       }),
     ).toEqual({
       marketplaces: [{ name: 'company', add: 'https://gitlab.example.com/team/plugins.git' }],
-      plugins: manifest.plugins.slice(1),
-      alreadyInstalled: [manifest.plugins[0]],
+      plugins: savedManifest.plugins.slice(1),
+      alreadyInstalled: [savedManifest.plugins[0]],
     });
   });
 
   it('reads what this PC already has', async () => {
     await realisticPlugins();
-    const current = await readCurrentPlugins(base, project());
+    const current = await readCurrentPlugins(base, process.platform, project());
     expect(current.marketplaces.has('brag')).toBe(true);
     expect(current.installed.has('brag@brag|user')).toBe(true);
     expect(current.installed.has('team-lint@company|project')).toBe(true);
     expect(current.installed.has('other@company|project')).toBe(false);
+  });
+});
+
+describe('push saves only what pull accepts (BUG-01)', () => {
+  it('leaves out, with why, a marketplace URL or plugin name pull would refuse', async () => {
+    await putJson(join(base, 'plugins', 'installed_plugins.json'), {
+      plugins: {
+        'ok@plain': [{ scope: 'user' }],
+        'tool@encoded': [{ scope: 'user' }],
+        'tool@query': [{ scope: 'user' }],
+        '.x@plain': [{ scope: 'user' }],
+      },
+    });
+    await putJson(join(base, 'plugins', 'known_marketplaces.json'), {
+      plain: { source: { source: 'url', url: 'https://host/market.json' } },
+      encoded: { source: { source: 'url', url: 'https://host/my%20market.json' } },
+      query: { source: { source: 'url', url: 'https://host/m.json?a=1&b=2' } },
+    });
+    const saved = await readPluginManifest({
+      baseDir: base,
+      platform: process.platform,
+      scope: { kind: 'global' },
+    });
+    expect(saved?.plugins.map((plugin) => plugin.id)).toEqual(['ok@plain']);
+    expect(saved?.skipped).toEqual([
+      { what: 'tool@encoded', reason: 'its marketplace address has characters pull refuses' },
+      { what: 'tool@query', reason: 'its marketplace address has characters pull refuses' },
+      { what: '.x@plain', reason: 'unexpected plugin name' },
+    ]);
+    expect(PluginManifestSchema.safeParse(saved).success).toBe(true);
+  });
+});
+
+describe('one reader of installed_plugins.json (BUG-03)', () => {
+  it('counts a project install whose path is written another way as installed', async () => {
+    await putJson(join(base, 'plugins', 'installed_plugins.json'), {
+      plugins: { 'lint@company': [{ scope: 'project', projectPath: `${project()}${sep}` }] },
+    });
+    const current = await readCurrentPlugins(base, process.platform, project());
+    expect(current.installed.has('lint@company|project')).toBe(true);
+    const saved = await readPluginManifest({
+      baseDir: base,
+      platform: process.platform,
+      scope: { kind: 'project', projectDir: project() },
+    });
+    expect(saved?.skipped.map((entry) => entry.what)).toEqual(['lint@company']);
+  });
+
+  it.runIf(process.platform === 'win32')('ignores the case of a Windows path', async () => {
+    await putJson(join(base, 'plugins', 'installed_plugins.json'), {
+      plugins: { 'lint@company': [{ scope: 'project', projectPath: project().toUpperCase() }] },
+    });
+    const current = await readCurrentPlugins(base, 'win32', project());
+    expect(current.installed.has('lint@company|project')).toBe(true);
   });
 });

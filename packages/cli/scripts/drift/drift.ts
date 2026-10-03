@@ -7,10 +7,12 @@
  * - the official ".claude directory" docs page, which names what lives in `~/.claude` and a
  *   project's `.claude`;
  * - what a fresh Claude Code creates in an empty config folder (run in CI);
- * - the changelog entries of versions newer than the one the data file was reviewed against.
+ * - the changelog entries of versions newer than the one the data file was reviewed against,
+ *   including any that name a settings key or variable the pull review watches (T55).
  */
 import type { ClaudeCodePathsData } from '../../src/agents/claude-code/claude-code-paths.data.ts';
-import { compareVersions } from '../../src/agents/claude-code/version-stamp.ts';
+import { WATCHED_SETTINGS } from '../../src/agents/claude-code/reviewed-settings.ts';
+import { compareVersions } from '../../src/agents/notices.ts';
 
 export interface ChangelogSection {
   readonly version: string;
@@ -95,6 +97,14 @@ const KIND =
 const WHERE =
   /~\/\.claude\b|\.claude\/|\.claude\.json|CLAUDE_CONFIG_DIR|\b(stored|saved|written|moved|kept|lives?) (in|to|under|at)\b|\bnew (file|folder|directory)\b|AGENTS\.md|CLAUDE(\.local)?\.md|\.mcp\.json|keybindings\.json|\.worktreeinclude/i;
 
+/**
+ * The settings keys and `env` names the pull review lists (T55): an entry that adds or changes
+ * one may need a change in `command-review.ts`.
+ */
+const WATCHED = new RegExp(
+  `(?<![\\w.])(${WATCHED_SETTINGS.map((key) => key.replaceAll('.', '\\.')).join('|')})(?!\\w)`,
+);
+
 /** Relevant entries of every version newer than `afterVersion`, newest first. */
 export function changelogSince(markdown: string, afterVersion: string): ChangelogSection[] {
   const sections: ChangelogSection[] = [];
@@ -102,7 +112,9 @@ export function changelogSince(markdown: string, afterVersion: string): Changelo
     const [heading = '', ...body] = section.split(/\r?\n/);
     const version = /^\d+\.\d+\.\d+/.exec(heading.trim())?.[0];
     if (version === undefined || compareVersions(version, afterVersion) <= 0) continue;
-    const lines = body.filter((line) => KIND.test(line) && WHERE.test(line));
+    const lines = body.filter(
+      (line) => KIND.test(line) && (WHERE.test(line) || WATCHED.test(line)),
+    );
     if (lines.length > 0) sections.push({ version, lines });
   }
   return sections.sort((a, b) => compareVersions(b.version, a.version));
@@ -110,10 +122,14 @@ export function changelogSince(markdown: string, afterVersion: string): Changelo
 
 /**
  * A changelog line as it is shown in the issue (T48): text from outside the repository, so an
- * @mention cannot notify anyone and an image cannot load from elsewhere.
+ * @mention cannot notify anyone and an image (Markdown or HTML: `<` is shown as text) cannot
+ * load from elsewhere.
  */
 export function inert(line: string): string {
-  return line.replace(/@(?=[A-Za-z0-9])/g, '@\u200b').replace(/!\[/g, '!\\[');
+  return line
+    .replace(/@(?=[A-Za-z0-9])/g, '@\u200b')
+    .replace(/!\[/g, '!\\[')
+    .replace(/</g, '&lt;');
 }
 
 export function driftReport(input: DriftInput): DriftReport {
@@ -136,8 +152,11 @@ export function driftReport(input: DriftInput): DriftReport {
 
 const bullets = (items: readonly string[]) => items.map((item) => `- \`${item}\``).join('\n');
 
-/** The GitHub issue (or job summary) for a report, in Markdown. */
-export function reportMarkdown(report: DriftReport, runUrl?: string): string {
+/**
+ * The GitHub issue (or job summary) for a report, in Markdown. It holds no link to the run,
+ * so the same findings give the same text and the open issue is only edited when they change.
+ */
+export function reportMarkdown(report: DriftReport): string {
   const parts = [
     `The paths data file (\`packages/cli/src/agents/claude-code/claude-code-paths.data.ts\`) was reviewed against Claude Code **${report.reviewedVersion}**; the newest is **${report.latestVersion}**.`,
   ];
@@ -169,11 +188,10 @@ export function reportMarkdown(report: DriftReport, runUrl?: string): string {
       '## To do',
       [
         '- [ ] Sort each unknown name into `neverSynced`, `knownState` or a synced list (never sync credentials, history, caches or machine state).',
-        '- [ ] Read the changelog entries; add anything that is part of a user setup.',
+        '- [ ] Read the changelog entries; add anything that is part of a user setup. For a setting that redirects Claude Code, loosens its permissions or runs a command, update `packages/cli/src/agents/claude-code/reviewed-settings.ts` and the pull review.',
         `- [ ] Set \`reviewedVersion\` to \`${report.latestVersion}\`, run \`pnpm check\`, and close this issue.`,
       ].join('\n'),
     );
   }
-  if (runUrl !== undefined) parts.push(`---\nFound by the [weekly drift check](${runUrl}).`);
   return `${parts.join('\n\n')}\n`;
 }

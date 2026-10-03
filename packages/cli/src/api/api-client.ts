@@ -11,16 +11,23 @@ import type {
   SessionResponse,
 } from '@agentnomad/contracts';
 
-/** Account and session endpoints. Logout and account delete use the stored session token. */
-export interface AuthApi {
+/**
+ * Account and session endpoints. Logout and account delete use the stored session token,
+ * unless logout is given one.
+ */
+interface AuthApi {
   prelogin(request: PreloginRequest): Promise<PreloginResponse>;
   register(request: RegisterRequest): Promise<SessionResponse>;
   login(request: LoginRequest): Promise<LoginResponse>;
-  logout(): Promise<void>;
+  /**
+   * Ends the stored session (retried like other requests). Given a token, ends that session
+   * instead, in one attempt: for a login this PC could not use and never saved (T66).
+   */
+  logout(sessionToken?: string): Promise<void>;
   deleteAccount(request: DeleteAccountRequest): Promise<void>;
 }
 
-export interface ListBundlesOptions {
+interface ListBundlesOptions {
   readonly cursor?: string;
   /** 1–100; the server defaults to 50. */
   readonly limit?: number;
@@ -48,7 +55,7 @@ export interface DownloadedBundle {
 }
 
 /** Saved-setup endpoints. All need a session. */
-export interface BundlesApi {
+interface BundlesApi {
   list(options?: ListBundlesOptions): Promise<ListBundlesResponse>;
   get(params: BundleParams): Promise<DownloadedBundle>;
   put(params: BundleParams, upload: BundleUpload): Promise<PutBundleResponse>;

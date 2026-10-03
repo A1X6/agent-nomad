@@ -21,6 +21,11 @@ export interface PathEnvironment {
   readonly homeDir: string;
 }
 
+/** A platform name (Node's `process.platform`): `darwin` and `win32` stay, anything else counts as Linux. */
+export function sourceOsOf(platform: string): SourceOs {
+  return platform === 'darwin' || platform === 'win32' ? platform : 'linux';
+}
+
 /** Converts between bundle paths and OS paths, and between real and portable home paths (T10). */
 export interface PathResolver {
   readonly environment: PathEnvironment;
@@ -44,7 +49,7 @@ export interface PathResolver {
   fromPortableText(text: string, options?: PortableTextOptions): string;
 }
 
-export interface PortableTextOptions {
+interface PortableTextOptions {
   /**
    * On Windows, write the home folder and the path after it with backslashes: batch files
    * read `C:/Users/a/bin` as a switch (T45). Other files keep forward slashes.

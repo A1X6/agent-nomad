@@ -1,8 +1,8 @@
 /** The hosted API (Render, T19). */
-export const DEFAULT_API_URL = 'https://agentnomad-api.onrender.com';
+const DEFAULT_API_URL = 'https://agentnomad-api.onrender.com';
 
 /** Environment variable that points the CLI at another server, e.g. a local one. */
-export const API_URL_ENV = 'AGENTNOMAD_API_URL';
+const API_URL_ENV = 'AGENTNOMAD_API_URL';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 

@@ -2,13 +2,14 @@
 
 Where agentnomad is today and where it is going. Dates are not promised; the order is.
 
-| Stage                            | Theme                                                                                   | Status          |
-| -------------------------------- | --------------------------------------------------------------------------------------- | --------------- |
-| [v1](#v1-claude-code-everywhere) | Claude Code, on every OS, zero-knowledge                                                | Released as 1.0 |
-| [v1.x](#v1x-more-agents)         | More agents: Codex, Gemini CLI, OpenCode, Cursor and others                             | Next            |
-| [v1.x](#v1x-data-only-agents)    | Data-only agents: add a simple agent with a data file, no code                          | Planned         |
-| [v2](#v2-one-setup-every-agent)  | One setup, every agent: turn a Claude Code setup into a Codex, Gemini or OpenCode setup | Planned         |
-| [Later](#later)                  | History, teams, a dashboard, password change, storage                                   | Ideas           |
+| Stage                               | Theme                                                                                   | Status          |
+| ----------------------------------- | --------------------------------------------------------------------------------------- | --------------- |
+| [v1](#v1-claude-code-everywhere)    | Claude Code, on every OS, zero-knowledge                                                | Released as 1.0 |
+| [v1.x](#v1x-more-agents)            | More agents: Codex, Gemini CLI, OpenCode, Cursor and others                             | Next            |
+| [v1.x](#v1x-data-only-agents)       | Data-only agents: add a simple agent with a data file, no code                          | Planned         |
+| [v1.x](#v1x-claudeai-account-items) | claude.ai account items: skills, plugins and connectors from the claude.ai account      | Started         |
+| [v2](#v2-one-setup-every-agent)     | One setup, every agent: turn a Claude Code setup into a Codex, Gemini or OpenCode setup | Planned         |
+| [Later](#later)                     | History, teams, a dashboard, password change, storage                                   | Ideas           |
 
 ## v1: Claude Code everywhere
 
@@ -51,9 +52,7 @@ What is shared by every new agent, so each adapter stays small:
 - Push, pull, `list`, `status`, `delete`, `agents`, encryption, the server and the CLI
   flags work unchanged.
 - `{{HOME}}` path rewriting, per-OS line endings and permissions, JSON merge, backups.
-- The "runs programs" review. It currently understands Claude Code's hook, status line and
-  MCP formats; it will move behind the adapter (an `inspector.runnable` hook) with the
-  second agent, so each agent can describe its own.
+- The runs-programs review is per adapter (`Restorer.reviewRunnable`); each agent describes its own.
 
 ## v1.x: data-only agents
 
@@ -79,6 +78,17 @@ data file only, read by one generic adapter:
 The same schema checks as Claude Code's data file apply, so a mistake fails loudly at
 start-up and in tests. Agents with special rules (Claude Code's `~/.claude.json`, plugins,
 auto memory) keep a code adapter, which can still use the generic parts.
+
+## v1.x: claude.ai account items
+
+Claude Code also brings in things from the user's claude.ai account: skills, plugins and
+connectors. Saving a copy lets a PC with another claude.ai account, or none, have them too.
+
+| Item                               | Status                    | Notes                                                                                                                                               |
+| ---------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Skills you made on claude.ai**   | Done (`--account-skills`) | Only your own; restored as local skills where claude.ai does not already sync them.                                                                 |
+| **Plugins turned on in claude.ai** | Planned                   | No marketplace to reinstall from: their files would be restored as a local plugin, without organization plugins.                                    |
+| **Connectors**                     | Research                  | They are not files (Claude Code fetches them and their logins from claude.ai); at most the list could be offered as MCP servers to log in to again. |
 
 ## v2: one setup, every agent
 
@@ -129,17 +139,6 @@ flowchart LR
   generated, so a later run can update them.
 - The same safety rules as pull: anything that runs programs is shown first.
 - Works offline too: converting on one PC needs no account.
-
-## v1.x: claude.ai account items
-
-Claude Code also brings in things from the user's claude.ai account: skills, plugins and
-connectors. Saving a copy lets a PC with another claude.ai account, or none, have them too.
-
-| Item                               | Status                    | Notes                                                                                                                                               |
-| ---------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Skills you made on claude.ai**   | Done (`--account-skills`) | Only your own; restored as local skills where claude.ai does not already sync them.                                                                 |
-| **Plugins turned on in claude.ai** | Planned                   | No marketplace to reinstall from: their files would be restored as a local plugin, without organization plugins.                                    |
-| **Connectors**                     | Research                  | They are not files (Claude Code fetches them and their logins from claude.ai); at most the list could be offered as MCP servers to log in to again. |
 
 ## Later
 

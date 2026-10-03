@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /** Database settings, read from the environment (`packages/server/.env` locally). */
-export const DatabaseEnvSchema = z.object({
+const DatabaseEnvSchema = z.object({
   DATABASE_URL: z.url({
     protocol: /^postgres(ql)?$/,
     error: 'DATABASE_URL must be a postgres:// or postgresql:// connection string',
@@ -11,7 +11,7 @@ export const DatabaseEnvSchema = z.object({
 export type DatabaseEnv = z.infer<typeof DatabaseEnvSchema>;
 
 /** Smallest server secret accepted, in bytes (256 bits). */
-export const MIN_SERVER_SECRET_BYTES = 32;
+const MIN_SERVER_SECRET_BYTES = 32;
 
 function decodedLength(base64: string): number {
   try {
@@ -22,10 +22,11 @@ function decodedLength(base64: string): number {
 }
 
 /**
- * Everything the API server needs. SERVER_SECRET keys the auth-key hashes and fake prelogin
- * salts: it must never change or leak, or no existing user can log in.
+ * Everything the API server needs. SERVER_SECRET keys the auth-key hashes, fake prelogin
+ * salts and the rate-limit keys: it must never change or leak, or no existing user can log
+ * in.
  */
-export const ServerEnvSchema = DatabaseEnvSchema.extend({
+const ServerEnvSchema = DatabaseEnvSchema.extend({
   SERVER_SECRET: z
     .base64({ error: 'SERVER_SECRET must be base64 (generate: openssl rand -base64 32)' })
     .refine(

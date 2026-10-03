@@ -1,3 +1,4 @@
+import { sameBytes } from '@agentnomad/contracts';
 import { strFromU8, strToU8 } from 'fflate';
 
 import type { FileConflict, MergeStrategy, PlannedWrite } from './merge.ts';
@@ -22,15 +23,11 @@ export interface MergeStrategies {
 }
 
 /** `2026-09-24T17:42:50.123Z` to `20260924T174250Z`: sortable, and no colons (Windows-safe). */
-function timestamp(date: Date): string {
+export function backupStamp(date: Date): string {
   return date
     .toISOString()
     .replace(/\.\d{3}Z$/, 'Z')
     .replace(/[-:]/g, '');
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -40,11 +37,16 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 /** Invisible character some Windows editors put at the start of text files. */
 const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
 
-/** A whole number too large to survive `JSON.parse`, anywhere inside `value` (T45). */
-function hasUnsafeInteger(value: unknown): boolean {
-  if (typeof value === 'number') return Number.isInteger(value) && !Number.isSafeInteger(value);
-  if (Array.isArray(value)) return value.some(hasUnsafeInteger);
-  if (isJsonObject(value)) return Object.values(value).some(hasUnsafeInteger);
+/**
+ * A number `JSON.parse` could not keep, anywhere inside `value`: a whole number past the safe
+ * range (T45), or one too large for a double (`1e400` is `Infinity`, written back as `null`).
+ */
+function hasUnsafeNumber(value: unknown): boolean {
+  if (typeof value === 'number') {
+    return !Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value));
+  }
+  if (Array.isArray(value)) return value.some(hasUnsafeNumber);
+  if (isJsonObject(value)) return Object.values(value).some(hasUnsafeNumber);
   return false;
 }
 
@@ -57,7 +59,7 @@ function parseJsonObject(bytes: Uint8Array): Record<string, unknown> | undefined
   const text = raw.startsWith(BYTE_ORDER_MARK) ? raw.slice(1) : raw;
   try {
     const value: unknown = JSON.parse(text);
-    return isJsonObject(value) && !hasUnsafeInteger(value) ? value : undefined;
+    return isJsonObject(value) && !hasUnsafeNumber(value) ? value : undefined;
   } catch {
     return undefined;
   }
@@ -93,7 +95,7 @@ export function createMergeStrategies(options: MergeStrategyOptions = {}): Merge
     resolve: ({ path, existing, incoming }: FileConflict): readonly PlannedWrite[] =>
       sameBytes(existing, incoming)
         ? []
-        : [{ path: `${path}${INCOMING_MARKER}${timestamp(now())}`, content: incoming }],
+        : [{ path: `${path}${INCOMING_MARKER}${backupStamp(now())}`, content: incoming }],
   };
 
   const overwrite: MergeStrategy = {
@@ -103,7 +105,7 @@ export function createMergeStrategies(options: MergeStrategyOptions = {}): Merge
       sameBytes(existing, incoming)
         ? []
         : [
-            { path: `${path}${BACKUP_MARKER}${timestamp(now())}`, content: existing },
+            { path: `${path}${BACKUP_MARKER}${backupStamp(now())}`, content: existing },
             { path, content: incoming },
           ],
   };
@@ -126,15 +128,26 @@ export function createMergeStrategies(options: MergeStrategyOptions = {}): Merge
   return { jsonMerge, textSideBySide, overwrite };
 }
 
+/** The strategies a restorer chooses from; an agent passes the merges its files need. */
+export interface MergeChoices {
+  /** Format-aware merges in order of preference, e.g. `[jsonMerge]`. */
+  readonly merges: readonly MergeStrategy[];
+  /** For "merge" when none of `merges` applies: keep both copies. */
+  readonly fallback: MergeStrategy;
+  /** For "overwrite". */
+  readonly overwrite: MergeStrategy;
+}
+
 /**
  * The strategy for the user's choice: "overwrite" always overwrites (with a backup);
- * "merge" merges JSON files and keeps both copies of everything else.
+ * "merge" uses the first of `merges` that applies to the file and keeps both copies of
+ * everything else.
  */
 export function selectMergeStrategy(
-  strategies: MergeStrategies,
+  choices: MergeChoices,
   choice: 'merge' | 'overwrite',
   path: string,
 ): MergeStrategy {
-  if (choice === 'overwrite') return strategies.overwrite;
-  return strategies.jsonMerge.appliesTo(path) ? strategies.jsonMerge : strategies.textSideBySide;
+  if (choice === 'overwrite') return choices.overwrite;
+  return choices.merges.find((strategy) => strategy.appliesTo(path)) ?? choices.fallback;
 }

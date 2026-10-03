@@ -1,16 +1,15 @@
-import { createHash } from 'node:crypto';
-
-import {
-  DEFAULT_KDF_PARAMS,
-  ErrorResponseSchema,
-  SessionResponseSchema,
-} from '@agentnomad/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestApp, postJson, type TestApp } from './support/app.ts';
-
-const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-const bytes = (length: number, fill: number) => new Uint8Array(length).fill(fill);
+import { createTestApp, type TestApp } from './support/app.ts';
+import {
+  b64,
+  bytes,
+  deleteAccountRequest,
+  errorCode,
+  loginRequest,
+  putSetup,
+  registerForToken,
+} from './support/fixtures.ts';
 
 /** Each test user has its own auth key (derived from their password in real life). */
 const authKeyOf = (username: string) => b64(bytes(32, username.length));
@@ -25,54 +24,19 @@ afterEach(async () => {
   await t.database.close();
 });
 
-async function register(username: string): Promise<string> {
-  const res = await t.app.request(
-    '/auth/register',
-    postJson({
-      username,
-      kdfSalt: b64(bytes(16, 1)),
-      kdfParams: DEFAULT_KDF_PARAMS,
-      authKey: authKeyOf(username),
-      wrappedDataKey: b64(bytes(72, 3)),
-      deviceName: 'laptop',
-    }),
-  );
-  return SessionResponseSchema.parse(await res.json()).sessionToken;
-}
+const register = (username: string) =>
+  registerForToken(t.app, username, { authKey: authKeyOf(username) });
 
-async function login(username: string, deviceName = 'desktop'): Promise<Response> {
-  return t.app.request(
-    '/auth/login',
-    postJson({ username, authKey: authKeyOf(username), deviceName }),
-  );
-}
+const login = (username: string) =>
+  loginRequest(t.app, username, authKeyOf(username), { deviceName: 'desktop' });
 
 async function pushGlobal(token: string): Promise<void> {
-  const body = bytes(64, 7);
-  const res = await t.app.request('/bundles/claude-code/global', {
-    method: 'PUT',
-    body,
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/octet-stream',
-      'x-an-expected-revision': '0',
-      'x-an-content-sha256': createHash('sha256').update(body).digest('hex'),
-      'x-an-format-version': '1',
-    },
-  });
+  const res = await putSetup(t.app, token, { expected: 0, body: bytes(64, 7) });
   expect(res.status).toBe(200);
 }
 
-async function deleteAccount(token: string | null, body: unknown): Promise<Response> {
-  return t.app.request('/account', {
-    method: 'DELETE',
-    body: JSON.stringify(body),
-    headers: {
-      'content-type': 'application/json',
-      ...(token && { authorization: `Bearer ${token}` }),
-    },
-  });
-}
+const deleteAccount = (token: string | null, body: unknown) =>
+  deleteAccountRequest(t.app, token, body);
 
 /** Rows per table that belong to `username`. */
 async function rowsOf(username: string) {
@@ -85,10 +49,6 @@ async function rowsOf(username: string) {
     [username],
   );
   return rows[0];
-}
-
-async function errorCode(res: Response): Promise<string> {
-  return ErrorResponseSchema.parse(await res.json()).error.code;
 }
 
 describe('DELETE /account', () => {

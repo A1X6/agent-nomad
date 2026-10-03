@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,6 +11,7 @@ import {
   reportMarkdown,
 } from '../scripts/drift/drift.ts';
 import { CLAUDE_CODE_PATHS } from '../src/index.ts';
+import { WATCHED_SETTINGS } from '../src/agents/claude-code/reviewed-settings.ts';
 
 /** Every top-level name the ".claude directory" docs page named on 2026-09-26 (Claude Code 2.1.283). */
 const DOCS_NAMES_2026_09_26 = [
@@ -85,20 +88,63 @@ describe('drift check (T41): reading the sources', () => {
   });
 });
 
+describe('drift check (T55): settings the pull review watches', () => {
+  it('watches every key and variable the review lists', () => {
+    for (const key of [
+      'apiKeyHelper',
+      'permissions.defaultMode',
+      'permissions.allow',
+      'permissions.additionalDirectories',
+      'sandbox',
+      'ANTHROPIC_BASE_URL',
+      'HTTPS_PROXY',
+      'NODE_EXTRA_CA_CERTS',
+      'CLAUDE_CODE_SHELL_PREFIX',
+    ]) {
+      expect(WATCHED_SETTINGS).toContain(key);
+    }
+  });
+
+  it('keeps changelog entries that name a watched setting', () => {
+    const changelog = [
+      '## 2.1.300',
+      '',
+      '- Added `sandbox.network.allowAll` to open the network',
+      '- Changed `ANTHROPIC_BASE_URL` to also apply to MCP tool search',
+      '- Added wildcards in `permissions.allow` rules for MCP servers',
+      '- Fixed a crash when the sandbox could not start',
+      '- Added a new theme',
+      '',
+    ].join('\n');
+    expect(changelogSince(changelog, '2.1.299')).toEqual([
+      {
+        version: '2.1.300',
+        lines: [
+          '- Added `sandbox.network.allowAll` to open the network',
+          '- Changed `ANTHROPIC_BASE_URL` to also apply to MCP tool search',
+          '- Added wildcards in `permissions.allow` rules for MCP servers',
+        ],
+      },
+    ]);
+  });
+});
+
 describe('drift check (T41): comparing with the data file', () => {
   it('the data file knows every name the docs named on 2026-09-26', () => {
     const known = knownTopLevelNames(CLAUDE_CODE_PATHS);
     expect(DOCS_NAMES_2026_09_26.filter((name) => !known.has(name))).toEqual([]);
   });
 
+  const driftInput = {
+    paths: { ...CLAUDE_CODE_PATHS, reviewedVersion: '2.1.283' },
+    directoryDocs: 'Settings in `~/.claude/settings.json`, prompts in `~/.claude/prompts/`.',
+    changelog: CHANGELOG,
+    latestVersion: '2.1.290',
+    freshEntries: ['.claude.json', 'backups', 'projects', 'sessions', 'new-state'],
+  };
+
   it('reports unknown docs names, unknown fresh-install entries and new changelog entries', () => {
-    const report = driftReport({
-      paths: { ...CLAUDE_CODE_PATHS, reviewedVersion: '2.1.283' },
-      directoryDocs: 'Settings in `~/.claude/settings.json`, prompts in `~/.claude/prompts/`.',
-      changelog: CHANGELOG,
-      latestVersion: '2.1.290',
-      freshEntries: ['.claude.json', 'backups', 'projects', 'sessions', 'new-state'],
-    });
+    const report = driftReport(driftInput);
     expect(report).toMatchObject({
       latestVersion: '2.1.290',
       reviewedVersion: '2.1.283',
@@ -108,12 +154,27 @@ describe('drift check (T41): comparing with the data file', () => {
     });
     expect(report.changelog.map((section) => section.version)).toEqual(['2.1.290']);
 
-    const markdown = reportMarkdown(report, 'https://github.com/A1X6/agent-nomad/actions/runs/1');
+    const markdown = reportMarkdown(report);
     expect(markdown).toContain('- `prompts`');
     expect(markdown).toContain('- `new-state`');
     expect(markdown).toContain('### 2.1.290');
     expect(markdown).toContain('Set `reviewedVersion` to `2.1.290`');
-    expect(markdown).toContain('actions/runs/1');
+  });
+
+  it('writes the same report for the same input, with no link to the run (BUG-02)', async () => {
+    // The workflow edits the open issue only when the body differs, so the body must not
+    // change from run to run: the run link goes in the issue comment instead.
+    expect(reportMarkdown(driftReport(driftInput))).toBe(reportMarkdown(driftReport(driftInput)));
+    const script = await readFile(
+      new URL('../scripts/drift/check-claude-code.ts', import.meta.url),
+      'utf8',
+    );
+    const workflow = await readFile(
+      new URL('../../../.github/workflows/drift-check.yml', import.meta.url),
+      'utf8',
+    );
+    expect(script).not.toContain('RUN_URL');
+    expect(workflow).not.toContain('DRIFT_RUN_URL');
   });
 
   it('finds nothing when the data file is up to date', () => {
@@ -135,5 +196,11 @@ describe('drift check (T48): changelog text is shown inert', () => {
     expect(shown).not.toMatch(/@[A-Za-z]/);
     expect(shown).not.toContain('![');
     expect(shown).toContain('~/.claude');
+  });
+
+  it('shows HTML as text, so an <img> cannot load either (SEC-05)', () => {
+    expect(inert('- Logo <img src="https://tracker.example/p.png"> added')).toBe(
+      '- Logo &lt;img src="https://tracker.example/p.png"> added',
+    );
   });
 });

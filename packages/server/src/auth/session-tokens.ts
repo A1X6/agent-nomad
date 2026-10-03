@@ -1,4 +1,6 @@
-import { toBase64Url, toHex, utf8 } from '../encoding.ts';
+import { toHex } from '@agentnomad/contracts';
+
+import { sha256, toBase64Url, utf8 } from '../encoding.ts';
 
 /** 32 random bytes = 256 bits, well above OWASP's 128-bit minimum for custom session ids. */
 const SESSION_TOKEN_BYTES = 32;
@@ -13,5 +15,5 @@ export function newSessionToken(randomBytes: (length: number) => Uint8Array): st
  * cannot be reversed or guessed; no slow hash is needed.
  */
 export async function hashSessionToken(token: string): Promise<string> {
-  return toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', utf8(token))));
+  return toHex(await sha256(utf8(token)));
 }

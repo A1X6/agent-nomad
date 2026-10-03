@@ -13,7 +13,7 @@ import { hashSessionToken, newSessionToken } from './session-tokens.ts';
 /** A session ends this long after login, however often it is used. */
 export const SESSION_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 /** A session unused for this long ends early (a forgotten old PC). */
-export const SESSION_IDLE_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_IDLE_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000;
 /** `last_used_at` is refreshed at most this often, to avoid a write on every request. */
 const TOUCH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -25,22 +25,22 @@ export class InvalidCredentialsError extends Error {
   }
 }
 
-export interface PreloginResult {
+interface PreloginResult {
   readonly kdfSalt: Uint8Array;
   readonly kdfParams: KdfParams;
 }
 
-export interface IssuedSession {
+interface IssuedSession {
   /** Shown to the client once; only its hash is stored. */
   readonly token: string;
   readonly expiresAt: Date;
 }
 
-export interface LoginResult extends IssuedSession {
+interface LoginResult extends IssuedSession {
   readonly wrappedDataKey: Uint8Array;
 }
 
-export interface RegisterInput extends Omit<NewUser, 'authHash'> {
+interface RegisterInput extends Omit<NewUser, 'authHash'> {
   readonly authKey: Uint8Array;
   readonly deviceName: string;
 }
@@ -78,8 +78,6 @@ export interface AuthServiceDeps {
   readonly limiter: RateLimiter;
 }
 
-const FAILED = RATE_LIMITS.failedLoginsPerAccount;
-
 export function createAuthService(deps: AuthServiceDeps): AuthService {
   const { users, sessions, keys, now, randomBytes, limiter } = deps;
 
@@ -101,16 +99,18 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     await limiter.reset(rule, subject);
   }
 
-  async function issueSession(userId: string, deviceName: string): Promise<IssuedSession> {
+  /** A new token and the session row to store for it (only the token's hash). */
+  async function newSession(deviceName: string) {
     const token = newSessionToken(randomBytes);
     const expiresAt = new Date(now().getTime() + SESSION_LIFETIME_MS);
-    await sessions.create({
-      userId,
-      tokenHash: await hashSessionToken(token),
-      deviceName,
-      expiresAt,
-    });
-    return { token, expiresAt };
+    const issued: IssuedSession = { token, expiresAt };
+    return { issued, row: { tokenHash: await hashSessionToken(token), deviceName, expiresAt } };
+  }
+
+  async function issueSession(userId: string, deviceName: string): Promise<IssuedSession> {
+    const { issued, row } = await newSession(deviceName);
+    await sessions.create({ userId, ...row });
+    return issued;
   }
 
   return {
@@ -123,14 +123,19 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     },
 
     async register(input) {
-      const user = await users.create({
-        username: input.username,
-        kdfSalt: input.kdfSalt,
-        kdfParams: input.kdfParams,
-        authHash: await keys.hashAuthKey(input.authKey),
-        wrappedDataKey: input.wrappedDataKey,
-      });
-      return issueSession(user.id, input.deviceName);
+      const { issued, row } = await newSession(input.deviceName);
+      // One transaction: a failed session leaves no account, so trying again works.
+      await users.createWithSession(
+        {
+          username: input.username,
+          kdfSalt: input.kdfSalt,
+          kdfParams: input.kdfParams,
+          authHash: await keys.hashAuthKey(input.authKey),
+          wrappedDataKey: input.wrappedDataKey,
+        },
+        row,
+      );
+      return issued;
     },
 
     async login(username, authKey, deviceName) {
@@ -138,7 +143,7 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       // Do the same hashing work for an unknown user, so response time does not reveal
       // whether the account exists.
       await guardedCheck(
-        FAILED,
+        RATE_LIMITS.failedLoginsPerAccount,
         username,
         async () => (await keys.verifyAuthKey(authKey, user?.authHash ?? '')) && user !== null,
       );

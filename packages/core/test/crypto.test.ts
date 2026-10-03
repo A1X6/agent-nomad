@@ -1,5 +1,6 @@
-import { WRAPPED_DATA_KEY_BYTES, type KdfParams } from '@agentnomad/contracts';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { WRAPPED_DATA_KEY_BYTES, toHex, type KdfParams } from '@agentnomad/contracts';
+import sodium from 'libsodium-wrappers-sumo';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   DATA_KEY_BYTES,
@@ -12,9 +13,6 @@ import {
   type BundleContext,
   type CryptoService,
 } from '../src/index.ts';
-
-const hex = (bytes: Uint8Array): string =>
-  Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const bytes = (...values: number[]): Uint8Array => new Uint8Array(values);
 
@@ -47,10 +45,10 @@ describe('deriveKeys', () => {
   it('matches the fixed reference vector (changing it would lock every user out)', async () => {
     // Argon2id step cross-checked against Node's crypto.argon2Sync when this vector was made.
     const keys = await crypto.deriveKeys('correct horse battery staple', salt, params);
-    expect(hex(keys.authKey)).toBe(
+    expect(toHex(keys.authKey)).toBe(
       'd95bd8f1fd834f2ed0aba5a0f1c6971f9e38141236e16f1983362124981aac65',
     );
-    expect(hex(keys.passwordKey)).toBe(
+    expect(toHex(keys.passwordKey)).toBe(
       'c88cb24ea1e5d714e18a3a2ce4a3a889bdb2060139652b1e9db005631104d47a',
     );
   });
@@ -59,26 +57,54 @@ describe('deriveKeys', () => {
     const base = await crypto.deriveKeys('password one', salt, params);
     const otherPassword = await crypto.deriveKeys('password two', salt, params);
     const otherSalt = await crypto.deriveKeys('password one', flipBit(salt, 0), params);
-    expect(hex(otherPassword.authKey)).not.toBe(hex(base.authKey));
-    expect(hex(otherSalt.authKey)).not.toBe(hex(base.authKey));
+    expect(toHex(otherPassword.authKey)).not.toBe(toHex(base.authKey));
+    expect(toHex(otherSalt.authKey)).not.toBe(toHex(base.authKey));
   });
 
   it('splits the master key into two different 32-byte keys', async () => {
     const keys = await crypto.deriveKeys('password', salt, params);
     expect(keys.authKey).toHaveLength(32);
     expect(keys.passwordKey).toHaveLength(32);
-    expect(hex(keys.authKey)).not.toBe(hex(keys.passwordKey));
+    expect(toHex(keys.authKey)).not.toBe(toHex(keys.passwordKey));
   });
 
   it('treats the same password typed on different OSes as equal (Unicode NFC)', async () => {
-    const composed = await crypto.deriveKeys('café', salt, params); // é as one character
-    const decomposed = await crypto.deriveKeys('café', salt, params); // e + accent
-    expect(hex(decomposed.authKey)).toBe(hex(composed.authKey));
+    const composed = await crypto.deriveKeys('caf\u00e9', salt, params); // U+00E9 as one character
+    const decomposed = await crypto.deriveKeys('cafe\u0301', salt, params); // e + U+0301 combining accent
+    expect(toHex(decomposed.authKey)).toBe(toHex(composed.authKey));
   });
 
   it('refuses settings outside the allowed range before doing any work', async () => {
     const huge: KdfParams = { ...params, memoryKiB: 4_194_304 }; // 4 GiB, above the 1 GiB limit
     await expect(crypto.deriveKeys('password', salt, huge)).rejects.toThrow();
+  });
+
+  it('wipes the password bytes once the master key is made, also on an error (BP-01)', async () => {
+    const encoded: Uint8Array[] = [];
+    const encode = sodium.from_string.bind(sodium);
+    const spy = vi.spyOn(sodium, 'from_string').mockImplementation((text: string) => {
+      const passwordBytes = encode(text);
+      encoded.push(passwordBytes);
+      return passwordBytes;
+    });
+    try {
+      await crypto.deriveKeys('correct horse battery staple', salt, params);
+      const pwhash = vi.spyOn(sodium, 'crypto_pwhash').mockImplementation(() => {
+        throw new Error('out of memory');
+      });
+      try {
+        await expect(crypto.deriveKeys('another password', salt, params)).rejects.toThrow(
+          'out of memory',
+        );
+      } finally {
+        pwhash.mockRestore();
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    expect(encoded).toHaveLength(2);
+    expect(encoded.every((passwordBytes) => passwordBytes.length > 0)).toBe(true);
+    expect(encoded.every((passwordBytes) => passwordBytes.every((byte) => byte === 0))).toBe(true);
   });
 
   it('refuses a salt that is not 16 bytes', async () => {
@@ -100,7 +126,9 @@ describe('seal and open', () => {
 
   it('uses a fresh nonce every time, so equal plaintexts look different', () => {
     const plaintext = bytes(1, 2, 3);
-    expect(hex(crypto.seal(plaintext, key, aad))).not.toBe(hex(crypto.seal(plaintext, key, aad)));
+    expect(toHex(crypto.seal(plaintext, key, aad))).not.toBe(
+      toHex(crypto.seal(plaintext, key, aad)),
+    );
   });
 
   describe('tamper checks: every change is rejected', () => {
@@ -186,7 +214,7 @@ describe('bundle encryption is bound to its agent, scope and format', () => {
 
 describe('hashes and randomness', () => {
   it('sha256 matches the standard test vector for "abc"', () => {
-    expect(hex(crypto.sha256(bytes(0x61, 0x62, 0x63)))).toBe(
+    expect(toHex(crypto.sha256(bytes(0x61, 0x62, 0x63)))).toBe(
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
     );
   });
@@ -195,12 +223,12 @@ describe('hashes and randomness', () => {
     const message = bytes(1, 2, 3);
     const first = crypto.keyedHash(message, key);
     expect(first).toHaveLength(32);
-    expect(hex(crypto.keyedHash(message, key))).toBe(hex(first));
-    expect(hex(crypto.keyedHash(message, crypto.randomBytes(32)))).not.toBe(hex(first));
+    expect(toHex(crypto.keyedHash(message, key))).toBe(toHex(first));
+    expect(toHex(crypto.keyedHash(message, crypto.randomBytes(32)))).not.toBe(toHex(first));
   });
 
   it('randomBytes returns the requested length and never repeats', () => {
     expect(crypto.randomBytes(16)).toHaveLength(16);
-    expect(hex(crypto.randomBytes(32))).not.toBe(hex(crypto.randomBytes(32)));
+    expect(toHex(crypto.randomBytes(32))).not.toBe(toHex(crypto.randomBytes(32)));
   });
 });

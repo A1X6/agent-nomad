@@ -1,26 +1,18 @@
-/** Byte and text conversions with web-standard APIs only, so they run on any host. */
-
-export function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-export function fromBase64(text: string): Uint8Array {
-  return Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
-}
+/** Server-only text conversions; the shared byte helpers are in `@agentnomad/contracts`. */
+import { fromBase64, toBase64 } from '@agentnomad/contracts';
 
 export function toBase64Url(bytes: Uint8Array): string {
   return toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-export function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-export function fromHex(text: string): Uint8Array {
-  const pairs = text.match(/../g) ?? [];
-  return Uint8Array.from(pairs, (pair) => parseInt(pair, 16));
+/** Unpadded base64url to bytes. Throws on anything else, rather than return wrong bytes. */
+export function fromBase64Url(text: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]*$/.test(text)) throw new Error('Not a base64url string');
+  return fromBase64(text.replace(/-/g, '+').replace(/_/g, '/'));
 }
 
 export const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+export async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+}

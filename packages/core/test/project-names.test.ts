@@ -1,11 +1,10 @@
-import { MAX_NAME_ENC_BYTES, ScopeKeySchema } from '@agentnomad/contracts';
+import { GLOBAL_SCOPE_KEY, MAX_NAME_ENC_BYTES, ScopeKeySchema, toHex } from '@agentnomad/contracts';
 import { strToU8 } from 'fflate';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   DATA_KEY_BYTES,
   DecryptionError,
-  GLOBAL_SCOPE_KEY,
   createSodiumCryptoService,
   decryptProjectName,
   encryptProjectName,
@@ -22,12 +21,9 @@ beforeAll(async () => {
   dataKey = crypto.randomBytes(DATA_KEY_BYTES);
 });
 
-const hex = (bytes: Uint8Array): string =>
-  Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
 /** True when `needle` appears as a run of bytes inside `haystack`. */
 function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
-  return hex(haystack).includes(hex(needle));
+  return toHex(haystack).includes(toHex(needle));
 }
 
 describe('projectScopeKey', () => {
@@ -58,11 +54,13 @@ describe('projectScopeKey', () => {
 
   it('cannot be guessed from the name alone (it is not a plain hash of the name)', () => {
     const name = 'my-saas-app';
-    expect(projectScopeKey(crypto, dataKey, name)).not.toBe(hex(crypto.sha256(strToU8(name))));
+    expect(projectScopeKey(crypto, dataKey, name)).not.toBe(toHex(crypto.sha256(strToU8(name))));
   });
 
   it('treats the same name typed on different OSes as equal (Unicode NFC)', () => {
-    expect(projectScopeKey(crypto, dataKey, 'café')).toBe(projectScopeKey(crypto, dataKey, 'café'));
+    expect(projectScopeKey(crypto, dataKey, 'caf\u00e9')).toBe(
+      projectScopeKey(crypto, dataKey, 'cafe\u0301'),
+    );
   });
 
   it('is case-sensitive, like the name the user typed', () => {
@@ -107,13 +105,14 @@ describe('project name encryption', () => {
   });
 
   it('looks different every time, even for the same name', () => {
-    expect(hex(encryptProjectName(crypto, dataKey, name, context()))).not.toBe(
-      hex(encryptProjectName(crypto, dataKey, name, context())),
+    expect(toHex(encryptProjectName(crypto, dataKey, name, context()))).not.toBe(
+      toHex(encryptProjectName(crypto, dataKey, name, context())),
     );
   });
 
-  it('fits the API size limit even for the longest name in 4-byte characters', () => {
-    const longest = '😀'.repeat(50); // 100 UTF-16 units, 200 bytes of UTF-8
+  it('fits the API size limit even for the longest name in bytes', () => {
+    // 100 UTF-16 units is the limit; 3-byte characters give the most UTF-8 (300 bytes).
+    const longest = '项'.repeat(100);
     const scopeKey = projectScopeKey(crypto, dataKey, longest);
     const sealed = encryptProjectName(crypto, dataKey, longest, { agent: 'claude-code', scopeKey });
     expect(sealed.length).toBeLessThanOrEqual(MAX_NAME_ENC_BYTES);

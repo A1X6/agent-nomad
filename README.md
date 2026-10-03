@@ -152,15 +152,18 @@ Run `agentnomad <command> --help` for every option.
 ### From scripts and CI
 
 With no terminal, agentnomad never asks: a question the flags do not answer stops the
-command with exit code 1 and names the flags to add. Push and pull look for every such
-question before they change anything, so a script never stops halfway.
+command with exit code 1 and names the flags to add. Push and pull ask every question before
+they change anything, so a script never stops halfway.
 
 ```sh
 echo "$AGENTNOMAD_PASSWORD" | agentnomad login --username me --password-stdin
 agentnomad pull --global --merge --yes
 ```
 
-Exit codes: `0` done, `1` failed (or an answer was needed), `130` cancelled.
+Exit codes: `0` done, `1` failed (or an answer was needed), `130` cancelled. Push and pull
+also exit with `1` when a setup was skipped or refused without you answering no: a newer copy
+on the server, an older copy than this PC had, a setup over 5 MB, or a skip made by `--yes`.
+The other setups are still done first, and one message lists what was not.
 
 ## What is synced
 
@@ -179,8 +182,9 @@ exist.
 
 - Your password never leaves your PC. A key derived from it (Argon2id) unlocks a random data
   key, which encrypts every setup with XChaCha20-Poly1305.
-- The server stores only ciphertext, a keyed hash of each project name, your username and
-  the device name of each login. Automated tests on every OS check that nothing readable
+- The server stores ciphertext, a keyed hash of each project name, your username, the device
+  name of each login, and a keyed pseudonym of your IP address for rate limits (see
+  [SECURITY.md](SECURITY.md)). Automated tests on every OS check that nothing readable
   leaves the PC.
 - Your login is kept in the OS keychain (Windows Credential Manager, macOS Keychain, Linux
   Secret Service), or in a file only you can read where there is none.

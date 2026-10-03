@@ -1,9 +1,9 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { posix, win32 } from 'node:path';
 
 import { BACKUP_MARKER, INCOMING_MARKER } from '@agentnomad/core';
 
-import type { ScopeTarget } from '../adapter.ts';
+import { TEMP_MARKER } from '../../system/files.ts';
+import { RESERVED_DIR, type ScopeTarget } from '../adapter.ts';
 import {
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
@@ -12,6 +12,7 @@ import {
   IGNORED_COPY_PATTERNS,
   NEVER_SYNCED,
 } from './global-paths.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 import { hookScripts } from './hook-scripts.ts';
 import {
   PROJECT_CLAUDE_FILES,
@@ -36,7 +37,7 @@ export interface UnknownFilesInput {
  */
 async function hookScriptNames(input: UnknownFilesInput): Promise<string[]> {
   if (input.homedir === undefined) return [];
-  const path = input.platform === 'win32' ? win32 : posix;
+  const path = pathsOf(input.platform);
   const settings = await readFile(path.join(input.baseDir, 'settings.json'), 'utf8').catch(
     () => null,
   );
@@ -47,7 +48,7 @@ async function hookScriptNames(input: UnknownFilesInput): Promise<string[]> {
     platform: input.platform,
   })
     .map((script) => script.bundlePath)
-    .filter((bundlePath) => !bundlePath.startsWith('.agentnomad/'))
+    .filter((bundlePath) => !bundlePath.startsWith(`${RESERVED_DIR}/`))
     .map(topLevel);
 }
 
@@ -59,7 +60,7 @@ function isCopy(name: string): boolean {
   return (
     name.includes(BACKUP_MARKER) ||
     name.includes(INCOMING_MARKER) ||
-    name.includes('.agentnomad-tmp-') ||
+    name.includes(TEMP_MARKER) ||
     IGNORED_COPY_PATTERNS.some((pattern) => pattern.test(name))
   );
 }
@@ -75,7 +76,7 @@ export async function findUnknownEntries(
   target: ScopeTarget,
   input: UnknownFilesInput,
 ): Promise<string[]> {
-  const path = input.platform === 'win32' ? win32 : posix;
+  const path = pathsOf(input.platform);
   const [folder, prefix, known] =
     target.kind === 'global'
       ? [
@@ -115,13 +116,4 @@ export async function findUnknownEntries(
     .filter((entry) => !knownNames.has(entry.name) && !isCopy(entry.name))
     .map((entry) => `${prefix}${entry.name}${entry.isDirectory() ? '/' : ''}`)
     .sort();
-}
-
-/** What push says about unknown entries; `null` when there are none. */
-export function unknownEntriesNotice(entries: readonly string[]): string | null {
-  if (entries.length === 0) return null;
-  return [
-    `Not saved, because agentnomad does not know ${entries.length === 1 ? 'this' : 'these'} yet: ${entries.join(', ')}.`,
-    'A newer Claude Code may have added them; if they matter to you, update agentnomad.',
-  ].join(' ');
 }

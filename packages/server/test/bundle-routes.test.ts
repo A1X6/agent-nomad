@@ -1,23 +1,26 @@
-import { createHash } from 'node:crypto';
-
 import {
-  DEFAULT_KDF_PARAMS,
   ErrorResponseSchema,
   GetBundleResponseHeadersSchema,
   ListBundlesResponseSchema,
   MAX_BUNDLE_BYTES,
   PutBundleResponseSchema,
-  SessionResponseSchema,
   USER_STORAGE_LIMITS,
 } from '@agentnomad/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RATE_LIMITS } from '../src/rate-limit/rate-limiter.ts';
-import { createTestApp, postJson, type TestApp } from './support/app.ts';
-
-const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-const bytes = (length: number, fill: number) => new Uint8Array(length).fill(fill);
-const sha256Hex = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
+import { createTestApp, type TestApp } from './support/app.ts';
+import {
+  b64,
+  bytes,
+  errorCode,
+  putSetup,
+  registerForToken,
+  scopeKeyOf,
+  type PutSetupOptions,
+  seedSetups,
+  sha256Hex,
+} from './support/fixtures.ts';
 
 const PROJECT = 'a'.repeat(64);
 const GLOBAL_PATH = '/bundles/claude-code/global';
@@ -33,48 +36,9 @@ afterEach(async () => {
   await t.database.close();
 });
 
-async function register(username = 'ahmed'): Promise<string> {
-  const res = await t.app.request(
-    '/auth/register',
-    postJson({
-      username,
-      kdfSalt: b64(bytes(16, 1)),
-      kdfParams: DEFAULT_KDF_PARAMS,
-      authKey: b64(bytes(32, 2)),
-      wrappedDataKey: b64(bytes(72, 3)),
-      deviceName: 'laptop',
-    }),
-  );
-  return SessionResponseSchema.parse(await res.json()).sessionToken;
-}
+const register = (username = 'ahmed') => registerForToken(t.app, username);
 
-interface PutOptions {
-  readonly expected: number;
-  readonly body: Uint8Array;
-  readonly path?: string;
-  readonly nameEnc?: Uint8Array;
-  readonly hash?: string;
-  readonly contentType?: string;
-  readonly omitHeader?: string;
-}
-
-async function put(token: string, options: PutOptions): Promise<Response> {
-  const headers: Record<string, string> = {
-    authorization: `Bearer ${token}`,
-    'content-type': options.contentType ?? 'application/octet-stream',
-    'x-an-expected-revision': String(options.expected),
-    'x-an-content-sha256': options.hash ?? sha256Hex(options.body),
-    'x-an-format-version': '1',
-    ...(options.nameEnc && { 'x-an-name-enc': b64(options.nameEnc) }),
-  };
-  return t.app.request(options.path ?? GLOBAL_PATH, {
-    method: 'PUT',
-    body: options.body,
-    headers: Object.fromEntries(
-      Object.entries(headers).filter(([name]) => name !== options.omitHeader),
-    ),
-  });
-}
+const put = (token: string, options: PutSetupOptions) => putSetup(t.app, token, options);
 
 const as = (token: string, method = 'GET') => ({
   method,
@@ -101,7 +65,7 @@ describe('access', () => {
   ])('%s %s needs a session', async (method, path) => {
     const res = await t.app.request(path, { method });
     expect(res.status).toBe(401);
-    expect((await error(res)).code).toBe('unauthorized');
+    expect(await errorCode(res)).toBe('unauthorized');
   });
 
   it("never shows, returns or deletes another user's setup", async () => {
@@ -142,7 +106,7 @@ describe('PUT then GET', () => {
     const token = await register();
     const res = await t.app.request(GLOBAL_PATH, as(token));
     expect(res.status).toBe(404);
-    expect((await error(res)).code).toBe('not_found');
+    expect(await errorCode(res)).toBe('not_found');
   });
 
   it('keeps project names encrypted and returns them with the bytes', async () => {
@@ -213,7 +177,7 @@ describe('PUT checks', () => {
     expect(max.status).toBe(200);
     const over = await put(token, { expected: 1, body: bytes(MAX_BUNDLE_BYTES + 1, 2) });
     expect(over.status).toBe(413);
-    expect((await error(over)).code).toBe('payload_too_large');
+    expect(await errorCode(over)).toBe('payload_too_large');
   });
 
   it.each([
@@ -228,16 +192,26 @@ describe('PUT checks', () => {
     const token = await register();
     const res = await put(token, { expected: 0, ...options });
     expect(res.status).toBe(400);
-    expect((await error(res)).code).toBe('bad_request');
+    expect(await errorCode(res)).toBe('bad_request');
     expect(await fileCount()).toBe(0);
   });
 });
 
 describe('GET /bundles', () => {
+  it('checks the session once (DB-01)', async () => {
+    const token = await register();
+    const authenticate = vi.spyOn(t.auth, 'authenticate');
+    expect((await t.app.request('/bundles', as(token))).status).toBe(200);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    authenticate.mockClear();
+    expect((await t.app.request(GLOBAL_PATH, as(token))).status).toBe(404);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+  });
+
   it('lists metadata only, newest first, page by page', async () => {
     const token = await register();
     for (let index = 0; index < 5; index++) {
-      const scopeKey = index.toString(16).padStart(64, '0');
+      const scopeKey = scopeKeyOf(index);
       await put(token, {
         expected: 0,
         body: bytes(64, index),
@@ -260,13 +234,18 @@ describe('GET /bundles', () => {
     expect(new Set(seen).size).toBe(5);
   });
 
-  it.each(['?cursor=bad-cursor', '?limit=0', '?limit=101'])(
+  // A well-formed cursor with an impossible time is refused like any bad cursor (BUG-07).
+  const impossibleTime = Buffer.from(
+    JSON.stringify(['2026-13-45 99:99:99+00', '00000000-0000-4000-8000-000000000000']),
+  ).toString('base64url');
+
+  it.each(['?cursor=bad-cursor', `?cursor=${impossibleTime}`, '?limit=0', '?limit=101'])(
     'refuses %s with 400',
     async (query) => {
       const token = await register();
       const res = await t.app.request(`/bundles${query}`, as(token));
       expect(res.status).toBe(400);
-      expect((await error(res)).code).toBe('bad_request');
+      expect(await errorCode(res)).toBe('bad_request');
     },
   );
 });
@@ -293,16 +272,17 @@ describe('DELETE', () => {
 describe('limits per account (T47)', () => {
   it(`refuses a new setup past ${String(USER_STORAGE_LIMITS.maxSetups)} with 413 and says why, storing nothing`, async () => {
     const token = await register();
-    for (let index = 0; index < USER_STORAGE_LIMITS.maxSetups; index++) {
-      const path = `/bundles/claude-code/${index.toString(16).padStart(64, '0')}`;
-      const res = await put(token, {
-        expected: 0,
-        body: bytes(64, 1),
-        path,
-        nameEnc: bytes(40, 1),
-      });
-      expect(res.status).toBe(200);
-    }
+    // All but the last straight into the database; the last one through the API (QA-12).
+    const last = USER_STORAGE_LIMITS.maxSetups - 1;
+    await seedSetups(t.database.db, 'ahmed', last);
+    const lastPath = `/bundles/claude-code/${scopeKeyOf(last)}`;
+    const atLimit = await put(token, {
+      expected: 0,
+      body: bytes(64, 1),
+      path: lastPath,
+      nameEnc: bytes(40, 1),
+    });
+    expect(atLimit.status).toBe(200);
     const files = await fileCount();
     const res = await put(token, { expected: 0, body: bytes(64, 2) });
     expect(res.status).toBe(413);
@@ -319,8 +299,36 @@ describe('limits per account (T47)', () => {
     }
     const res = await t.app.request(GLOBAL_PATH, as(token, 'DELETE'));
     expect(res.status).toBe(429);
-    expect((await error(res)).code).toBe('rate_limited');
-    // Reading is not limited this way.
+    expect(await errorCode(res)).toBe('rate_limited');
+    // Downloads have their own limit, and the list has none.
+    expect((await t.app.request(GLOBAL_PATH, as(token))).status).toBe(404);
     expect((await t.app.request('/bundles', as(token))).status).toBe(200);
+  });
+
+  it(`allows ${String(RATE_LIMITS.readsPerAccount.limit)} downloads an hour per account, then 429 (SEC-03)`, async () => {
+    const token = await register();
+    const other = await register('other');
+    expect((await put(token, { expected: 0, body: bytes(64) })).status).toBe(200);
+    const { rows: before } = await t.database.client.query<{ key: string }>(
+      'select key from rate_limits',
+    );
+    expect((await t.app.request(GLOBAL_PATH, as(token))).status).toBe(200);
+    // Skip ahead to the last allowed download instead of making hundreds of requests: the
+    // only new counter is this account's download counter.
+    const { affectedRows } = await t.database.client.query(
+      'update rate_limits set count = $1 where not (key = any($2))',
+      [RATE_LIMITS.readsPerAccount.limit - 1, before.map((row) => row.key)],
+    );
+    expect(affectedRows).toBe(1);
+    expect((await t.app.request(GLOBAL_PATH, as(token))).status).toBe(200);
+
+    const res = await t.app.request(GLOBAL_PATH, as(token));
+    expect(res.status).toBe(429);
+    expect(await errorCode(res)).toBe('rate_limited');
+    expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
+    // Per account: another account still downloads; the list and saves are not counted here.
+    expect((await t.app.request(GLOBAL_PATH, as(other))).status).toBe(404);
+    expect((await t.app.request('/bundles', as(token))).status).toBe(200);
+    expect((await put(token, { expected: 1, body: bytes(64, 2) })).status).toBe(200);
   });
 });

@@ -8,8 +8,12 @@ import { HOME_PLACEHOLDER, PathError, type PathEnvironment, type PathResolver } 
  */
 const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
 
-/** An 8.3 short name (`PROGRA~1`, `SSH~1`), which can reach a folder under another name. */
-const SHORT_NAME = /~\d+(\.[^.]*)?$/;
+/**
+ * An 8.3 short name (`PROGRA~1`, `SSH~1`), which can reach a folder under another name: at
+ * most 8 characters before the dot, ending in `~<digits>`, and at most 3 after it. Longer
+ * names (`release-notes~3.md`) cannot be one.
+ */
+const SHORT_NAME = /^(?=[^.]{2,8}(\.|$))[^.]*~\d+(\.[^.]{0,3})?$/;
 
 /** `{{HOME}}` and its kept forms `{{HOME\}}`, `{{HOME\\}}`, …; group 1 is the backslashes. */
 const PLACEHOLDER_FORMS = /\{\{HOME(\\*)\}\}/g;

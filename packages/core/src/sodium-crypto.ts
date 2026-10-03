@@ -1,10 +1,16 @@
-import { KdfParamsSchema, type KdfParams } from '@agentnomad/contracts';
+import {
+  AUTH_KEY_BYTES,
+  KDF_SALT_BYTES,
+  KdfParamsSchema,
+  type KdfParams,
+} from '@agentnomad/contracts';
 import sodium from 'libsodium-wrappers-sumo';
 
 import { DecryptionError, type CryptoService, type DerivedKeys } from './crypto.ts';
+import { DATA_KEY_BYTES } from './envelopes.ts';
 
-const KEY_BYTES = 32;
-const SALT_BYTES = 16;
+/** Keyed hash output size. Part of the stored format: scope keys are this hash in hex. */
+const HASH_BYTES = 32;
 /** XChaCha20-Poly1305: 192-bit nonce, so random nonces never realistically repeat. */
 const NONCE_BYTES = 24;
 const TAG_BYTES = 16;
@@ -29,21 +35,28 @@ function requireLength(name: string, data: Uint8Array, length: number): void {
 function deriveKeys(password: string, salt: Uint8Array, params: KdfParams): DerivedKeys {
   // Re-checked here: the settings arrive from the server at prelogin.
   const checked = KdfParamsSchema.parse(params);
-  requireLength('Salt', salt, SALT_BYTES);
-  // NFC: the same password typed on macOS, Windows or Linux becomes the same bytes.
-  const master = sodium.crypto_pwhash(
-    KEY_BYTES,
-    password.normalize('NFC'),
-    salt,
-    checked.passes,
-    checked.memoryKiB * 1024,
-    sodium.crypto_pwhash_ALG_ARGON2ID13,
-  );
+  requireLength('Salt', salt, KDF_SALT_BYTES);
+  // NFC: the same password typed on macOS, Windows or Linux becomes the same bytes. Encoded
+  // here the way libsodium encodes a string itself, so the bytes can be wiped afterwards.
+  const passwordBytes = sodium.from_string(password.normalize('NFC'));
+  let master: Uint8Array;
+  try {
+    master = sodium.crypto_pwhash(
+      sodium.crypto_kdf_KEYBYTES,
+      passwordBytes,
+      salt,
+      checked.passes,
+      checked.memoryKiB * 1024,
+      sodium.crypto_pwhash_ALG_ARGON2ID13,
+    );
+  } finally {
+    sodium.memzero(passwordBytes);
+  }
   try {
     return {
-      authKey: sodium.crypto_kdf_derive_from_key(KEY_BYTES, AUTH_KEY_ID, KDF_CONTEXT, master),
+      authKey: sodium.crypto_kdf_derive_from_key(AUTH_KEY_BYTES, AUTH_KEY_ID, KDF_CONTEXT, master),
       passwordKey: sodium.crypto_kdf_derive_from_key(
-        KEY_BYTES,
+        AUTH_KEY_BYTES,
         PASSWORD_KEY_ID,
         KDF_CONTEXT,
         master,
@@ -55,7 +68,7 @@ function deriveKeys(password: string, salt: Uint8Array, params: KdfParams): Deri
 }
 
 function seal(plaintext: Uint8Array, key: Uint8Array, associatedData: Uint8Array): Uint8Array {
-  requireLength('Key', key, KEY_BYTES);
+  requireLength('Key', key, DATA_KEY_BYTES);
   const nonce = sodium.randombytes_buf(NONCE_BYTES);
   const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
     plaintext,
@@ -71,7 +84,7 @@ function seal(plaintext: Uint8Array, key: Uint8Array, associatedData: Uint8Array
 }
 
 function open(sealed: Uint8Array, key: Uint8Array, associatedData: Uint8Array): Uint8Array {
-  requireLength('Key', key, KEY_BYTES);
+  requireLength('Key', key, DATA_KEY_BYTES);
   if (sealed.length < NONCE_BYTES + TAG_BYTES) throw new DecryptionError();
   try {
     return sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
@@ -92,7 +105,7 @@ function keyedHash(message: Uint8Array, key: Uint8Array): Uint8Array {
       `Hash key must be ${String(MIN_HASH_KEY_BYTES)}–${String(MAX_HASH_KEY_BYTES)} bytes`,
     );
   }
-  return sodium.crypto_generichash(KEY_BYTES, message, key);
+  return sodium.crypto_generichash(HASH_BYTES, message, key);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { and, eq, gt, lt, sql } from 'drizzle-orm';
+import { eq, lt, sql } from 'drizzle-orm';
 
 import type { ServerKeys } from '../auth/server-keys.ts';
 import type { Database } from '../db/database.ts';
@@ -13,6 +13,10 @@ export interface PostgresRateLimiterDeps {
   readonly keys: Pick<ServerKeys, 'pseudonym'>;
   /** Whether this hit should also prune expired rows; about 1 in 100 in production. */
   readonly shouldPrune: () => boolean;
+  /** Other housekeeping that runs with each prune (expired sessions, DB-02). */
+  readonly alsoPrune?: () => Promise<void>;
+  /** Reports a failed prune; the hit itself still counts and answers (BUG-02). */
+  readonly logError: (message: string, error: unknown) => void;
 }
 
 const windowOf = (rule: RateLimitRule) => sql`make_interval(secs => ${rule.windowSeconds})`;
@@ -23,9 +27,21 @@ const secondsLeft = (rule: RateLimitRule) =>
 
 /** Fixed-window counters in the `rate_limits` table, on the database clock. */
 export function createPostgresRateLimiter(deps: PostgresRateLimiterDeps): RateLimiter {
-  const { db, keys, shouldPrune } = deps;
+  const { db, keys, shouldPrune, alsoPrune, logError } = deps;
   const keyFor = (rule: RateLimitRule, subject: string) =>
     keys.pseudonym(`${rule.name}:${subject}`);
+
+  /** Housekeeping only: a failure must never fail the request that happened to run it. */
+  async function pruneQuietly(): Promise<void> {
+    try {
+      await db
+        .delete(rateLimits)
+        .where(lt(rateLimits.windowStartedAt, sql`now() - ${PRUNE_AFTER}`));
+      await alsoPrune?.();
+    } catch (error) {
+      logError('Could not prune expired rate limits and sessions', error);
+    }
+  }
 
   return {
     async hit(rule, subject): Promise<RateLimitStatus> {
@@ -44,32 +60,11 @@ export function createPostgresRateLimiter(deps: PostgresRateLimiterDeps): RateLi
         })
         .returning({ count: rateLimits.count, retryAfter: secondsLeft(rule) });
 
-      if (shouldPrune()) {
-        await db
-          .delete(rateLimits)
-          .where(lt(rateLimits.windowStartedAt, sql`now() - ${PRUNE_AFTER}`));
-      }
+      if (shouldPrune()) await pruneQuietly();
       const count = row?.count ?? 1;
       return count <= rule.limit
         ? { allowed: true, retryAfterSeconds: 0 }
         : { allowed: false, retryAfterSeconds: Math.max(1, row?.retryAfter ?? 1) };
-    },
-
-    async check(rule, subject): Promise<RateLimitStatus> {
-      const key = await keyFor(rule, subject);
-      const [row] = await db
-        .select({ count: rateLimits.count, retryAfter: secondsLeft(rule) })
-        .from(rateLimits)
-        .where(
-          and(
-            eq(rateLimits.key, key),
-            gt(rateLimits.windowStartedAt, sql`now() - ${windowOf(rule)}`),
-          ),
-        )
-        .limit(1);
-      return row && row.count >= rule.limit
-        ? { allowed: false, retryAfterSeconds: Math.max(1, row.retryAfter) }
-        : { allowed: true, retryAfterSeconds: 0 };
     },
 
     async reset(rule, subject) {

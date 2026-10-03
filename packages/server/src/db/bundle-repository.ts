@@ -1,16 +1,17 @@
+import { sameBytes } from '@agentnomad/contracts';
 import { and, desc, eq, sql } from 'drizzle-orm';
 
 import { decodeBundleCursor, encodeBundleCursor } from './bundle-cursor.ts';
 import type { Database } from './database.ts';
-import type {
-  BundleKey,
-  BundleMeta,
-  BundleMetaWrite,
-  BundleRepository,
-  PutMetaResult,
+import {
+  storageLimitPassed,
+  type BundleKey,
+  type BundleMeta,
+  type BundleMetaWrite,
+  type BundleRepository,
+  type PutMetaResult,
+  type StorageUsage,
 } from './repositories.ts';
-import { USER_STORAGE_LIMITS } from '@agentnomad/contracts';
-
 import { bundles, users } from './schema.ts';
 
 /** Metadata columns only; `bundles` holds no bytes, but list stays explicit anyway. */
@@ -43,10 +44,6 @@ function toBundleMeta(row: MetaRow): BundleMeta {
     updatedAt: row.updatedAt,
     blobId: row.blobId,
   };
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
 
 const matchesKey = (key: BundleKey) =>
@@ -92,55 +89,34 @@ export function createBundleRepository(db: Database): BundleRepository {
 
     putMeta(write) {
       return db.transaction(async (tx): Promise<PutMetaResult> => {
-        // Lock the row, so a concurrent save of the same setup waits for this one.
-        const lockCurrent = async () => {
-          const [row] = await tx
-            .select(metaColumns)
-            .from(bundles)
-            .where(matchesKey(write.key))
-            .for('update');
-          return row;
-        };
-
         // One save at a time per account (the user row is locked first, then the setup, as
         // account delete does), so two saves at once cannot both slip under the limits (T47).
+        // This also serializes two first saves of one setup: under READ COMMITTED the second
+        // one reads the setup after the first commits, so it never inserts a duplicate. Only
+        // this function inserts setups, so there is no unique-key race to handle (DEAD-03).
         await tx
           .select({ id: users.id })
           .from(users)
           .where(eq(users.id, write.key.userId))
           .for('update');
-        let current = await lockCurrent();
-
-        const [used] = await tx
-          .select({
-            setups: sql<number>`count(*)::int`,
-            bytes: sql<string>`coalesce(sum(${bundles.sizeBytes}), 0)::bigint`,
-          })
+        const [current] = await tx
+          .select(metaColumns)
           .from(bundles)
-          .where(eq(bundles.userId, write.key.userId));
-        const setups = (used?.setups ?? 0) + (current ? 0 : 1);
-        const bytes = Number(used?.bytes ?? 0) - (current?.sizeBytes ?? 0) + write.sizeBytes;
-        if (setups > USER_STORAGE_LIMITS.maxSetups) {
-          return { outcome: 'over-limit', reason: overLimit('setups') };
-        }
-        // Saving a setup no bigger than before is always allowed, so nobody gets stuck.
-        if (bytes > USER_STORAGE_LIMITS.maxBytes && write.sizeBytes > (current?.sizeBytes ?? 0)) {
-          return { outcome: 'over-limit', reason: overLimit('bytes') };
-        }
+          .where(matchesKey(write.key))
+          .for('update');
+
+        const used = await usageQuery(tx, write.key.userId);
+        const limit = storageLimitPassed(used, current?.sizeBytes ?? null, write.sizeBytes);
+        if (limit) return { outcome: 'over-limit', limit };
 
         if (!current) {
           if (write.expectedRevision !== 0) return { outcome: 'conflict', currentRevision: 0 };
           const [created] = await tx
             .insert(bundles)
             .values({ ...write.key, ...newRevision(write), revision: 1 })
-            .onConflictDoNothing({ target: [bundles.userId, bundles.agent, bundles.scopeKey] })
             .returning(metaColumns);
-          if (created) {
-            return { outcome: 'saved', meta: toBundleMeta(created), replacedBlobId: null };
-          }
-          // Another first save won the race; judge this one against what it stored.
-          current = await lockCurrent();
-          if (!current) throw new Error('Saved setup vanished during a first save');
+          if (!created) throw new Error('Insert of a first save returned no row');
+          return { outcome: 'saved', meta: toBundleMeta(created), replacedBlobId: null };
         }
 
         // Same bytes already current: a retry of a save that went through (revision is one
@@ -170,16 +146,7 @@ export function createBundleRepository(db: Database): BundleRepository {
       });
     },
 
-    async usage(userId) {
-      const [row] = await db
-        .select({
-          setups: sql<number>`count(*)::int`,
-          bytes: sql<string>`coalesce(sum(${bundles.sizeBytes}), 0)::bigint`,
-        })
-        .from(bundles)
-        .where(eq(bundles.userId, userId));
-      return { setups: row?.setups ?? 0, bytes: Number(row?.bytes ?? 0) };
-    },
+    usage: (userId) => usageQuery(db, userId),
 
     async delete(key) {
       const [row] = await db.delete(bundles).where(matchesKey(key)).returning(metaColumns);
@@ -188,11 +155,16 @@ export function createBundleRepository(db: Database): BundleRepository {
   };
 }
 
-/** Why a save is refused by the storage limits, in words the CLI shows as they are. */
-export function overLimit(kind: 'setups' | 'bytes'): string {
-  return kind === 'setups'
-    ? `An account keeps at most ${String(USER_STORAGE_LIMITS.maxSetups)} saved setups. Delete some with \`agentnomad delete\` first.`
-    : `An account keeps at most ${String(USER_STORAGE_LIMITS.maxBytes / 1024 / 1024)} MB of saved setups. Delete some with \`agentnomad delete\` or make this one smaller.`;
+/** How many setups the user keeps and their bytes; `db` may be a transaction. */
+async function usageQuery(db: Database, userId: string): Promise<StorageUsage> {
+  const [row] = await db
+    .select({
+      setups: sql<number>`count(*)::int`,
+      bytes: sql<string>`coalesce(sum(${bundles.sizeBytes}), 0)::bigint`,
+    })
+    .from(bundles)
+    .where(eq(bundles.userId, userId));
+  return { setups: row?.setups ?? 0, bytes: Number(row?.bytes ?? 0) };
 }
 
 /** The columns a save writes, apart from the revision number. */

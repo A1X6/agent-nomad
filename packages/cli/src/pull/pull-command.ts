@@ -1,29 +1,37 @@
 import { type Bundle, type BundleScope, type SourceOs } from '@agentnomad/contracts';
-import { createPathResolver, type BundleCodec, type CryptoService } from '@agentnomad/core';
+import {
+  createPathResolver,
+  sourceOsOf,
+  type BundleCodec,
+  type CryptoService,
+} from '@agentnomad/core';
 
-import type {
-  AgentAdapter,
-  AgentRegistry,
-  CollectedFile,
-  ConflictChoice,
-  ConflictResolver,
-  DetectedAgent,
-  ScopeTarget,
+import {
+  chosenAgent,
+  type AgentAdapter,
+  type AgentRegistry,
+  type AgentRestorePlan,
+  type ChosenAgent,
+  type CollectedFile,
+  type ConflictChoice,
+  type ConflictResolver,
+  type DetectedAgent,
+  type ScopeTarget,
 } from '../agents/adapter.ts';
-import { agentVersionNotice } from '../agents/claude-code/version-stamp.ts';
+import { showNotices } from '../agents/notices.ts';
 import type { ApiClient } from '../api/api-client.ts';
-import { NotLoggedInError } from '../api/api-errors.ts';
-import { withSession } from '../auth/local-session.ts';
+import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
-import { restoreEnvValues } from '../env/env-restore.ts';
-import { ENV_BUNDLE_PATH, parseEnvSection } from '../env/env-section.ts';
+import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
+import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
+import { planEnvRestore, writeEnvValues } from '../env/env-restore.ts';
+import { ENV_BUNDLE_PATH, parseEnvSection, type EnvSection } from '../env/env-section.ts';
 import type { EnvWriter } from '../env/shell-profile.ts';
 import { fromBundleFiles, preferLocalEquivalents } from '../push/bundle-files.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
-import { AnswerNeededError } from '../ui/no-terminal-prompter.ts';
+import { printableLine } from '../ui/printable.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
-import { reviewRunnable } from './command-review.ts';
 import { downloadSetup, listSavedSetups, type SavedSetup } from './saved-setups.ts';
 
 export interface PullDeps {
@@ -43,9 +51,19 @@ export interface PullDeps {
   readonly platform: NodeJS.Platform;
 }
 
+/** What the apply step gets: no prompter, so it cannot ask anything (T59). */
+export type PullApplyDeps = Omit<PullDeps, 'prompter'>;
+
+/** The logged-in session and the data key, for the length of one pull. */
+export interface PullKeys {
+  readonly secrets: SecretStore;
+  readonly crypto: CryptoService;
+  readonly dataKey: Uint8Array;
+}
+
 type ScopeChoice = 'global' | 'project' | 'both';
 
-/** A setup downloaded, checked and reviewed, ready to write. */
+/** A setup downloaded, checked and reviewed. */
 interface Prepared {
   readonly adapter: AgentAdapter;
   readonly setup: SavedSetup;
@@ -59,28 +77,52 @@ interface Prepared {
   readonly declined: boolean;
 }
 
-const sameBytes = (a: Uint8Array, b: Uint8Array) =>
-  a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index]);
+/** One setup the plan will restore, with every answer the restore needs (T59). */
+export interface PlannedRestore {
+  readonly adapter: AgentAdapter;
+  /** E.g. `Claude Code global setup`. */
+  readonly name: string;
+  readonly setup: SavedSetup;
+  readonly revision: number;
+  readonly sourceOs: SourceOs;
+  readonly target: ScopeTarget;
+  readonly files: readonly CollectedFile[];
+  readonly declined: boolean;
+  /** The answer for each file here that differs, by bundle path. */
+  readonly conflicts: ReadonlyMap<string, ConflictChoice>;
+  /** Saved environment values to add, already chosen. */
+  readonly env: { readonly section: EnvSection; readonly toAdd: readonly string[] } | null;
+  /** The agent's own answers for this setup: how to write it and what follows (T61). */
+  readonly agentPlan: AgentRestorePlan;
+}
+
+/** Every answer pull needs, gathered before the first file is written (T59). */
+export interface PullPlan {
+  readonly restores: readonly PlannedRestore[];
+  /** Setups already decided while planning: skipped. */
+  readonly outcomes: readonly SetupOutcome[];
+  /** The answer for every file from flags or "… all remaining files", if one was given. */
+  readonly conflictAnswer: ConflictChoice | undefined;
+}
+
 type ConflictAnswer = ConflictChoice | 'merge-all' | 'overwrite-all';
 
-const sourceOsOf = (platform: NodeJS.Platform): SourceOs =>
-  platform === 'darwin' || platform === 'win32' ? platform : 'linux';
-
 const describe = (adapter: AgentAdapter, setup: SavedSetup) =>
-  `${adapter.displayName} ${setup.projectName === null ? 'global setup' : `project "${setup.projectName}"`}`;
+  setupLabel(adapter.displayName, setup.projectName);
 
 /**
- * `agentnomad pull` (T34): choose saved setups, download and decrypt them on this PC,
- * confirm what would run programs, restore with the user's merge / overwrite / skip
- * choices, then offer plugins, programs and environment variables.
+ * Pull's plan step (T59): chooses saved setups, downloads and checks them, and asks every
+ * question before anything is written: an older copy, what would run programs, each file
+ * here that differs, saved environment values, and each agent's own questions (T61). Without a terminal, a question the flags
+ * leave open stops pull here (T46).
  */
-export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'> {
+export function createPullPlanner(deps: PullDeps) {
   const { prompter, reporter } = deps;
 
   async function chooseAgents(
     saved: readonly SavedSetup[],
     options: PullOptions,
-  ): Promise<{ adapter: AgentAdapter; version: string | null }[]> {
+  ): Promise<ChosenAgent[]> {
     const withSetups: { adapter: AgentAdapter; found: DetectedAgent }[] = [];
     for (const adapter of deps.registry().list()) {
       if (!saved.some((setup) => setup.agent === adapter.id)) continue;
@@ -91,11 +133,11 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
       return options.agents.map((id) => {
         const match = withSetups.find((entry) => entry.adapter.id === id);
         if (!match) throw new Error(`No saved setup for agent "${id}".`);
-        return { adapter: match.adapter, version: match.found.version };
+        return chosenAgent(match);
       });
     }
     if (withSetups.length <= 1 || options.yes) {
-      return withSetups.map((entry) => ({ adapter: entry.adapter, version: entry.found.version }));
+      return withSetups.map(chosenAgent);
     }
     const count = (id: string) => saved.filter((setup) => setup.agent === id).length;
     const chosen = await prompter.multiselect(
@@ -107,16 +149,26 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
       })),
       { required: true, initial: withSetups.map((entry) => entry.adapter.id) },
     );
-    return withSetups
-      .filter((entry) => chosen.includes(entry.adapter.id))
-      .map((entry) => ({ adapter: entry.adapter, version: entry.found.version }));
+    return withSetups.filter((entry) => chosen.includes(entry.adapter.id)).map(chosenAgent);
   }
 
   async function chooseSetups(
-    adapter: AgentAdapter,
+    agent: ChosenAgent,
     saved: readonly SavedSetup[],
     options: PullOptions,
   ): Promise<SavedSetup[]> {
+    const { adapter } = agent;
+    // A project is never restored into the home folder or the agent's own folder: its
+    // `.claude/` there is the global setup (BUG-05).
+    const refusal = projectFolderRefusal(deps.cwd, {
+      homedir: deps.homedir,
+      baseDir: agent.baseDir,
+      agentName: adapter.displayName,
+      platform: deps.platform,
+    });
+    if (options.project !== undefined && refusal !== null) {
+      throw new ProjectFolderError(deps.cwd, refusal);
+    }
     const mine = saved.filter((setup) => setup.agent === adapter.id);
     const global = mine.find((setup) => setup.projectName === null);
     const projects = mine.filter((setup) => setup.projectName !== null);
@@ -132,8 +184,9 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
     } else if (projects.length === 0) {
       choice = 'global';
     } else if (!global) {
+      if (refusal !== null) throw new ProjectFolderError(deps.cwd, refusal);
       choice = 'project';
-    } else if (options.yes) {
+    } else if (options.yes || refusal !== null) {
       // --yes alone restores the global setup; a project is picked with --project.
       choice = 'global';
     } else {
@@ -180,17 +233,19 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
     return chosen;
   }
 
-  /** Per file: merge, overwrite, skip; "… all remaining" answers the rest; flags answer all. */
-  function conflictResolver(options: PullOptions): ConflictResolver {
+  /**
+   * Per file: merge, overwrite, skip; "… all remaining" answers the rest; flags answer all.
+   * `fixed()` is the answer that holds for every file from now on, if there is one.
+   */
+  function conflictAsker(options: PullOptions) {
     let sticky: ConflictChoice | undefined = options.conflict;
-    return async (path, question) => {
-      const fixed = sticky ?? (options.yes ? 'merge' : undefined);
-      if (fixed !== undefined)
-        return fixed === 'overwrite' && !question.overwriteAllowed ? 'merge' : fixed;
-      const answer: ConflictAnswer = await prompter.select(
-        question.overwriteAllowed
-          ? `${path} already exists here and is different.`
-          : `${path === '.agentnomad/claude.json' ? '~/.claude.json' : path}: add your MCP servers and preferences (your login and history stay)?`,
+    const fixed = () => sticky ?? (options.yes ? 'merge' : undefined);
+    const ask: ConflictResolver = async (path, question) => {
+      const answer = fixed();
+      if (answer !== undefined)
+        return answer === 'overwrite' && !question.overwriteAllowed ? 'merge' : answer;
+      const chosen: ConflictAnswer = await prompter.select(
+        question.message ?? `${printableLine(path)} already exists here and is different.`,
         [
           {
             value: 'merge',
@@ -207,37 +262,36 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
             : []),
         ],
       );
-      if (answer === 'merge-all' || answer === 'overwrite-all') {
-        sticky = answer === 'merge-all' ? 'merge' : 'overwrite';
+      if (chosen === 'merge-all' || chosen === 'overwrite-all') {
+        sticky = chosen === 'merge-all' ? 'merge' : 'overwrite';
         return sticky;
       }
-      return answer;
+      return chosen;
     };
+    return { ask, fixed };
   }
 
   /**
    * Everything about one setup that comes before writing: download and check it, and ask
-   * about an older copy and about what would run programs (T46: all setups are prepared
-   * before any is written, so a question left open stops pull before it changes anything).
-   * `null`: the user chose to skip it.
+   * about an older copy and about what would run programs. An outcome: it is skipped.
    */
   async function prepareOne(
     adapter: AgentAdapter,
     version: string | null,
     setup: SavedSetup,
-    context: { secrets: SecretStore; crypto: CryptoService; dataKey: Uint8Array },
+    keys: PullKeys,
     options: PullOptions,
-  ): Promise<Prepared | null> {
+  ): Promise<Prepared | SetupOutcome> {
     const spinner = reporter.spinner();
     spinner.start(`Downloading and decrypting the ${describe(adapter, setup)}…`);
     let downloaded;
     try {
-      downloaded = await withSession(context.secrets, () =>
+      downloaded = await withSession(keys.secrets, () =>
         downloadSetup(setup, {
           api: deps.api(),
-          crypto: context.crypto,
+          crypto: keys.crypto,
           codec: deps.codec,
-          dataKey: context.dataKey,
+          dataKey: keys.dataKey,
         }),
       );
     } finally {
@@ -253,11 +307,17 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
       reporter.warn(note);
       if (options.yes || !(await prompter.confirm('Restore this older copy anyway?', false))) {
         reporter.info(`Skipped the ${describe(adapter, setup)}.`);
-        return null;
+        return options.yes
+          ? {
+              setup: describe(adapter, setup),
+              result: 'not-done',
+              reason: `the saved copy (revision ${String(revision)}) is older than the one this PC had (revision ${String(known)})`,
+            }
+          : { setup: describe(adapter, setup), result: 'declined' };
       }
     }
 
-    const versionNote = agentVersionNotice(adapter.displayName, bundle.agentVersion, version);
+    const versionNote = adapter.inspector?.versionNotice?.(bundle.agentVersion, version) ?? null;
     if (versionNote !== null) reporter.warn(versionNote);
 
     const scope: BundleScope = bundle.scope;
@@ -270,7 +330,7 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
     // are, and anything that runs programs and is new here is confirmed before writing.
     const current = await adapter.collector.collect(target, { includeMemory: true });
     files = preferLocalEquivalents(bundle.files, files, current, resolver);
-    const review = reviewRunnable(files, current);
+    const review = adapter.restorer.reviewRunnable(files, current);
     let declined = false;
     if (review.length > 0) {
       reporter.info(
@@ -278,7 +338,7 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
           `The ${describe(adapter, setup)} would add or change these, which run programs on this PC:`,
           ...review.map(
             (entry) =>
-              `  ${entry.change === 'new' ? '+' : '~'} ${entry.label}: ${entry.command}${entry.change === 'changed' ? '  (changed)' : ''}`,
+              `  ${entry.change === 'new' ? '+' : '~'} ${printableLine(entry.label)}: ${printableLine(entry.command)}${entry.change === 'changed' ? '  (changed)' : ''}`,
           ),
         ].join('\n'),
       );
@@ -291,7 +351,7 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
         const blocked = new Set(review.map((entry) => entry.file));
         files = files.filter((file) => !blocked.has(file.path));
         reporter.warn(
-          `Skipped ${[...blocked].join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
+          `Skipped ${[...blocked].map(printableLine).join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
         );
       }
     }
@@ -299,137 +359,236 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
     return { adapter, setup, bundle, revision, target, files, current, declined };
   }
 
-  /**
-   * Without a terminal (T46): every question the flags leave open is found before anything is
-   * written. A file that differs here needs --merge, --overwrite or --yes; saved environment
-   * values missing here need --yes.
-   */
-  function checkAnswerable(prepared: readonly Prepared[], options: PullOptions): void {
-    if (prompter.canAsk !== false || options.yes) return;
-    for (const { files, current } of prepared) {
-      if (options.conflict === undefined) {
-        const differs = files.find((file) => {
-          const here = current.find((entry) => entry.path === file.path);
-          return here !== undefined && !sameBytes(here.content, file.content);
-        });
-        if (differs) {
-          throw new AnswerNeededError(`${differs.path} already exists here and is different.`);
-        }
-      }
-      const envFile = files.find((file) => file.path === ENV_BUNDLE_PATH);
-      const section = envFile ? parseEnvSection(envFile.content) : null;
-      const missing = Object.keys(section?.variables ?? {}).filter(
-        (name) => (deps.env[name] ?? '') === '',
-      );
-      if (missing.length > 0) throw new AnswerNeededError(`Add ${missing.join(', ')}?`);
+  /** The answer for each file that is here and differs, as the agent's restorer lists them. */
+  async function answerConflicts(
+    { adapter, files, current }: Prepared,
+    ask: ConflictResolver,
+  ): Promise<Map<string, ConflictChoice>> {
+    const answers = new Map<string, ConflictChoice>();
+    for (const conflict of adapter.restorer.conflicts(files, current)) {
+      answers.set(conflict.path, await ask(conflict.path, conflict.question));
     }
+    return answers;
   }
 
-  async function applyOne(
-    { adapter, setup, bundle, revision, target, files, declined }: Prepared,
-    resolverOfConflicts: ConflictResolver,
+  /**
+   * The agent's own questions for one setup (T61), e.g. an open app that rewrites a file, or
+   * plugins to reinstall; without its own plan step, the restorer writes the files.
+   */
+  async function planAgent(
+    restore: Omit<PlannedRestore, 'agentPlan'>,
+    conflictAnswer: ConflictChoice | undefined,
     options: PullOptions,
-  ): Promise<void> {
-    const report = await adapter.restorer.restore(target, files, resolverOfConflicts, {
-      sourceOs: bundle.sourceOs,
+  ): Promise<AgentRestorePlan> {
+    const { adapter, target, files } = restore;
+    if (adapter.planRestore === undefined) {
+      return {
+        restore: (onConflict, context) =>
+          adapter.restorer.restore(target, files, onConflict, context),
+        afterRestore: () => Promise.resolve(),
+      };
+    }
+    return adapter.planRestore({
+      target,
+      files,
+      conflicts: restore.conflicts,
+      conflictAnswer,
+      prompter,
+      reporter,
       assumeYes: options.yes,
+      allowCommands: options.allowCommands === true,
+      parts: options.parts ?? new Map(),
     });
+  }
+
+  return {
+    /** `null`: nothing to pull (already said why). */
+    async plan(options: PullOptions, keys: PullKeys): Promise<PullPlan | null> {
+      const saved = await withSession(keys.secrets, () =>
+        listSavedSetups(deps.api(), keys.crypto, keys.dataKey),
+      );
+      if (saved.length === 0) {
+        reporter.info('Nothing is saved yet. Run `agentnomad push` on the PC that has your setup.');
+        return null;
+      }
+      const agents = await chooseAgents(saved, options);
+      if (agents.length === 0) {
+        reporter.info('None of the saved setups are for an agent agentnomad supports here.');
+        return null;
+      }
+      const chosen: { adapter: AgentAdapter; version: string | null; setups: SavedSetup[] }[] = [];
+      for (const agent of agents) {
+        const { adapter, version } = agent;
+        chosen.push({ adapter, version, setups: await chooseSetups(agent, saved, options) });
+      }
+
+      await showNotices(
+        chosen.map(({ adapter }) => adapter),
+        'pull',
+        reporter,
+      );
+
+      const outcomes: SetupOutcome[] = [];
+      const prepared: Prepared[] = [];
+      for (const { adapter, version, setups } of chosen) {
+        for (const setup of setups) {
+          const ready = await prepareOne(adapter, version, setup, keys, options);
+          if ('result' in ready) outcomes.push(ready);
+          else prepared.push(ready);
+        }
+      }
+
+      const conflicts = conflictAsker(options);
+      const answered: Omit<PlannedRestore, 'agentPlan'>[] = [];
+      for (const ready of prepared) {
+        const answers = await answerConflicts(ready, conflicts.ask);
+        const envFile = ready.files.find((file) => file.path === ENV_BUNDLE_PATH);
+        const section = envFile ? parseEnvSection(envFile.content) : null;
+        const env = section
+          ? {
+              section,
+              toAdd: (
+                await planEnvRestore({
+                  section,
+                  env: deps.env,
+                  writer: deps.envWriter(),
+                  prompter,
+                  reporter,
+                  assumeYes: options.yes,
+                  allowCommands: options.allowCommands === true,
+                  isRedirectVariable: (name) => ready.adapter.restorer.isRedirectVariable(name),
+                })
+              ).toAdd,
+            }
+          : null;
+        answered.push({
+          adapter: ready.adapter,
+          name: describe(ready.adapter, ready.setup),
+          setup: ready.setup,
+          revision: ready.revision,
+          sourceOs: ready.bundle.sourceOs,
+          target: ready.target,
+          files: ready.files,
+          declined: ready.declined,
+          conflicts: answers,
+          env,
+        });
+      }
+      // Then each agent's own questions, still before anything is written (T61).
+      const restores: PlannedRestore[] = [];
+      for (const restore of answered) {
+        restores.push({
+          ...restore,
+          agentPlan: await planAgent(restore, conflicts.fixed(), options),
+        });
+      }
+      return { restores, outcomes, conflictAnswer: conflicts.fixed() };
+    },
+  };
+}
+
+/**
+ * Pull's apply step (T59): writes each planned setup with the answers from the plan, adds the
+ * chosen environment values, remembers the revision, then runs each agent's follow-up. It has no prompter, so it never
+ * asks: a file that differs but was not asked about (only the restorer saw it) is left as it
+ * is, and the setup is not done.
+ */
+export function createPullApplier(deps: PullApplyDeps) {
+  const { reporter } = deps;
+
+  async function applyOne(
+    planned: PlannedRestore,
+    conflictAnswer: ConflictChoice | undefined,
+  ): Promise<SetupOutcome> {
+    const { adapter, name, setup, revision, declined } = planned;
+    const notAsked: string[] = [];
+    const answer: ConflictResolver = (path, question) => {
+      const chosen = planned.conflicts.get(path) ?? conflictAnswer;
+      if (chosen === undefined) {
+        notAsked.push(path);
+        return Promise.resolve('skip');
+      }
+      return Promise.resolve(
+        chosen === 'overwrite' && !question.overwriteAllowed ? 'merge' : chosen,
+      );
+    };
+    const report = await planned.agentPlan.restore(answer, { sourceOs: planned.sourceOs });
     for (const warning of report.warnings) reporter.warn(warning);
     const parts = [
       `${String(report.written.length)} written`,
       ...(report.skipped.length > 0 ? [`${String(report.skipped.length)} skipped`] : []),
       ...(report.backups.length > 0 ? [`${String(report.backups.length)} backed up first`] : []),
     ];
-    reporter.success(
-      `Restored the ${describe(adapter, setup)}: ${parts.join(', ')} (revision ${String(revision)}).`,
-    );
+    reporter.success(`Restored the ${name}: ${parts.join(', ')} (revision ${String(revision)}).`);
 
-    // Declined commands are noted, so a later push asks before dropping them (T46).
-    await deps
-      .localState()
-      .setRevision(adapter.id, setup.scopeKey, revision, { partial: declined });
+    // Declined commands and files left unasked are noted, so a later push asks before
+    // replacing them (T46, BUG-05).
+    await deps.localState().setRevision(adapter.id, setup.scopeKey, revision, {
+      partial: declined || notAsked.length > 0,
+    });
     if (setup.projectName !== null)
       await deps.localState().rememberProject(deps.cwd, setup.projectName);
 
-    await adapter.afterRestore?.({
-      target,
-      files,
-      prompter,
-      reporter,
-      assumeYes: options.yes,
-      allowCommands: options.allowCommands === true,
-      ...(options.accountSkills !== undefined && { accountSkills: options.accountSkills }),
-    });
-
-    const envFile = files.find((file) => file.path === ENV_BUNDLE_PATH);
-    const section = envFile ? parseEnvSection(envFile.content) : null;
-    if (section) {
-      await restoreEnvValues({
-        section,
-        env: deps.env,
-        writer: deps.envWriter(),
-        prompter,
-        reporter,
-        assumeYes: options.yes,
-        allowCommands: options.allowCommands === true,
-      });
+    if (planned.env !== null && planned.env.toAdd.length > 0) {
+      await writeEnvValues(
+        {
+          section: planned.env.section,
+          writer: deps.envWriter(),
+          reporter,
+          agentName: adapter.displayName,
+        },
+        planned.env.toAdd,
+      );
     }
+
+    if (notAsked.length === 0) return { setup: name, result: 'done' };
+    const leftAlone = notAsked.map(printableLine).join(', ');
+    reporter.warn(
+      `Left as they are in the ${name}: ${leftAlone}. They differ here, but pull did not ask about them before writing. Pull again with --merge or --overwrite to choose.`,
+    );
+    return {
+      setup: name,
+      result: 'not-done',
+      reason: `not asked about ${leftAlone}, so left as they are`,
+    };
   }
 
   return {
+    async apply(plan: PullPlan): Promise<SetupOutcome[]> {
+      const outcomes: SetupOutcome[] = [];
+      for (const planned of plan.restores) {
+        outcomes.push(await applyOne(planned, plan.conflictAnswer));
+      }
+      // The agents' follow-ups (plugins, programs), with the answers from the plan.
+      for (const planned of plan.restores) await planned.agentPlan.afterRestore({ reporter });
+      return outcomes;
+    },
+  };
+}
+
+/**
+ * `agentnomad pull` (T34): choose saved setups, download and decrypt them on this PC,
+ * confirm what would run programs, restore with the user's merge / overwrite / skip
+ * choices, then offer plugins, programs and environment variables. Plan, then apply (T59):
+ * every question, the agent's own ones included (T61), comes before the first write, and
+ * the apply step has no prompter. Exits with code 1 when a setup was not restored (BUG-03).
+ */
+export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'> {
+  const planner = createPullPlanner(deps);
+  const applier = createPullApplier(deps);
+  return {
     async pull(options) {
       const secrets = await deps.secrets();
-      const [token, dataKeyText] = await Promise.all([
-        secrets.get('session-token'),
-        secrets.get('data-key'),
-      ]);
-      if (token === null || dataKeyText === null) throw new NotLoggedInError();
-      const dataKey = new Uint8Array(Buffer.from(dataKeyText, 'base64'));
+      const dataKey = await readDataKey(secrets);
       try {
-        const crypto = await deps.crypto();
-        const saved = await withSession(secrets, () =>
-          listSavedSetups(deps.api(), crypto, dataKey),
-        );
-        if (saved.length === 0) {
-          reporter.info(
-            'Nothing is saved yet. Run `agentnomad push` on the PC that has your setup.',
-          );
-          return;
-        }
-        const agents = await chooseAgents(saved, options);
-        if (agents.length === 0) {
-          reporter.info('None of the saved setups are for an agent agentnomad supports here.');
-          return;
-        }
-        const plan: { adapter: AgentAdapter; version: string | null; setups: SavedSetup[] }[] = [];
-        for (const { adapter, version } of agents) {
-          plan.push({ adapter, version, setups: await chooseSetups(adapter, saved, options) });
-        }
-
-        const shown = new Set<string>();
-        for (const { adapter } of plan) {
-          for (const notice of (await adapter.inspector?.notices('pull')) ?? []) {
-            if (!shown.has(notice)) reporter.warn(notice);
-            shown.add(notice);
-          }
-        }
-
-        const prepared: Prepared[] = [];
-        for (const { adapter, version, setups } of plan) {
-          for (const setup of setups) {
-            const ready = await prepareOne(
-              adapter,
-              version,
-              setup,
-              { secrets, crypto, dataKey },
-              options,
-            );
-            if (ready) prepared.push(ready);
-          }
-        }
-        checkAnswerable(prepared, options);
-        const resolver = conflictResolver(options);
-        for (const ready of prepared) await applyOne(ready, resolver, options);
+        const plan = await planner.plan(options, {
+          secrets,
+          crypto: await deps.crypto(),
+          dataKey,
+        });
+        if (plan === null) return;
+        const applied = await applier.apply(plan);
+        finishSetups('pull', [...plan.outcomes, ...applied]);
       } finally {
         dataKey.fill(0);
       }

@@ -1,4 +1,5 @@
 import {
+  fromBase64,
   GLOBAL_SCOPE_KEY,
   type AgentId,
   type Bundle,
@@ -14,6 +15,7 @@ import {
 } from '@agentnomad/core';
 
 import type { ApiClient } from '../api/api-client.ts';
+import { setupLabel } from '../cli/setup-outcomes.ts';
 
 /** One saved setup as listed, with its project name decrypted on this PC. */
 export interface SavedSetup {
@@ -50,7 +52,6 @@ export class MislabelledSetupError extends Error {
   }
 }
 
-/** Every saved setup of the account (all pages), names decrypted; unreadable names are left out. */
 /** Pages of 100: far more than one person saves, and a stop for a server that never ends. */
 const MAX_PAGES = 100;
 
@@ -81,6 +82,7 @@ export async function listSavedRevisions(api: ApiClient): Promise<Map<string, nu
   return new Map(items.map((item) => [`${item.agent}/${item.scopeKey}`, item.revision]));
 }
 
+/** Every saved setup of the account (all pages), names decrypted; unreadable names are left out. */
 export async function listSavedSetups(
   api: ApiClient,
   crypto: CryptoService,
@@ -93,15 +95,10 @@ export async function listSavedSetups(
     if (item.scopeKey !== GLOBAL_SCOPE_KEY) {
       if (item.nameEnc === null) continue;
       try {
-        projectName = decryptProjectName(
-          crypto,
-          new Uint8Array(Buffer.from(item.nameEnc, 'base64')),
-          dataKey,
-          {
-            agent: item.agent,
-            scopeKey: item.scopeKey,
-          },
-        );
+        projectName = decryptProjectName(crypto, fromBase64(item.nameEnc), dataKey, {
+          agent: item.agent,
+          scopeKey: item.scopeKey,
+        });
       } catch (error) {
         if (error instanceof DecryptionError) continue;
         throw error;
@@ -127,7 +124,7 @@ export async function downloadSetup(
   setup: SavedSetup,
   deps: { api: ApiClient; crypto: CryptoService; codec: BundleCodec; dataKey: Uint8Array },
 ): Promise<{ bundle: Bundle; revision: number }> {
-  const what = setup.projectName === null ? 'global setup' : `project "${setup.projectName}"`;
+  const what = setupLabel(null, setup.projectName);
   const downloaded = await deps.api.bundles.get({ agent: setup.agent, scopeKey: setup.scopeKey });
   let bundle: Bundle;
   try {

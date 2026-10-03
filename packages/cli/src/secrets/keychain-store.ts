@@ -1,9 +1,9 @@
 import { AsyncEntry } from '@napi-rs/keyring';
 
-import type { SecretName, SecretStore } from './secret-store.ts';
+import { SECRET_NAMES, type SecretName, type SecretStore } from './secret-store.ts';
 
 /** Service name every agentnomad keychain entry is saved under. */
-export const KEYCHAIN_SERVICE = 'agentnomad';
+const KEYCHAIN_SERVICE = 'agentnomad';
 
 /** One keychain entry; the part of @napi-rs/keyring this store uses. */
 export interface KeychainEntry {
@@ -37,8 +37,11 @@ export function createKeychainStore(
     async get(name) {
       return (await entry(name).getPassword()) ?? null;
     },
-    async set(name, value) {
-      await entry(name).setPassword(value);
+    async setMany(values) {
+      for (const name of SECRET_NAMES) {
+        const value = values[name];
+        if (value !== undefined) await entry(name).setPassword(value);
+      }
     },
     async delete(name) {
       await entry(name).deleteCredential();

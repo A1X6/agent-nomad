@@ -1,14 +1,25 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { win32 } from 'node:path';
 
 import * as z from 'zod';
 
+import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { runProgram } from '../../system/run-program.ts';
 import type { Prompter, Reporter } from '../../ui/prompter.ts';
-import type { MarketplaceEntry, PluginEntry, PluginManifest } from './plugins.ts';
+import { pathsOf } from '../shared/detector-system.ts';
+import {
+  installedIn,
+  readInstalledPlugins,
+  type MarketplaceEntry,
+  type PluginEntry,
+  type PluginManifest,
+} from './plugins.ts';
 
-/** Runs `claude` with arguments in a folder; project-scope installs write there. */
-export interface ClaudeCli {
+/**
+ * Runs a program found on this PC (`claude`, `npm`) with arguments in a folder;
+ * project-scope plugin installs write there.
+ */
+export interface ProgramCli {
   run(
     args: readonly string[],
     cwd: string,
@@ -56,33 +67,34 @@ export function planPluginSync(manifest: PluginManifest, current: CurrentPlugins
 /** Reads this PC's `known_marketplaces.json` and `installed_plugins.json`. */
 export async function readCurrentPlugins(
   baseDir: string,
+  platform: NodeJS.Platform,
   projectDir?: string,
 ): Promise<CurrentPlugins> {
-  const read = async (name: string): Promise<unknown> => {
-    try {
-      return JSON.parse(await readFile(join(baseDir, 'plugins', name), 'utf8'));
-    } catch {
-      return null;
-    }
-  };
-  const known = z.record(z.string(), z.unknown()).safeParse(await read('known_marketplaces.json'));
-  const installed = z
-    .looseObject({
-      plugins: z.record(
-        z.string(),
-        z.array(z.looseObject({ scope: z.string(), projectPath: z.string().optional() })),
-      ),
-    })
-    .safeParse(await read('installed_plugins.json'));
+  const path = pathsOf(platform);
+  const knownText = await readFile(
+    path.join(baseDir, 'plugins', 'known_marketplaces.json'),
+    'utf8',
+  ).catch(() => null);
+  const known =
+    knownText === null
+      ? null
+      : valueOrNull(parseJsonWith(z.record(z.string(), z.unknown()), knownText));
   const keys = new Set<string>();
-  for (const [id, installs] of Object.entries(installed.success ? installed.data.plugins : {})) {
+  for (const [id, installs] of Object.entries(
+    (await readInstalledPlugins(baseDir, platform)) ?? {},
+  )) {
     for (const install of installs) {
-      // A project install only counts for the project being restored.
-      if (install.scope !== 'user' && install.projectPath !== projectDir) continue;
-      keys.add(installKey(id, install.scope));
+      // A project install only counts for the project being restored, compared as push
+      // compares it (BUG-03: `e:\app` is `E:\app` on Windows).
+      const here =
+        install.scope === 'user' ||
+        (projectDir === undefined
+          ? install.projectPath === undefined
+          : installedIn(install, projectDir, platform));
+      if (here) keys.add(installKey(id, install.scope));
     }
   }
-  return { marketplaces: new Set(Object.keys(known.success ? known.data : {})), installed: keys };
+  return { marketplaces: new Set(Object.keys(known ?? {})), installed: keys };
 }
 
 /** The JSON result `claude plugin install --json` prints on its last line. */
@@ -90,48 +102,51 @@ const InstallResultSchema = z.looseObject({ outcome: z.string(), message: z.stri
 
 function installOutcome(stdout: string): { ok: boolean; message: string } | null {
   const last = stdout.trim().split(/\r?\n/).pop() ?? '';
-  try {
-    const parsed = InstallResultSchema.safeParse(JSON.parse(last));
-    return parsed.success
-      ? { ok: parsed.data.outcome === 'ok', message: parsed.data.message ?? '' }
-      : null;
-  } catch {
-    return null;
-  }
+  const result = valueOrNull(parseJsonWith(InstallResultSchema, last));
+  return result === null ? null : { ok: result.outcome === 'ok', message: result.message ?? '' };
 }
 
-export interface SyncPluginsDeps {
+/** What pull's plan step asks about saved plugins (T61): nothing is installed here. */
+export interface AskPluginSyncDeps {
   readonly manifest: PluginManifest;
   readonly current: CurrentPlugins;
-  readonly claude: ClaudeCli;
   readonly prompter: Pick<Prompter, 'confirm'>;
-  readonly reporter: Pick<Reporter, 'info' | 'success' | 'warn'>;
-  /** Where project-scope plugins are installed; the home folder for a global setup. */
-  readonly cwd: string;
+  readonly reporter: Pick<Reporter, 'info' | 'warn'>;
   /** `--yes`: never ask; without `allowCommands` nothing is installed (T38). */
   readonly assumeYes?: boolean;
   /** `--allow-commands`: install the list, command-source plugins included, without asking. */
   readonly allowCommands?: boolean;
+}
+
+/** What the user agreed to install; installing it asks nothing. */
+export interface PluginSyncChoice {
+  /** Marketplaces to add first. */
+  readonly marketplaces: readonly MarketplaceEntry[];
+  /** Plugins to install, in order; a command-source one only after its own yes. */
+  readonly plugins: readonly PluginEntry[];
+  readonly declined: readonly string[];
+}
+
+export interface InstallPluginsDeps {
+  readonly claude: ProgramCli;
+  readonly reporter: Pick<Reporter, 'success' | 'warn'>;
+  /** Where project-scope plugins are installed; the home folder for a global setup. */
+  readonly cwd: string;
   /** Turns an install failure into a clearer reason, e.g. "blocked by your organization" (T31). */
   readonly explainFailure?: (reason: string) => string;
 }
 
 /**
- * Reinstalls saved plugins on this PC (T29): shows what is missing, asks once, then adds
- * the marketplaces and installs the plugins with Claude Code's own commands. A plugin
- * built by running a command gets its own question first.
+ * The questions of a plugin reinstall (T29, T61): shows what is missing, asks once, and asks
+ * again for each plugin built by running a command. Installs nothing.
  */
-export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResult> {
+export async function askPluginSync(deps: AskPluginSyncDeps): Promise<PluginSyncChoice> {
   const plan = planPluginSync(deps.manifest, deps.current);
-  const result = {
-    installed: [] as string[],
-    failed: [] as { what: string; reason: string }[],
-    declined: [] as string[],
-  };
+  const nothing: PluginSyncChoice = { marketplaces: [], plugins: [], declined: [] };
   if (plan.plugins.length === 0) {
     if (deps.manifest.plugins.length > 0)
       deps.reporter.info('All saved plugins are already installed.');
-    return result;
+    return nothing;
   }
 
   const list = [
@@ -154,23 +169,56 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
         `Plugins were not reinstalled: --yes never installs or runs new code; add --allow-commands, or run pull without --yes to choose.`,
       );
     }
-    result.declined.push(...plan.plugins.map((plugin) => plugin.id));
-    return result;
+    return { ...nothing, declined: plan.plugins.map((plugin) => plugin.id) };
   }
 
+  const plugins: PluginEntry[] = [];
+  const declined: string[] = [];
+  for (const plugin of plan.plugins) {
+    // Its own question, unless --allow-commands already accepted code from the setup
+    // (--yes alone never gets this far: it reinstalls nothing).
+    const accept =
+      !plugin.commandSource ||
+      deps.allowCommands === true ||
+      (await deps.prompter.confirm(
+        `${plugin.id} is built by running a command from its marketplace. Allow it?`,
+        false,
+      ));
+    if (accept) plugins.push(plugin);
+    else declined.push(plugin.id);
+  }
+  return { marketplaces: plan.marketplaces, plugins, declined };
+}
+
+/**
+ * Installs what the user agreed to (T29, T61): adds the marketplaces, then installs the
+ * plugins with Claude Code's own commands. Asks nothing.
+ */
+export async function installPlugins(
+  choice: PluginSyncChoice,
+  deps: InstallPluginsDeps,
+): Promise<PluginSyncResult> {
+  const result = {
+    installed: [] as string[],
+    failed: [] as { what: string; reason: string }[],
+    declined: [...choice.declined],
+  };
+  if (choice.plugins.length === 0) return result;
+
   const failedMarketplaces = new Set<string>();
-  for (const marketplace of plan.marketplaces) {
+  for (const marketplace of choice.marketplaces) {
     const run = await deps.claude.run(['plugin', 'marketplace', 'add', marketplace.add], deps.cwd);
     if (run.exitCode !== 0) {
       failedMarketplaces.add(marketplace.name);
+      const reason = run.stderr.trim() || run.stdout.trim() || `exit code ${String(run.exitCode)}`;
       result.failed.push({
         what: `marketplace ${marketplace.name}`,
-        reason: run.stderr.trim() || run.stdout.trim() || `exit code ${String(run.exitCode)}`,
+        reason: deps.explainFailure?.(reason) ?? reason,
       });
     }
   }
 
-  for (const plugin of plan.plugins) {
+  for (const plugin of choice.plugins) {
     const marketplace = plugin.id.split('@')[1] ?? '';
     if (failedMarketplaces.has(marketplace)) {
       result.failed.push({
@@ -180,21 +228,7 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
       continue;
     }
     const args = ['plugin', 'install', plugin.id, '--scope', plugin.scope, '--json'];
-    if (plugin.commandSource) {
-      // Its own question, unless --allow-commands already accepted code from the setup
-      // (--yes alone never gets this far: it reinstalls nothing).
-      const accept =
-        deps.allowCommands === true ||
-        (await deps.prompter.confirm(
-          `${plugin.id} is built by running a command from its marketplace. Allow it?`,
-          false,
-        ));
-      if (!accept) {
-        result.declined.push(plugin.id);
-        continue;
-      }
-      args.push('--yes');
-    }
+    if (plugin.commandSource) args.push('--yes');
     const run = await deps.claude.run(args, deps.cwd);
     const outcome = installOutcome(run.stdout);
     if (run.exitCode === 0 && (outcome === null || outcome.ok)) {
@@ -213,50 +247,81 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
   return result;
 }
 
+type RunResult = Awaited<ReturnType<ProgramCli['run']>>;
+
+/** Starts a program without a shell (Node's `execFile`); `verbatim`: no quoting on Windows. */
+export type StartProgram = (
+  file: string,
+  args: readonly string[],
+  options: {
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+    readonly timeoutMs: number;
+    readonly verbatim: boolean;
+  },
+) => Promise<RunResult>;
+
+const startProgram: StartProgram = async (file, args, options) => {
+  const { exitCode, stdout, stderr } = await runProgram(file, args, {
+    ...options,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return { exitCode, stdout, stderr };
+};
+
 /** Windows launchers npm creates; they need `cmd.exe` to run. */
 const SHIMS = new Set(['.cmd', '.bat']);
-const CMD_UNSAFE = /["&|<>^%!]/;
+/**
+ * What cmd.exe acts on in an argument, and any white space but a plain space. A space is
+ * fine: such an argument is quoted, as a local marketplace folder like `C:\My Plugins` needs.
+ */
+const CMD_UNSAFE = /["&|<>^%!\p{Cc}]|[^\S ]/u;
 
 /**
- * The real `claude` command. Arguments come from a validated manifest; a Windows `.cmd`
- * launcher is run through `cmd.exe`, so arguments with its special characters are refused.
+ * One argument on the cmd.exe line: as it is, or in quotes when it holds a space. Inside the
+ * quotes only a backslash right before the closing quote means something (to the program's
+ * argument parser), so trailing backslashes are doubled.
  */
-export function createClaudeCli(
-  claudePath: string,
-  env: Readonly<Record<string, string | undefined>>,
-  timeoutMs = 5 * 60_000,
-): ClaudeCli {
-  const shim = SHIMS.has(extname(claudePath).toLowerCase());
+const cmdArgument = (arg: string) =>
+  arg.includes(' ') ? `"${arg.replace(/(\\+)$/, '$1$1')}"` : arg;
+
+/** What cmd.exe still acts on inside the quotes around the launcher's path. */
+const CMD_UNSAFE_PATH = /["%!\p{Cc}]/u;
+
+/**
+ * A real program such as `claude` or `npm`. Arguments come from a validated manifest. On Windows a
+ * `.cmd` launcher runs through `cmd.exe` with one command line passed as written (Node would
+ * escape the quotes in it): an argument with a space is quoted, and arguments cmd.exe would
+ * read differently are refused.
+ */
+export function createProgramCli(
+  programPath: string,
+  system: {
+    readonly platform: NodeJS.Platform;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  },
+  options: { readonly timeoutMs?: number; readonly start?: StartProgram } = {},
+): ProgramCli {
+  const shim = system.platform === 'win32' && SHIMS.has(win32.extname(programPath).toLowerCase());
+  const start = options.start ?? startProgram;
+  const timeoutMs = options.timeoutMs ?? 5 * 60_000;
   return {
     run(args, cwd) {
-      if (shim && args.some((arg) => CMD_UNSAFE.test(arg))) {
+      const common = { cwd, env: system.env, timeoutMs };
+      if (!shim) return start(programPath, args, { ...common, verbatim: false });
+      if (
+        CMD_UNSAFE_PATH.test(programPath) ||
+        args.some((arg) => arg === '' || CMD_UNSAFE.test(arg))
+      ) {
         return Promise.resolve({
           exitCode: 1,
           stdout: '',
           stderr: 'Unsafe characters for cmd.exe',
         });
       }
-      const [file, fileArgs] = shim
-        ? ['cmd.exe', ['/d', '/s', '/c', `"${claudePath}"`, ...args]]
-        : [claudePath, [...args]];
-      return new Promise((done) => {
-        execFile(
-          file,
-          fileArgs,
-          {
-            cwd,
-            env: { ...env },
-            timeout: timeoutMs,
-            windowsHide: true,
-            encoding: 'utf8',
-            maxBuffer: 16 * 1024 * 1024,
-          },
-          (error, stdout, stderr) => {
-            const code = error && typeof error.code === 'number' ? error.code : error ? 1 : 0;
-            done({ exitCode: code, stdout, stderr });
-          },
-        );
-      });
+      // `/s`: cmd.exe drops the outer quotes and runs the rest exactly as written.
+      const line = `"${[`"${programPath}"`, ...args.map(cmdArgument)].join(' ')}"`;
+      return start('cmd.exe', ['/d', '/s', '/c', line], { ...common, verbatim: true });
     },
   };
 }

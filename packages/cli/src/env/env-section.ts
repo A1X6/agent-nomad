@@ -1,5 +1,7 @@
 import * as z from 'zod';
 
+import { RESERVED_DIR } from '../agents/adapter.ts';
+import { parseJsonWith, valueOrNull } from '../system/json.ts';
 import type { Prompter } from '../ui/prompter.ts';
 import type { EnvScan } from './env-references.ts';
 
@@ -7,7 +9,7 @@ import type { EnvScan } from './env-references.ts';
  * Variable values the user chose to save, inside the (encrypted) bundle (T30). Never
  * written to disk as a file on restore; pull offers to add them to the shell profile.
  */
-export const ENV_BUNDLE_PATH = '.agentnomad/env.json';
+export const ENV_BUNDLE_PATH = `${RESERVED_DIR}/env.json`;
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -36,14 +38,8 @@ export const envSectionFile = (section: EnvSection) => ({
 });
 
 /** Reads a bundle's env section; `null` when absent or damaged. */
-export function parseEnvSection(content: Uint8Array): EnvSection | null {
-  try {
-    const parsed = EnvSectionSchema.safeParse(JSON.parse(new TextDecoder().decode(content)));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
+export const parseEnvSection = (content: Uint8Array): EnvSection | null =>
+  valueOrNull(parseJsonWith(EnvSectionSchema, content));
 
 export interface ChooseEnvValuesDeps {
   readonly scan: EnvScan;

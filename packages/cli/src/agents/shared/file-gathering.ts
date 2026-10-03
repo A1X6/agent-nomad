@@ -1,24 +1,54 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
-import { posix, win32, type PlatformPath } from 'node:path';
+import type { PlatformPath } from 'node:path';
 
 import { BACKUP_MARKER, INCOMING_MARKER } from '@agentnomad/core';
 import { BundlePathSchema } from '@agentnomad/contracts';
-import * as z from 'zod';
 
+import { TEMP_MARKER } from '../../system/files.ts';
 import type { CollectedFile } from '../adapter.ts';
-import {
-  isSensitiveHomePath,
-  PACKAGE_RUNNERS,
-  RUNTIME_COMMANDS,
-  SKIPPED_NAMES,
-} from './global-paths.ts';
+import { pathsOf } from './detector-system.ts';
 
-/** Reading files for a bundle; shared by the global (T25) and project (T26) collectors. */
+/*
+ * Reading an agent's files for a bundle, for any adapter (ARCH-02): nothing here is
+ * specific to one agent; what to take comes from the adapter's own data file.
+ */
+
+/** Home folders for keys and cloud logins: never read for a setup, whatever links there. */
+const SENSITIVE_HOME_DIRS: readonly string[] = [
+  '.ssh',
+  '.gnupg',
+  '.aws',
+  '.azure',
+  '.kube',
+  '.docker',
+  '.config/gcloud',
+  '.config/gh',
+  '.password-store',
+];
+
+/** `relative` (from home, `/`-separated) is `dir` or inside a `dir` folder; any case. */
+export function inHomeFolder(relative: string, dir: string): boolean {
+  const [lower, folder] = [relative.toLowerCase(), dir.toLowerCase()];
+  return lower === folder || lower.startsWith(`${folder}/`) || lower.includes(`/${folder}/`);
+}
+
+/** A path from the home folder inside a folder for keys and logins (any case). */
+export function isSensitiveHomePath(relative: string): boolean {
+  return SENSITIVE_HOME_DIRS.some((dir) => inHomeFolder(relative, dir));
+}
+
+/** `file` as a bundle path from `folder` (forward slashes), or `null` when it is not inside it. */
+export function bundlePathInside(path: PlatformPath, folder: string, file: string): string | null {
+  const relative = path.relative(folder, file);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  const bundlePath = relative.split(path.sep).join('/');
+  return BundlePathSchema.safeParse(bundlePath).success ? bundlePath : null;
+}
+
+/** Reading files for a bundle; shared by an agent's global (T25) and project (T26) collectors. */
 export interface FileGatherer {
   /** Path rules of the PC being collected. */
   readonly path: PlatformPath;
-  /** Path from `folder` in forward slashes, or `null` when `file` is outside it. */
-  relativeInside(folder: string, file: string): string | null;
   /** The file as a bundle entry, or `null` when it is not a file. */
   readIfFile(nativePath: string, bundlePath: string): Promise<CollectedFile | null>;
   /**
@@ -33,14 +63,17 @@ export interface FileGatherer {
   ): Promise<CollectedFile[]>;
 }
 
+/** agentnomad's backup and incoming copies, and temporary files an interrupted write left. */
 const isMarkerCopy = (name: string) =>
-  name.includes(BACKUP_MARKER) || name.includes(INCOMING_MARKER);
+  name.includes(BACKUP_MARKER) || name.includes(INCOMING_MARKER) || name.includes(TEMP_MARKER);
 
 /** A file larger than this is left out of a setup (T45): a setup is settings and text. */
-export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
-/** Where links may lead when collecting (T45). */
+/** What a walk skips, and where links may lead when collecting (T45). */
 export interface GatherLimits {
+  /** Names skipped anywhere inside a walked folder: tool state and OS clutter (agent data). */
+  readonly skippedNames: ReadonlySet<string>;
   /** The home folder: a link into a folder for keys and logins is never followed. */
   readonly homedir?: string;
   /**
@@ -52,18 +85,10 @@ export interface GatherLimits {
   readonly onSkipped?: (bundlePath: string, reason: string) => void;
 }
 
-export function createFileGatherer(
-  platform: NodeJS.Platform,
-  limits: GatherLimits = {},
-): FileGatherer {
-  const path = platform === 'win32' ? win32 : posix;
+export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimits): FileGatherer {
+  const path = pathsOf(platform);
 
-  const relativeInside = (folder: string, file: string): string | null => {
-    const relative = path.relative(folder, file);
-    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return null;
-    const bundlePath = relative.split(path.sep).join('/');
-    return BundlePathSchema.safeParse(bundlePath).success ? bundlePath : null;
-  };
+  const relativeInside = (folder: string, file: string) => bundlePathInside(path, folder, file);
 
   const realOrSelf = (folder: string) => realpath(folder).catch(() => folder);
   const realHome = limits.homedir === undefined ? null : realOrSelf(limits.homedir);
@@ -133,7 +158,7 @@ export function createFileGatherer(
 
     const files: CollectedFile[] = [];
     for (const entry of await readdir(folder, { withFileTypes: true })) {
-      if (SKIPPED_NAMES.has(entry.name) || isMarkerCopy(entry.name)) continue;
+      if (limits.skippedNames.has(entry.name) || isMarkerCopy(entry.name)) continue;
       const bundlePath = `${bundlePrefix}/${entry.name}`;
       if (excluded(bundlePath) || !BundlePathSchema.safeParse(bundlePath).success) continue;
       const nativePath = path.join(folder, entry.name);
@@ -150,7 +175,7 @@ export function createFileGatherer(
     return files;
   }
 
-  return { path, relativeInside, readIfFile, walk };
+  return { path, readIfFile, walk };
 }
 
 /** One entry per path (the last wins), sorted by path. */
@@ -164,71 +189,3 @@ export const jsonFile = (bundlePath: string, value: unknown): CollectedFile => (
   content: new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`),
   executable: false,
 });
-
-const HookCommandSchema = z.looseObject({ command: z.string().optional() });
-const SettingsSchema = z.looseObject({
-  hooks: z
-    .record(
-      z.string(),
-      z.array(z.looseObject({ hooks: z.array(HookCommandSchema).optional() })).optional(),
-    )
-    .optional(),
-  statusLine: HookCommandSchema.optional(),
-});
-
-/** Parsed settings JSON, or `null` when the text is not a JSON object. */
-export function parseSettings(settingsJson: string): Record<string, unknown> | null {
-  try {
-    const parsed = z.record(z.string(), z.unknown()).safeParse(JSON.parse(settingsJson));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Commands in a `settings.json` that run files: every hook, and the status line. */
-export function commandsInSettings(settingsJson: string): string[] {
-  const settings = SettingsSchema.safeParse(parseSettings(settingsJson));
-  if (!settings.success) return [];
-  const commands = Object.values(settings.data.hooks ?? {}).flatMap((groups) =>
-    (groups ?? []).flatMap((group) => (group.hooks ?? []).map((hook) => hook.command)),
-  );
-  commands.push(settings.data.statusLine?.command);
-  return commands.filter((command): command is string => command !== undefined);
-}
-
-/**
- * Words of a command line, like a shell splits them: quoted and unquoted parts next to each
- * other form one word (`"$CLAUDE_PROJECT_DIR"/.claude/hooks/a.sh`), quotes removed.
- */
-export function commandWords(command: string): string[] {
-  return [...command.matchAll(/(?:"[^"]*"|'[^']*'|[^\s"']+)+/g)].map((match) =>
-    match[0].replace(
-      /"([^"]*)"|'([^']*)'/g,
-      (_quoted, double?: string, single?: string) => double ?? single ?? '',
-    ),
-  );
-}
-
-/** `ccstatusline@2.2.22` → `ccstatusline`; `@scope/tool@1` → `@scope/tool`. */
-const withoutVersion = (spec: string) => spec.replace(/(?<=.)@[^/]*$/, '');
-
-/**
- * The program a command starts, e.g. `ccstatusline`, or `ccstatusline` for
- * `npx -y ccstatusline@latest` (`runner`: nothing to install). `null` for a script path,
- * a shell or a runtime.
- */
-export function programOf(command: string): { name: string; runner: boolean } | null {
-  const words = commandWords(command);
-  let index = 0;
-  while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? '')) index += 1;
-  const first = words[index];
-  if (first === undefined || /[\\/]/.test(first)) return null;
-  const base = first.toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
-  if (PACKAGE_RUNNERS.has(base)) {
-    const spec = words.slice(index + 1).find((word) => !word.startsWith('-'));
-    return spec === undefined ? null : { name: withoutVersion(spec), runner: true };
-  }
-  if (RUNTIME_COMMANDS.has(base) || !/^[A-Za-z0-9._-]+$/.test(first)) return null;
-  return { name: base, runner: false };
-}

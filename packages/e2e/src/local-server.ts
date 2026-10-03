@@ -5,18 +5,7 @@ import { serve } from '@hono/node-server';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 
-import {
-  createApp,
-  createAuthService,
-  createBundleRepository,
-  createBundleService,
-  createJsonLogger,
-  createPostgresBlobStore,
-  createPostgresRateLimiter,
-  createServerKeys,
-  createSessionRepository,
-  createUserRepository,
-} from '@agentnomad/server';
+import { createApi, createJsonLogger, createServerKeys } from '@agentnomad/server';
 
 const migrationsFolder = fileURLToPath(new URL('../../server/drizzle', import.meta.url));
 
@@ -56,28 +45,19 @@ export async function startLocalServer(load?: Uint8Array): Promise<LocalServer> 
   const db = drizzle({ client });
   await migrate(db, { migrationsFolder });
 
-  const keys = await createServerKeys(E2E_SERVER_SECRET);
-  const limiter = createPostgresRateLimiter({ db, keys, shouldPrune: () => false });
-  const app = createApp({
-    auth: createAuthService({
-      users: createUserRepository(db),
-      sessions: createSessionRepository(db),
-      keys,
-      limiter,
-      now: () => new Date(),
-      randomBytes: (length) => crypto.getRandomValues(new Uint8Array(length)),
-    }),
-    bundles: createBundleService({
-      bundles: createBundleRepository(db),
-      blobs: createPostgresBlobStore(db),
-      logError: (message, error) => {
-        throw new Error(`Unexpected cleanup failure: ${message}`, { cause: error });
-      },
-    }),
-    limiter,
+  const { app } = createApi({
+    db,
+    keys: await createServerKeys(E2E_SERVER_SECRET),
     // Every request comes from this machine.
     clientIp: () => '127.0.0.1',
     logger: createJsonLogger(() => undefined),
+    now: () => new Date(),
+    randomBytes: (length) => crypto.getRandomValues(new Uint8Array(length)),
+    shouldPrune: () => false,
+    shouldSweep: () => false,
+    logError: (message, error) => {
+      throw new Error(`Unexpected cleanup failure: ${message}`, { cause: error });
+    },
   });
 
   const requests: RecordedRequest[] = [];
