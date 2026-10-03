@@ -443,6 +443,44 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(await t.state.revisionOf('claude-code', 'global')).toBeNull();
   });
 
+  it('without a terminal, a second pull of scripts with other line endings asks nothing and writes nothing (T53)', async () => {
+    const server = fakeServer();
+    const a = pc('laptop');
+    // A CRLF .py (Git's autocrlf on Windows) and an LF .cmd (from macOS or Linux).
+    await put(join(a.base, 'hooks', 'check.py'), 'print("ok")\r\n');
+    await put(join(a.base, 'hooks', 'run.cmd'), '@echo off\necho ok\n');
+    await put(
+      join(a.base, 'settings.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: 'command', command: `python ${a.home}/.claude/hooks/check.py` }] },
+            { hooks: [{ type: 'command', command: `${a.home}/.claude/hooks/run.cmd` }] },
+          ],
+        },
+      }),
+    );
+    await pushFrom(a, server, [])({ global: true, yes: true, memory: false });
+    const b = pc('desktop');
+    await pullOn(b, server, []).pull({ global: true, yes: true, allowCommands: true });
+
+    for (const machine of [a, b]) {
+      const hooksBefore = await readdir(join(machine.base, 'hooks'));
+      const pyBefore = await read(join(machine.base, 'hooks', 'check.py'));
+      for (const round of [1, 2]) {
+        const t = pullOn(machine, server, [], { prompter: createNoTerminalPrompter() });
+        await t.pull({ global: true, yes: false, allowCommands: true });
+        expect(
+          t.lines.filter((line) => line.startsWith('warn:')),
+          `round ${String(round)}`,
+        ).toEqual([]);
+        expect(t.lines.find((line) => line.startsWith('success: Restored'))).toMatch(/: 0 written/);
+      }
+      expect(await readdir(join(machine.base, 'hooks'))).toEqual(hooksBefore);
+      expect(await read(join(machine.base, 'hooks', 'check.py'))).toBe(pyBefore);
+    }
+  });
+
   it('a pull that left out declined commands is remembered; push then asks (T46)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');

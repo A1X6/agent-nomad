@@ -1,4 +1,15 @@
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -17,6 +28,7 @@ import {
   lineEndingsFor,
   projectDestination,
   projectDirName,
+  sameForRestore,
   type ClaudeRunningAnswer,
   type CollectedFile,
   type ConflictChoice,
@@ -60,6 +72,10 @@ interface Setup {
   running?: boolean[];
   runningAnswers?: ClaudeRunningAnswer[];
   customConfigDir?: boolean;
+  /** Replaces the scripted running check, e.g. with one that fails. */
+  isClaudeRunning?: () => Promise<boolean>;
+  /** Replaces the scripted "close Claude Code?" answers, e.g. with a cancel. */
+  onClaudeRunning?: () => Promise<ClaudeRunningAnswer>;
 }
 
 function restorer(setup: Setup = {}) {
@@ -75,11 +91,13 @@ function restorer(setup: Setup = {}) {
       env: {},
       customConfigDir: setup.customConfigDir ?? false,
       now: () => NOW,
-      isClaudeRunning: () => Promise.resolve(running.shift() ?? false),
-      onClaudeRunning: () => {
-        asked.push('close claude?');
-        return Promise.resolve(answers.shift() ?? 'skip');
-      },
+      isClaudeRunning: setup.isClaudeRunning ?? (() => Promise.resolve(running.shift() ?? false)),
+      onClaudeRunning:
+        setup.onClaudeRunning ??
+        (() => {
+          asked.push('close claude?');
+          return Promise.resolve(answers.shift() ?? 'skip');
+        }),
     }),
   };
 }
@@ -337,6 +355,35 @@ describe('restorer: existing files', () => {
     expect(report.written).toEqual([`CLAUDE.md.agentnomad-incoming-${STAMP}`]);
   });
 
+  it.runIf(posix)('writes through a linked file, keeping the link (T53)', async () => {
+    const real = join(root, 'dotfiles', 'CLAUDE.md');
+    await put(real, 'mine');
+    await symlink(real, join(base, 'CLAUDE.md'));
+    const report = await restorer().restorer.restore(
+      { kind: 'global' },
+      [file('CLAUDE.md', 'theirs')],
+      answer('overwrite').resolve,
+    );
+    expect((await lstat(join(base, 'CLAUDE.md'))).isSymbolicLink()).toBe(true);
+    expect(await read(real)).toBe('theirs');
+    expect(await read(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('mine');
+    expect(report.written).toEqual(['CLAUDE.md']);
+    expect(await readdir(join(root, 'dotfiles'))).toEqual(['CLAUDE.md']);
+  });
+
+  it.runIf(posix)('merges through a linked ~/.claude.json, keeping the link (T53)', async () => {
+    const real = join(root, 'dotfiles', 'claude.json');
+    await put(real, '{"diffTool":"auto"}');
+    await symlink(real, join(home, '.claude.json'));
+    await restorer().restorer.restore(
+      { kind: 'global' },
+      [file('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
+      answer('merge').resolve,
+    );
+    expect((await lstat(join(home, '.claude.json'))).isSymbolicLink()).toBe(true);
+    expect(await readJson(real)).toEqual({ diffTool: 'terminal' });
+  });
+
   it('leaves no temporary files behind', async () => {
     await restorer().restorer.restore(
       { kind: 'global' },
@@ -560,6 +607,21 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
     expect(await read(join(base, 'skills', 'review', 'SKILL.md'))).toBe('ok');
   });
 
+  it('a thrown non-Error still gives a readable warning (T53)', async () => {
+    await put(join(home, '.claude.json'), '{}');
+    const report = await restorer({
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the case under test
+      isClaudeRunning: () => Promise.reject('the process list was empty'),
+    }).restorer.restore(
+      { kind: 'global' },
+      [file('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
+      answer('merge').resolve,
+    );
+    expect(report.warnings).toEqual([
+      'Skipped ".agentnomad/claude.json": the process list was empty.',
+    ]);
+  });
+
   it('a broken .agentnomad/claude.json is skipped, not fatal', async () => {
     const report = await restorer().restorer.restore(
       { kind: 'global' },
@@ -585,6 +647,43 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
       ]);
     },
   );
+});
+
+describe('restorer: a cancelled question stops the restore (T53)', () => {
+  class Cancelled extends Error {}
+
+  it('a rejected conflict question rejects restore, and no later file is written', async () => {
+    await put(join(base, 'rules', 'a.md'), 'mine a');
+    await put(join(base, 'rules', 'b.md'), 'mine b');
+    const questions: string[] = [];
+    const restore = restorer().restorer.restore(
+      { kind: 'global' },
+      [file('rules/a.md', 'theirs a'), file('rules/b.md', 'theirs b'), file('rules/c.md', 'c')],
+      (path) => {
+        questions.push(path);
+        return Promise.reject(new Cancelled('Cancelled'));
+      },
+    );
+    await expect(restore).rejects.toBeInstanceOf(Cancelled);
+    expect(questions).toEqual(['rules/a.md']);
+    expect(await readdir(join(base, 'rules'))).toEqual(['a.md', 'b.md']);
+    expect(await read(join(base, 'rules', 'a.md'))).toBe('mine a');
+  });
+
+  it('a rejected "close Claude Code?" question rejects restore too', async () => {
+    await put(join(home, '.claude.json'), '{}');
+    const restore = restorer({
+      running: [true],
+      onClaudeRunning: () => Promise.reject(new Cancelled('Cancelled')),
+    }).restorer.restore(
+      { kind: 'global' },
+      [file('.agentnomad/claude.json', '{"diffTool":"terminal"}'), file('rules/z.md', 'z')],
+      answer('merge').resolve,
+    );
+    await expect(restore).rejects.toBeInstanceOf(Cancelled);
+    expect(await read(join(home, '.claude.json'))).toBe('{}');
+    await expect(read(join(base, 'rules', 'z.md'))).rejects.toThrow();
+  });
 });
 
 describe('restorer: auto memory folder chosen by project settings (T43)', () => {
@@ -648,6 +747,54 @@ describe('restorer: per-OS fixes', () => {
     expect(text(lineEndingsFor('win32', 'a.cmd', bytes('a\nb\n')))).toBe('a\r\nb\r\n');
     expect(text(lineEndingsFor('linux', 'a.cmd', bytes('a\r\nb\r\n')))).toBe('a\r\nb\r\n');
     expect(text(lineEndingsFor('linux', 'CLAUDE.md', bytes('a\r\nb')))).toBe('a\r\nb');
+  });
+
+  it('a script kept with the other line endings is unchanged: pulled twice, no question, no write (T53)', async () => {
+    // Git's autocrlf gives a CRLF .py on Windows; an LF .cmd comes from macOS or Linux.
+    const py = 'print("a")\r\nprint("b")\r\n';
+    const cmd = '@echo off\necho ok\n';
+    await put(join(base, 'hooks', 'check.py'), py);
+    await put(join(base, 'hooks', 'run.cmd'), cmd);
+    const incoming = [file('hooks/check.py', py), file('hooks/run.cmd', cmd)];
+    for (const choice of ['merge', 'overwrite'] as const) {
+      const { questions, resolve } = answer(choice);
+      const report = await restorer().restorer.restore({ kind: 'global' }, incoming, resolve);
+      expect(questions).toEqual([]);
+      expect(report.written).toEqual([]);
+      expect(report.backups).toEqual([]);
+    }
+    expect(await readdir(join(base, 'hooks'))).toEqual(['check.py', 'run.cmd']);
+    expect(await read(join(base, 'hooks', 'check.py'))).toBe(py);
+    expect(await read(join(base, 'hooks', 'run.cmd'))).toBe(cmd);
+  });
+
+  it('a script pulled onto a fresh PC is unchanged by a second pull (T53)', async () => {
+    const incoming = [
+      file('hooks/check.py', 'print("a")\r\n'),
+      file('hooks/run.cmd', '@echo off\n'),
+    ];
+    const first = await restorer().restorer.restore(
+      { kind: 'global' },
+      incoming,
+      answer('skip').resolve,
+    );
+    expect(first.written).toEqual(['hooks/check.py', 'hooks/run.cmd']);
+    const { questions, resolve } = answer('merge');
+    const second = await restorer().restorer.restore({ kind: 'global' }, incoming, resolve);
+    expect(questions).toEqual([]);
+    expect(second.written).toEqual([]);
+    expect(await readdir(join(base, 'hooks'))).toEqual(['check.py', 'run.cmd']);
+  });
+
+  it('sameForRestore: equal before or after the line-ending fix, never otherwise (T53)', () => {
+    const bytes = (text: string) => new TextEncoder().encode(text);
+    expect(sameForRestore('linux', 'a.py', bytes('a\r\n'), bytes('a\r\n'))).toBe(true);
+    expect(sameForRestore('linux', 'a.py', bytes('a\n'), bytes('a\r\n'))).toBe(true);
+    expect(sameForRestore('win32', 'a.cmd', bytes('a\n'), bytes('a\n'))).toBe(true);
+    expect(sameForRestore('win32', 'a.cmd', bytes('a\r\n'), bytes('a\n'))).toBe(true);
+    expect(sameForRestore('linux', 'a.cmd', bytes('a\r\n'), bytes('a\n'))).toBe(false);
+    expect(sameForRestore('linux', 'a.md', bytes('a\r\n'), bytes('a\n'))).toBe(false);
+    expect(sameForRestore('linux', 'a.py', bytes('b\n'), bytes('a\n'))).toBe(false);
   });
 
   it.runIf(posix)('makes scripts runnable on macOS and Linux, even from a Windows PC', async () => {

@@ -121,6 +121,19 @@ export function shellProfileFor(
 const isMissing = (error: unknown) =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
 
+/**
+ * Where to write `path`: a file linked from a dotfiles folder (stow, chezmoi) is written where
+ * it really is, so the link stays (T46). Only a link is followed: a plain or missing file
+ * keeps the path as given.
+ */
+export async function writeTargetOf(path: string): Promise<string> {
+  const link = await lstat(path).catch((error: unknown) => {
+    if (isMissing(error)) return null;
+    throw error;
+  });
+  return link?.isSymbolicLink() ? realpath(path) : path;
+}
+
 /** `20260925T120000Z`, as in the T11 backup names. */
 const stamp = (date: Date) =>
   date
@@ -136,14 +149,7 @@ export function createShellProfileWriter(
   return {
     where: profile.label,
     async write(variables) {
-      // A profile linked from a dotfiles folder (stow, chezmoi) is written where it really
-      // is, so the link stays (T46).
-      // Only a link is followed: a plain file keeps the path as given.
-      const link = await lstat(profile.path).catch((error: unknown) => {
-        if (isMissing(error)) return null;
-        throw error;
-      });
-      const target = link?.isSymbolicLink() ? await realpath(profile.path) : profile.path;
+      const target = await writeTargetOf(profile.path);
       let existing: string | null;
       // A new profile holds saved values, so only this user may read it (T46).
       let mode = 0o600;
