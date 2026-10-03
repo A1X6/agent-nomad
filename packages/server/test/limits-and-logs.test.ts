@@ -1,4 +1,5 @@
 import {
+  API_HEADERS,
   DEFAULT_KDF_PARAMS,
   ErrorResponseSchema,
   SessionResponseSchema,
@@ -191,6 +192,22 @@ describe('logging', () => {
         status: 200,
       }),
     );
+  });
+
+  it('logs the CLI version from x-an-client with the request (ARCH-03)', async () => {
+    await t.app.request('/health', { headers: { [API_HEADERS.client]: '1.0.4' } });
+    expect(t.logs).toContainEqual(
+      expect.objectContaining({ event: 'request', path: '/health', client: '1.0.4' }),
+    );
+  });
+
+  it('logs no version for older CLIs, and never logs a malformed one', async () => {
+    await t.app.request('/health');
+    await t.app.request('/health', { headers: { [API_HEADERS.client]: '1.0.4 "forged": true' } });
+    const lines = t.logs.filter((line) => line['event'] === 'request');
+    expect(lines.at(-2)).not.toHaveProperty('client');
+    expect(lines.at(-1)).toMatchObject({ client: 'invalid' });
+    expect(JSON.stringify(t.logs)).not.toContain('forged');
   });
 
   it('ignores a request id sent by the client, so log entries cannot be forged', async () => {
