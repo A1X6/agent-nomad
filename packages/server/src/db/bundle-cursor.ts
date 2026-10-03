@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { fromBase64Url, toBase64Url, utf8 } from '../encoding.ts';
 import { InvalidCursorError } from './repositories.ts';
 
 /**
@@ -47,14 +48,14 @@ function isRealTime(text: string): boolean {
 const CursorSchema = z.tuple([z.string().refine(isRealTime), z.uuid()]);
 
 export function encodeBundleCursor(cursor: BundleCursor): string {
-  return Buffer.from(JSON.stringify([cursor.updatedAt, cursor.id])).toString('base64url');
+  return toBase64Url(utf8(JSON.stringify([cursor.updatedAt, cursor.id])));
 }
 
 /** Throws InvalidCursorError for a cursor that is not well-formed. */
 export function decodeBundleCursor(encoded: string): BundleCursor {
   let json: unknown;
   try {
-    json = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    json = JSON.parse(new TextDecoder().decode(fromBase64Url(encoded)));
   } catch {
     throw new InvalidCursorError();
   }

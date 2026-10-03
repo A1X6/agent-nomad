@@ -122,7 +122,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### BUG-06 · Low · `verifyAuthKey` throws, instead of returning false, for a stored hash that is not hex
 
-- [ ] **Where:** `packages/server/src/auth/server-keys.ts:62-69`; cause: `packages/contracts/src/encoding.ts:26-27` (T72 made `fromHex` throw); test: `packages/server/test/server-keys.test.ts:16-23`
+- [x] **Where:** `packages/server/src/auth/server-keys.ts:62-69`; cause: `packages/contracts/src/encoding.ts:26-27` (T72 made `fromHex` throw); test: `packages/server/test/server-keys.test.ts:16-23`
 - **Problem:** `verifyAuthKey` runs `fromHex(storedHash.slice(AUTH_HASH_PREFIX.length))` before it checks the prefix. Since T72 (review 4 BP-03), `fromHex` throws "Not a hex string" for anything that is not even-length hex. The comment at lines 65-66 says the check runs "even for an unknown format" and only `known && matches` decides the result, but a stored hash in another format now throws before that point. Confirmed with `fromHex`: `'argon2id$v=19$m=65536$abc'` and `'hmac-sha256-v2$<64 hex>$salt'` throw, while `''`, `'auth-hash'` and `'hmac-sha256-v9$<64 hex>'` do not. The "unknown-format" test only uses the last kind (`stored.replace('v1', 'v9')`, hex payload), so it cannot catch this.
 - **Why it matters:** Nothing breaks today, because every stored hash is v1 and an unknown user passes `''`. But the file says a new scheme will be added "as v2 next to v1". If a v2 hash with a non-hex part reaches this code (for example during a rollout, or when the v2 branch falls through to v1), login and account delete answer 500 instead of 401. The time taken would then depend on the stored format, which the comment says must not happen.
 - **Fix:** Decode inside a guard that never throws, for example `const expected = known && /^[0-9a-f]{64}$/.test(rest) ? fromHex(rest) : new Uint8Array(32);`. Then call `subtle.verify` as now and return `known && matches`. Add `'argon2id$v=19$abc'` and `'hmac-sha256-v1$zz'` to the test at `server-keys.test.ts:16-23`, each expecting `false`.
@@ -174,7 +174,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### SEC-03 · Medium · Downloads and lists have no per-account limit
 
-- [ ] **Where:** `packages/server/src/http/routes/bundles.ts:76-82` (`writeLimit` is defined), `:120` and `:172` (it is used only on PUT and DELETE), `:85-116` (GET list and GET download have no limit); `packages/server/src/rate-limit/rate-limiter.ts:53-57` (the only rule for signed-in bundle routes is writes)
+- [x] **Where:** `packages/server/src/http/routes/bundles.ts:76-82` (`writeLimit` is defined), `:120` and `:172` (it is used only on PUT and DELETE), `:85-116` (GET list and GET download have no limit); `packages/server/src/rate-limit/rate-limiter.ts:53-57` (the only rule for signed-in bundle routes is writes)
 - **Problem:** A signed-in client can call `GET /bundles/:agent/:scopeKey` as often as it likes. Each call reads up to 5 MB from Postgres (`bundle_blobs`) and sends it out of Render. The per-IP limits cover only the auth routes, and `writesPerAccount` covers only saves and deletes. The test at `bundle-routes.test.ts:322-323` says so on purpose: "Reading is not limited this way."
 - **Why it matters:** Anyone can get an account (5 registrations per IP per hour). One account that downloads the same full 5 MB setup in a loop moves gigabytes an hour out of Neon and Render. On free tiers that can use up the shared transfer and compute for every user, so a single cheap account can take the service down.
 - **Fix:** Add a `readsPerAccount` rule to `RATE_LIMITS` (for example 600 an hour, far above what `pull` needs for 100 setups) and apply it to the download route with the same middleware shape as `writeLimit`. The list route is cheap and could stay unlimited, or share the rule. Add a route test like the writes test. The `429 rate_limited` code already exists, so installed 1.0.3 CLIs understand it.
@@ -279,7 +279,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DEAD-03 · Low · `putMeta`'s "another first save won the race" branch can no longer run
 
-- [ ] **Where:** `packages/server/src/db/bundle-repository.ts:101-108` (the user row is locked first) and `:121-134` (`onConflictDoNothing`, then a second lock and "Saved setup vanished")
+- [x] **Where:** `packages/server/src/db/bundle-repository.ts:101-108` (the user row is locked first) and `:121-134` (`onConflictDoNothing`, then a second lock and "Saved setup vanished")
 - **Problem:** Since T47, every save locks the user row (`for update`) before it reads the setup. Two first saves of the same setup therefore run one after the other. The second one's `lockCurrent()` is a new statement under READ COMMITTED, so it already sees the row the first one committed. It takes the "current exists" path and never reaches the insert. `onConflictDoNothing`, the second `lockCurrent()` and its error are left over from before the user lock. The comment "Another first save won the race" describes something that cannot happen now. No test reaches it, because PGlite has one connection.
 - **Why it matters:** Readers trust the wrong guard. Someone may "simplify" the user lock away because the insert looks race-safe, or keep code that cannot be tested.
 - **Fix:** Either remove the `onConflictDoNothing` branch and state in one comment that the user lock serializes all saves of an account, or keep it as a safety net and reword the comment: "Unreachable while saves lock the user row; kept so a missing lock fails safe."
@@ -355,7 +355,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DUP-06 · Low · The storage-limit rule is written twice, in the service and in the repository
 
-- [ ] **Where:** `packages/server/src/bundles/bundle-service.ts:157-167` (early check); `packages/server/src/db/bundle-repository.ts:110-119` (check inside the transaction)
+- [x] **Where:** `packages/server/src/bundles/bundle-service.ts:157-167` (early check); `packages/server/src/db/bundle-repository.ts:110-119` (check inside the transaction)
 - **Problem:** The same business rule is written in two different forms. The service refuses with `!current && used.setups >= maxSetups` and `growth > 0 && used.bytes + growth > maxBytes`. The repository refuses with `used.setups + (current ? 0 : 1) > maxSetups` and `bytes > maxBytes && write.sizeBytes > current.sizeBytes`. They agree today. The repository (data layer) also imports `USER_STORAGE_LIMITS` and decides a business limit.
 - **Why it matters:** If the rule changes (a new limit, or a plan with higher limits), both copies must change the same way. If only one changes, the early check and the locked check disagree. A save then either stores 5 MB before being refused, or passes the early check and fails inside the transaction.
 - **Fix:** One pure function, for example `storageLimitPassed(used, currentSize: number | null, newSize): StorageLimit | null`, next to `overLimit` in `bundle-service.ts` (or in `repositories.ts`). Both places call it: the repository with numbers it read under the locks, the service with numbers it read early. Unit-test the function once.
@@ -364,7 +364,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DUP-07 · Low · The server does base64url and SHA-256 two ways each
 
-- [ ] **Where:** base64url: `packages/server/src/encoding.ts:4-6` (`toBase64Url` by string replacement, used for session tokens) and `packages/server/src/db/bundle-cursor.ts:50` and `:57` (`Buffer` `'base64url'`); SHA-256: `packages/server/src/auth/session-tokens.ts:17-19` (`subtle.digest`, then hex) and `packages/server/src/bundles/bundle-service.ts:100-102` (a local `sha256`, bytes)
+- [x] **Where:** base64url: `packages/server/src/encoding.ts:4-6` (`toBase64Url` by string replacement, used for session tokens) and `packages/server/src/db/bundle-cursor.ts:50` and `:57` (`Buffer` `'base64url'`); SHA-256: `packages/server/src/auth/session-tokens.ts:17-19` (`subtle.digest`, then hex) and `packages/server/src/bundles/bundle-service.ts:100-102` (a local `sha256`, bytes)
 - **Problem:** The server has its own `encoding.ts` for "server-only text conversions", but the cursor encoder uses Node's `Buffer` instead. The digest call is also written in two files.
 - **Why it matters:** Small. It is against the project's "one implementation per job" rule (T62), and the next file to need either one has two to choose from.
 - **Fix:** Add `fromBase64Url` and `sha256(bytes)` to `src/encoding.ts`. `bundle-cursor.ts` then uses `toBase64Url(utf8(json))` and `fromBase64Url`, and both digest callers use `sha256`. Keep the cursor's decode errors as `InvalidCursorError`.
@@ -373,7 +373,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DUP-08 · Low · Server test helpers are still copied across test files
 
-- [ ] **Where:**
+- [x] **Where:**
   - SHA-256 of a body: `packages/server/test/bundle-routes.test.ts:16`, `packages/server/test/bundle-service.test.ts:16`, inline at `packages/server/test/account-routes.test.ts:41` and `packages/server/test/support/fixtures.ts:95`
   - Read the error code from a response: `account-routes.test.ts:72-74`, `auth-routes.test.ts:32-34`, `bundle-routes.test.ts:67-69`
   - Scope key from an index (`index.toString(16).padStart(64, '0')`): `fixtures.ts:93`, `bundle-routes.test.ts:233` and `:297`, `repositories.test.ts:353`, `:382` and `:429`
@@ -482,7 +482,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-10 · Low · Stale comments and a vague name in the server source
 
-- [ ] **Where:**
+- [x] **Where:**
   - `packages/server/src/rate-limit/rate-limiter.ts:43-47`: the comment on `failedLoginsPerAccount` says "Failed logins or account deletes per account", but account deletes have had their own rule (`failedDeletesPerAccount`, lines 48-52) since T47.
   - `packages/server/src/server.ts:24-25`: "Share of rate-limit hits that also prune expired counters". The same prune also deletes every user's expired sessions (`api.ts:42-43`).
   - `packages/server/src/auth/auth-service.ts:81` and `:147-148`: `const FAILED = RATE_LIMITS.failedLoginsPerAccount` is used once, and "FAILED" no longer says which of the two failure rules it is.
@@ -495,7 +495,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-11 · Low · A test names a column for the opposite of what it checks
 
-- [ ] **Where:** `packages/server/test/auth-routes.test.ts:270-273`
+- [x] **Where:** `packages/server/test/auth-routes.test.ts:270-273`
 - **Problem:** `select last_used_at > now() - interval '1 minute' as idle` is true when the session was just used, then `expect(rows[0]?.idle).toBe(true)`. The test is right, but `idle` means the opposite.
 - **Why it matters:** The next reader thinks the test asserts the session is idle.
 - **Fix:** Rename the alias to `recently_used` (and the type field).
@@ -638,7 +638,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### QA-06 · Low · The "identical push" half of the retry rule has no test
 
-- [ ] **Where:** `packages/server/src/db/bundle-repository.ts:136-143` (`isRetry` is `current.revision === expectedRevision || current.revision === expectedRevision + 1`); tests: `packages/server/test/repositories.test.ts:300-310`, `packages/server/test/bundle-routes.test.ts:165-172`
+- [x] **Where:** `packages/server/src/db/bundle-repository.ts:136-143` (`isRetry` is `current.revision === expectedRevision || current.revision === expectedRevision + 1`); tests: `packages/server/test/repositories.test.ts:300-310`, `packages/server/test/bundle-routes.test.ts:165-172`
 - **Problem:** Both tests send the same bytes again with the old expected revision, which is the `+ 1` case. No test sends the same bytes with the current revision, which is the "identical push" the comment names. If the first half of the condition were deleted, an identical push would make a new revision with the same bytes, and every test would still pass. A repo-wide search for "unchanged" and "identical" in the server and e2e tests finds only the `+ 1` test.
 - **Why it matters:** The upload idempotency rule is half tested. A change there would add useless revisions and cause revision conflicts on other PCs without any test failing.
 - **Fix:** In `repositories.test.ts`, save revision 1, then `putMeta` the same hash with `expectedRevision: 1` and expect `{ outcome: 'unchanged', meta: { revision: 1 } }`, with the current blob unchanged.

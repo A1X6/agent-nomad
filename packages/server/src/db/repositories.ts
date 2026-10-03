@@ -1,4 +1,10 @@
-import type { AgentId, KdfParams, ScopeKey, Username } from '@agentnomad/contracts';
+import {
+  USER_STORAGE_LIMITS,
+  type AgentId,
+  type KdfParams,
+  type ScopeKey,
+  type Username,
+} from '@agentnomad/contracts';
 
 /** A stored account. Holds nothing that can decrypt the user's data. */
 export interface UserRecord {
@@ -134,6 +140,29 @@ export type PutMetaResult =
 /** Which per-account limit a save would pass: the number of setups or their bytes. */
 export type StorageLimit = 'setups' | 'bytes';
 
+/** What an account keeps now: how many setups, and their bytes. */
+export interface StorageUsage {
+  readonly setups: number;
+  readonly bytes: number;
+}
+
+/**
+ * The storage rule (T47) in one place (DUP-06): the limit a save would pass, or `null`.
+ * `currentSize` is the size of the setup it replaces, `null` for a new setup. A new revision
+ * of an existing setup never passes the count, and a save that does not grow never passes
+ * the bytes, so nobody gets stuck at a limit.
+ */
+export function storageLimitPassed(
+  used: StorageUsage,
+  currentSize: number | null,
+  newSize: number,
+): StorageLimit | null {
+  if (currentSize === null && used.setups >= USER_STORAGE_LIMITS.maxSetups) return 'setups';
+  const growth = newSize - (currentSize ?? 0);
+  if (growth > 0 && used.bytes + growth > USER_STORAGE_LIMITS.maxBytes) return 'bytes';
+  return null;
+}
+
 export interface BundlePage {
   readonly items: readonly BundleMeta[];
   readonly nextCursor: string | null;
@@ -156,7 +185,7 @@ export interface BundleRepository {
    */
   putMeta(write: BundleMetaWrite): Promise<PutMetaResult>;
   /** How many setups the user keeps and their encrypted bytes together (T47). */
-  usage(userId: string): Promise<{ readonly setups: number; readonly bytes: number }>;
+  usage(userId: string): Promise<StorageUsage>;
   /** Returns what was removed (so its file can be deleted next), or `null` if nothing was. */
   delete(key: BundleKey): Promise<BundleMeta | null>;
 }

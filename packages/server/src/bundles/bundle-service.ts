@@ -1,12 +1,14 @@
 import { GLOBAL_SCOPE_KEY, USER_STORAGE_LIMITS, sameBytes } from '@agentnomad/contracts';
 
-import type {
-  BundleKey,
-  BundleMeta,
-  BundlePage,
-  BundleRepository,
-  StorageLimit,
+import {
+  storageLimitPassed,
+  type BundleKey,
+  type BundleMeta,
+  type BundlePage,
+  type BundleRepository,
+  type StorageLimit,
 } from '../db/repositories.ts';
+import { sha256 } from '../encoding.ts';
 import type { BlobStore } from '../storage/blob-store.ts';
 
 /** Nonce (24) + Poly1305 tag (16): anything shorter cannot be an encrypted bundle. */
@@ -97,10 +99,6 @@ export interface BundleServiceDeps {
 /** Files left unused for this long are swept: far longer than any upload takes. */
 const ORPHAN_AGE_SECONDS = 60 * 60;
 
-async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-}
-
 export function createBundleService(deps: BundleServiceDeps): BundleService {
   const { bundles, blobs, logError } = deps;
   const shouldSweep = deps.shouldSweep ?? (() => Math.random() < 0.02);
@@ -158,13 +156,8 @@ export function createBundleService(deps: BundleServiceDeps): BundleService {
       // same check runs again inside the save, where it cannot be raced.
       const { userId } = input.key;
       const [used, current] = await Promise.all([bundles.usage(userId), bundles.get(input.key)]);
-      if (!current && used.setups >= USER_STORAGE_LIMITS.maxSetups) {
-        throw new StorageLimitError(overLimit('setups'));
-      }
-      const growth = input.ciphertext.length - (current?.sizeBytes ?? 0);
-      if (growth > 0 && used.bytes + growth > USER_STORAGE_LIMITS.maxBytes) {
-        throw new StorageLimitError(overLimit('bytes'));
-      }
+      const limit = storageLimitPassed(used, current?.sizeBytes ?? null, input.ciphertext.length);
+      if (limit) throw new StorageLimitError(overLimit(limit));
 
       // 1. Store the bytes under a new random id; the current copy is untouched.
       const uploaded = await blobs.put(userId, input.ciphertext);

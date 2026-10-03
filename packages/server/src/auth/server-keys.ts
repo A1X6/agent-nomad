@@ -12,6 +12,9 @@ const FAKE_SALT_LABEL = 'agentnomad/server/prelogin-salt/v1';
 const PSEUDONYM_LABEL = 'agentnomad/server/rate-limit-key/v1';
 /** Prefix of stored auth hashes, so a later scheme can be told apart. */
 const AUTH_HASH_PREFIX = 'hmac-sha256-v1$';
+/** HMAC-SHA-256 output size, and the hex that follows the prefix. */
+const AUTH_HASH_BYTES = 32;
+const AUTH_HASH_HEX = /^[0-9a-f]{64}$/;
 
 export interface ServerKeys {
   /** What `users.auth_hash` stores for an auth key. */
@@ -60,8 +63,10 @@ export async function createServerKeys(serverSecret: Uint8Array): Promise<Server
     },
 
     async verifyAuthKey(authKey, storedHash) {
-      const known = storedHash.startsWith(AUTH_HASH_PREFIX);
-      const expected = fromHex(storedHash.slice(AUTH_HASH_PREFIX.length));
+      const rest = storedHash.slice(AUTH_HASH_PREFIX.length);
+      const known = storedHash.startsWith(AUTH_HASH_PREFIX) && AUTH_HASH_HEX.test(rest);
+      // Decode only what is known to be hex: fromHex throws on anything else (BUG-06).
+      const expected = known ? fromHex(rest) : new Uint8Array(AUTH_HASH_BYTES);
       // subtle.verify compares in constant time. Run it even for an unknown format, so the
       // time taken does not depend on what is stored.
       const matches = await crypto.subtle.verify('HMAC', authHashKey, expected, authKey);

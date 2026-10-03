@@ -5,7 +5,14 @@ import { describeError } from '../src/logging/logger.ts';
 import { RATE_LIMITS } from '../src/rate-limit/rate-limiter.ts';
 import { createServerFromEnv } from '../src/server.ts';
 import { TEST_IP_HEADER, createTestApp, postJson, type TestApp } from './support/app.ts';
-import { b64, bytes, registerUser } from './support/fixtures.ts';
+import {
+  b64,
+  bytes,
+  deleteAccountRequest,
+  errorCode,
+  loginRequest,
+  registerUser,
+} from './support/fixtures.ts';
 
 const goodKey = b64(bytes(32, 1));
 const badKey = b64(bytes(32, 2));
@@ -25,16 +32,12 @@ const fromIp = (ip: string) => ({ [TEST_IP_HEADER]: ip });
 const register = (username: string, ip = '198.51.100.1') =>
   registerUser(t.app, username, { authKey: goodKey, headers: fromIp(ip) });
 
-async function login(username: string, authKey: string, ip = '198.51.100.1'): Promise<Response> {
-  return t.app.request(
-    '/auth/login',
-    postJson({ username, authKey, deviceName: 'pc' }, fromIp(ip)),
-  );
-}
+const login = (username: string, authKey: string, ip = '198.51.100.1') =>
+  loginRequest(t.app, username, authKey, { headers: fromIp(ip) });
 
 async function expectRateLimited(res: Response) {
   expect(res.status).toBe(429);
-  expect(ErrorResponseSchema.parse(await res.json()).error.code).toBe('rate_limited');
+  expect(await errorCode(res)).toBe('rate_limited');
   expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
 }
 
@@ -105,11 +108,7 @@ describe('failed logins per account', () => {
   it('failed logins by someone else never block the owner deleting the account (T47)', async () => {
     const token = SessionResponseSchema.parse(await (await register('ahmed')).json()).sessionToken;
     for (let index = 0; index < limit; index++) await login('ahmed', badKey);
-    const res = await t.app.request('/account', {
-      method: 'DELETE',
-      body: JSON.stringify({ authKey: goodKey }),
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    });
+    const res = await deleteAccountRequest(t.app, token, { authKey: goodKey });
     expect(res.status).toBe(204);
   });
 
@@ -122,12 +121,7 @@ describe('failed logins per account', () => {
 
   it('also limits wrong-password account deletes', async () => {
     const token = SessionResponseSchema.parse(await (await register('ahmed')).json()).sessionToken;
-    const del = (authKey: string) =>
-      t.app.request('/account', {
-        method: 'DELETE',
-        body: JSON.stringify({ authKey }),
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      });
+    const del = (authKey: string) => deleteAccountRequest(t.app, token, { authKey });
     for (let index = 0; index < limit; index++) expect((await del(badKey)).status).toBe(401);
     await expectRateLimited(await del(goodKey));
   });

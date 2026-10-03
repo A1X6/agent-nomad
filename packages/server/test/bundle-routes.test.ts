@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import {
   ErrorResponseSchema,
   GetBundleResponseHeadersSchema,
@@ -12,8 +10,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RATE_LIMITS } from '../src/rate-limit/rate-limiter.ts';
 import { createTestApp, type TestApp } from './support/app.ts';
-import { b64, bytes, registerForToken, seedSetups } from './support/fixtures.ts';
-const sha256Hex = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
+import {
+  b64,
+  bytes,
+  errorCode,
+  registerForToken,
+  scopeKeyOf,
+  seedSetups,
+  sha256Hex,
+} from './support/fixtures.ts';
 
 const PROJECT = 'a'.repeat(64);
 const GLOBAL_PATH = '/bundles/claude-code/global';
@@ -84,7 +89,7 @@ describe('access', () => {
   ])('%s %s needs a session', async (method, path) => {
     const res = await t.app.request(path, { method });
     expect(res.status).toBe(401);
-    expect((await error(res)).code).toBe('unauthorized');
+    expect(await errorCode(res)).toBe('unauthorized');
   });
 
   it("never shows, returns or deletes another user's setup", async () => {
@@ -125,7 +130,7 @@ describe('PUT then GET', () => {
     const token = await register();
     const res = await t.app.request(GLOBAL_PATH, as(token));
     expect(res.status).toBe(404);
-    expect((await error(res)).code).toBe('not_found');
+    expect(await errorCode(res)).toBe('not_found');
   });
 
   it('keeps project names encrypted and returns them with the bytes', async () => {
@@ -196,7 +201,7 @@ describe('PUT checks', () => {
     expect(max.status).toBe(200);
     const over = await put(token, { expected: 1, body: bytes(MAX_BUNDLE_BYTES + 1, 2) });
     expect(over.status).toBe(413);
-    expect((await error(over)).code).toBe('payload_too_large');
+    expect(await errorCode(over)).toBe('payload_too_large');
   });
 
   it.each([
@@ -211,7 +216,7 @@ describe('PUT checks', () => {
     const token = await register();
     const res = await put(token, { expected: 0, ...options });
     expect(res.status).toBe(400);
-    expect((await error(res)).code).toBe('bad_request');
+    expect(await errorCode(res)).toBe('bad_request');
     expect(await fileCount()).toBe(0);
   });
 });
@@ -230,7 +235,7 @@ describe('GET /bundles', () => {
   it('lists metadata only, newest first, page by page', async () => {
     const token = await register();
     for (let index = 0; index < 5; index++) {
-      const scopeKey = index.toString(16).padStart(64, '0');
+      const scopeKey = scopeKeyOf(index);
       await put(token, {
         expected: 0,
         body: bytes(64, index),
@@ -264,7 +269,7 @@ describe('GET /bundles', () => {
       const token = await register();
       const res = await t.app.request(`/bundles${query}`, as(token));
       expect(res.status).toBe(400);
-      expect((await error(res)).code).toBe('bad_request');
+      expect(await errorCode(res)).toBe('bad_request');
     },
   );
 });
@@ -294,7 +299,7 @@ describe('limits per account (T47)', () => {
     // All but the last straight into the database; the last one through the API (QA-12).
     const last = USER_STORAGE_LIMITS.maxSetups - 1;
     await seedSetups(t.database.db, 'ahmed', last);
-    const lastPath = `/bundles/claude-code/${last.toString(16).padStart(64, '0')}`;
+    const lastPath = `/bundles/claude-code/${scopeKeyOf(last)}`;
     const atLimit = await put(token, {
       expected: 0,
       body: bytes(64, 1),
@@ -318,8 +323,36 @@ describe('limits per account (T47)', () => {
     }
     const res = await t.app.request(GLOBAL_PATH, as(token, 'DELETE'));
     expect(res.status).toBe(429);
-    expect((await error(res)).code).toBe('rate_limited');
-    // Reading is not limited this way.
+    expect(await errorCode(res)).toBe('rate_limited');
+    // Downloads have their own limit, and the list has none.
+    expect((await t.app.request(GLOBAL_PATH, as(token))).status).toBe(404);
     expect((await t.app.request('/bundles', as(token))).status).toBe(200);
+  });
+
+  it(`allows ${String(RATE_LIMITS.readsPerAccount.limit)} downloads an hour per account, then 429 (SEC-03)`, async () => {
+    const token = await register();
+    const other = await register('other');
+    expect((await put(token, { expected: 0, body: bytes(64) })).status).toBe(200);
+    const { rows: before } = await t.database.client.query<{ key: string }>(
+      'select key from rate_limits',
+    );
+    expect((await t.app.request(GLOBAL_PATH, as(token))).status).toBe(200);
+    // Skip ahead to the last allowed download instead of making hundreds of requests: the
+    // only new counter is this account's download counter.
+    const { affectedRows } = await t.database.client.query(
+      'update rate_limits set count = $1 where not (key = any($2))',
+      [RATE_LIMITS.readsPerAccount.limit - 1, before.map((row) => row.key)],
+    );
+    expect(affectedRows).toBe(1);
+    expect((await t.app.request(GLOBAL_PATH, as(token))).status).toBe(200);
+
+    const res = await t.app.request(GLOBAL_PATH, as(token));
+    expect(res.status).toBe(429);
+    expect(await errorCode(res)).toBe('rate_limited');
+    expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
+    // Per account: another account still downloads; the list and saves are not counted here.
+    expect((await t.app.request(GLOBAL_PATH, as(other))).status).toBe(404);
+    expect((await t.app.request('/bundles', as(token))).status).toBe(200);
+    expect((await put(token, { expected: 1, body: bytes(64, 2) })).status).toBe(200);
   });
 });

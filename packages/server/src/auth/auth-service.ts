@@ -78,8 +78,6 @@ export interface AuthServiceDeps {
   readonly limiter: RateLimiter;
 }
 
-const FAILED = RATE_LIMITS.failedLoginsPerAccount;
-
 export function createAuthService(deps: AuthServiceDeps): AuthService {
   const { users, sessions, keys, now, randomBytes, limiter } = deps;
 
@@ -145,7 +143,7 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       // Do the same hashing work for an unknown user, so response time does not reveal
       // whether the account exists.
       await guardedCheck(
-        FAILED,
+        RATE_LIMITS.failedLoginsPerAccount,
         username,
         async () => (await keys.verifyAuthKey(authKey, user?.authHash ?? '')) && user !== null,
       );

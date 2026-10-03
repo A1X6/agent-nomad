@@ -475,9 +475,11 @@ deleted, so two PCs saving at once can never overwrite or delete each other's fi
 **Limits and logs:** 30 auth requests per minute per IP, 5 registrations per hour per IP
 (an IPv6 address counts by its /64), 10 failed logins per account and 10 wrong-password
 account deletes per account per 15 minutes (counted before the check, so parallel guesses
-cannot slip past), 120 saves and deletes per account per hour; `429` with `Retry-After`.
+cannot slip past), 120 saves and deletes and 600 downloads per account per hour (the list of
+setups has no limit); `429` with `Retry-After`.
 Each account keeps at most 100 setups and 50 MB of encrypted bytes (checked before storing
-anything and again inside the save's transaction, with the user row locked); over it,
+anything and again inside the save's transaction, with the user row locked, both with one
+rule, `storageLimitPassed`); over it,
 `413 payload_too_large` says which limit. The visitor's IP is Cloudflare's
 `CF-Connecting-IP` (`True-Client-IP` when that is missing). About one save in 50 also deletes
 files no setup points to that are over an hour old, and about one rate-limited request in 100 prunes old counters and every user's expired sessions; a failed sweep or prune is logged and never fails the request. Register writes the account and its first session in one transaction. Logs are one JSON line per request with
@@ -771,11 +773,11 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `api.ts`                                                                       | `createApi`, the composition root: limiter, services and app from a database (all callers use it).   |
 | `index.ts`                                                                     | Re-exports for tests and the e2e server.                                                             |
 | `port.ts`                                                                      | The port from `PORT`.                                                                                |
-| `encoding.ts`                                                                  | Base64url and UTF-8 for tokens; base64 and hex come from contracts.                                  |
+| `encoding.ts`                                                                  | Base64url, UTF-8 and SHA-256 for tokens, cursors and uploads; base64 and hex come from contracts.    |
 | `db/env.ts`                                                                    | Reading and checking `DATABASE_URL` and `SERVER_SECRET`.                                             |
 | `db/schema.ts`                                                                 | The Drizzle tables and their constraints.                                                            |
 | `db/database.ts`                                                               | The driver-independent `Database` type (Neon in production, PGlite in tests).                        |
-| `db/repositories.ts`                                                           | Repository interfaces and their errors.                                                              |
+| `db/repositories.ts`                                                           | Repository interfaces, their errors and the storage-limit rule.                                      |
 | `db/user-repository.ts`, `db/session-repository.ts`, `db/bundle-repository.ts` | Accounts, sessions (token hashes) and bundle metadata in Postgres, with the revision check.          |
 | `db/bundle-cursor.ts`                                                          | Opaque list cursors, format-checked (a real date and time, a UUID); queries stay scoped to the user. |
 | `storage/blob-store.ts`                                                        | The `BlobStore` interface: encrypted bytes under random ids (R2 later).                              |
@@ -791,7 +793,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `http/session.ts`                                                              | `requireSession`: the bearer token, one identical 401 for every failure.                             |
 | `http/validate.ts`                                                             | Parsing bodies, queries, params and headers with the contracts.                                      |
 | `http/small-body.ts`                                                           | Size limit for JSON requests.                                                                        |
-| `http/rate-limit.ts`                                                           | Per-IP limits on routes.                                                                             |
+| `http/rate-limit.ts`                                                           | Per-IP and per-account limits on routes.                                                             |
 | `http/errors.ts`                                                               | The standard error body; 500 details only in logs.                                                   |
 | `hosting/client-ip.ts`                                                         | The visitor's IP on Render (Cloudflare's header).                                                    |
 | `logging/logger.ts`                                                            | JSON log lines with only safe fields.                                                                |

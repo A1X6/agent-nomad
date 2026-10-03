@@ -1,6 +1,5 @@
 import {
   DEFAULT_KDF_PARAMS,
-  ErrorResponseSchema,
   LoginResponseSchema,
   PreloginResponseSchema,
   SessionResponseSchema,
@@ -10,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SESSION_LIFETIME_MS } from '../src/auth/auth-service.ts';
 import { createTestApp, postJson, type TestApp } from './support/app.ts';
-import { b64, bytes, registerForToken, registration } from './support/fixtures.ts';
+import { b64, bytes, errorCode, registerForToken, registration } from './support/fixtures.ts';
 
 const realKdf: KdfParams = { ...DEFAULT_KDF_PARAMS, memoryKiB: 131_072 };
 const authKey = b64(bytes(32, 1));
@@ -28,10 +27,6 @@ afterEach(async () => {
 });
 
 const register = (username = 'ahmed') => registerForToken(t.app, username, { kdfParams: realKdf });
-
-async function errorCode(res: Response): Promise<string> {
-  return ErrorResponseSchema.parse(await res.json()).error.code;
-}
 
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
@@ -267,9 +262,9 @@ describe('sessions', () => {
     const token = await register();
     await t.database.client.query(`update sessions set last_used_at = now() - interval '2 days'`);
     expect(await t.auth.authenticate(token)).not.toBeNull();
-    const { rows } = await t.database.client.query<{ idle: boolean }>(
-      `select last_used_at > now() - interval '1 minute' as idle from sessions`,
+    const { rows } = await t.database.client.query<{ recently_used: boolean }>(
+      `select last_used_at > now() - interval '1 minute' as recently_used from sessions`,
     );
-    expect(rows[0]?.idle).toBe(true);
+    expect(rows[0]?.recently_used).toBe(true);
   });
 });

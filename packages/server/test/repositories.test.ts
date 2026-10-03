@@ -11,6 +11,7 @@ import {
   createSessionRepository,
   createUserRepository,
   sessions,
+  storageLimitPassed,
   type BlobStore,
   type BundleKey,
   type BundleMetaWrite,
@@ -20,7 +21,7 @@ import {
 } from '../src/index.ts';
 import { encodeBundleCursor } from '../src/db/bundle-cursor.ts';
 import { createTestDatabase, type TestDatabase } from './support/database.ts';
-import { bytes, createUser, newUser, seedSetups } from './support/fixtures.ts';
+import { bytes, createUser, newUser, scopeKeyOf, seedSetups } from './support/fixtures.ts';
 
 const hash = (fill: number) => bytes(32, fill);
 
@@ -309,6 +310,21 @@ describe('BundleRepository.putMeta', () => {
     expect((await bundleRepo.get(globalKey(user.id)))?.blobId).toBe(upload.blobId);
   });
 
+  it('treats an identical push of the current revision as unchanged (QA-06)', async () => {
+    const user = await createUser(database.db, 'ahmed');
+    const upload = await blobs.put(user.id, bytes(40));
+    await bundleRepo.putMeta(write({ userId: user.id }, 0, upload.blobId, 1));
+
+    // Pushed again with nothing changed: same bytes, and the client saw revision 1.
+    const again = await blobs.put(user.id, bytes(40));
+    const result = await bundleRepo.putMeta(write({ userId: user.id }, 1, again.blobId, 1));
+    expect(result).toMatchObject({ outcome: 'unchanged', meta: { revision: 1 } });
+    expect(await bundleRepo.get(globalKey(user.id))).toMatchObject({
+      revision: 1,
+      blobId: upload.blobId,
+    });
+  });
+
   it('keeps separate setups per agent and scope', async () => {
     const user = await createUser(database.db, 'ahmed');
     const global = await blobs.put(user.id, bytes(40));
@@ -347,22 +363,41 @@ describe('BundleRepository.putMeta', () => {
   });
 });
 
+describe('storageLimitPassed (DUP-06)', () => {
+  const { maxSetups, maxBytes } = USER_STORAGE_LIMITS;
+
+  it('refuses a new setup past the count, never a new revision of one', () => {
+    const full = { setups: maxSetups, bytes: 0 };
+    expect(storageLimitPassed({ setups: maxSetups - 1, bytes: 0 }, null, 40)).toBeNull();
+    expect(storageLimitPassed(full, null, 40)).toBe('setups');
+    expect(storageLimitPassed(full, 40, 80)).toBeNull();
+  });
+
+  it('refuses growing past the bytes, never a save that does not grow', () => {
+    expect(storageLimitPassed({ setups: 1, bytes: maxBytes - 40 }, null, 40)).toBeNull();
+    expect(storageLimitPassed({ setups: 1, bytes: maxBytes - 40 }, null, 41)).toBe('bytes');
+    expect(storageLimitPassed({ setups: 1, bytes: maxBytes - 40 }, 40, 81)).toBe('bytes');
+    // Already over (say the limit was lowered): the same size or smaller still saves.
+    expect(storageLimitPassed({ setups: 1, bytes: maxBytes + 1 }, 40, 40)).toBeNull();
+    expect(storageLimitPassed({ setups: 1, bytes: maxBytes + 1 }, 40, 39)).toBeNull();
+  });
+});
+
 describe('storage limits per account (T47)', () => {
   it(`refuses a new setup past ${String(USER_STORAGE_LIMITS.maxSetups)}, never an update`, async () => {
     const user = await createUser(database.db, 'ahmed');
-    const scopeKey = (index: number) => index.toString(16).padStart(64, '0');
     await seedSetups(database.db, 'ahmed', USER_STORAGE_LIMITS.maxSetups);
     const one = await blobs.put(user.id, bytes(40));
     expect(
       await bundleRepo.putMeta(
-        write({ userId: user.id, scopeKey: scopeKey(999) }, 0, one.blobId, 1),
+        write({ userId: user.id, scopeKey: scopeKeyOf(999) }, 0, one.blobId, 1),
       ),
     ).toEqual({ outcome: 'over-limit', limit: 'setups' });
     // A new revision of an existing setup still saves.
     const update = await blobs.put(user.id, bytes(40, 2));
     expect(
       await bundleRepo.putMeta(
-        write({ userId: user.id, scopeKey: scopeKey(0) }, 1, update.blobId, 2),
+        write({ userId: user.id, scopeKey: scopeKeyOf(0) }, 1, update.blobId, 2),
       ),
     ).toMatchObject({ outcome: 'saved' });
     expect(await bundleRepo.usage(user.id)).toEqual({
@@ -379,25 +414,24 @@ describe('storage limits per account (T47)', () => {
     });
     // Each setup is at most 5 MB, so the limit is reached with full ones.
     const full = Math.floor(USER_STORAGE_LIMITS.maxBytes / MAX_BUNDLE_BYTES);
-    const scopeKey = (index: number) => index.toString(16).padStart(64, '0');
     for (let index = 0; index < full; index++) {
       const blob = await blobs.put(user.id, bytes(40));
       await bundleRepo.putMeta(
-        big({ scopeKey: scopeKey(index) }, 0, blob.blobId, MAX_BUNDLE_BYTES),
+        big({ scopeKey: scopeKeyOf(index) }, 0, blob.blobId, MAX_BUNDLE_BYTES),
       );
     }
     const extra = await blobs.put(user.id, bytes(40));
-    expect(await bundleRepo.putMeta(big({ scopeKey: scopeKey(999) }, 0, extra.blobId, 40))).toEqual(
-      { outcome: 'over-limit', limit: 'bytes' },
-    );
+    expect(
+      await bundleRepo.putMeta(big({ scopeKey: scopeKeyOf(999) }, 0, extra.blobId, 40)),
+    ).toEqual({ outcome: 'over-limit', limit: 'bytes' });
     // The same size again, or smaller: always saved, so nobody gets stuck at the limit.
     const same = await blobs.put(user.id, bytes(40));
     expect(
-      await bundleRepo.putMeta(big({ scopeKey: scopeKey(0) }, 1, same.blobId, MAX_BUNDLE_BYTES)),
+      await bundleRepo.putMeta(big({ scopeKey: scopeKeyOf(0) }, 1, same.blobId, MAX_BUNDLE_BYTES)),
     ).toMatchObject({ outcome: 'saved' });
     const smaller = await blobs.put(user.id, bytes(40));
     expect(
-      await bundleRepo.putMeta(big({ scopeKey: scopeKey(1) }, 1, smaller.blobId, 40)),
+      await bundleRepo.putMeta(big({ scopeKey: scopeKeyOf(1) }, 1, smaller.blobId, 40)),
     ).toMatchObject({
       outcome: 'saved',
     });
@@ -425,9 +459,7 @@ describe('BundleRepository.list', () => {
   async function saveSetups(userId: string, count: number) {
     for (let index = 0; index < count; index++) {
       const blob = await blobs.put(userId, bytes(40));
-      await bundleRepo.putMeta(
-        write({ userId, scopeKey: index.toString(16).padStart(64, '0') }, 0, blob.blobId, 1),
-      );
+      await bundleRepo.putMeta(write({ userId, scopeKey: scopeKeyOf(index) }, 0, blob.blobId, 1));
     }
   }
 
@@ -474,7 +506,7 @@ describe('BundleRepository.list', () => {
     expect((await bundleRepo.list(other.id, { limit: 10 })).items).toEqual([]);
   });
 
-  it.each(['not-a-cursor', 'W10', Buffer.from('["x","y"]').toString('base64url')])(
+  it.each(['not-a-cursor', 'not+a/cursor', 'W10', Buffer.from('["x","y"]').toString('base64url')])(
     'throws InvalidCursorError for cursor %j',
     async (cursor) => {
       const user = await createUser(database.db, 'ahmed');

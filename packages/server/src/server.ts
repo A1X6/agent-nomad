@@ -21,7 +21,7 @@ export interface Server {
   close(): Promise<void>;
 }
 
-/** Share of rate-limit hits that also prune expired counters. */
+/** Share of rate-limit hits that also prune expired counters and sessions. */
 const PRUNE_CHANCE = 0.01;
 
 /**
