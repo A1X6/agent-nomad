@@ -911,7 +911,7 @@ describe('restorer: per-OS fixes', () => {
     const hook = (command: string, args: string[]) =>
       JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command, args }] }] } });
     expect(hooksForOtherOs(hook('pwsh.exe', ['-File', 'C:/hooks/x.ps1']), 'linux')).toEqual([
-      'pwsh.exe -File C:/hooks/x.ps1',
+      'pwsh.exe "-File" "C:/hooks/x.ps1"',
     ]);
     expect(hooksForOtherOs(hook('node', ['~/hooks/x.js']), 'linux')).toEqual([]);
   });
@@ -1086,5 +1086,44 @@ describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
         (script) => script.bundlePath,
       ),
     ).toEqual(expected);
+  });
+});
+
+describe('restorer: a path with a line break stays on one warning line (review 6 SEC-02)', () => {
+  it('shows the line break as \\u{000a}', async () => {
+    const path = 'not-synced\n✔ Restored settings.json';
+    const report = await restorer().restore(
+      { kind: 'global' },
+      [collected(path, 'x')],
+      answer('skip').resolve,
+    );
+    expect(report.skipped).toEqual([path]);
+    expect(report.warnings).toHaveLength(1);
+    expect(report.warnings[0]).toMatch(
+      /^Refused "not-synced\\u\{000a\}✔ Restored settings\.json": /,
+    );
+    expect(report.warnings[0]).not.toContain('\n');
+  });
+});
+
+describe('restorer: hooks for another OS, by what they run (review 6 UX-02)', () => {
+  const statusLine = (command: string) =>
+    JSON.stringify({ statusLine: { type: 'command', command } });
+
+  it.each([
+    ['echo "use bash here"', 'win32'],
+    ['git log -1 --format="%s by sh"', 'win32'],
+    ['notify "ran cmd"', 'linux'],
+  ] as const)('never flags a shell name that is only a word of the text: %s', (command, os) => {
+    expect(hooksForOtherOs(statusLine(command), os)).toEqual([]);
+  });
+
+  it('shows the command as it is written in the settings', () => {
+    expect(hooksForOtherOs(statusLine('bash -c "echo hi"'), 'win32')).toEqual([
+      'bash -c "echo hi"',
+    ]);
+    expect(hooksForOtherOs(statusLine('node "C:/hooks/x.ps1"'), 'linux')).toEqual([
+      'node "C:/hooks/x.ps1"',
+    ]);
   });
 });

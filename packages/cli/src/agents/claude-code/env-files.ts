@@ -1,12 +1,12 @@
 import type { EnvReferenceFiles } from '../adapter.ts';
 import { CLAUDE_JSON_BUNDLE_PATH } from './global-paths.ts';
+import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
 
 /** Files that can hold `${VAR}` references: MCP servers and settings. */
 export const MCP_FILES: ReadonlySet<string> = new Set(['.mcp.json', CLAUDE_JSON_BUNDLE_PATH]);
 export const SETTINGS_FILES: ReadonlySet<string> = new Set([
   'settings.json',
-  '.claude/settings.json',
-  '.claude/settings.local.json',
+  ...PROJECT_SETTINGS_FILES,
 ]);
 
 /** Where a Claude Code setup uses environment variables (T30, ARCH-01). */

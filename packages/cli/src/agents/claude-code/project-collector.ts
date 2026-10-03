@@ -18,6 +18,7 @@ import {
   PROJECT_MEMORY_FOLDERS,
   PROJECT_NEVER_SYNCED,
   PROJECT_ROOT_FILES,
+  PROJECT_SETTINGS_FILES,
 } from './project-paths.ts';
 
 export interface ProjectCollectorOptions {
@@ -108,7 +109,7 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
         );
       }
 
-      for (const settings of ['.claude/settings.json', '.claude/settings.local.json']) {
+      for (const settings of PROJECT_SETTINGS_FILES) {
         const file = found.find((entry) => entry.path === settings);
         if (file)
           found.push(

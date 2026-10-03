@@ -362,7 +362,10 @@ The scripts hooks and the status line run are found in the words each program ge
 (`args` set) passes each `args` element as one word, spaces and all; a shell-form command is
 split like a shell, and a word that carries a command line (`bash -c "a.sh; true"`,
 `pwsh -Command "& 'a.ps1'"`) is split again, at any depth, also on shell operators (`a.sh;`,
-`a.sh&&b`).
+`a.sh&&b`). The review shows an exec-form hook with each `args` element quoted and compares
+it by its words, so a text moved between one argument and a shell command line is shown as
+new. The "will likely not run here" warning for a setup from another OS looks only at a
+command's program and the scripts it runs, and shows the command as written.
 
 **Restore rules** (`restore-rules.ts`): a file is written only if a collector could have
 produced it. A home-folder file must be a known tool's settings or a script the setup's
@@ -705,12 +708,12 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `system/`: files and programs, one copy each (T62)
 
-| File                    | Responsible for                                                                                                                                      |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `system/files.ts`       | `writeFileAtomically` (temporary file, then rename; mode, folder mode, following a link, a step before the rename), `writeTargetOf` and `isMissing`. |
-| `system/paths.ts`       | `samePath` and `pathKey`: folders compared per OS (Windows ignores case).                                                                            |
-| `system/json.ts`        | `parseJsonWith`: JSON text or bytes checked with a schema, the value or why it could not be read.                                                    |
-| `system/run-program.ts` | `runProgram`: one `execFile` wrapper (no shell, timeout, never rejects) for every program the CLI starts.                                            |
+| File                    | Responsible for                                                                                                                                                                                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system/files.ts`       | `writeFileAtomically` (temporary file, then rename; mode, folder mode, following a link, a step before the rename), `writeTargetOf`, `isMissing` and `freeSuffix` (the first free `-2`, `-3`, … for a backup name, used by the restorer and the shell profile). |
+| `system/paths.ts`       | `samePath` and `pathKey`: folders compared per OS (Windows ignores case).                                                                                                                                                                                       |
+| `system/json.ts`        | `parseJsonWith`: JSON text or bytes checked with a schema, the value or why it could not be read.                                                                                                                                                               |
+| `system/run-program.ts` | `runProgram`: one `execFile` wrapper (no shell, timeout, never rejects) for every program the CLI starts.                                                                                                                                                       |
 
 ### `push/`, `pull/`, `commands/`: the setup commands
 
@@ -724,14 +727,14 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `env/`: environment variables in setups
 
-| File                  | Responsible for                                                                                                                                                                                                 |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `env-references.ts`   | Finding `${VAR}` references in the files the adapter names (`envReferences`), leaving out the agent's own variables.                                                                                            |
-| `env-section.ts`      | The encrypted `.agentnomad/env.json` section and choosing which values to save (opt-in).                                                                                                                        |
-| `env-restore.ts`      | On pull: adding saved values that are missing here (not in the environment nor already written); asking (plan) and writing (apply) are separate.                                                                |
-| `shell-profile.ts`    | Writing them, and reading back what is there: a marked block in the shell profile (sh, bash, zsh, fish), rewritten only when it changes, or Windows user variables through one PowerShell call for all of them. |
-| `loader-variables.ts` | `LOADER_VARIABLE`: the variables that make a shell or runtime load or run code (`NODE_OPTIONS`, `LD_*`, ...); a saved value for one is treated like a hook (T44, T55).                                          |
-| `env-command.ts`      | `agentnomad env`.                                                                                                                                                                                               |
+| File                  | Responsible for                                                                                                                                                                                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env-references.ts`   | Finding `${VAR}` references in the files the adapter names (`envReferences`), leaving out the agent's own variables.                                                                                                                                       |
+| `env-section.ts`      | The encrypted `.agentnomad/env.json` section and choosing which values to save (opt-in).                                                                                                                                                                   |
+| `env-restore.ts`      | On pull: adding saved values that are missing here (not in the environment nor already written); asking (plan) and writing (apply) are separate.                                                                                                           |
+| `shell-profile.ts`    | Writing them, and reading back what is there: a marked block in the shell profile (sh, bash, zsh, fish), rewritten only when it changes after a backup that never replaces another, or Windows user variables through one PowerShell call for all of them. |
+| `loader-variables.ts` | `LOADER_VARIABLE`: the variables that make a shell or runtime load or run code (`NODE_OPTIONS`, `LD_*`, ...); a saved value for one is treated like a hook (T44, T55).                                                                                     |
+| `env-command.ts`      | `agentnomad env`.                                                                                                                                                                                                                                          |
 
 ### `agents/`: the plug-in layer
 
