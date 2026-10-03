@@ -10,9 +10,6 @@ import { strFromU8, strToU8 } from 'fflate';
 
 import { DecryptionError, type Aead, type KeyedHash } from './crypto.ts';
 
-/** Scope key of the global setup (defined in contracts, shared with the server). */
-export { GLOBAL_SCOPE_KEY };
-
 /**
  * Labels for keys and associated data. Part of the stored format: changing them would make
  * existing projects unfindable or unreadable (a new scheme is added as v2 instead).

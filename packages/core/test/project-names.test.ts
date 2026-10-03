@@ -1,11 +1,10 @@
-import { MAX_NAME_ENC_BYTES, ScopeKeySchema, toHex } from '@agentnomad/contracts';
+import { GLOBAL_SCOPE_KEY, MAX_NAME_ENC_BYTES, ScopeKeySchema, toHex } from '@agentnomad/contracts';
 import { strToU8 } from 'fflate';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   DATA_KEY_BYTES,
   DecryptionError,
-  GLOBAL_SCOPE_KEY,
   createSodiumCryptoService,
   decryptProjectName,
   encryptProjectName,
