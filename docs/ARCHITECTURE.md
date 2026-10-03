@@ -361,8 +361,9 @@ file while open): pull's plan step asks to close it ("I closed it, continue" che
 "Skip ~/.claude.json this time" leaves it with a warning; `--yes` never waits), and the
 restorer checks once more right before writing and leaves the file if it is open again. It is
 read again at that point, as Claude Code saves it while closing. Running means a `claude` program
-(also under a folder with a space), npm's Claude Code under node (seen by its command line;
-on Windows read through PowerShell, else `tasklist` names), or the Claude app, whose Code tab
+(also under a folder with a space; npm's package now ships it as a native `claude.exe`, checked
+with a real install on Windows), npm's Claude Code under node (its fallback, seen by its command
+line; on Windows read through PowerShell, else `tasklist` names), or the Claude app, whose Code tab
 runs Claude Code and shares `~/.claude.json`. Auto memory is Markdown only, and
 a folder chosen by the project's `autoMemoryDirectory` is used only inside the home folder
 and outside refused folders (`auto-memory.ts`).
