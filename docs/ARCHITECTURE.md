@@ -442,8 +442,10 @@ through Drizzle.
 
 **Layers:** routes (validation with the contracts, errors, limits) → services
 (`auth-service`, `bundle-service`: the rules, free of HTTP) → repositories and the blob
-store (Postgres). The composition root `server.ts` wires them from environment settings and
-refuses to start if `DATABASE_URL` or `SERVER_SECRET` is missing or weak.
+store (Postgres). `createApi` (`api.ts`) wires them from a database and is the only wiring:
+production, the server tests and the e2e local server all use it. `server.ts` reads the
+environment settings, opens the Neon pool and calls it; it refuses to start if
+`DATABASE_URL` or `SERVER_SECRET` is missing or weak.
 
 **Tables:** `users`, `sessions` (token hashes only), `bundles` (metadata: agent, scope key,
 encrypted name, revision, size, hash, pointer to the current file), `bundle_blobs`
@@ -460,7 +462,7 @@ Each account keeps at most 100 setups and 50 MB of encrypted bytes (checked befo
 anything and again inside the save's transaction, with the user row locked); over it,
 `413 payload_too_large` says which limit. The visitor's IP is Cloudflare's
 `CF-Connecting-IP` (`True-Client-IP` when that is missing). About one save in 50 also deletes
-files no setup points to that are over an hour old, and about one rate-limited request in 100 prunes old counters and every user's expired sessions. Register writes the account and its first session in one transaction. Logs are one JSON line per request with
+files no setup points to that are over an hour old, and about one rate-limited request in 100 prunes old counters and every user's expired sessions; a failed sweep or prune is logged and never fails the request. Register writes the account and its first session in one transaction. Logs are one JSON line per request with
 a request id and the CLI version from `x-an-client` (`invalid` when it does not look like a
 version; absent for 1.0.3 and older), never other headers, bodies or query strings; a failed query logs its SQL text, never
 its parameters. There are no CORS headers and no cookies.
@@ -549,7 +551,7 @@ only gets the pooled one.
 ## 12. Design rules
 
 - **Single responsibility, injected dependencies.** Services receive repositories, clients,
-  clocks and prompters; composition roots (`cli/src/app.ts`, `server/src/server.ts`) build
+  clocks and prompters; composition roots (`cli/src/app.ts`, `server/src/api.ts`) build
   the real ones. Everything is testable without a network, a terminal or a keychain.
 - **Contracts at every boundary.** API bodies, headers, the bundle, files read back from
   disk (`programs.json`, `plugins.json`, the env section) are all parsed with Zod.
@@ -728,7 +730,8 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | File                                                                           | Responsible for                                                                                      |
 | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | `main.ts`                                                                      | Starts the Node web server, logs a crash as one line, and shuts down cleanly on Render's signals.    |
-| `server.ts`                                                                    | Composition root: settings, Neon pool (its errors logged), keys, limiter, services, app.             |
+| `server.ts`                                                                    | Production start: settings, Neon pool (its errors logged), keys, then `createApi`.                   |
+| `api.ts`                                                                       | `createApi`, the composition root: limiter, services and app from a database (all callers use it).   |
 | `index.ts`                                                                     | Re-exports for tests and the e2e server.                                                             |
 | `port.ts`                                                                      | The port from `PORT`.                                                                                |
 | `encoding.ts`                                                                  | Base64url and UTF-8 for tokens; base64 and hex come from contracts.                                  |
@@ -761,12 +764,12 @@ Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 
 ## `packages/e2e/src`
 
-| File              | Responsible for                                                                                      |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| `local-server.ts` | The real API on PGlite on a free local port, loaded from or dumped to a file; records every request. |
-| `pc.ts`           | A simulated PC (its own home, config folder and project) that runs the built CLI with no terminal.   |
-| `steps.ts`        | The three end-to-end steps and what each checks.                                                     |
-| `plaintext.ts`    | Searching recorded requests for readable secrets (as text and base64 at any alignment).              |
+| File              | Responsible for                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `local-server.ts` | The real API (`createApi`) on PGlite on a free local port, loaded from or dumped to a file; records every request. |
+| `pc.ts`           | A simulated PC (its own home, config folder and project) that runs the built CLI with no terminal.                 |
+| `steps.ts`        | The three end-to-end steps and what each checks.                                                                   |
+| `plaintext.ts`    | Searching recorded requests for readable secrets (as text and base64 at any alignment).                            |
 
 ## Repository root
 
