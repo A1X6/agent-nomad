@@ -6,6 +6,7 @@ import {
   type RateLimiter,
   type RateLimitRule,
 } from '../rate-limit/rate-limiter.ts';
+import type { SessionVariables } from './session.ts';
 
 /**
  * Reads the visitor's IP. Host-specific (each host passes it in its own proxy header), so
@@ -50,6 +51,15 @@ export function limitPerIp(limiter: RateLimiter, rule: RateLimitRule, clientIp: 
     // Visitors whose IP cannot be read share one bucket: stricter, never looser.
     const ip = clientIp(c);
     const status = await limiter.hit(rule, ip === undefined ? 'unknown' : rateLimitSubject(ip));
+    if (!status.allowed) throw new RateLimitedError(status.retryAfterSeconds);
+    await next();
+  });
+}
+
+/** Refuses the request with 429 once the signed-in account has used up the rule's limit. */
+export function limitPerAccount(limiter: RateLimiter, rule: RateLimitRule) {
+  return createMiddleware<{ Variables: SessionVariables }>(async (c, next) => {
+    const status = await limiter.hit(rule, c.get('session').userId);
     if (!status.allowed) throw new RateLimitedError(status.retryAfterSeconds);
     await next();
   });

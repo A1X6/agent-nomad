@@ -20,6 +20,9 @@ describe('ServerKeys', () => {
     expect(await keys.verifyAuthKey(authKey, flipped)).toBe(false);
     expect(await keys.verifyAuthKey(authKey, '')).toBe(false);
     expect(await keys.verifyAuthKey(authKey, stored.replace('v1', 'v9'))).toBe(false);
+    // Not hex after the prefix, or another scheme altogether: false, never a throw (BUG-06).
+    expect(await keys.verifyAuthKey(authKey, 'argon2id$v=19$abc')).toBe(false);
+    expect(await keys.verifyAuthKey(authKey, 'hmac-sha256-v1$zz')).toBe(false);
   });
 
   it('makes hashes useless without the server secret', async () => {

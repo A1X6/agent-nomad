@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 
 import {
   DEFAULT_KDF_PARAMS,
+  ErrorResponseSchema,
   KDF_SALT_BYTES,
   SessionResponseSchema,
   WRAPPED_DATA_KEY_BYTES,
+  fromHex,
   type KdfParams,
 } from '@agentnomad/contracts';
 import { eq } from 'drizzle-orm';
@@ -17,6 +19,15 @@ import { postJson, type TestApp } from './app.ts';
 
 export const b64 = (data: Uint8Array) => Buffer.from(data).toString('base64');
 export const bytes = (length: number, fill = 7) => new Uint8Array(length).fill(fill);
+/** SHA-256 in hex, as the CLI sends it in `x-an-content-sha256`. */
+export const sha256Hex = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
+/** The project scope key numbered `index` (its hex, padded to 64 characters). */
+export const scopeKeyOf = (index: number) => index.toString(16).padStart(64, '0');
+
+/** The error code of an API error answer. */
+export async function errorCode(res: Response): Promise<string> {
+  return ErrorResponseSchema.parse(await res.json()).error.code;
+}
 
 /** A user as the repositories store it. */
 export const newUser = (username: string): NewUser => ({
@@ -74,6 +85,45 @@ export async function registerForToken(
   return SessionResponseSchema.parse(await res.json()).sessionToken;
 }
 
+export interface LoginOptions {
+  readonly deviceName?: string;
+  /** Extra request headers, e.g. the test client IP. */
+  readonly headers?: Record<string, string>;
+}
+
+/** `POST /auth/login` as the CLI sends it; `authKey` is base64. */
+export function loginRequest(
+  app: TestApp['app'],
+  username: string,
+  authKey: string,
+  options: LoginOptions = {},
+): Promise<Response> {
+  return Promise.resolve(
+    app.request(
+      '/auth/login',
+      postJson({ username, authKey, deviceName: options.deviceName ?? 'pc' }, options.headers),
+    ),
+  );
+}
+
+/** `DELETE /account` with this body (normally `{ authKey }`), signed in when `token` is given. */
+export function deleteAccountRequest(
+  app: TestApp['app'],
+  token: string | null,
+  body: unknown,
+): Promise<Response> {
+  return Promise.resolve(
+    app.request('/account', {
+      method: 'DELETE',
+      body: JSON.stringify(body),
+      headers: {
+        'content-type': 'application/json',
+        ...(token !== null && { authorization: `Bearer ${token}` }),
+      },
+    }),
+  );
+}
+
 /**
  * Saves `count` project setups for the user in two statements instead of one request each
  * (QA-12), so the limit tests stay fast. Each holds 40 bytes; scope keys are the index in hex.
@@ -90,9 +140,9 @@ export async function seedSetups(db: Database, username: string, count: number):
     files.map((file, index) => ({
       userId: user.id,
       agent: 'claude-code',
-      scopeKey: index.toString(16).padStart(64, '0'),
+      scopeKey: scopeKeyOf(index),
       nameEnc: bytes(40, 1),
-      contentHash: new Uint8Array(createHash('sha256').update(ciphertext).digest()),
+      contentHash: fromHex(sha256Hex(ciphertext)),
       formatVersion: 1,
       revision: 1,
       sizeBytes: ciphertext.length,

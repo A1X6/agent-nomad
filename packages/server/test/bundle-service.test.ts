@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-
+import { fromHex } from '@agentnomad/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -12,8 +11,7 @@ import type { BundleRepository } from '../src/db/repositories.ts';
 import type { BlobStore } from '../src/storage/blob-store.ts';
 import { createPostgresBlobStore } from '../src/storage/postgres-blob-store.ts';
 import { createTestDatabase, type TestDatabase } from './support/database.ts';
-import { bytes, createUser } from './support/fixtures.ts';
-const sha256 = (data: Uint8Array) => new Uint8Array(createHash('sha256').update(data).digest());
+import { bytes, createUser, sha256Hex } from './support/fixtures.ts';
 
 let database: TestDatabase;
 
@@ -45,7 +43,7 @@ describe('BundleService cleanup', () => {
         key: { userId: user.id, agent: 'claude-code', scopeKey: 'global' },
         expectedRevision,
         ciphertext: bytes(64, fill),
-        contentHash: sha256(bytes(64, fill)),
+        contentHash: fromHex(sha256Hex(bytes(64, fill))),
         formatVersion: 1,
         nameEnc: null,
       });
@@ -63,7 +61,7 @@ describe('BundleService upload', () => {
     key: key(userId),
     expectedRevision: 0,
     ciphertext: bytes(64, fill),
-    contentHash: sha256(bytes(64, fill)),
+    contentHash: fromHex(sha256Hex(bytes(64, fill))),
     formatVersion: 1,
     nameEnc: null,
   });

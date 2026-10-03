@@ -1,10 +1,15 @@
-import { createHash } from 'node:crypto';
-
-import { ErrorResponseSchema } from '@agentnomad/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestApp, postJson, type TestApp } from './support/app.ts';
-import { b64, bytes, registerForToken } from './support/fixtures.ts';
+import { createTestApp, type TestApp } from './support/app.ts';
+import {
+  b64,
+  bytes,
+  deleteAccountRequest,
+  errorCode,
+  loginRequest,
+  registerForToken,
+  sha256Hex,
+} from './support/fixtures.ts';
 
 /** Each test user has its own auth key (derived from their password in real life). */
 const authKeyOf = (username: string) => b64(bytes(32, username.length));
@@ -22,12 +27,8 @@ afterEach(async () => {
 const register = (username: string) =>
   registerForToken(t.app, username, { authKey: authKeyOf(username) });
 
-async function login(username: string, deviceName = 'desktop'): Promise<Response> {
-  return t.app.request(
-    '/auth/login',
-    postJson({ username, authKey: authKeyOf(username), deviceName }),
-  );
-}
+const login = (username: string) =>
+  loginRequest(t.app, username, authKeyOf(username), { deviceName: 'desktop' });
 
 async function pushGlobal(token: string): Promise<void> {
   const body = bytes(64, 7);
@@ -38,23 +39,15 @@ async function pushGlobal(token: string): Promise<void> {
       authorization: `Bearer ${token}`,
       'content-type': 'application/octet-stream',
       'x-an-expected-revision': '0',
-      'x-an-content-sha256': createHash('sha256').update(body).digest('hex'),
+      'x-an-content-sha256': sha256Hex(body),
       'x-an-format-version': '1',
     },
   });
   expect(res.status).toBe(200);
 }
 
-async function deleteAccount(token: string | null, body: unknown): Promise<Response> {
-  return t.app.request('/account', {
-    method: 'DELETE',
-    body: JSON.stringify(body),
-    headers: {
-      'content-type': 'application/json',
-      ...(token && { authorization: `Bearer ${token}` }),
-    },
-  });
-}
+const deleteAccount = (token: string | null, body: unknown) =>
+  deleteAccountRequest(t.app, token, body);
 
 /** Rows per table that belong to `username`. */
 async function rowsOf(username: string) {
@@ -67,10 +60,6 @@ async function rowsOf(username: string) {
     [username],
   );
   return rows[0];
-}
-
-async function errorCode(res: Response): Promise<string> {
-  return ErrorResponseSchema.parse(await res.json()).error.code;
 }
 
 describe('DELETE /account', () => {

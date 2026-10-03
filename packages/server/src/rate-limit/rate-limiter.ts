@@ -41,7 +41,7 @@ export const RATE_LIMITS = {
   /** Account creation from one IP: stops mass sign-ups. */
   registerPerIp: { name: 'register-ip', limit: 5, windowSeconds: 60 * 60 },
   /**
-   * Failed logins or account deletes per account (not per IP, which attackers rotate).
+   * Failed logins per account (not per IP, which attackers rotate).
    * A pause, never a lockout, so nobody can lock another user out for long.
    */
   failedLoginsPerAccount: { name: 'login-fail', limit: 10, windowSeconds: 15 * 60 },
@@ -55,4 +55,9 @@ export const RATE_LIMITS = {
    * enough that one account cannot churn the database.
    */
   writesPerAccount: { name: 'bundle-write', limit: 120, windowSeconds: 60 * 60 },
+  /**
+   * Setup downloads per account (SEC-03): six full pulls of the 100 setups an account may keep,
+   * every hour, yet one account cannot loop 5 MB downloads out of the database for long.
+   */
+  readsPerAccount: { name: 'bundle-read', limit: 600, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
