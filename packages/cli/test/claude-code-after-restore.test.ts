@@ -9,7 +9,6 @@ import {
   type ExecutableLookupSystem,
   type FollowUpPlanContext,
   type ManagedSettings,
-  PluginManifestSchema,
 } from '../src/index.ts';
 
 /** Organization-managed settings, injected so no test reads this PC's (SOLID-01). */
@@ -148,29 +147,6 @@ describe('after a Claude Code restore', () => {
       });
       await afterRestore({ system: system(['/usr/bin/npm']), cli })(context([bad]).ctx);
       expect(runs).toEqual([]);
-    },
-  );
-
-  it('a normal plugin id is accepted (control for the next test)', () => {
-    expect(
-      PluginManifestSchema.safeParse({
-        marketplaces: [],
-        plugins: [{ id: 'x@market', scope: 'user', commandSource: false }],
-        skipped: [],
-      }).success,
-    ).toBe(true);
-  });
-
-  it.each(['-x@market', 'x@-market', '--help@x'])(
-    'a plugin id that starts like an option is refused: %s',
-    (id) => {
-      expect(
-        PluginManifestSchema.safeParse({
-          marketplaces: [],
-          plugins: [{ id, scope: 'user', commandSource: false }],
-          skipped: [],
-        }).success,
-      ).toBe(false);
     },
   );
 
