@@ -12,7 +12,11 @@ import {
 import { createProgramLocator } from './programs.ts';
 import { createClaudeCodeProjectCollector } from './project-collector.ts';
 import { createClaudeCodeRestorer, type ClaudeRunningAnswer } from './restorer.ts';
-import { createClaudeRunningCheck, type ClaudeRunningCheck } from './running-claude.ts';
+import {
+  createClaudeRunningCheck,
+  systemProcessLister,
+  type ClaudeRunningCheck,
+} from './running-claude.ts';
 import { findUnknownEntries } from './unknown-files.ts';
 
 export interface ClaudeCodeAdapterOptions {
@@ -50,7 +54,11 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     ...shared,
     env: options.env,
     customConfigDir,
-    isClaudeRunning: options.isClaudeRunning ?? createClaudeRunningCheck(),
+    isClaudeRunning:
+      options.isClaudeRunning ??
+      createClaudeRunningCheck(
+        systemProcessLister({ platform: options.platform, env: options.env }),
+      ),
     onClaudeRunning: options.onClaudeRunning,
   });
 

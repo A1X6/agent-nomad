@@ -271,7 +271,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
       if (assumeYes || (await onClaudeRunning()) === 'skip') {
         report.skipped.push(file.path);
         report.warnings.push(
-          `${claudeJsonFile} was left as it is because Claude Code was running; pull again later to add your MCP servers and preferences.`,
+          `${claudeJsonFile} was left as it is because Claude Code or the Claude app was running; pull again later to add your MCP servers and preferences.`,
         );
         return;
       }

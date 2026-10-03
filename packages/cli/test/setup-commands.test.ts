@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -280,6 +280,27 @@ describe('the revisions this PC knows belong to one account (T56)', () => {
     const text = await readFile(join(dir, 'state.json'), 'utf8');
     expect(old.safeParse(JSON.parse(text)).success).toBe(true);
     expect(await state.projectNameFor('#account')).toBeNull();
+  });
+});
+
+describe('a local state file that cannot be read (BUG-06)', () => {
+  it('stops with the reason instead of starting again from nothing', async () => {
+    // A folder where the file should be: reading it fails with something other than ENOENT.
+    const path = join(dir, 'unreadable.json');
+    await mkdir(path);
+    const unreadable = createLocalState({ path, server: 's', platform: process.platform });
+    await expect(unreadable.projectNameFor(CWD)).rejects.toThrow(
+      `Could not read agentnomad's local state file ${path}`,
+    );
+    await expect(unreadable.rememberProject(CWD, 'my-app')).rejects.toThrow(
+      `Could not read agentnomad's local state file ${path}`,
+    );
+  });
+
+  it('a missing file is still an empty state', async () => {
+    expect(await state.projectNameFor(CWD)).toBeNull();
+    await state.rememberProject(CWD, 'my-app');
+    expect(await state.projectNameFor(CWD)).toBe('my-app');
   });
 });
 

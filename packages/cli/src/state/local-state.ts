@@ -49,6 +49,21 @@ export class LocalStateError extends Error {
   }
 }
 
+/** The state file is there but could not be read (permissions, a locked file). */
+export class LocalStateReadError extends Error {
+  constructor(path: string, options?: ErrorOptions) {
+    const code =
+      options?.cause instanceof Error && 'code' in options.cause
+        ? ` (${String(options.cause.code)})`
+        : '';
+    super(
+      `Could not read agentnomad's local state file ${path}${code}. Nothing was changed; check that it can be read, then try again.`,
+      options,
+    );
+    this.name = 'LocalStateReadError';
+  }
+}
+
 /**
  * What this PC remembers between commands (T33): the name each project folder was saved
  * under, and the last revision it pushed or pulled of each setup (so the server can refuse
@@ -99,8 +114,12 @@ export function createLocalState(options: LocalStateOptions): LocalState {
     let text: string;
     try {
       text = await readFile(options.path, 'utf8');
-    } catch {
-      return { version: 1, servers: {} };
+    } catch (error) {
+      // Only a missing file is "no state yet"; anything else would be written over (BUG-06).
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return { version: 1, servers: {} };
+      }
+      throw new LocalStateReadError(options.path, { cause: error });
     }
     try {
       return StateFileSchema.parse(JSON.parse(text));

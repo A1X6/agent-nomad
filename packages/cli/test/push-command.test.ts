@@ -22,6 +22,7 @@ import {
   createPushCommand,
   createPushPlanner,
   NotLoggedInPushError,
+  ProjectFolderError,
   PromptCancelledError,
   SetupsNotDoneError,
   type AgentAdapter,
@@ -406,6 +407,28 @@ describe('agentnomad push', () => {
 
   it('never offers the home folder as a project', async () => {
     const t = setup([false], { cwd: HOME });
+    await t.command.push(noFlags);
+    expect(t.script.asked).toEqual([
+      'Include memory (what Claude learned: subagent and auto memory)?',
+    ]);
+    expect(t.server.stored.size).toBe(1);
+  });
+
+  it.each([
+    ['the home folder', HOME, { project: 'home' }],
+    ['the home folder, with --global too', HOME, { global: true, project: 'home' }],
+    ["Claude Code's own folder", join(HOME, '.claude'), { project: 'dot-claude' }],
+  ])('refuses --project in %s, saving nothing (BUG-05)', async (_, cwd, flags) => {
+    const t = setup([], { cwd });
+    const push = t.command.push({ global: false, yes: true, ...flags });
+    await expect(push).rejects.toThrow(ProjectFolderError);
+    await expect(push).rejects.toThrow("Run the command again from the project's folder.");
+    expect(t.server.stored.size).toBe(0);
+    expect(await t.state.projectNameFor(cwd)).toBeNull();
+  });
+
+  it("never offers Claude Code's own folder as a project (BUG-05)", async () => {
+    const t = setup([false], { cwd: join(HOME, '.claude') });
     await t.command.push(noFlags);
     expect(t.script.asked).toEqual([
       'Include memory (what Claude learned: subagent and auto memory)?',

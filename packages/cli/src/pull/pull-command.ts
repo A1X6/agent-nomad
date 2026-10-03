@@ -16,6 +16,7 @@ import type { ApiClient } from '../api/api-client.ts';
 import { NotLoggedInError } from '../api/api-errors.ts';
 import { withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
+import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
 import { finishSetups, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { planEnvRestore, writeEnvValues } from '../env/env-restore.ts';
 import { ENV_BUNDLE_PATH, parseEnvSection, type EnvSection } from '../env/env-section.ts';
@@ -55,6 +56,19 @@ export interface PullKeys {
 }
 
 type ScopeChoice = 'global' | 'project' | 'both';
+
+/** An agent chosen for this pull, with what its detector found. */
+interface ChosenAgent {
+  readonly adapter: AgentAdapter;
+  readonly version: string | null;
+  readonly baseDir: string | null;
+}
+
+const chosenAgent = (entry: { adapter: AgentAdapter; found: DetectedAgent }): ChosenAgent => ({
+  adapter: entry.adapter,
+  version: entry.found.version,
+  baseDir: entry.found.baseDir,
+});
 
 /** A setup downloaded, checked and reviewed. */
 interface Prepared {
@@ -119,7 +133,7 @@ export function createPullPlanner(deps: PullDeps) {
   async function chooseAgents(
     saved: readonly SavedSetup[],
     options: PullOptions,
-  ): Promise<{ adapter: AgentAdapter; version: string | null }[]> {
+  ): Promise<ChosenAgent[]> {
     const withSetups: { adapter: AgentAdapter; found: DetectedAgent }[] = [];
     for (const adapter of deps.registry().list()) {
       if (!saved.some((setup) => setup.agent === adapter.id)) continue;
@@ -130,11 +144,11 @@ export function createPullPlanner(deps: PullDeps) {
       return options.agents.map((id) => {
         const match = withSetups.find((entry) => entry.adapter.id === id);
         if (!match) throw new Error(`No saved setup for agent "${id}".`);
-        return { adapter: match.adapter, version: match.found.version };
+        return chosenAgent(match);
       });
     }
     if (withSetups.length <= 1 || options.yes) {
-      return withSetups.map((entry) => ({ adapter: entry.adapter, version: entry.found.version }));
+      return withSetups.map(chosenAgent);
     }
     const count = (id: string) => saved.filter((setup) => setup.agent === id).length;
     const chosen = await prompter.multiselect(
@@ -146,16 +160,26 @@ export function createPullPlanner(deps: PullDeps) {
       })),
       { required: true, initial: withSetups.map((entry) => entry.adapter.id) },
     );
-    return withSetups
-      .filter((entry) => chosen.includes(entry.adapter.id))
-      .map((entry) => ({ adapter: entry.adapter, version: entry.found.version }));
+    return withSetups.filter((entry) => chosen.includes(entry.adapter.id)).map(chosenAgent);
   }
 
   async function chooseSetups(
-    adapter: AgentAdapter,
+    agent: ChosenAgent,
     saved: readonly SavedSetup[],
     options: PullOptions,
   ): Promise<SavedSetup[]> {
+    const { adapter } = agent;
+    // A project is never restored into the home folder or the agent's own folder: its
+    // `.claude/` there is the global setup (BUG-05).
+    const refusal = projectFolderRefusal(deps.cwd, {
+      homedir: deps.homedir,
+      baseDir: agent.baseDir,
+      agentName: adapter.displayName,
+      platform: deps.platform,
+    });
+    if (options.project !== undefined && refusal !== null) {
+      throw new ProjectFolderError(deps.cwd, refusal);
+    }
     const mine = saved.filter((setup) => setup.agent === adapter.id);
     const global = mine.find((setup) => setup.projectName === null);
     const projects = mine.filter((setup) => setup.projectName !== null);
@@ -171,8 +195,9 @@ export function createPullPlanner(deps: PullDeps) {
     } else if (projects.length === 0) {
       choice = 'global';
     } else if (!global) {
+      if (refusal !== null) throw new ProjectFolderError(deps.cwd, refusal);
       choice = 'project';
-    } else if (options.yes) {
+    } else if (options.yes || refusal !== null) {
       // --yes alone restores the global setup; a project is picked with --project.
       choice = 'global';
     } else {
@@ -387,8 +412,9 @@ export function createPullPlanner(deps: PullDeps) {
         return null;
       }
       const chosen: { adapter: AgentAdapter; version: string | null; setups: SavedSetup[] }[] = [];
-      for (const { adapter, version } of agents) {
-        chosen.push({ adapter, version, setups: await chooseSetups(adapter, saved, options) });
+      for (const agent of agents) {
+        const { adapter, version } = agent;
+        chosen.push({ adapter, version, setups: await chooseSetups(agent, saved, options) });
       }
 
       const shown = new Set<string>();

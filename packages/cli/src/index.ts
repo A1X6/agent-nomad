@@ -36,6 +36,7 @@ export * from './cli/commands.ts';
 export * from './cli/error-messages.ts';
 export * from './cli/flags.ts';
 export * from './cli/program.ts';
+export * from './cli/project-folder.ts';
 export * from './cli/run.ts';
 export * from './cli/setup-outcomes.ts';
 export * from './cli/stdin.ts';
