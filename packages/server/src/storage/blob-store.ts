@@ -16,8 +16,8 @@ export interface BlobRef {
  * 1. `put` the bytes; they get a new random id.
  * 2. `BundleRepository.putMeta` checks the revision and, if it passes, points the setup at
  *    the new id in the same step.
- * 3. On `saved`, `delete` the file it replaced; on `unchanged` or `conflict`, `delete` the
- *    new file (it never became current).
+ * 3. On `saved`, `delete` the file it replaced; on `unchanged`, `conflict` or `over-limit`,
+ *    `delete` the new file (it never became current).
  */
 export interface BlobStore {
   /** Stores the bytes under a new random id and returns where they are. */

@@ -48,8 +48,8 @@ already compromised PC, and denial of service by volume.
 - **Local secrets in the OS keychain,** or in a file only your user can read where there is
   no keychain (on Windows with an access list for your user only).
 - **Limits on the server.** Each account keeps at most 100 setups and 50 MB, with limits on
-  saves, logins and account deletes, so one account cannot fill the service or guess passwords
-  quickly.
+  saves, downloads (600 per account per hour), logins and account deletes, so one account
+  cannot fill or tie up the service or guess passwords quickly.
 - **Checked on every change.** Automated tests on macOS, Linux and Windows record every
   request the CLI makes and fail if anything readable (a password, the data key, file
   contents, a project name) is in it, also inside compressed or encoded data.

@@ -152,8 +152,11 @@ export function driftReport(input: DriftInput): DriftReport {
 
 const bullets = (items: readonly string[]) => items.map((item) => `- \`${item}\``).join('\n');
 
-/** The GitHub issue (or job summary) for a report, in Markdown. */
-export function reportMarkdown(report: DriftReport, runUrl?: string): string {
+/**
+ * The GitHub issue (or job summary) for a report, in Markdown. It holds no link to the run,
+ * so the same findings give the same text and the open issue is only edited when they change.
+ */
+export function reportMarkdown(report: DriftReport): string {
   const parts = [
     `The paths data file (\`packages/cli/src/agents/claude-code/claude-code-paths.data.ts\`) was reviewed against Claude Code **${report.reviewedVersion}**; the newest is **${report.latestVersion}**.`,
   ];
@@ -190,6 +193,5 @@ export function reportMarkdown(report: DriftReport, runUrl?: string): string {
       ].join('\n'),
     );
   }
-  if (runUrl !== undefined) parts.push(`---\nFound by the [weekly drift check](${runUrl}).`);
   return `${parts.join('\n\n')}\n`;
 }

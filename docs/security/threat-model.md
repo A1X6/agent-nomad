@@ -1,6 +1,6 @@
 # Threat model (T38)
 
-- **Reviewed:** 2026-09-26, updated through T74; first reviewed at the end of the v1 build (T01–T37), before the first release.
+- **Reviewed:** 2026-09-26, updated through T83; first reviewed at the end of the v1 build (T01–T37), before the first release.
 - **Covers:** the `agentnomad` CLI, the API server and its database, and the path in between.
 - **Result:** 8 findings, all fixed on the `t38-security-review` branch (see [Findings](#findings)); the
   risks we accept are listed under [Accepted risks](#accepted-risks).
@@ -119,12 +119,17 @@ Found in the 2026-10-03 code review, about threat 13 (a compromised PC of the us
 
 Found in the 2026-10-03 code review (review 4), about threat 13:
 
-| #   | Severity | Finding                                                                                                                       | Fix                                                                                                                                                   |
-| --- | -------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 41  | Medium   | One malformed hook or MCP server hid every hook or server in that file from the pull review.                                  | Hooks and MCP servers are read one by one; one that cannot be read is shown as unreadable (its JSON), never left out, and hides no other (T69).       |
-| 42  | Low      | A ` ```! ` block was missed when an earlier code block held a fence line of the other character.                              | A fence closes only on the same character, at least as long; a fence still opens at any indentation, so a block in a list item is shown (T69).        |
-| 43  | Low      | Review lists printed commands from a bundle with their real line breaks, so a command could look like several harmless lines. | The label and command of each review entry go through `printableLine`, which shows line breaks escaped (T71).                                         |
-| 44  | Medium   | Downloads had no per-account limit, so one account could loop 5 MB downloads.                                                 | 600 downloads per account per hour (the list of setups moves only metadata and has no limit), answered with the same `429` as the other limits (T77). |
+| #   | Severity | Finding                                                                                                                       | Fix                                                                                                                                             |
+| --- | -------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| 41  | Medium   | One malformed hook or MCP server hid every hook or server in that file from the pull review.                                  | Hooks and MCP servers are read one by one; one that cannot be read is shown as unreadable (its JSON), never left out, and hides no other (T69). |
+| 42  | Low      | A ` ```! ` block was missed when an earlier code block held a fence line of the other character.                              | A fence closes only on the same character, at least as long; a fence still opens at any indentation, so a block in a list item is shown (T69).  |
+| 43  | Low      | Review lists printed commands from a bundle with their real line breaks, so a command could look like several harmless lines. | The label and command of each review entry go through `printableLine`, which shows line breaks escaped (T71).                                   |
+
+Found in the 2026-10-03 code review (review 5):
+
+| #   | Severity | Finding                                                                       | Fix                                                                                                                                                   |
+| --- | -------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 44  | Medium   | Downloads had no per-account limit, so one account could loop 5 MB downloads. | 600 downloads per account per hour (the list of setups moves only metadata and has no limit), answered with the same `429` as the other limits (T77). |
 
 ## Accepted risks
 

@@ -110,11 +110,11 @@ jobs:
           DRIFT_LATEST: ${{ needs.fresh-install.outputs.version }}
           DRIFT_FRESH_ENTRIES: ${{ runner.temp }}/fresh-entries.txt
           DRIFT_OUT: ${{ runner.temp }}/report.md
-          DRIFT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: node --experimental-strip-types packages/cli/scripts/drift/check-claude-code.ts
 
       # One open issue at a time: created once, then updated (with a comment) only when the
-      # report changes. Pushes never file issues.
+      # report changes. The report holds no run link, so an unchanged report is not edited; the
+      # link to the run goes in the comment. Pushes never file issues.
       - name: File or update the issue
         if: >-
           github.event_name != 'push' &&
@@ -132,7 +132,8 @@ jobs:
           gh label create "$label" --color FBCA04 --description "Claude Code drift check (T41)" --force
           number="$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')"
           if [ -z "$number" ]; then
-            gh issue create --title "$title" --label "$label" --body-file "$REPORT"
+            url="$(gh issue create --title "$title" --label "$label" --body-file "$REPORT")"
+            gh issue comment "$url" --body "Found for Claude Code $LATEST by $RUN_URL"
           elif [ "$(gh issue view "$number" --json body --jq .body)" != "$(cat "$REPORT")" ]; then
             gh issue edit "$number" --title "$title" --body-file "$REPORT"
             gh issue comment "$number" --body "Updated for Claude Code $LATEST by $RUN_URL"
