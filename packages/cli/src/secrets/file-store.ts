@@ -65,6 +65,22 @@ export function aclPrincipals(listing: string, file: string): string[] {
 }
 
 /**
+ * The principals to take off the file: everyone but the current user, and only when
+ * exactly one entry is recognisably the current user (by name or SID). Otherwise none, so
+ * a user that icacls names differently from `whoami` never loses their own access.
+ */
+export function principalsToRemove(
+  principals: readonly string[],
+  user: { readonly name: string; readonly sid: string },
+): string[] {
+  const isUser = (principal: string) =>
+    principal.toLowerCase() === user.name.toLowerCase() ||
+    principal.toUpperCase() === user.sid.toUpperCase();
+  if (principals.filter(isUser).length !== 1) return [];
+  return principals.filter((principal) => !isUser(principal));
+}
+
+/**
  * Windows: removes inherited access, grants the current user (by SID, from `whoami`)
  * full control and removes every other principal's explicit access, so the file stays
  * private wherever the config folder is (T46). Explicit entries appear where the folder
@@ -84,10 +100,7 @@ export function windowsOwnerOnly(
     const icacls = win32.join(system32, 'icacls.exe');
     await run(icacls, [file, '/inheritance:r', '/grant:r', `*${sid}:F`]);
     const others = async () =>
-      aclPrincipals(await run(icacls, [file]), file).filter(
-        (principal) =>
-          principal.toLowerCase() !== name.toLowerCase() && principal.toUpperCase() !== sid,
-      );
+      principalsToRemove(aclPrincipals(await run(icacls, [file]), file), { name, sid });
     const extra = await others();
     if (extra.length === 0) return;
     // A principal icacls cannot name is shown as its bare SID, which icacls takes with `*`.

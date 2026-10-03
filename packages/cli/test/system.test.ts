@@ -10,7 +10,7 @@ import { nodeManagedSettingsSystem } from '../src/agents/claude-code/managed-set
 import { createClaudeCli, type StartProgram } from '../src/agents/claude-code/plugin-sync.ts';
 import { systemProcessLister } from '../src/agents/claude-code/running-claude.ts';
 import { realPowerShell } from '../src/env/shell-profile.ts';
-import { aclPrincipals, windowsOwnerOnly } from '../src/secrets/file-store.ts';
+import { aclPrincipals, principalsToRemove, windowsOwnerOnly } from '../src/secrets/file-store.ts';
 
 const win32 = process.platform === 'win32';
 const posix = !win32;
@@ -177,6 +177,17 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
       'runnervmfi6oq\\runneradmin',
       'S-1-5-21-1-2-3-1001',
     ]);
+  });
+
+  it('principalsToRemove removes the others only when the current user is found once', () => {
+    const user = { name: 'runnervmfi6oq\\runneradmin', sid: 'S-1-5-21-1-2-3-500' };
+    const others = ['NT AUTHORITY\\SYSTEM', 'BUILTIN\\Administrators'];
+    expect(principalsToRemove([...others, 'RUNNERVMFI6OQ\\RunnerAdmin'], user)).toEqual(others);
+    expect(principalsToRemove([...others, 's-1-5-21-1-2-3-500'], user)).toEqual(others);
+    // icacls names the user differently from whoami: take nothing away.
+    expect(principalsToRemove([...others, 'runneradmin'], user)).toEqual([]);
+    expect(principalsToRemove(others, user)).toEqual([]);
+    expect(principalsToRemove([...others, user.name, user.sid], user)).toEqual([]);
   });
 
   it.runIf(win32)('windowsOwnerOnly leaves only the current user on a temp file', async () => {
