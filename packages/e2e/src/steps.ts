@@ -1,7 +1,8 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { createClaudeRunningCheck, projectDirName } from '@agentnomad/cli';
+import { createClaudeRunningCheck, projectDirName, shellProfileFor } from '@agentnomad/cli';
 import { expect } from 'vitest';
 
 import type { LocalServer } from './local-server.ts';
@@ -19,6 +20,19 @@ const SKILL = '---\nname: deploy\ndescription: Deploy the app\n---\nRun the depl
 const REVIEW_SKILL = '---\nname: review\ndescription: Review a change\n---\nRead the diff.\n';
 const MEMORY = '# Memory\n- The demo app uses port 5173.\n';
 const EDIT = 'Edited on the second PC.\n';
+/** Scripts kept with the other line endings (T56): restore fixes them once, then leaves them. */
+const PY_CRLF = 'print("ok")\r\nprint("done")\r\n';
+const CMD_LF = '@echo off\necho ok\n';
+/** A saved environment value (T56), used by the project's MCP server. */
+const ENV_NAME = 'AGENTNOMAD_E2E_TOKEN';
+const ENV_VALUE = 'e2e-token-value-5b1d';
+/**
+ * Windows PCs already have the value set, so pull never writes the real user's environment
+ * variables; elsewhere it goes into the shell profile in the PC's own home folder.
+ */
+const PRESET_ENV: Readonly<Record<string, string>> =
+  process.platform === 'win32' ? { [ENV_NAME]: ENV_VALUE } : {};
+const PUSH_ENV_VALUE = fileURLToPath(new URL('push-env-value.ts', import.meta.url));
 /** A skill from the user's claude.ai account, as Claude Code syncs it (T42). */
 const ACCOUNT_SKILL =
   '---\nname: my-account-skill\ndescription: From claude.ai\n---\nWrite release notes.\n';
@@ -35,6 +49,9 @@ const memoryFile = (pc: Pc) =>
   claude(pc, 'projects', projectDirName(pc.project), 'memory', 'MEMORY.md');
 const hookCommand = (pc: Pc) => `${forward(pc.home)}/.claude/hooks/check.sh`;
 const notes = (pc: Pc) => `Notes live in ${pc.home}/notes.\n`;
+const MCP_JSON = {
+  mcpServers: { db: { command: 'node', args: ['db.js'], env: { TOKEN: `\${${ENV_NAME}}` } } },
+};
 
 /**
  * Where Claude Code itself runs (a developer's PC, never CI), pull --yes leaves
@@ -72,6 +89,7 @@ function expectNothingReadable(server: LocalServer, known: Known): void {
     'first@example.com',
     'second@example.com',
     'demo',
+    ENV_VALUE,
   ];
   expect(plaintextLeaks(server.requests, secrets)).toEqual([]);
   // A session token goes only in the Authorization header.
@@ -138,6 +156,11 @@ async function expectRestored(pc: Pc, edited: boolean): Promise<void> {
   expect(await read(claude(pc, 'hooks', 'check.sh'))).toBe(HOOK_SCRIPT);
   if (posix) expect(await isExecutable(claude(pc, 'hooks', 'check.sh'))).toBe(true);
   expect(await read(claude(pc, 'skills', 'deploy', 'SKILL.md'))).toBe(SKILL);
+  // A .py always gets LF; a .cmd gets CRLF on Windows and keeps what it came with elsewhere.
+  expect(await read(claude(pc, 'skills', 'deploy', 'tool.py'))).toBe(PY_CRLF.replace(/\r/g, ''));
+  const cmd = await read(claude(pc, 'skills', 'deploy', 'run.cmd'));
+  expect(cmd.replace(/\r/g, '')).toBe(CMD_LF);
+  if (!posix) expect(cmd).toBe(CMD_LF.replace(/\n/g, '\r\n'));
   if (edited) expect(await read(claude(pc, 'skills', 'review', 'SKILL.md'))).toBe(REVIEW_SKILL);
   if (!claudeRunningHere) {
     const claudeJson = JSON.parse(await read(join(pc.home, '.claude.json'))) as {
@@ -146,18 +169,68 @@ async function expectRestored(pc: Pc, edited: boolean): Promise<void> {
     expect(claudeJson.mcpServers).toEqual({ docs: { command: 'npx', args: ['-y', 'docs-mcp'] } });
   }
   expect(await read(join(pc.project, 'CLAUDE.md'))).toBe('Project rules.\n');
-  expect(JSON.parse(await read(join(pc.project, '.mcp.json')))).toEqual({
-    mcpServers: { db: { command: 'node', args: ['db.js'] } },
-  });
+  expect(JSON.parse(await read(join(pc.project, '.mcp.json')))).toEqual(MCP_JSON);
   // Auto memory lands in the folder Claude Code uses for this project path on this PC.
   expect(await read(memoryFile(pc))).toBe(MEMORY);
+  // The saved environment value: in the shell profile, or already set on Windows.
+  if (posix) {
+    const profile = shellProfileFor(process.env['SHELL'], pc.home, process.platform);
+    expect(await read(profile.path)).toContain(ENV_NAME);
+  }
+}
+
+/** Every file and folder of the PC (home and project), to see that nothing was added. */
+async function filesOf(pc: Pc): Promise<string[]> {
+  const list = async (dir: string) =>
+    (await readdir(dir, { recursive: true })).map((name) => join(dir, name));
+  return [...(await list(pc.home)), ...(await list(pc.project))].sort();
+}
+
+/**
+ * QA-04 (T56): pulling the same revisions again asks nothing (no --yes, and no terminal to
+ * ask in), writes nothing and leaves no new file, not even a backup of the shell profile.
+ */
+async function expectSecondPullChangesNothing(pc: Pc, conflict: '--merge' | '--overwrite') {
+  const before = await filesOf(pc);
+  const profile = posix
+    ? await read(shellProfileFor(process.env['SHELL'], pc.home, process.platform).path)
+    : '';
+  const again = ok(
+    await pc.run([
+      'pull',
+      '--global',
+      '--project',
+      'demo',
+      conflict,
+      '--allow-commands',
+      '--account-skills',
+      // Only where Claude Code runs (never CI): its "close Claude Code" question needs --yes.
+      ...(claudeRunningHere ? ['--yes'] : []),
+    ]),
+  );
+  expect(again.stdout).toContain('Restored the Claude Code global setup: 0 written');
+  expect(again.stdout).toContain('Restored the Claude Code project "demo": 0 written');
+  expect(again.stdout).toContain('The saved environment variables are already set here.');
+  expect(again.stdout).not.toContain('backed up first');
+  expect(await filesOf(pc)).toEqual(before);
+  if (posix) {
+    expect(await read(shellProfileFor(process.env['SHELL'], pc.home, process.platform).path)).toBe(
+      profile,
+    );
+  }
 }
 
 /** Step 1, first OS: a realistic setup is registered, pushed with memory, and up to date. */
 export async function firstPc({ server, keychain }: StepContext): Promise<void> {
-  const pc = await newPc('first', { apiUrl: server.url, keychain });
+  const pc = await newPc('first', {
+    apiUrl: server.url,
+    keychain,
+    env: { [ENV_NAME]: ENV_VALUE },
+  });
   try {
     await write(claude(pc, 'CLAUDE.md'), notes(pc));
+    await write(claude(pc, 'skills', 'deploy', 'tool.py'), PY_CRLF);
+    await write(claude(pc, 'skills', 'deploy', 'run.cmd'), CMD_LF);
     await write(
       claude(pc, 'settings.json'),
       JSON.stringify({
@@ -175,10 +248,7 @@ export async function firstPc({ server, keychain }: StepContext): Promise<void> 
       }),
     );
     await write(join(pc.project, 'CLAUDE.md'), 'Project rules.\n');
-    await write(
-      join(pc.project, '.mcp.json'),
-      JSON.stringify({ mcpServers: { db: { command: 'node', args: ['db.js'] } } }),
-    );
+    await write(join(pc.project, '.mcp.json'), JSON.stringify(MCP_JSON));
     await write(memoryFile(pc), MEMORY);
     // Skills Claude Code synced from claude.ai (T42): the user's own and one of Anthropic's.
     const synced = (...parts: string[]) => claude(pc, 'skills', 'synced', 'account-1', ...parts);
@@ -228,6 +298,16 @@ export async function firstPc({ server, keychain }: StepContext): Promise<void> 
     const uploads = server.requests.filter((request) => request.method === 'PUT');
     expect(uploads.length).toBe(2);
     expect(uploads.every((request) => request.body.byteLength > 0)).toBe(true);
+
+    // The project again, now with its environment value saved (T56): revision 2.
+    const withValue = ok(
+      await pc.runScript(PUSH_ENV_VALUE, [
+        ENV_NAME,
+        JSON.stringify({ project: 'demo', yes: false, memory: true }),
+      ]),
+    );
+    expect(withValue.stdout).toContain('Saved the Claude Code project "demo"');
+    expect(withValue.stdout).toContain('(revision 2)');
     expectNothingReadable(server, secretsHere);
   } finally {
     await pc.remove();
@@ -239,7 +319,7 @@ export async function firstPc({ server, keychain }: StepContext): Promise<void> 
  * rewrites every path for this PC; pulling again changes nothing; an edit is pushed back.
  */
 export async function secondPc({ server, keychain }: StepContext): Promise<void> {
-  const pc = await newPc('second', { apiUrl: server.url, keychain });
+  const pc = await newPc('second', { apiUrl: server.url, keychain, env: PRESET_ENV });
   try {
     // This PC already has its own settings and Claude Code login state.
     await write(claude(pc, 'settings.json'), JSON.stringify({ theme: 'light', model: 'opus' }));
@@ -292,20 +372,8 @@ export async function secondPc({ server, keychain }: StepContext): Promise<void>
       numStartups: 3,
     });
 
-    // Pulling again: nothing to write, nothing backed up.
-    const again = ok(
-      await pc.run([
-        'pull',
-        '--global',
-        '--project',
-        'demo',
-        '--merge',
-        '--yes',
-        '--allow-commands',
-      ]),
-    );
-    expect(again.stdout).toContain('Restored the Claude Code global setup: 0 written');
-    expect(again.stdout).toContain('Restored the Claude Code project "demo": 0 written');
+    // Pulling again: nothing to ask, nothing to write, nothing backed up.
+    await expectSecondPullChangesNothing(pc, '--merge');
 
     await write(claude(pc, 'CLAUDE.md'), (await read(claude(pc, 'CLAUDE.md'))) + EDIT);
     await write(claude(pc, 'skills', 'review', 'SKILL.md'), REVIEW_SKILL);
@@ -326,7 +394,7 @@ export async function secondPc({ server, keychain }: StepContext): Promise<void>
  * delete and account delete leave nothing on the server.
  */
 export async function thirdPc({ server, keychain }: StepContext): Promise<void> {
-  const pc = await newPc('third', { apiUrl: server.url, keychain });
+  const pc = await newPc('third', { apiUrl: server.url, keychain, env: PRESET_ENV });
   // Never pulled: knows no revision. Its login is kept in its own folder (see pc.ts).
   const stale = await newPc('stale', { apiUrl: server.url, keychain: false });
   try {
@@ -354,6 +422,7 @@ export async function thirdPc({ server, keychain }: StepContext): Promise<void> 
     );
     expect(backups).toHaveLength(1);
     expect(await read(claude(pc, backups[0] ?? ''))).toBe('Old notes on the third PC.\n');
+    await expectSecondPullChangesNothing(pc, '--overwrite');
 
     // A PC out of step: --yes never replaces the newer copy.
     await write(claude(stale, 'CLAUDE.md'), 'Stale notes.\n');
@@ -368,7 +437,7 @@ export async function thirdPc({ server, keychain }: StepContext): Promise<void> 
     const deleted = ok(await stale.run(['delete', '--global', '--yes']));
     expect(deleted.stdout).toContain('Deleted the Claude Code global setup from the server.');
     const afterDelete = ok(await pc.run(['status']));
-    expect(afterDelete.stdout).toContain('✓ Claude Code project "demo": up to date (revision 1)');
+    expect(afterDelete.stdout).toContain('✓ Claude Code project "demo": up to date (revision 2)');
     expect(afterDelete.stdout).toContain(
       'A Claude Code setup this PC had was deleted on the server.',
     );
