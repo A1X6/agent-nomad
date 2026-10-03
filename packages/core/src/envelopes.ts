@@ -49,7 +49,10 @@ export function unwrapDataKey(
   passwordKey: Uint8Array,
 ): Uint8Array {
   const dataKey = aead.open(wrapped, passwordKey, DATA_KEY_ASSOCIATED_DATA);
-  if (dataKey.length !== DATA_KEY_BYTES) throw new DecryptionError();
+  if (dataKey.length !== DATA_KEY_BYTES) {
+    dataKey.fill(0);
+    throw new DecryptionError();
+  }
   return dataKey;
 }
 

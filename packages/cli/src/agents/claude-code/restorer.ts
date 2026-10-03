@@ -3,18 +3,16 @@ import { readFile, stat } from 'node:fs/promises';
 import { sameBytes } from '@agentnomad/contracts';
 import {
   BACKUP_MARKER,
-  backupStamp,
   createMergeStrategies,
   createPathResolver,
   selectMergeStrategy,
   sourceOsOf,
+  type MergeChoices,
   type PlannedWrite,
 } from '@agentnomad/core';
-import * as z from 'zod';
 
 import type {
   CollectedFile,
-  ConflictQuestion,
   ConflictResolver,
   FileConflict,
   RestoreContext,
@@ -26,14 +24,14 @@ import { writeFileAtomically } from '../../system/files.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { reviewRunnable } from './command-review.ts';
-import { commandsInSettings, commandWords, createFileGatherer } from './file-gathering.ts';
 import {
-  CLAUDE_JSON_BUNDLE_PATH,
-  CLAUDE_JSON_MCP_KEY,
-  CLAUDE_JSON_PREFERENCE_KEYS,
-  extensionOf,
-} from './global-paths.ts';
-import { ClaudeJsonError } from './global-collector.ts';
+  CLAUDE_JSON_QUESTION,
+  createClaudeJsonMerge,
+  type MutableReport,
+} from './claude-json-merge.ts';
+import { createFileGatherer } from './file-gathering.ts';
+import { commandsInSettings, commandWords } from './settings-commands.ts';
+import { CLAUDE_JSON_BUNDLE_PATH, extensionOf } from './global-paths.ts';
 import {
   globalDestination,
   projectDestination,
@@ -43,12 +41,6 @@ import {
 } from './restore-rules.ts';
 import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
-
-/** `~/.claude.json`'s question: never replaced, only merged or skipped. */
-const CLAUDE_JSON_QUESTION: ConflictQuestion = {
-  overwriteAllowed: false,
-  message: '~/.claude.json: add your MCP servers and preferences (your login and history stay)?',
-};
 
 /** What pull's plan step decided for this restore (T61). */
 export interface ClaudeRestoreContext extends RestoreContext {
@@ -95,9 +87,6 @@ const CRLF_SCRIPTS = new Set(['.bat', '.cmd']);
 /** Commands that only run on one side. */
 const WINDOWS_ONLY = /(\.ps1|\.psm1|\.bat|\.cmd)$|^(powershell|pwsh|cmd)(\.exe)?$/i;
 const POSIX_ONLY = /(\.sh|\.bash|\.zsh|\.fish)$|^(bash|sh|zsh|fish)$/i;
-
-const isJsonObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Line endings of scripts for this OS; every other file stays byte-for-byte. */
 export function lineEndingsFor(
@@ -149,6 +138,12 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   const os = sourceOsOf(options.platform);
   const resolver = createPathResolver({ os, homeDir: options.homedir });
   const strategies = createMergeStrategies(options.now ? { now: options.now } : {});
+  /** Claude Code's settings and MCP files are JSON: the one merge its files need (SOLID-07). */
+  const mergeChoices: MergeChoices = {
+    merges: [strategies.jsonMerge],
+    fallback: strategies.textSideBySide,
+    overwrite: strategies.overwrite,
+  };
   const claudeJsonFile = options.customConfigDir
     ? path.join(options.baseDir, '.claude.json')
     : path.join(options.homedir, '.claude.json');
@@ -181,6 +176,15 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     });
   }
 
+  const claudeJson = createClaudeJsonMerge({
+    claudeJsonFile,
+    isClaudeRunning: options.isClaudeRunning,
+    readExisting,
+    writeAtomically,
+    freeSuffix,
+    ...(options.now && { now: options.now }),
+  });
+
   /** Permissions: a replaced file keeps its own; new scripts may run on macOS and Linux. */
   function modeFor(file: CollectedFile, content: Uint8Array, existingMode: number | null) {
     if (options.platform === 'win32') return null;
@@ -211,115 +215,6 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       default:
         return null;
     }
-  }
-
-  /** `~/.claude.json` as it is now, parsed: `existing` is `null` when missing. */
-  async function readClaudeJson() {
-    const existing = await readExisting(claudeJsonFile);
-    if (existing === null || existing === 'folder') return { existing, current: {} };
-    try {
-      const current = z
-        .record(z.string(), z.unknown())
-        .parse(JSON.parse(new TextDecoder().decode(existing)));
-      return { existing, current };
-    } catch (error) {
-      throw new ClaudeJsonError(claudeJsonFile, { cause: error });
-    }
-  }
-
-  /**
-   * `current` with the incoming keys merged in: servers by name (incoming wins), preference
-   * keys replaced. A Map keeps a key named "__proto__" plain data. `unchanged` compares the
-   * keys, not the bytes, since Claude Code formats the file its own way.
-   */
-  function mergeInto(current: Record<string, unknown>, incoming: Record<string, unknown>) {
-    const merged = new Map(Object.entries(current));
-    for (const [key, value] of Object.entries(incoming)) {
-      const before = merged.get(key);
-      merged.set(
-        key,
-        key === CLAUDE_JSON_MCP_KEY && isJsonObject(before) && isJsonObject(value)
-          ? Object.fromEntries([...Object.entries(before), ...Object.entries(value)])
-          : value,
-      );
-    }
-    const unchanged = Object.keys(incoming).every(
-      (key) => JSON.stringify(current[key]) === JSON.stringify(merged.get(key)),
-    );
-    return { merged, unchanged };
-  }
-
-  /** The keys of a pulled `~/.claude.json` that are restored, and the ones left out. */
-  function claudeJsonKeys(file: CollectedFile) {
-    const parsed = z
-      .record(z.string(), z.unknown())
-      .parse(JSON.parse(new TextDecoder().decode(file.content)));
-    const allowed = new Set([CLAUDE_JSON_MCP_KEY, ...CLAUDE_JSON_PREFERENCE_KEYS]);
-    const incoming = Object.fromEntries(Object.entries(parsed).filter(([key]) => allowed.has(key)));
-    const ignored = Object.keys(parsed).filter((key) => !allowed.has(key));
-    return { incoming, ignored };
-  }
-
-  /**
-   * Merges the selected keys into `~/.claude.json`, keeping everything else in it. Only the
-   * keys push saves are taken (T43): the MCP servers and the preference keys. Anything else,
-   * such as `projects` (local MCP servers and folder trust) or account state, is left out.
-   */
-  async function mergeClaudeJson(
-    file: CollectedFile,
-    onConflict: ConflictResolver,
-    report: MutableReport,
-    leave: boolean,
-  ): Promise<void> {
-    const { incoming, ignored } = claudeJsonKeys(file);
-    if (ignored.length > 0) {
-      report.warnings.push(
-        `Left out of ${claudeJsonFile}: ${ignored.map((key) => JSON.stringify(key)).join(', ')} (only MCP servers and preferences are restored there).`,
-      );
-    }
-    if (Object.keys(incoming).length === 0) return;
-
-    const before = await readClaudeJson();
-    if (before.existing === 'folder') {
-      report.skipped.push(file.path);
-      return;
-    }
-    if (before.existing !== null) {
-      if (mergeInto(before.current, incoming).unchanged) return;
-      const choice = await onConflict(CLAUDE_JSON_BUNDLE_PATH, CLAUDE_JSON_QUESTION);
-      if (choice === 'skip') {
-        report.skipped.push(file.path);
-        return;
-      }
-    }
-    // Asked in the plan (T61): skipped there, or open again now that nobody can be asked.
-    if (leave || (await options.isClaudeRunning())) {
-      report.skipped.push(file.path);
-      report.warnings.push(
-        `${claudeJsonFile} was left as it is because Claude Code or the Claude app was running; pull again later to add your MCP servers and preferences.`,
-      );
-      return;
-    }
-    // Read again now that Claude Code is closed: it may have saved the file meanwhile (T43).
-    const { existing, current } = await readClaudeJson();
-    if (existing === 'folder') {
-      report.skipped.push(file.path);
-      return;
-    }
-    const { merged, unchanged } = mergeInto(current, incoming);
-    if (existing !== null && unchanged) return;
-    const content = new TextEncoder().encode(
-      `${JSON.stringify(Object.fromEntries(merged), null, 2)}\n`,
-    );
-    const mode = existing === null ? 0o600 : (await stat(claudeJsonFile)).mode & 0o777;
-    if (existing !== null) {
-      const name = `${claudeJsonFile}${BACKUP_MARKER}${backupStamp(options.now?.() ?? new Date())}`;
-      const backup = name + (await freeSuffix(name));
-      await writeAtomically(backup, existing, mode);
-      report.backups.push(backup);
-    }
-    await writeAtomically(claudeJsonFile, content, mode);
-    report.written.push(file.path);
   }
 
   return {
@@ -354,18 +249,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
 
     async claudeJsonChange(incoming) {
       const file = incoming.find((entry) => entry.path === CLAUDE_JSON_BUNDLE_PATH);
-      if (file === undefined) return 'none';
-      try {
-        const keys = claudeJsonKeys(file).incoming;
-        if (Object.keys(keys).length === 0) return 'none';
-        const { existing, current } = await readClaudeJson();
-        if (existing === 'folder') return 'none';
-        if (existing === null) return 'new';
-        return mergeInto(current, keys).unchanged ? 'none' : 'merge';
-      } catch {
-        // A file that cannot be read is reported by the restore itself.
-        return 'none';
-      }
+      return file === undefined ? 'none' : claudeJson.change(file);
     },
 
     async restore(target, incoming, onConflict, context: ClaudeRestoreContext = {}) {
@@ -433,7 +317,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         }
         if (destination.kind === 'metadata') return;
         if (destination.kind === 'claude-json') {
-          await mergeClaudeJson(file, ask, report, context.leaveClaudeJson === true);
+          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true);
           return;
         }
 
@@ -463,7 +347,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
             report.skipped.push(file.path);
             return;
           }
-          writes = selectMergeStrategy(strategies, choice, file.path).resolve({
+          writes = selectMergeStrategy(mergeChoices, choice, file.path).resolve({
             path: file.path,
             existing,
             incoming: content,
@@ -536,11 +420,4 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       return report;
     },
   };
-}
-
-interface MutableReport {
-  written: string[];
-  skipped: string[];
-  backups: string[];
-  warnings: string[];
 }

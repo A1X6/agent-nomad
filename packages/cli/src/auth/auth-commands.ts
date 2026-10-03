@@ -12,6 +12,7 @@ import {
   unwrapDataKey,
   wrapDataKey,
   type CryptoService,
+  type DerivedKeys,
 } from '@agentnomad/core';
 
 import type { ApiClient } from '../api/api-client.ts';
@@ -100,19 +101,30 @@ export function createAuthCommands(
     return password;
   }
 
-  /** Slow on purpose (Argon2id, 64 MiB); a spinner shows it is working. */
-  async function deriveKeys(
+  /**
+   * Derives the password's keys and runs `use` with them; both keys are wiped when it ends,
+   * however it ends. Slow on purpose (Argon2id, 64 MiB); a spinner shows it is working.
+   */
+  async function withDerivedKeys<T>(
     crypto: CryptoService,
     password: string,
     salt: Uint8Array,
     params: Parameters<CryptoService['deriveKeys']>[2],
-  ) {
+    use: (keys: DerivedKeys) => Promise<T>,
+  ): Promise<T> {
     const spinner = reporter.spinner();
     spinner.start('Securing your password (takes a few seconds)…');
+    let keys: DerivedKeys;
     try {
-      return await crypto.deriveKeys(password, salt, params);
+      keys = await crypto.deriveKeys(password, salt, params);
     } finally {
       spinner.stop('Password secured.');
+    }
+    try {
+      return await use(keys);
+    } finally {
+      keys.authKey.fill(0);
+      keys.passwordKey.fill(0);
     }
   }
 
@@ -185,22 +197,22 @@ export function createAuthCommands(
       const crypto = await deps.crypto();
       const salt = crypto.randomBytes(KDF_SALT_BYTES);
       const dataKey = crypto.randomBytes(DATA_KEY_BYTES);
-      const keys = await deriveKeys(crypto, password, salt, DEFAULT_KDF_PARAMS);
       try {
-        const session = await deps.api().auth.register({
-          username,
-          kdfSalt: toBase64(salt),
-          kdfParams: DEFAULT_KDF_PARAMS,
-          authKey: toBase64(keys.authKey),
-          wrappedDataKey: toBase64(wrapDataKey(crypto, dataKey, keys.passwordKey)),
-          deviceName: deps.deviceName,
-        });
-        await saveLocalSession(secrets, {
-          sessionToken: session.sessionToken,
-          dataKey: toBase64(dataKey),
+        await withDerivedKeys(crypto, password, salt, DEFAULT_KDF_PARAMS, async (keys) => {
+          const session = await deps.api().auth.register({
+            username,
+            kdfSalt: toBase64(salt),
+            kdfParams: DEFAULT_KDF_PARAMS,
+            authKey: toBase64(keys.authKey),
+            wrappedDataKey: toBase64(wrapDataKey(crypto, dataKey, keys.passwordKey)),
+            deviceName: deps.deviceName,
+          });
+          await saveLocalSession(secrets, {
+            sessionToken: session.sessionToken,
+            dataKey: toBase64(dataKey),
+          });
         });
       } finally {
-        keys.passwordKey.fill(0);
         dataKey.fill(0);
       }
       await deps.localState?.().useAccount(username);
@@ -218,38 +230,39 @@ export function createAuthCommands(
       // First, so a sleeping server's "waking up" notice never overlaps the key spinner.
       const prelogin = await api.auth.prelogin({ username });
       const crypto = await deps.crypto();
-      const keys = await deriveKeys(
+      await withDerivedKeys(
         crypto,
         password,
         fromBase64(prelogin.kdfSalt),
         prelogin.kdfParams,
+        async (keys) => {
+          const answer = await api.auth.login({
+            username,
+            authKey: toBase64(keys.authKey),
+            deviceName: deps.deviceName,
+          });
+          let dataKey: Uint8Array;
+          try {
+            dataKey = unwrapDataKey(crypto, fromBase64(answer.wrappedDataKey), keys.passwordKey);
+          } catch (error) {
+            if (!(error instanceof DecryptionError)) throw error;
+            throw new Error(
+              'Logged in, but your data key could not be unlocked with this password.',
+              {
+                cause: error,
+              },
+            );
+          }
+          try {
+            await saveLocalSession(secrets, {
+              sessionToken: answer.sessionToken,
+              dataKey: toBase64(dataKey),
+            });
+          } finally {
+            dataKey.fill(0);
+          }
+        },
       );
-      try {
-        const answer = await api.auth.login({
-          username,
-          authKey: toBase64(keys.authKey),
-          deviceName: deps.deviceName,
-        });
-        let dataKey: Uint8Array;
-        try {
-          dataKey = unwrapDataKey(crypto, fromBase64(answer.wrappedDataKey), keys.passwordKey);
-        } catch (error) {
-          if (!(error instanceof DecryptionError)) throw error;
-          throw new Error(
-            'Logged in, but your data key could not be unlocked with this password.',
-            {
-              cause: error,
-            },
-          );
-        }
-        await saveLocalSession(secrets, {
-          sessionToken: answer.sessionToken,
-          dataKey: toBase64(dataKey),
-        });
-        dataKey.fill(0);
-      } finally {
-        keys.passwordKey.fill(0);
-      }
       await deps.localState?.().useAccount(username);
       finish(secrets, `Logged in as "${username}".`);
     },
@@ -286,14 +299,14 @@ export function createAuthCommands(
       const api = deps.api();
       const prelogin = await api.auth.prelogin({ username });
       const crypto = await deps.crypto();
-      const keys = await deriveKeys(
-        crypto,
-        password,
-        fromBase64(prelogin.kdfSalt),
-        prelogin.kdfParams,
-      );
       try {
-        await api.auth.deleteAccount({ authKey: toBase64(keys.authKey) });
+        await withDerivedKeys(
+          crypto,
+          password,
+          fromBase64(prelogin.kdfSalt),
+          prelogin.kdfParams,
+          (keys) => api.auth.deleteAccount({ authKey: toBase64(keys.authKey) }),
+        );
       } catch (error) {
         if (error instanceof ApiError && error.code === 'unauthorized') {
           // "Wrong password" keeps the login; any other 401 means the session itself ended.
@@ -307,9 +320,6 @@ export function createAuthCommands(
         }
         // OutcomeUnknownError (a lost answer) passes through with its own advice (T21).
         throw error;
-      } finally {
-        keys.passwordKey.fill(0);
-        keys.authKey.fill(0);
       }
       await clearLocalSession(secrets);
       await deps.localState?.().forgetServer();

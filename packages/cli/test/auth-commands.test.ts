@@ -3,6 +3,7 @@ import {
   type KdfParams,
   type LoginRequest,
   type RegisterRequest,
+  WRONG_PASSWORD_MESSAGE,
 } from '@agentnomad/contracts';
 import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -22,6 +23,7 @@ import {
   loadZxcvbnChecker,
   NetworkError,
   NO_RECOVERY_WARNING,
+  PromptCancelledError,
   SessionExpiredError,
   withSession,
   createLocalState,
@@ -81,8 +83,11 @@ function memorySecrets(backend: SecretStore['backend'] = 'keychain') {
   return { store, saved };
 }
 
-/** Answers questions from a script. A validator's complaint is recorded and the next answer used. */
-function scriptedPrompter(answers: (string | boolean)[]) {
+/**
+ * Answers questions from a script. A validator's complaint is recorded and the next answer
+ * used; an Error answer is thrown, like a question the user cancels.
+ */
+function scriptedPrompter(answers: (string | boolean | Error)[]) {
   const asked: string[] = [];
   const rejected: string[] = [];
   const next = (message: string, validate?: (value: string) => string | undefined) => {
@@ -90,6 +95,7 @@ function scriptedPrompter(answers: (string | boolean)[]) {
       asked.push(message);
       const answer = answers.shift();
       if (answer === undefined) throw new Error(`No answer scripted for "${message}"`);
+      if (answer instanceof Error) throw answer;
       const problem = typeof answer === 'string' ? validate?.(answer) : undefined;
       if (problem === undefined) return answer;
       rejected.push(problem);
@@ -168,7 +174,15 @@ function fakeServer() {
         }
         return Promise.resolve();
       },
-      deleteAccount: () => Promise.reject(new Error('not used')),
+      deleteAccount: ({ authKey }) => {
+        calls.push('deleteAccount');
+        const user = [...users.values()].find((known) => known.authKey === authKey);
+        if (user === undefined) {
+          return Promise.reject(new ApiError(401, 'unauthorized', WRONG_PASSWORD_MESSAGE));
+        }
+        users.delete(user.username);
+        return Promise.resolve();
+      },
     },
     bundles: {
       list: () => Promise.reject(new Error('not used')),
@@ -188,8 +202,9 @@ function fakeServer() {
 }
 
 function setup(
-  answers: (string | boolean)[],
+  answers: (string | boolean | Error)[],
   options: {
+    crypto?: CryptoService;
     server?: ReturnType<typeof fakeServer>;
     secrets?: ReturnType<typeof memorySecrets>;
     /** What `--password-stdin` reads. */
@@ -213,7 +228,7 @@ function setup(
     reporter,
     api: () => server.api,
     secrets: () => Promise.resolve(secrets.store),
-    crypto: () => Promise.resolve(fastCrypto()),
+    crypto: () => Promise.resolve(options.crypto ?? fastCrypto()),
     passwordChecker: () => Promise.resolve(zxcvbn),
     deviceName: 'laptop',
     ...(options.localState !== undefined && { localState: () => options.localState as LocalState }),
@@ -561,5 +576,192 @@ describe('sessions and messages', () => {
     expect(deviceNameOf('a\nb')).toBe('ab');
     expect(deviceNameOf('x'.repeat(100))).toHaveLength(64);
     expect(deviceNameOf('  ')).toBe('unknown device');
+  });
+});
+
+/**
+ * Fast crypto that keeps every secret array it hands out: both derived keys, a new data key
+ * (the only 32-byte random value) and an unlocked one.
+ */
+function secretTrackingCrypto(failDerive = false) {
+  const base = fastCrypto();
+  const handedOut: Uint8Array[] = [];
+  const crypto: CryptoService = {
+    ...base,
+    deriveKeys: async (password, salt, params) => {
+      if (failDerive) throw new Error('out of memory');
+      const keys = await base.deriveKeys(password, salt, params);
+      handedOut.push(keys.authKey, keys.passwordKey);
+      return keys;
+    },
+    randomBytes: (length) => {
+      const bytes = base.randomBytes(length);
+      if (length === 32) handedOut.push(bytes);
+      return bytes;
+    },
+    open: (sealed, key, associatedData) => {
+      const opened = base.open(sealed, key, associatedData);
+      handedOut.push(opened);
+      return opened;
+    },
+  };
+  const allWiped = () => handedOut.every((bytes) => bytes.every((byte) => byte === 0));
+  return { crypto, handedOut, allWiped };
+}
+
+const failingSave = () => {
+  const secrets = memorySecrets();
+  secrets.store.setMany = () => Promise.reject(new Error('disk full'));
+  return secrets;
+};
+
+describe('secret arrays are wiped on every path (BP-01)', () => {
+  /** A PC already holding a login for "ahmed", to log in again or delete the account. */
+  async function registered() {
+    const server = fakeServer();
+    const first = setup(registerAnswers(), { server });
+    await first.commands.register(ASK);
+    return { server, secrets: first.secrets };
+  }
+
+  describe('register', () => {
+    it('on success: both derived keys and the data key', async () => {
+      const keys = secretTrackingCrypto();
+      await setup(registerAnswers(), { crypto: keys.crypto }).commands.register(ASK);
+      expect(keys.handedOut).toHaveLength(3);
+      expect(keys.allWiped()).toBe(true);
+    });
+
+    it('on an error from the server, from saving the login or from deriving the keys', async () => {
+      const server = fakeServer();
+      await setup(registerAnswers(), { server }).commands.register(ASK);
+      const taken = secretTrackingCrypto();
+      await expect(
+        setup(registerAnswers(), { server, crypto: taken.crypto }).commands.register(ASK),
+      ).rejects.toMatchObject({ code: 'username_taken' });
+      expect(taken.handedOut).toHaveLength(3);
+      expect(taken.allWiped()).toBe(true);
+
+      const notSaved = secretTrackingCrypto();
+      await expect(
+        setup(registerAnswers('other'), {
+          crypto: notSaved.crypto,
+          secrets: failingSave(),
+        }).commands.register(ASK),
+      ).rejects.toThrow('disk full');
+      expect(notSaved.handedOut).toHaveLength(3);
+      expect(notSaved.allWiped()).toBe(true);
+
+      const notDerived = secretTrackingCrypto(true);
+      await expect(
+        setup(registerAnswers('third'), { crypto: notDerived.crypto }).commands.register(ASK),
+      ).rejects.toThrow('out of memory');
+      expect(notDerived.handedOut).toHaveLength(1);
+      expect(notDerived.allWiped()).toBe(true);
+    });
+
+    it('on a cancelled question: no key is made before the last answer', async () => {
+      const keys = secretTrackingCrypto();
+      const t = setup(['ahmed', true, STRONG, new PromptCancelledError()], {
+        crypto: keys.crypto,
+      });
+      await expect(t.commands.register(ASK)).rejects.toBeInstanceOf(PromptCancelledError);
+      expect(keys.handedOut).toEqual([]);
+      expect(t.server.calls).toEqual([]);
+    });
+  });
+
+  describe('login', () => {
+    it('on success: both derived keys and the unlocked data key', async () => {
+      const { server } = await registered();
+      const keys = secretTrackingCrypto();
+      await setup(['ahmed', STRONG], { server, crypto: keys.crypto }).commands.login(ASK);
+      expect(keys.handedOut).toHaveLength(3);
+      expect(keys.allWiped()).toBe(true);
+    });
+
+    it('on a wrong password, a data key that does not unlock, or a login not saved', async () => {
+      const { server } = await registered();
+      const wrong = secretTrackingCrypto();
+      await expect(
+        setup(['ahmed', 'plum-garage-violin-99'], { server, crypto: wrong.crypto }).commands.login(
+          ASK,
+        ),
+      ).rejects.toThrow('Wrong username or password');
+      expect(wrong.handedOut).toHaveLength(2);
+      expect(wrong.allWiped()).toBe(true);
+
+      const user = server.users.get('ahmed');
+      if (user === undefined) throw new Error('not registered');
+      const wrapped = Buffer.from(user.wrappedDataKey, 'base64');
+      wrapped[30] = (wrapped[30] ?? 0) ^ 1;
+      server.users.set('ahmed', { ...user, wrappedDataKey: wrapped.toString('base64') });
+      const locked = secretTrackingCrypto();
+      await expect(
+        setup(['ahmed', STRONG], { server, crypto: locked.crypto }).commands.login(ASK),
+      ).rejects.toThrow('could not be unlocked');
+      expect(locked.handedOut).toHaveLength(2);
+      expect(locked.allWiped()).toBe(true);
+      server.users.set('ahmed', user);
+
+      const notSaved = secretTrackingCrypto();
+      await expect(
+        setup(['ahmed', STRONG], {
+          server,
+          crypto: notSaved.crypto,
+          secrets: failingSave(),
+        }).commands.login(ASK),
+      ).rejects.toThrow('disk full');
+      expect(notSaved.handedOut).toHaveLength(3);
+      expect(notSaved.allWiped()).toBe(true);
+    });
+
+    it('on a cancelled question: no key is made', async () => {
+      const keys = secretTrackingCrypto();
+      const t = setup(['ahmed', new PromptCancelledError()], { crypto: keys.crypto });
+      await expect(t.commands.login(ASK)).rejects.toBeInstanceOf(PromptCancelledError);
+      expect(keys.handedOut).toEqual([]);
+      expect(t.server.calls).toEqual([]);
+    });
+  });
+
+  describe('account delete', () => {
+    it('on success: both derived keys', async () => {
+      const { server, secrets } = await registered();
+      const keys = secretTrackingCrypto();
+      const t = setup(['ahmed', STRONG], { server, secrets, crypto: keys.crypto });
+      await t.commands.accountDelete(ASK);
+      expect(server.users.has('ahmed')).toBe(false);
+      expect(keys.handedOut).toHaveLength(2);
+      expect(keys.allWiped()).toBe(true);
+    });
+
+    it('on a wrong password', async () => {
+      const { server, secrets } = await registered();
+      const keys = secretTrackingCrypto();
+      const t = setup(['ahmed', 'plum-garage-violin-99'], {
+        server,
+        secrets,
+        crypto: keys.crypto,
+      });
+      await expect(t.commands.accountDelete(ASK)).rejects.toThrow(
+        'Wrong username or password. Nothing was deleted.',
+      );
+      expect(keys.handedOut).toHaveLength(2);
+      expect(keys.allWiped()).toBe(true);
+    });
+
+    it('on a cancelled question: no key is made', async () => {
+      const { server, secrets } = await registered();
+      const keys = secretTrackingCrypto();
+      const t = setup(['ahmed', new PromptCancelledError()], {
+        server,
+        secrets,
+        crypto: keys.crypto,
+      });
+      await expect(t.commands.accountDelete(ASK)).rejects.toBeInstanceOf(PromptCancelledError);
+      expect(keys.handedOut).toEqual([]);
+      expect(server.users.has('ahmed')).toBe(true);
+    });
   });
 });

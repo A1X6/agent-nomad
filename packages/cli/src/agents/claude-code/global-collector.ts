@@ -3,14 +3,8 @@ import { readFile } from 'node:fs/promises';
 import * as z from 'zod';
 
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
-import {
-  commandsInSettings,
-  createFileGatherer,
-  type FileGatherer,
-  jsonFile,
-  programOf,
-  uniqueByPath,
-} from './file-gathering.ts';
+import { createFileGatherer, type FileGatherer, jsonFile, uniqueByPath } from './file-gathering.ts';
+import { commandsInSettings, programOf } from './settings-commands.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,

@@ -1,5 +1,6 @@
 import { WRAPPED_DATA_KEY_BYTES, type KdfParams } from '@agentnomad/contracts';
-import { beforeAll, describe, expect, it } from 'vitest';
+import sodium from 'libsodium-wrappers-sumo';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   DATA_KEY_BYTES,
@@ -79,6 +80,34 @@ describe('deriveKeys', () => {
   it('refuses settings outside the allowed range before doing any work', async () => {
     const huge: KdfParams = { ...params, memoryKiB: 4_194_304 }; // 4 GiB, above the 1 GiB limit
     await expect(crypto.deriveKeys('password', salt, huge)).rejects.toThrow();
+  });
+
+  it('wipes the password bytes once the master key is made, also on an error (BP-01)', async () => {
+    const encoded: Uint8Array[] = [];
+    const encode = sodium.from_string.bind(sodium);
+    const spy = vi.spyOn(sodium, 'from_string').mockImplementation((text: string) => {
+      const passwordBytes = encode(text);
+      encoded.push(passwordBytes);
+      return passwordBytes;
+    });
+    try {
+      await crypto.deriveKeys('correct horse battery staple', salt, params);
+      const pwhash = vi.spyOn(sodium, 'crypto_pwhash').mockImplementation(() => {
+        throw new Error('out of memory');
+      });
+      try {
+        await expect(crypto.deriveKeys('another password', salt, params)).rejects.toThrow(
+          'out of memory',
+        );
+      } finally {
+        pwhash.mockRestore();
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    expect(encoded).toHaveLength(2);
+    expect(encoded.every((passwordBytes) => passwordBytes.length > 0)).toBe(true);
+    expect(encoded.every((passwordBytes) => passwordBytes.every((byte) => byte === 0))).toBe(true);
   });
 
   it('refuses a salt that is not 16 bytes', async () => {

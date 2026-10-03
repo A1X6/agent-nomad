@@ -123,15 +123,26 @@ export function createMergeStrategies(options: MergeStrategyOptions = {}): Merge
   return { jsonMerge, textSideBySide, overwrite };
 }
 
+/** The strategies a restorer chooses from; an agent passes the merges its files need. */
+export interface MergeChoices {
+  /** Format-aware merges in order of preference, e.g. `[jsonMerge]`. */
+  readonly merges: readonly MergeStrategy[];
+  /** For "merge" when none of `merges` applies: keep both copies. */
+  readonly fallback: MergeStrategy;
+  /** For "overwrite". */
+  readonly overwrite: MergeStrategy;
+}
+
 /**
  * The strategy for the user's choice: "overwrite" always overwrites (with a backup);
- * "merge" merges JSON files and keeps both copies of everything else.
+ * "merge" uses the first of `merges` that applies to the file and keeps both copies of
+ * everything else.
  */
 export function selectMergeStrategy(
-  strategies: MergeStrategies,
+  choices: MergeChoices,
   choice: 'merge' | 'overwrite',
   path: string,
 ): MergeStrategy {
-  if (choice === 'overwrite') return strategies.overwrite;
-  return strategies.jsonMerge.appliesTo(path) ? strategies.jsonMerge : strategies.textSideBySide;
+  if (choice === 'overwrite') return choices.overwrite;
+  return choices.merges.find((strategy) => strategy.appliesTo(path)) ?? choices.fallback;
 }

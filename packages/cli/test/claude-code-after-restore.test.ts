@@ -4,7 +4,7 @@ import {
   createClaudeCodeAfterRestore,
   type ClaudeCli,
   type CollectedFile,
-  type DetectorSystem,
+  type ExecutableLookupSystem,
   type FollowUpPlanContext,
   type ManagedSettings,
   PluginManifestSchema,
@@ -26,7 +26,7 @@ const noPolicy: ManagedSettings = {
 
 /** The plan step (it asks), then the follow-up it returns (it gets no prompter). */
 function afterRestore(deps: {
-  system: DetectorSystem;
+  system: ExecutableLookupSystem;
   cli: (path: string) => ClaudeCli;
   managed?: ManagedSettings;
 }) {
@@ -45,15 +45,13 @@ const json = (path: string, value: unknown): CollectedFile => ({
   executable: false,
 });
 
-function system(executables: string[]): DetectorSystem {
+/** Only what after-restore reads (SOLID-06): no full detector system to fake. */
+function system(executables: string[]): ExecutableLookupSystem {
   return {
     platform: 'linux',
     homedir: '/home/a',
     env: { PATH: '/usr/bin' },
-    isDirectory: () => Promise.resolve(false),
     isExecutable: (path) => Promise.resolve(executables.includes(path)),
-    readText: () => Promise.resolve(null),
-    runVersion: () => Promise.resolve(null),
   };
 }
 

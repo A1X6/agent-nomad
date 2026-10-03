@@ -30,18 +30,33 @@ export interface DetectorSystem {
   runVersion(file: string): Promise<string | null>;
 }
 
+/**
+ * The parts of DetectorSystem that finding a command on PATH reads (SOLID-06): callers and
+ * their tests need nothing else.
+ */
+export type ExecutableLookupSystem = Pick<
+  DetectorSystem,
+  'platform' | 'homedir' | 'env' | 'isExecutable'
+>;
+
 /** Path rules of the PC being inspected (not of the one running the tests). */
-const pathsOf = (system: DetectorSystem) => (system.platform === 'win32' ? win32 : posix);
+const pathsOf = (system: Pick<DetectorSystem, 'platform'>) =>
+  system.platform === 'win32' ? win32 : posix;
 
 /** Environment lookup that ignores case on Windows, where `Path` and `PATH` are the same. */
-function envValue(system: DetectorSystem, name: string): string | undefined {
+function envValue(
+  system: Pick<DetectorSystem, 'platform' | 'env'>,
+  name: string,
+): string | undefined {
   if (system.platform !== 'win32') return system.env[name];
   const key = Object.keys(system.env).find((candidate) => candidate.toUpperCase() === name);
   return key === undefined ? undefined : system.env[key];
 }
 
 /** `CLAUDE_CONFIG_DIR` when set, else `~/.claude` (`%USERPROFILE%\.claude` on Windows). */
-export function claudeConfigDir(system: DetectorSystem): string {
+export function claudeConfigDir(
+  system: Pick<DetectorSystem, 'platform' | 'homedir' | 'env'>,
+): string {
   const path = pathsOf(system);
   const configured = envValue(system, CLAUDE_CONFIG_DIR_ENV)?.trim();
   if (configured) return path.resolve(configured);
@@ -57,7 +72,7 @@ export function parseVersion(output: string): string | null {
  * The `claude` command the user's shell would run: the first match on PATH, then the
  * native installer's folder (`~/.local/bin`), which some shells leave off PATH.
  */
-export function findClaudeExecutable(system: DetectorSystem): Promise<string | null> {
+export function findClaudeExecutable(system: ExecutableLookupSystem): Promise<string | null> {
   return findExecutable(system, 'claude');
 }
 
@@ -66,7 +81,7 @@ export function findClaudeExecutable(system: DetectorSystem): Promise<string | n
  * Windows), then `~/.local/bin`. `null` when it is not installed.
  */
 export async function findExecutable(
-  system: DetectorSystem,
+  system: ExecutableLookupSystem,
   command: string,
 ): Promise<string | null> {
   const windows = system.platform === 'win32';

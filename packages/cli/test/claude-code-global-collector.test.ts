@@ -10,6 +10,7 @@ import {
   createProgramLocator,
   programOf,
   type DetectorSystem,
+  type ExecutableLookupSystem,
   type ProgramInfo,
   createClaudeCodeGlobalCollector,
   type CollectedFile,
@@ -427,14 +428,12 @@ describe('program locator', () => {
     path: string;
     executables: string[];
     files: Record<string, string>;
-  }): DetectorSystem => ({
+  }): ExecutableLookupSystem & Pick<DetectorSystem, 'readText'> => ({
     platform: pc.platform,
     homedir: pc.platform === 'win32' ? 'C:\\Users\\a' : '/home/a',
     env: { PATH: pc.path, PATHEXT: '.EXE;.CMD' },
-    isDirectory: () => Promise.resolve(false),
     isExecutable: (path) => Promise.resolve(pc.executables.includes(path)),
     readText: (path) => Promise.resolve(pc.files[path] ?? null),
-    runVersion: () => Promise.resolve(null),
   });
   const manifest = JSON.stringify({
     name: 'ccstatusline',

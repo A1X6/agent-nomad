@@ -10,7 +10,7 @@ import { BundlePathSchema } from '@agentnomad/contracts';
 import { windowsNameProblem } from '@agentnomad/core';
 
 import { ENV_BUNDLE_PATH } from '../../env/env-section.ts';
-import { commandsInSettings, commandWords } from './file-gathering.ts';
+import { commandsInSettings, commandWords } from './settings-commands.ts';
 
 import {
   CLAUDE_JSON_BUNDLE_PATH,

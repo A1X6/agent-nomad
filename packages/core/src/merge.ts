@@ -12,8 +12,6 @@ export interface PlannedWrite {
   readonly content: Uint8Array;
 }
 
-export type MergeStrategyName = 'json-merge' | 'text-side-by-side' | 'overwrite';
-
 /**
  * Decides how to resolve one conflict (T11). Pure: it returns the files to write and never
  * touches the disk, so every case is easy to test.
@@ -21,9 +19,13 @@ export type MergeStrategyName = 'json-merge' | 'text-side-by-side' | 'overwrite'
  * - `json-merge`: one merged file, keys from `incoming` win.
  * - `text-side-by-side`: the existing file stays; the incoming one is written next to it as a copy.
  * - `overwrite`: a backup of the existing file, then the incoming file.
+ *
+ * A merge for another format (TOML, Markdown sections) is one more strategy an agent's
+ * restorer adds to its list; nothing here changes (SOLID-07).
  */
 export interface MergeStrategy {
-  readonly name: MergeStrategyName;
+  /** e.g. `json-merge`; shown in tests and logs only. */
+  readonly name: string;
   /** Whether this strategy can handle the file, e.g. `json-merge` only handles JSON. */
   appliesTo(path: string): boolean;
   resolve(conflict: FileConflict): readonly PlannedWrite[];
