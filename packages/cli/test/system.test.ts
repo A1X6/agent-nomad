@@ -166,7 +166,7 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
     const { stdout: acl } = await promisify(execFile)('icacls', [file], { encoding: 'utf8' });
     // One entry, full control, nothing inherited: "<file> PC\user:(F)".
     const entries = acl.split(/\r?\n/).filter((line) => line.includes(':('));
-    expect(entries).toHaveLength(1);
+    expect(entries, acl).toHaveLength(1);
     expect(entries[0]?.trim()).toMatch(/:\(F\)$/);
   });
 
