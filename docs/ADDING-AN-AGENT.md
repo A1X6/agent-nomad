@@ -229,7 +229,9 @@ loop) into a shared `agents/shared/` module rather than copying them.
 - **`inspector.versionNotice(savedWith, here)`:** what pull says about the version a setup
   was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text).
 - **`optionalParts`:** what push saves only after a yes, as data (an id, its scope, what
-  there is, the question); the collector gets the chosen ids in `options.include`.
+  there is, the question, and `flagHelp`, the help for `--<id>` / `--no-<id>` in push and
+  pull); the collector gets the chosen ids in `options.include`. The command line builds
+  the flags from the registered adapters: nothing to add in `cli/`.
 - **`memoryDescription`:** what push's memory question names.
 - **`envReferences`:** which bundle files hold MCP servers (`mcp`) and settings with an
   `env` block (`settings`) that can use `${VAR}`, the variables the agent sets itself
@@ -282,7 +284,7 @@ made for one agent cannot change another. A helper two adapters need goes in `sh
 
 ## Step 8 · Register it (the one line)
 
-In `packages/cli/src/app.ts`, add the adapter to the registry list:
+In `packages/cli/src/app.ts`, add the adapter to the registry list in `createAppRegistry`:
 
 ```ts
 createAgentRegistry([
