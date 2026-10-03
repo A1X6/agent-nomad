@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createAgentRegistry,
   createAgentsCommand,
+  createClaudeCodeAdapter,
   detectManagedSettings,
   explainPluginFailure,
   globalDestination,
@@ -166,14 +167,24 @@ describe('warnings (T31 done-when)', () => {
     );
   });
 
-  it('agentnomad agents shows the notice', async () => {
+  it('agentnomad agents shows the notice, from the adapter’s inspector (SOLID-01)', async () => {
     const lines: string[] = [];
+    const adapter = createClaudeCodeAdapter({
+      env: { PATH: '' },
+      homedir: '/nowhere',
+      platform: 'linux',
+      isClaudeRunning: () => Promise.resolve(false),
+      managedSystem: fakeSystem({
+        platform: 'linux',
+        files: { '/etc/claude-code/managed-settings.json': policy },
+      }),
+    });
     await createAgentsCommand({
-      registry: () => createAgentRegistry([]),
+      registry: () => createAgentRegistry([adapter]),
       reporter: { info: () => undefined, success: () => undefined, warn: (m) => lines.push(m) },
-      notices: () => Promise.resolve([managedSettingsNotice(found, 'agents') ?? '']),
     }).agents();
     expect(lines[0]).toContain('never synced');
+    expect(managedSettingsNotice(found, 'agents')).toContain('never synced');
   });
 
   it('a plugin blocked by policy gets a clear reason', async () => {

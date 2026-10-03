@@ -13,14 +13,18 @@ import * as z from 'zod';
 
 import type {
   CollectedFile,
+  ConflictQuestion,
   ConflictResolver,
+  FileConflict,
   RestoreContext,
+  RestoreReport,
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
 import { writeTargetOf } from '../../env/shell-profile.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
+import { reviewRunnable } from './command-review.ts';
 import { commandsInSettings, commandWords, createFileGatherer } from './file-gathering.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
@@ -35,10 +39,38 @@ import {
   type RestoreDestination,
   windowsNameProblem,
 } from './restore-rules.ts';
+import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
 
-/** The user's answer while Claude Code is running: try again after closing it, or skip. */
-export type ClaudeRunningAnswer = 'retry' | 'skip';
+/** `~/.claude.json`'s question: never replaced, only merged or skipped. */
+const CLAUDE_JSON_QUESTION: ConflictQuestion = {
+  overwriteAllowed: false,
+  message: '~/.claude.json: add your MCP servers and preferences (your login and history stay)?',
+};
+
+/** What pull's plan step decided for this restore (T61). */
+export interface ClaudeRestoreContext extends RestoreContext {
+  /**
+   * Leave `~/.claude.json` as it is, with the "was running" warning: Claude Code was open
+   * when the plan asked, and the user chose to skip it.
+   */
+  readonly leaveClaudeJson?: boolean;
+}
+
+/** The Claude Code restorer, and what its plan step needs to know about `~/.claude.json`. */
+export interface ClaudeCodeRestorer extends Restorer {
+  restore(
+    target: ScopeTarget,
+    files: readonly CollectedFile[],
+    onConflict: ConflictResolver,
+    context?: ClaudeRestoreContext,
+  ): Promise<RestoreReport>;
+  /**
+   * What restoring `files` would do to `~/.claude.json` here as it is now: nothing, create
+   * it, or merge into it (only after the answer to its conflict question).
+   */
+  claudeJsonChange(files: readonly CollectedFile[]): Promise<'none' | 'new' | 'merge'>;
+}
 
 export interface RestorerOptions {
   /** Claude Code's base folder on this PC (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -48,9 +80,8 @@ export interface RestorerOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** Whether `CLAUDE_CONFIG_DIR` is set: `.claude.json` then lives in the base folder. */
   readonly customConfigDir: boolean;
+  /** Checked right before `~/.claude.json` is written: never while Claude Code runs. */
   readonly isClaudeRunning: ClaudeRunningCheck;
-  /** Asks the user to close Claude Code (then `retry`) or to leave `~/.claude.json` alone. */
-  readonly onClaudeRunning: () => Promise<ClaudeRunningAnswer>;
   /** Clock for backup names; injectable for tests. */
   readonly now?: () => Date;
 }
@@ -111,8 +142,9 @@ export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform)
  * Writes a pulled Claude Code setup to this PC (T27). Only paths a collector could have
  * produced are written; existing files that differ are resolved with the user's choice
  * (T11 strategies); `~/.claude.json` is only ever merged, and never while Claude Code runs.
+ * It never asks: every answer comes from pull's plan step (T61).
  */
-export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
+export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRestorer {
   const files = createFileGatherer(options.platform);
   const { path } = files;
   const os: SourceOs =
@@ -228,6 +260,17 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     return { merged, unchanged };
   }
 
+  /** The keys of a pulled `~/.claude.json` that are restored, and the ones left out. */
+  function claudeJsonKeys(file: CollectedFile) {
+    const parsed = z
+      .record(z.string(), z.unknown())
+      .parse(JSON.parse(new TextDecoder().decode(file.content)));
+    const allowed = new Set([CLAUDE_JSON_MCP_KEY, ...CLAUDE_JSON_PREFERENCE_KEYS]);
+    const incoming = Object.fromEntries(Object.entries(parsed).filter(([key]) => allowed.has(key)));
+    const ignored = Object.keys(parsed).filter((key) => !allowed.has(key));
+    return { incoming, ignored };
+  }
+
   /**
    * Merges the selected keys into `~/.claude.json`, keeping everything else in it. Only the
    * keys push saves are taken (T43): the MCP servers and the preference keys. Anything else,
@@ -236,16 +279,10 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
   async function mergeClaudeJson(
     file: CollectedFile,
     onConflict: ConflictResolver,
-    onClaudeRunning: () => Promise<ClaudeRunningAnswer>,
     report: MutableReport,
-    assumeYes: boolean,
+    leave: boolean,
   ): Promise<void> {
-    const parsed = z
-      .record(z.string(), z.unknown())
-      .parse(JSON.parse(new TextDecoder().decode(file.content)));
-    const allowed = new Set([CLAUDE_JSON_MCP_KEY, ...CLAUDE_JSON_PREFERENCE_KEYS]);
-    const incoming = Object.fromEntries(Object.entries(parsed).filter(([key]) => allowed.has(key)));
-    const ignored = Object.keys(parsed).filter((key) => !allowed.has(key));
+    const { incoming, ignored } = claudeJsonKeys(file);
     if (ignored.length > 0) {
       report.warnings.push(
         `Left out of ${claudeJsonFile}: ${ignored.map((key) => JSON.stringify(key)).join(', ')} (only MCP servers and preferences are restored there).`,
@@ -260,21 +297,19 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     }
     if (before.existing !== null) {
       if (mergeInto(before.current, incoming).unchanged) return;
-      const choice = await onConflict(CLAUDE_JSON_BUNDLE_PATH, { overwriteAllowed: false });
+      const choice = await onConflict(CLAUDE_JSON_BUNDLE_PATH, CLAUDE_JSON_QUESTION);
       if (choice === 'skip') {
         report.skipped.push(file.path);
         return;
       }
     }
-    while (await options.isClaudeRunning()) {
-      // --yes never waits for the user to close Claude Code: the file is skipped instead.
-      if (assumeYes || (await onClaudeRunning()) === 'skip') {
-        report.skipped.push(file.path);
-        report.warnings.push(
-          `${claudeJsonFile} was left as it is because Claude Code or the Claude app was running; pull again later to add your MCP servers and preferences.`,
-        );
-        return;
-      }
+    // Asked in the plan (T61): skipped there, or open again now that nobody can be asked.
+    if (leave || (await options.isClaudeRunning())) {
+      report.skipped.push(file.path);
+      report.warnings.push(
+        `${claudeJsonFile} was left as it is because Claude Code or the Claude app was running; pull again later to add your MCP servers and preferences.`,
+      );
+      return;
     }
     // Read again now that Claude Code is closed: it may have saved the file meanwhile (T43).
     const { existing, current } = await readClaudeJson();
@@ -299,7 +334,50 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
   }
 
   return {
-    async restore(target, incoming, onConflict, context: RestoreContext = {}) {
+    reviewRunnable,
+    isRedirectVariable,
+
+    /**
+     * Each file here that differs, in the order `restore` meets them. `~/.claude.json` is
+     * listed whenever the setup has it: its other keys are not collected, so whether it
+     * would change is only known while writing.
+     */
+    conflicts(incoming, current): FileConflict[] {
+      const found: FileConflict[] = [];
+      for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+        const here = current.find((entry) => entry.path === file.path);
+        const claudeJson = file.path === CLAUDE_JSON_BUNDLE_PATH;
+        if (here === undefined && !claudeJson) continue;
+        if (
+          here !== undefined &&
+          sameForRestore(options.platform, file.path, here.content, file.content)
+        )
+          continue;
+        found.push({
+          path: file.path,
+          question: claudeJson ? CLAUDE_JSON_QUESTION : { overwriteAllowed: true },
+        });
+      }
+      return found;
+    },
+
+    async claudeJsonChange(incoming) {
+      const file = incoming.find((entry) => entry.path === CLAUDE_JSON_BUNDLE_PATH);
+      if (file === undefined) return 'none';
+      try {
+        const keys = claudeJsonKeys(file).incoming;
+        if (Object.keys(keys).length === 0) return 'none';
+        const { existing, current } = await readClaudeJson();
+        if (existing === 'folder') return 'none';
+        if (existing === null) return 'new';
+        return mergeInto(current, keys).unchanged ? 'none' : 'merge';
+      } catch {
+        // A file that cannot be read is reported by the restore itself.
+        return 'none';
+      }
+    },
+
+    async restore(target, incoming, onConflict, context: ClaudeRestoreContext = {}) {
       const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
       // A question the user cancelled (Ctrl+C) or that cannot be asked without a terminal
       // stops the whole restore; only a problem with the entry itself is skipped (T53).
@@ -315,7 +393,6 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
           }
         };
       const ask = stopping(onConflict);
-      const askClaudeRunning = stopping(options.onClaudeRunning);
       const projectScripts = projectHookScripts(
         incoming
           .filter((entry) =>
@@ -365,7 +442,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         }
         if (destination.kind === 'metadata') return;
         if (destination.kind === 'claude-json') {
-          await mergeClaudeJson(file, ask, askClaudeRunning, report, context.assumeYes === true);
+          await mergeClaudeJson(file, ask, report, context.leaveClaudeJson === true);
           return;
         }
 

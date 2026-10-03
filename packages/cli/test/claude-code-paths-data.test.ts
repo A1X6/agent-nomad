@@ -107,10 +107,10 @@ describe('unknown-file check (T32 done-when)', () => {
   });
 
   it('says what was not saved and why', () => {
-    expect(unknownEntriesNotice(['hooks/', 'new-feature.json'])).toBe(
+    expect(unknownEntriesNotice('Claude Code', ['hooks/', 'new-feature.json'])).toBe(
       'Not saved, because agentnomad does not know these yet: hooks/, new-feature.json. A newer Claude Code may have added them; if they matter to you, update agentnomad.',
     );
-    expect(unknownEntriesNotice([])).toBeNull();
+    expect(unknownEntriesNotice('Claude Code', [])).toBeNull();
   });
 
   it('a missing folder reports nothing', async () => {

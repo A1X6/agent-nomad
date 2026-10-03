@@ -1,6 +1,7 @@
 /**
- * The agent version stamped into each saved setup (T32, `Bundle.agentVersion`) and the
- * check pull makes against this PC's version.
+ * What push and pull say about any agent, built from what its adapter reports (T61): the
+ * agent version stamped into each saved setup (T32, `Bundle.agentVersion`) against this
+ * PC's, and entries in the agent's folder that its adapter does not know (T32).
  */
 
 /** `2.1.282` → [2, 1, 282]; pre-release suffixes are ignored for the comparison. */
@@ -33,4 +34,16 @@ export function agentVersionNotice(
   }
   if (compareVersions(savedWith, here) <= 0) return null;
   return `This setup was saved from ${displayName} ${savedWith}, but this PC has ${here}. Update ${displayName} so every setting works.`;
+}
+
+/** What push says about unknown entries; `null` when there are none. */
+export function unknownEntriesNotice(
+  displayName: string,
+  entries: readonly string[],
+): string | null {
+  if (entries.length === 0) return null;
+  return [
+    `Not saved, because agentnomad does not know ${entries.length === 1 ? 'this' : 'these'} yet: ${entries.join(', ')}.`,
+    `A newer ${displayName} may have added them; if they matter to you, update agentnomad.`,
+  ].join(' ');
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { stubRestorer } from './stub-restorer.ts';
 import type {
   AgentAdapter,
   AgentRegistry,
@@ -33,15 +34,13 @@ const fakeAdapter: AgentAdapter = {
       Promise.resolve({ installed: true, baseDir: '/home/ahmed/.claude', version: '2.1.0' }),
   },
   collector: { collect: () => Promise.resolve([]) },
-  restorer: {
-    restore: async (_target, files, onConflict) => {
-      const skipped: string[] = [];
-      for (const file of files)
-        if ((await onConflict(file.path, { overwriteAllowed: true })) === 'skip')
-          skipped.push(file.path);
-      return { written: [], skipped, backups: [], warnings: [] };
-    },
-  },
+  restorer: stubRestorer(async (_target, files, onConflict) => {
+    const skipped: string[] = [];
+    for (const file of files)
+      if ((await onConflict(file.path, { overwriteAllowed: true })) === 'skip')
+        skipped.push(file.path);
+    return { written: [], skipped, backups: [], warnings: [] };
+  }),
 };
 
 const registry: AgentRegistry = {

@@ -10,6 +10,8 @@ import {
   type CryptoService,
 } from '@agentnomad/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { stubRestorer } from './stub-restorer.ts';
 import * as z from 'zod';
 
 import {
@@ -60,9 +62,7 @@ const claude: AgentAdapter = {
   displayName: 'Claude Code',
   detector: { detect: () => Promise.resolve({ installed: true, baseDir: null, version: null }) },
   collector: { collect: () => Promise.resolve([]) },
-  restorer: {
-    restore: () => Promise.resolve({ written: [], skipped: [], backups: [], warnings: [] }),
-  },
+  restorer: stubRestorer(),
 };
 
 /** A server holding a global setup and two projects. */

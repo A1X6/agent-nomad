@@ -267,11 +267,12 @@ flowchart TD
 Pull is split like push (T59). The **plan** step lists, downloads and checks every chosen
 setup and asks every question before anything is written: an older copy, new commands, each
 file here that differs (`~/.claude.json` whenever the setup has it) and missing environment
-values. The **apply** step writes with those answers and has no prompter; a file only the
-restorer finds different, which the plan never asked about, is left as it is and the setup
-counts as not done. The agent's after-restore step (plugins, programs, claude.ai skills) runs
-last and still asks: the adapter interface hands it the prompter (moving those questions into
-the plan is part of the adapter work, T61).
+values, then each agent's own questions (T61): for Claude Code, closing Claude Code when
+`~/.claude.json` would change, then plugins, programs and claude.ai skills. Without a
+terminal, an open question stops pull here, before any file changes. The **apply** step
+writes with those answers and has no prompter, nor does the agent's follow-up it runs last
+(plugin and program installs, adding the skills); a file only the restorer finds different,
+which the plan never asked about, is left as it is and the setup counts as not done.
 
 - Files that only differ in how the home path is written (`C:/` vs `C:\`) are left as they
   are.
@@ -297,18 +298,22 @@ the plan is part of the adapter work, T61).
 Everything agent-specific sits behind one interface, `AgentAdapter`
 (`packages/cli/src/agents/adapter.ts`):
 
-| Part                      | Question it answers                                                                                               |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `detector`                | Is the agent installed here? Where is its base folder? Which version?                                             |
-| `collector`               | Which files make up the global setup, or a project's setup? (Never credentials or machine state.)                 |
-| `restorer`                | Write a pulled setup back: where each file goes, what is refused, per-OS line endings and permissions, conflicts. |
-| `inspector` (optional)    | What should the user be told on push or pull (managed settings, files this version does not know yet)?            |
-| `afterRestore` (optional) | Follow-up after a pull, such as reinstalling plugins.                                                             |
+| Part                           | Question it answers                                                                                                                                                                                                                                                                                                    |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `detector`                     | Is the agent installed here? Where is its base folder? Which version?                                                                                                                                                                                                                                                  |
+| `collector`                    | Which files make up the global setup, or a project's setup? (Never credentials or machine state.)                                                                                                                                                                                                                      |
+| `restorer`                     | Write a pulled setup back: where each file goes, what is refused, per-OS line endings and permissions, conflicts. Also what pull's plan must ask first: what runs programs (`reviewRunnable`), which files differ (`conflicts`), which saved variables redirect requests (`isRedirectVariable`). It never asks itself. |
+| `inspector` (optional)         | What should the user be told on push, pull or `agents` (managed settings, files this version does not know yet, a setup saved with a newer version)?                                                                                                                                                                   |
+| `optionalParts` (optional)     | What push saves only after a yes, e.g. Claude Code's claude.ai skills; `--<id>` / `--no-<id>` answer it.                                                                                                                                                                                                               |
+| `memoryDescription` (optional) | What push's memory question names.                                                                                                                                                                                                                                                                                     |
+| `planRestore` (optional)       | The agent's own questions in pull's plan step; returns how to write the setup and a follow-up (e.g. plugin reinstalls) that gets no prompter.                                                                                                                                                                          |
 
 Adapters are registered in one place, `createAppHandlers` in `packages/cli/src/app.ts`,
 through `createAgentRegistry`. Push, pull, `list`, `status`, `delete` and `agents` only use
 the registry and these interfaces, so a new agent is a new folder plus one line there. See
-[ADDING-AN-AGENT.md](ADDING-AN-AGENT.md).
+[ADDING-AN-AGENT.md](ADDING-AN-AGENT.md). A lint rule (`no-restricted-imports` in
+`eslint.config.js`) keeps `push/`, `pull/` and `cli/` from importing any adapter's folder,
+and `test/agent-boundary.test.ts` runs a second, made-up agent through push and pull (T61).
 
 Data is stored per agent (`agent` is part of every bundle's key), so adding an agent never
 touches anyone's existing saves.
@@ -346,7 +351,10 @@ only in case or Unicode form are one file on Windows and macOS: only the first i
 entry that cannot be written is skipped with a warning; the rest continue. `~/.claude.json`
 is only ever merged, with a backup: only `mcpServers` and the preference keys, never
 `projects` or account state. It is skipped while Claude Code is running (it rewrites the
-file while open) and read again once Claude Code is closed. Running means a `claude` program
+file while open): pull's plan step asks to close it ("I closed it, continue" checks again,
+"Skip ~/.claude.json this time" leaves it with a warning; `--yes` never waits), and the
+restorer checks once more right before writing and leaves the file if it is open again. It is
+read again at that point, as Claude Code saves it while closing. Running means a `claude` program
 (also under a folder with a space), npm's Claude Code under node (seen by its command line;
 on Windows read through PowerShell, else `tasklist` names), or the Claude app, whose Code tab
 runs Claude Code and shares `~/.claude.json`. Auto memory is Markdown only, and
@@ -629,15 +637,13 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `push/`, `pull/`, `commands/`: the setup commands
 
-| File                         | Responsible for                                                                                                        |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `push/push-command.ts`       | `push`: a plan step (choose, collect, every question) and an apply step with no prompter (encrypt, upload).            |
-| `push/bundle-files.ts`       | Collected files ↔ bundle entries (UTF-8 with `{{HOME}}` or base64); keeps local files that only differ in slash style. |
-| `pull/pull-command.ts`       | `pull`: a plan step (choose, download, verify, every question), an apply step with no prompter, then after-restore.    |
-| `pull/saved-setups.ts`       | Listing setups with decrypted names; downloading and checking one (agent, scope, sealed revision).                     |
-| `pull/command-review.ts`     | Finding hooks, status line, MCP servers and the scripts they run, and which are new or changed on this PC.             |
-| `pull/reviewed-settings.ts`  | The settings keys and `env` names the review watches (command, loosening and redirect settings); the drift watch list. |
-| `commands/setup-commands.ts` | `list`, `status` and `delete`.                                                                                         |
+| File                         | Responsible for                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `push/push-command.ts`       | `push`: a plan step (choose, collect, every question) and an apply step with no prompter (encrypt, upload).               |
+| `push/bundle-files.ts`       | Collected files ↔ bundle entries (UTF-8 with `{{HOME}}` or base64); keeps local files that only differ in slash style.    |
+| `pull/pull-command.ts`       | `pull`: a plan step (choose, download, verify, every question, the agents' own ones too), an apply step with no prompter. |
+| `pull/saved-setups.ts`       | Listing setups with decrypted names; downloading and checking one (agent, scope, sealed revision).                        |
+| `commands/setup-commands.ts` | `list`, `status` and `delete`.                                                                                            |
 
 ### `env/`: environment variables in setups
 
@@ -655,32 +661,34 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `adapter.ts`        | The adapter interfaces: `Detector`, `Collector`, `Restorer`, `AgentInspector`, `AgentAdapter`, `AgentRegistry`, and the types they share. |
 | `registry.ts`       | `createAgentRegistry`: the list of adapters, by id.                                                                                       |
+| `notices.ts`        | What commands say about any agent: comparing versions for pull's warning, and files an adapter does not know.                             |
 | `agents-command.ts` | `agentnomad agents`.                                                                                                                      |
 
 ### `agents/claude-code/`: the Claude Code adapter
 
-| File                                  | Responsible for                                                                                                                    |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `claude-code-adapter.ts`              | Assembles the adapter from the parts below.                                                                                        |
-| `claude-code-paths.data.ts`           | **The data file:** every list of what to sync, skip or refuse, schema-checked.                                                     |
-| `global-paths.ts`, `project-paths.ts` | Named views of the data file for the global and project collectors.                                                                |
-| `detector.ts`                         | Finding `claude` and its version; the base folder (`CLAUDE_CONFIG_DIR`).                                                           |
-| `file-gathering.ts`                   | Reading files and folders into bundle entries; parsing settings and command lines.                                                 |
-| `global-collector.ts`                 | Collecting the global setup, `~/.claude.json` keys, hook scripts, tool settings, programs, plugins.                                |
-| `project-collector.ts`                | Collecting a project's setup and, when chosen, its auto memory.                                                                    |
-| `hook-scripts.ts`                     | Which scripts the hooks and status line run: what push collects and pull allows back.                                              |
-| `account-skills.ts`                   | claude.ai skills (T42): reading `skills/synced/` (only `creatorType: user`), saving a copy, and what pull may add as local skills. |
-| `auto-memory.ts`                      | Finding a project's auto memory folder the way Claude Code does.                                                                   |
-| `restore-rules.ts`                    | Where each bundle entry may go, or why it is refused (including Windows name rules).                                               |
-| `restorer.ts`                         | Writing a setup: atomic writes, permissions, line endings, conflicts, `~/.claude.json` merge, the running-Claude check.            |
-| `running-claude.ts`                   | Is Claude Code (or the Claude app) running (command lines)?                                                                        |
-| `plugins.ts`                          | Reading installed plugins and marketplaces into `.agentnomad/plugins.json`.                                                        |
-| `plugin-sync.ts`                      | Reinstalling what is missing with `claude plugin` commands.                                                                        |
-| `programs.ts`                         | Finding the programs hooks start and whether npm installed them.                                                                   |
-| `after-restore.ts`                    | Pull's follow-up: plugins, then missing programs.                                                                                  |
-| `managed-settings.ts`                 | Detecting organization-managed settings per OS (never synced) and explaining what they block.                                      |
-| `unknown-files.ts`                    | Reporting files in Claude Code's folder that the data file does not know.                                                          |
-| `version-stamp.ts`                    | Comparing Claude Code versions for pull's warning.                                                                                 |
+| File                                  | Responsible for                                                                                                                               |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code-adapter.ts`              | Assembles the adapter from the parts below.                                                                                                   |
+| `claude-code-paths.data.ts`           | **The data file:** every list of what to sync, skip or refuse, schema-checked.                                                                |
+| `global-paths.ts`, `project-paths.ts` | Named views of the data file for the global and project collectors.                                                                           |
+| `detector.ts`                         | Finding `claude` and its version; the base folder (`CLAUDE_CONFIG_DIR`).                                                                      |
+| `file-gathering.ts`                   | Reading files and folders into bundle entries; parsing settings and command lines.                                                            |
+| `global-collector.ts`                 | Collecting the global setup, `~/.claude.json` keys, hook scripts, tool settings, programs, plugins.                                           |
+| `project-collector.ts`                | Collecting a project's setup and, when chosen, its auto memory.                                                                               |
+| `hook-scripts.ts`                     | Which scripts the hooks and status line run: what push collects and pull allows back.                                                         |
+| `account-skills.ts`                   | claude.ai skills (T42): reading `skills/synced/` (only `creatorType: user`), saving a copy, and what pull may add as local skills.            |
+| `auto-memory.ts`                      | Finding a project's auto memory folder the way Claude Code does.                                                                              |
+| `restore-rules.ts`                    | Where each bundle entry may go, or why it is refused (including Windows name rules).                                                          |
+| `restorer.ts`                         | Writing a setup: atomic writes, permissions, line endings, conflicts, `~/.claude.json` merge, the running-Claude check; what pull asks first. |
+| `command-review.ts`                   | Finding hooks, status line, MCP servers and the scripts they run, and which are new or changed on this PC.                                    |
+| `reviewed-settings.ts`                | The settings keys and `env` names the review watches (command, loosening and redirect settings); the drift watch list.                        |
+| `running-claude.ts`                   | Is Claude Code (or the Claude app) running (command lines)?                                                                                   |
+| `plugins.ts`                          | Reading installed plugins and marketplaces into `.agentnomad/plugins.json`.                                                                   |
+| `plugin-sync.ts`                      | Reinstalling what is missing with `claude plugin` commands: the questions, then the installs.                                                 |
+| `programs.ts`                         | Finding the programs hooks start and whether npm installed them.                                                                              |
+| `after-restore.ts`                    | Pull's follow-up: plugins, missing programs and claude.ai skills; asked in the plan step, installed after writing.                            |
+| `managed-settings.ts`                 | Detecting organization-managed settings per OS (never synced) and explaining what they block.                                                 |
+| `unknown-files.ts`                    | Reporting files in Claude Code's folder that the data file does not know.                                                                     |
 
 ## `packages/server/src`
 

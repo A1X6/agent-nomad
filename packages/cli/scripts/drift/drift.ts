@@ -11,8 +11,8 @@
  *   including any that name a settings key or variable the pull review watches (T55).
  */
 import type { ClaudeCodePathsData } from '../../src/agents/claude-code/claude-code-paths.data.ts';
-import { compareVersions } from '../../src/agents/claude-code/version-stamp.ts';
-import { WATCHED_SETTINGS } from '../../src/pull/reviewed-settings.ts';
+import { WATCHED_SETTINGS } from '../../src/agents/claude-code/reviewed-settings.ts';
+import { compareVersions } from '../../src/agents/notices.ts';
 
 export interface ChangelogSection {
   readonly version: string;
@@ -181,7 +181,7 @@ export function reportMarkdown(report: DriftReport, runUrl?: string): string {
       '## To do',
       [
         '- [ ] Sort each unknown name into `neverSynced`, `knownState` or a synced list (never sync credentials, history, caches or machine state).',
-        '- [ ] Read the changelog entries; add anything that is part of a user setup. For a setting that redirects Claude Code, loosens its permissions or runs a command, update `packages/cli/src/pull/reviewed-settings.ts` and the pull review.',
+        '- [ ] Read the changelog entries; add anything that is part of a user setup. For a setting that redirects Claude Code, loosens its permissions or runs a command, update `packages/cli/src/agents/claude-code/reviewed-settings.ts` and the pull review.',
         `- [ ] Set \`reviewedVersion\` to \`${report.latestVersion}\`, run \`pnpm check\`, and close this issue.`,
       ].join('\n'),
     );

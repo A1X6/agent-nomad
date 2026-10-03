@@ -102,38 +102,49 @@ function installOutcome(stdout: string): { ok: boolean; message: string } | null
   }
 }
 
-export interface SyncPluginsDeps {
+/** What pull's plan step asks about saved plugins (T61): nothing is installed here. */
+export interface AskPluginSyncDeps {
   readonly manifest: PluginManifest;
   readonly current: CurrentPlugins;
-  readonly claude: ClaudeCli;
   readonly prompter: Pick<Prompter, 'confirm'>;
-  readonly reporter: Pick<Reporter, 'info' | 'success' | 'warn'>;
-  /** Where project-scope plugins are installed; the home folder for a global setup. */
-  readonly cwd: string;
+  readonly reporter: Pick<Reporter, 'info' | 'warn'>;
   /** `--yes`: never ask; without `allowCommands` nothing is installed (T38). */
   readonly assumeYes?: boolean;
   /** `--allow-commands`: install the list, command-source plugins included, without asking. */
   readonly allowCommands?: boolean;
+}
+
+/** What the user agreed to install; installing it asks nothing. */
+export interface PluginSyncChoice {
+  /** Marketplaces to add first. */
+  readonly marketplaces: readonly MarketplaceEntry[];
+  /** Plugins to install, in order; a command-source one only after its own yes. */
+  readonly plugins: readonly PluginEntry[];
+  readonly declined: readonly string[];
+}
+
+export interface InstallPluginsDeps {
+  readonly claude: ClaudeCli;
+  readonly reporter: Pick<Reporter, 'success' | 'warn'>;
+  /** Where project-scope plugins are installed; the home folder for a global setup. */
+  readonly cwd: string;
   /** Turns an install failure into a clearer reason, e.g. "blocked by your organization" (T31). */
   readonly explainFailure?: (reason: string) => string;
 }
 
+export type SyncPluginsDeps = AskPluginSyncDeps & InstallPluginsDeps;
+
 /**
- * Reinstalls saved plugins on this PC (T29): shows what is missing, asks once, then adds
- * the marketplaces and installs the plugins with Claude Code's own commands. A plugin
- * built by running a command gets its own question first.
+ * The questions of a plugin reinstall (T29, T61): shows what is missing, asks once, and asks
+ * again for each plugin built by running a command. Installs nothing.
  */
-export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResult> {
+export async function askPluginSync(deps: AskPluginSyncDeps): Promise<PluginSyncChoice> {
   const plan = planPluginSync(deps.manifest, deps.current);
-  const result = {
-    installed: [] as string[],
-    failed: [] as { what: string; reason: string }[],
-    declined: [] as string[],
-  };
+  const nothing: PluginSyncChoice = { marketplaces: [], plugins: [], declined: [] };
   if (plan.plugins.length === 0) {
     if (deps.manifest.plugins.length > 0)
       deps.reporter.info('All saved plugins are already installed.');
-    return result;
+    return nothing;
   }
 
   const list = [
@@ -156,12 +167,44 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
         `Plugins were not reinstalled: --yes never installs or runs new code; add --allow-commands, or run pull without --yes to choose.`,
       );
     }
-    result.declined.push(...plan.plugins.map((plugin) => plugin.id));
-    return result;
+    return { ...nothing, declined: plan.plugins.map((plugin) => plugin.id) };
   }
 
+  const plugins: PluginEntry[] = [];
+  const declined: string[] = [];
+  for (const plugin of plan.plugins) {
+    // Its own question, unless --allow-commands already accepted code from the setup
+    // (--yes alone never gets this far: it reinstalls nothing).
+    const accept =
+      !plugin.commandSource ||
+      deps.allowCommands === true ||
+      (await deps.prompter.confirm(
+        `${plugin.id} is built by running a command from its marketplace. Allow it?`,
+        false,
+      ));
+    if (accept) plugins.push(plugin);
+    else declined.push(plugin.id);
+  }
+  return { marketplaces: plan.marketplaces, plugins, declined };
+}
+
+/**
+ * Installs what the user agreed to (T29, T61): adds the marketplaces, then installs the
+ * plugins with Claude Code's own commands. Asks nothing.
+ */
+export async function installPlugins(
+  choice: PluginSyncChoice,
+  deps: InstallPluginsDeps,
+): Promise<PluginSyncResult> {
+  const result = {
+    installed: [] as string[],
+    failed: [] as { what: string; reason: string }[],
+    declined: [...choice.declined],
+  };
+  if (choice.plugins.length === 0) return result;
+
   const failedMarketplaces = new Set<string>();
-  for (const marketplace of plan.marketplaces) {
+  for (const marketplace of choice.marketplaces) {
     const run = await deps.claude.run(['plugin', 'marketplace', 'add', marketplace.add], deps.cwd);
     if (run.exitCode !== 0) {
       failedMarketplaces.add(marketplace.name);
@@ -172,7 +215,7 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
     }
   }
 
-  for (const plugin of plan.plugins) {
+  for (const plugin of choice.plugins) {
     const marketplace = plugin.id.split('@')[1] ?? '';
     if (failedMarketplaces.has(marketplace)) {
       result.failed.push({
@@ -182,21 +225,7 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
       continue;
     }
     const args = ['plugin', 'install', plugin.id, '--scope', plugin.scope, '--json'];
-    if (plugin.commandSource) {
-      // Its own question, unless --allow-commands already accepted code from the setup
-      // (--yes alone never gets this far: it reinstalls nothing).
-      const accept =
-        deps.allowCommands === true ||
-        (await deps.prompter.confirm(
-          `${plugin.id} is built by running a command from its marketplace. Allow it?`,
-          false,
-        ));
-      if (!accept) {
-        result.declined.push(plugin.id);
-        continue;
-      }
-      args.push('--yes');
-    }
+    if (plugin.commandSource) args.push('--yes');
     const run = await deps.claude.run(args, deps.cwd);
     const outcome = installOutcome(run.stdout);
     if (run.exitCode === 0 && (outcome === null || outcome.ok)) {
@@ -213,6 +242,11 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
   for (const failure of result.failed)
     deps.reporter.warn(`Could not install ${failure.what}: ${failure.reason}`);
   return result;
+}
+
+/** Reinstalls saved plugins on this PC (T29): the questions, then the installs. */
+export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResult> {
+  return installPlugins(await askPluginSync(deps), deps);
 }
 
 type RunResult = Awaited<ReturnType<ClaudeCli['run']>>;

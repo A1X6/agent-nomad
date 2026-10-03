@@ -116,12 +116,3 @@ export async function findUnknownEntries(
     .map((entry) => `${prefix}${entry.name}${entry.isDirectory() ? '/' : ''}`)
     .sort();
 }
-
-/** What push says about unknown entries; `null` when there are none. */
-export function unknownEntriesNotice(entries: readonly string[]): string | null {
-  if (entries.length === 0) return null;
-  return [
-    `Not saved, because agentnomad does not know ${entries.length === 1 ? 'this' : 'these'} yet: ${entries.join(', ')}.`,
-    'A newer Claude Code may have added them; if they matter to you, update agentnomad.',
-  ].join(' ');
-}

@@ -16,10 +16,13 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  AnswerNeededError,
+  createClaudeCodeAdapter,
   createClaudeCodeGlobalCollector,
   createClaudeCodeProjectCollector,
   createClaudeCodeRestorer,
   createClaudeRunningCheck,
+  createNoTerminalPrompter,
   globalDestination,
   hookScripts,
   windowsNameProblem,
@@ -29,10 +32,14 @@ import {
   projectDestination,
   projectDirName,
   sameForRestore,
-  type ClaudeRunningAnswer,
+  type ClaudeCodeRestorer,
   type CollectedFile,
   type ConflictChoice,
   type ConflictQuestion,
+  type ManagedSettingsSystem,
+  type Prompter,
+  type Reporter,
+  type RestorePlanContext,
 } from '../src/index.ts';
 
 const posix = process.platform !== 'win32';
@@ -70,20 +77,14 @@ const file = (path: string, content: string, executable = false): CollectedFile 
 
 interface Setup {
   running?: boolean[];
-  runningAnswers?: ClaudeRunningAnswer[];
   customConfigDir?: boolean;
   /** Replaces the scripted running check, e.g. with one that fails. */
   isClaudeRunning?: () => Promise<boolean>;
-  /** Replaces the scripted "close Claude Code?" answers, e.g. with a cancel. */
-  onClaudeRunning?: () => Promise<ClaudeRunningAnswer>;
 }
 
-function restorer(setup: Setup = {}) {
+function restorer(setup: Setup = {}): { restorer: ClaudeCodeRestorer } {
   const running = [...(setup.running ?? [false])];
-  const answers = [...(setup.runningAnswers ?? [])];
-  const asked: string[] = [];
   return {
-    asked,
     restorer: createClaudeCodeRestorer({
       baseDir: base,
       homedir: home,
@@ -92,12 +93,6 @@ function restorer(setup: Setup = {}) {
       customConfigDir: setup.customConfigDir ?? false,
       now: () => NOW,
       isClaudeRunning: setup.isClaudeRunning ?? (() => Promise.resolve(running.shift() ?? false)),
-      onClaudeRunning:
-        setup.onClaudeRunning ??
-        (() => {
-          asked.push('close claude?');
-          return Promise.resolve(answers.shift() ?? 'skip');
-        }),
     }),
   };
 }
@@ -481,7 +476,16 @@ describe('restorer: ~/.claude.json', () => {
     await put(join(home, '.claude.json'), JSON.stringify(existingJson));
     const { questions, resolve } = answer('merge');
     const report = await restorer().restorer.restore({ kind: 'global' }, [incoming], resolve);
-    expect(questions).toEqual([['.agentnomad/claude.json', { overwriteAllowed: false }]]);
+    expect(questions).toEqual([
+      [
+        '.agentnomad/claude.json',
+        {
+          overwriteAllowed: false,
+          message:
+            '~/.claude.json: add your MCP servers and preferences (your login and history stay)?',
+        },
+      ],
+    ]);
     expect(JSON.parse(await read(join(home, '.claude.json')))).toEqual({
       ...existingJson,
       mcpServers: { local: { command: 'local-mcp' }, github: { command: 'gh-mcp' } },
@@ -519,33 +523,37 @@ describe('restorer: ~/.claude.json', () => {
     expect(report.written).toEqual([]);
   });
 
-  it('waits while Claude Code runs: retry after closing it, then writes', async () => {
+  it('never asks: Claude Code running while writing leaves it as it is, and says why (T61)', async () => {
     await put(join(home, '.claude.json'), '{}');
-    const { restorer: r, asked } = restorer({ running: [true, false], runningAnswers: ['retry'] });
-    const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve);
-    expect(asked).toEqual(['close claude?']);
-    expect(report.written).toEqual(['.agentnomad/claude.json']);
-  });
-
-  it('skips it while Claude Code runs when the user says so, and says why', async () => {
-    await put(join(home, '.claude.json'), '{}');
-    const { restorer: r } = restorer({ running: [true], runningAnswers: ['skip'] });
+    const { restorer: r } = restorer({ running: [true] });
     const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve);
     expect(await read(join(home, '.claude.json'))).toBe('{}');
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
     expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
   });
 
-  it('with --yes skips it while Claude Code runs, without asking', async () => {
+  it('leaves it as it is when the plan chose to skip it, with the same warning (T61)', async () => {
     await put(join(home, '.claude.json'), '{}');
-    const { restorer: r, asked } = restorer({ running: [true] });
+    const { restorer: r } = restorer({ running: [false] });
     const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve, {
-      assumeYes: true,
+      leaveClaudeJson: true,
     });
-    expect(asked).toEqual([]);
     expect(await read(join(home, '.claude.json'))).toBe('{}');
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
     expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
+  });
+
+  it('says what restoring would do to it: nothing, create it, or merge (T61)', async () => {
+    const { restorer: r } = restorer();
+    expect(await r.claudeJsonChange([file('CLAUDE.md', 'x')])).toBe('none');
+    expect(await r.claudeJsonChange([incoming])).toBe('new');
+    await put(join(home, '.claude.json'), '{}');
+    expect(await r.claudeJsonChange([incoming])).toBe('merge');
+    await put(
+      join(home, '.claude.json'),
+      JSON.stringify({ mcpServers: { github: { command: 'gh-mcp' } }, diffTool: 'terminal' }),
+    );
+    expect(await r.claudeJsonChange([incoming])).toBe('none');
   });
 
   it('restores only the servers and preferences, never projects or account state (T43)', async () => {
@@ -590,7 +598,6 @@ describe('restorer: ~/.claude.json', () => {
 
   it('merges into the file as Claude Code left it after closing (T43)', async () => {
     await put(join(home, '.claude.json'), JSON.stringify({ diffTool: 'auto' }));
-    const running = [true, false];
     const r = createClaudeCodeRestorer({
       baseDir: base,
       homedir: home,
@@ -598,14 +605,13 @@ describe('restorer: ~/.claude.json', () => {
       env: {},
       customConfigDir: false,
       now: () => NOW,
-      isClaudeRunning: () => Promise.resolve(running.shift() ?? false),
-      // Claude Code saves the file as it closes.
-      onClaudeRunning: async () => {
+      // Claude Code saved the file as it closed, after the conflict question was answered.
+      isClaudeRunning: async () => {
         await writeFile(
           join(home, '.claude.json'),
           JSON.stringify({ diffTool: 'auto', projects: { '/new': {} } }),
         );
-        return 'retry';
+        return false;
       },
     });
     const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve);
@@ -739,21 +745,6 @@ describe('restorer: a cancelled question stops the restore (T53)', () => {
     expect(questions).toEqual(['rules/a.md']);
     expect(await readdir(join(base, 'rules'))).toEqual(['a.md', 'b.md']);
     expect(await read(join(base, 'rules', 'a.md'))).toBe('mine a');
-  });
-
-  it('a rejected "close Claude Code?" question rejects restore too', async () => {
-    await put(join(home, '.claude.json'), '{}');
-    const restore = restorer({
-      running: [true],
-      onClaudeRunning: () => Promise.reject(new Cancelled('Cancelled')),
-    }).restorer.restore(
-      { kind: 'global' },
-      [file('.agentnomad/claude.json', '{"diffTool":"terminal"}'), file('rules/z.md', 'z')],
-      answer('merge').resolve,
-    );
-    await expect(restore).rejects.toBeInstanceOf(Cancelled);
-    expect(await read(join(home, '.claude.json'))).toBe('{}');
-    await expect(read(join(base, 'rules', 'z.md'))).rejects.toThrow();
   });
 });
 
@@ -1035,4 +1026,153 @@ describe('restorer: names Windows cannot write safely (T38)', () => {
       expect(windowsNameProblem(path)).toBeNull();
     },
   );
+});
+
+describe('restorer: what pull asks before writing (T61)', () => {
+  it('lists each file here that differs, in order, and ~/.claude.json whenever it is pulled', () => {
+    const { restorer: r } = restorer();
+    const conflicts = r.conflicts(
+      [
+        file('rules/b.md', 'theirs'),
+        file('rules/a.md', 'same'),
+        file('new.md', 'new'),
+        file('.agentnomad/claude.json', '{"diffTool":"terminal"}'),
+        // Saved from Windows with CRLF; this PC keeps it with LF: the same script (T53).
+        file('hooks/run.sh', 'echo ok\r\n'),
+      ],
+      [file('rules/b.md', 'mine'), file('rules/a.md', 'same'), file('hooks/run.sh', 'echo ok\n')],
+    );
+    expect(conflicts.map((conflict) => conflict.path)).toEqual([
+      '.agentnomad/claude.json',
+      'rules/b.md',
+    ]);
+    expect(conflicts[0]?.question.overwriteAllowed).toBe(false);
+    expect(conflicts[1]?.question).toEqual({ overwriteAllowed: true });
+  });
+
+  it('reviews runnable entries and knows the variables that redirect Claude Code', () => {
+    const { restorer: r } = restorer();
+    const settings = file(
+      'settings.json',
+      JSON.stringify({ statusLine: { type: 'command', command: 'ccstatusline' } }),
+    );
+    expect(r.reviewRunnable([settings], []).map((entry) => entry.label)).toEqual(['status line']);
+    expect(r.reviewRunnable([settings], [settings])).toEqual([]);
+    expect(r.isRedirectVariable('ANTHROPIC_BASE_URL')).toBe(true);
+    expect(r.isRedirectVariable('https_proxy')).toBe(true);
+    expect(r.isRedirectVariable('GITHUB_TOKEN')).toBe(false);
+  });
+});
+
+describe('Claude Code plan step: closing Claude Code before ~/.claude.json changes (T61)', () => {
+  const incoming = file('.agentnomad/claude.json', '{"diffTool":"terminal"}');
+  const noManagedSettings: ManagedSettingsSystem = {
+    platform: 'linux',
+    env: {},
+    baseDir: '/nowhere',
+    readText: () => Promise.resolve(null),
+    exists: () => Promise.resolve(false),
+    listDir: () => Promise.resolve([]),
+    readRegistry: () => Promise.resolve(null),
+  };
+  const QUESTION =
+    'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.';
+
+  function planStep(running: boolean[], answers: string[], prompter?: Prompter) {
+    const asked: string[] = [];
+    const scripted = {
+      select: (message: string) => {
+        asked.push(message);
+        return Promise.resolve(answers.shift());
+      },
+      confirm: (message: string) => {
+        asked.push(message);
+        return Promise.resolve(false);
+      },
+    } as unknown as Prompter;
+    const lines: string[] = [];
+    const reporter: Reporter = {
+      info: (m) => lines.push(m),
+      success: (m) => lines.push(m),
+      warn: (m) => lines.push(m),
+      error: (m) => lines.push(m),
+      spinner: () => ({ start: () => undefined, stop: () => undefined }),
+    };
+    const adapter = createClaudeCodeAdapter({
+      env: { PATH: '' },
+      homedir: home,
+      platform: process.platform,
+      isClaudeRunning: () => Promise.resolve(running.shift() ?? false),
+      managedSystem: noManagedSettings,
+    });
+    const plan = (overrides: Partial<RestorePlanContext> = {}) => {
+      if (!adapter.planRestore) throw new Error('no plan step');
+      return adapter.planRestore({
+        target: { kind: 'global' },
+        files: [incoming],
+        conflicts: new Map([['.agentnomad/claude.json', 'merge']]),
+        conflictAnswer: undefined,
+        prompter: prompter ?? scripted,
+        reporter,
+        assumeYes: false,
+        allowCommands: false,
+        parts: new Map(),
+        ...overrides,
+      });
+    };
+    return { plan, asked, lines };
+  }
+
+  it('"I closed it, continue" checks again, then the restore merges it', async () => {
+    await put(join(home, '.claude.json'), '{}');
+    const t = planStep([true, true, false, false], ['retry', 'retry']);
+    const planned = await t.plan();
+    expect(t.asked).toEqual([QUESTION, QUESTION]);
+    const report = await planned.restore(answer('merge').resolve, {});
+    expect(report.written).toEqual(['.agentnomad/claude.json']);
+    expect((await readJson(join(home, '.claude.json')))['diffTool']).toBe('terminal');
+  });
+
+  it('"Skip" leaves it as it is with the warning, and nothing is asked while writing', async () => {
+    await put(join(home, '.claude.json'), '{}');
+    const t = planStep([true], ['skip']);
+    const planned = await t.plan();
+    expect(t.asked).toEqual([QUESTION]);
+    const report = await planned.restore(answer('merge').resolve, {});
+    expect(await read(join(home, '.claude.json'))).toBe('{}');
+    expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
+    expect(t.asked).toHaveLength(1);
+  });
+
+  it('--yes never asks: the file is left with the warning while Claude Code runs', async () => {
+    await put(join(home, '.claude.json'), '{}');
+    const t = planStep([true, true], []);
+    const planned = await t.plan({ assumeYes: true });
+    expect(t.asked).toEqual([]);
+    const report = await planned.restore(answer('merge').resolve, {});
+    expect(await read(join(home, '.claude.json'))).toBe('{}');
+    expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
+  });
+
+  it('is not asked when the file would not change or its merge was declined', async () => {
+    await put(join(home, '.claude.json'), '{"diffTool":"terminal"}');
+    expect(
+      await (async () => {
+        const t = planStep([true], []);
+        await t.plan();
+        return t.asked;
+      })(),
+    ).toEqual([]);
+    await put(join(home, '.claude.json'), '{}');
+    const declined = planStep([true], []);
+    await declined.plan({ conflicts: new Map([['.agentnomad/claude.json', 'skip']]) });
+    expect(declined.asked).toEqual([]);
+  });
+
+  it('without a terminal, the open question stops the plan', async () => {
+    await put(join(home, '.claude.json'), '{}');
+    const t = planStep([true], [], createNoTerminalPrompter());
+    await expect(t.plan()).rejects.toBeInstanceOf(AnswerNeededError);
+    expect(await read(join(home, '.claude.json'))).toBe('{}');
+  });
 });

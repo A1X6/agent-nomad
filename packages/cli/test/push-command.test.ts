@@ -14,9 +14,11 @@ import {
 } from '@agentnomad/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { stubRestorer } from './stub-restorer.ts';
 import {
   ApiError,
   createAgentRegistry,
+  createClaudeCodeAdapter,
   createLocalState,
   createPushApplier,
   createPushCommand,
@@ -73,6 +75,7 @@ function fakeAdapter(
   return {
     id: 'claude-code',
     displayName: 'Claude Code',
+    memoryDescription: 'what Claude learned: subagent and auto memory',
     detector: {
       detect: () =>
         Promise.resolve({ installed: true, baseDir: `${HOME}/.claude`, version: '2.1.282' }),
@@ -85,9 +88,7 @@ function fakeAdapter(
             : (options.project ?? [text('CLAUDE.md', 'project rules')]),
         ),
     },
-    restorer: {
-      restore: () => Promise.resolve({ written: [], skipped: [], backups: [], warnings: [] }),
-    },
+    restorer: stubRestorer(),
     inspector: {
       unknownEntries: () => Promise.resolve(options.unknown ?? []),
       notices: () => Promise.resolve(options.notices ?? []),
@@ -326,25 +327,51 @@ describe('agentnomad push', () => {
   });
 
   describe('claude.ai skills (T42)', () => {
-    function withAccountSkills(names: string[]) {
-      const seen: (boolean | undefined)[] = [];
+    // Claude Code's own optional part (its texts), with what this fake PC has.
+    const claudePart = createClaudeCodeAdapter({
+      env: { PATH: '' },
+      homedir: HOME,
+      platform: process.platform,
+      isClaudeRunning: () => Promise.resolve(false),
+    }).optionalParts?.[0];
+
+    function withAccountSkills(names: string[], problem: string | null = null) {
+      const seen: boolean[] = [];
       const base = fakeAdapter();
+      if (claudePart === undefined) throw new Error('no account skills part');
       const adapter: AgentAdapter = {
         ...base,
         collector: {
           collect: (target, options) => {
-            seen.push(options.includeAccountSkills);
+            seen.push(options.include?.has('account-skills') === true);
             return base.collector.collect(target, options);
           },
         },
-        inspector: {
-          unknownEntries: () => Promise.resolve([]),
-          notices: () => Promise.resolve([]),
-          accountSkills: () => Promise.resolve({ names, problem: null }),
-        },
+        optionalParts: [{ ...claudePart, available: () => Promise.resolve({ names, problem }) }],
       };
       return { adapter, seen };
     }
+
+    it('says when they cannot be read, and that they were not saved', async () => {
+      const broken = withAccountSkills([], 'The synced skills folder could not be read.');
+      const t = setup([], { adapter: broken.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
+      expect(t.lines).toContain(
+        'warn: The synced skills folder could not be read. Your claude.ai skills were not saved.',
+      );
+      expect(t.script.asked).toEqual([]);
+    });
+
+    it('--account-skills with none here says so', async () => {
+      const none = withAccountSkills([]);
+      const t = setup([], { adapter: none.adapter });
+      await t.command.push({
+        global: true,
+        yes: true,
+        parts: new Map([['account-skills', true]]),
+      });
+      expect(t.lines).toContain('info: No claude.ai skills of your own were found on this PC.');
+    });
 
     it('asks about them only when there are some; no by default', async () => {
       const some = withAccountSkills(['my-skill']);
@@ -369,7 +396,7 @@ describe('agentnomad push', () => {
         project: 'my-app',
         yes: true,
         memory: false,
-        accountSkills: true,
+        parts: new Map([['account-skills', true]]),
       });
       expect(t.script.asked).toEqual([]);
       expect(some.seen).toEqual([true, false]);

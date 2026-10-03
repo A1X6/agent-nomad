@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { stubRestorer } from './stub-restorer.ts';
 import {
   createAgentRegistry,
   createAgentsCommand,
@@ -18,9 +19,7 @@ const fakeAdapter = (id: string, displayName: string, found: DetectedAgent): Age
   displayName,
   detector: { detect: () => Promise.resolve(found) },
   collector: { collect: () => Promise.resolve([]) },
-  restorer: {
-    restore: () => Promise.resolve({ written: [], skipped: [], backups: [], warnings: [] }),
-  },
+  restorer: stubRestorer(),
 });
 
 const installed: DetectedAgent = {
@@ -90,7 +89,6 @@ describe('Claude Code adapter', () => {
       homedir: home,
       platform: process.platform,
       isClaudeRunning: () => Promise.resolve(false),
-      onClaudeRunning: () => Promise.resolve('skip'),
     });
 
   it('is registered as claude-code / Claude Code', () => {
