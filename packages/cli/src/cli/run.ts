@@ -7,8 +7,9 @@ import { describeError } from './error-messages.ts';
 import { createProgram, type ProgramOutput } from './program.ts';
 
 /**
- * Exit codes: 0 done; 1 failed, bad usage, or a question with no terminal to ask in;
- * 130 cancelled with Ctrl+C (shell convention).
+ * Exit codes: 0 done; 1 failed, bad usage, a question with no terminal to ask in, or a setup
+ * push or pull skipped or refused without the user saying no (BUG-03); 130 cancelled with
+ * Ctrl+C (shell convention).
  */
 export const EXIT = { ok: 0, failed: 1, cancelled: 130 } as const;
 

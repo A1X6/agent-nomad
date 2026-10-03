@@ -425,12 +425,18 @@ export async function thirdPc({ server, keychain }: StepContext): Promise<void> 
     expect(await read(claude(pc, backups[0] ?? ''))).toBe('Old notes on the third PC.\n');
     await expectSecondPullChangesNothing(pc, '--overwrite');
 
-    // A PC out of step: --yes never replaces the newer copy.
+    // A PC out of step: --yes never replaces the newer copy, and a script sees exit code 1
+    // (BUG-03), while the setup that could be saved still is.
     await write(claude(stale, 'CLAUDE.md'), 'Stale notes.\n');
+    await write(join(stale.project, 'CLAUDE.md'), 'Stale project.\n');
     ok(await stale.run(['login', ...LOGIN], stdin));
     const secretsHere = await known(pc, stale);
-    const skipped = ok(await stale.run(['push', '--global', '--yes']));
+    const skipped = await stale.run(['push', '--global', '--project', 'stale-only', '--yes']);
+    expect(skipped.code, `${skipped.stdout}\n${skipped.stderr}`).toBe(1);
     expect(skipped.stderr).toContain('a newer copy exists. Run `agentnomad pull` first');
+    expect(skipped.stderr).toContain('Not saved:');
+    expect(skipped.stderr).toContain('- the Claude Code global setup: a newer copy exists');
+    expect(skipped.stdout).toContain('Saved the Claude Code project "stale-only"');
     const list = ok(await pc.run(['list']));
     expect(list.stdout).toMatch(/global setup\s+revision 2/);
 

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { NOT_YET_AVAILABLE, type CommandHandlers } from '../src/cli/commands.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
+import { SetupsNotDoneError } from '../src/cli/setup-outcomes.ts';
 import { AnswerNeededError } from '../src/ui/no-terminal-prompter.ts';
 import { PromptCancelledError } from '../src/ui/prompter.ts';
 import { CLI_VERSION } from '../src/version.ts';
@@ -225,6 +226,20 @@ describe('outcomes', () => {
     });
     expect(code).toBe(EXIT.cancelled);
     expect(messages).toEqual(['warn: Cancelled.']);
+  });
+
+  it('a setup push or pull did not do is exit code 1, with one message listing them (BUG-03)', async () => {
+    const notDone = new SetupsNotDoneError('push', [
+      { setup: 'Claude Code global setup', reason: 'a newer copy exists' },
+      { setup: 'Claude Code project "my-app"', reason: '6.2 MB, over the 5 MB limit' },
+    ]);
+    const { code, messages } = await run(['push', '--global', '--yes'], {
+      push: () => Promise.reject(notDone),
+    });
+    expect(code).toBe(EXIT.failed);
+    expect(messages).toEqual([
+      'error: Not saved:\n  - the Claude Code global setup: a newer copy exists\n  - the Claude Code project "my-app": 6.2 MB, over the 5 MB limit',
+    ]);
   });
 
   it.each([

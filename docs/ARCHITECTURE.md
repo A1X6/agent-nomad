@@ -231,16 +231,19 @@ sequenceDiagram
 4. Show organization-managed settings and files the adapter does not know yet.
 5. The adapter **collects** the files; the user may add saved environment values. Links
    into folders for keys, links out of a project and files over 10 MB are left out, and push
-   says so. Every setup is collected and every question asked before the first upload.
-6. Paths are made portable, the bundle is built, compressed and **encrypted for the exact
-   revision it will become** (the one this PC last knew, plus one).
-7. Upload with that expected revision. If another PC saved a newer copy, the server refuses
-   (`revision_conflict`): the user is asked whether to replace it (with `--yes`: never), and
-   a replacement is encrypted again for the new revision.
-8. Remember the new revision for this PC.
+   says so.
+6. Compare each setup's revision on the server with the one this PC last knew. If another
+   PC saved a newer copy (or deleted it), the user is asked whether to replace it (with
+   `--yes`: never). If this PC's last pull of a setup left out commands the user declined,
+   pushing it would drop them for every PC: push asks first, and `--yes` skips it with a note.
+7. Paths are made portable, the bundle is built, compressed and **encrypted for the exact
+   revision it will become** (the one on the server, plus one).
+8. Upload with that expected revision, and remember the new revision for this PC. If another
+   PC saved in the meantime, the server refuses (`revision_conflict`) and the setup is
+   skipped, never replaced unasked.
 
-If this PC's last pull of a setup left out commands the user declined, pushing it would drop
-them for every PC: push asks first, and `--yes` skips it with a note.
+Push is split in two (T59): a **plan** step does steps 1 to 6 and asks every question, and an
+**apply** step does 7 and 8. The apply step is given no prompter at all, so it cannot ask.
 
 ### Pull
 
@@ -255,9 +258,18 @@ flowchart TD
   O -- no --> R
   Q -- restore anyway --> R["review new or changed<br/>hooks, status line, MCP servers<br/>and the scripts they run"]
   R --> W["restore: identical files untouched,<br/>different ones merge / overwrite (backup) / skip"]
-  W --> A["after restore: plugins,<br/>missing programs, env values"]
-  A --> S["remember revision and project name"]
+  W --> S["add the chosen env values,<br/>remember revision and project name"]
+  S --> A["after restore: plugins,<br/>missing programs, account skills"]
 ```
+
+Pull is split like push (T59). The **plan** step lists, downloads and checks every chosen
+setup and asks every question before anything is written: an older copy, new commands, each
+file here that differs (`~/.claude.json` whenever the setup has it) and missing environment
+values. The **apply** step writes with those answers and has no prompter; a file only the
+restorer finds different, which the plan never asked about, is left as it is and the setup
+counts as not done. The agent's after-restore step (plugins, programs, claude.ai skills) runs
+last and still asks: the adapter interface hands it the prompter (moving those questions into
+the plan is part of the adapter work, T61).
 
 - Files that only differ in how the home path is written (`C:/` vs `C:\`) are left as they
   are.
@@ -445,9 +457,10 @@ its parameters. There are no CORS headers and no cookies.
 
 When stdin or stdout is not a terminal, the CLI swaps its prompter for one that never asks:
 any question the flags leave open stops the command with exit code 1 and names the flags to
-add. Push and pull look for such questions before they change anything: pull downloads and
-reviews every setup and checks for files that differ and missing environment values first;
-push collects every setup and compares revisions with the server first. Every command can be scripted:
+add. Push and pull ask every question in their plan step, before they change anything: pull
+downloads and reviews every setup and asks about files that differ and missing environment
+values first; push collects every setup and compares revisions with the server first. Every
+command can be scripted:
 
 ```sh
 echo "$PASSWORD" | agentnomad login --username me --password-stdin
@@ -457,6 +470,16 @@ agentnomad pull --global --yes --allow-commands
 
 Exit codes: `0` done, `1` failed or an answer was needed, `130` cancelled. Warnings and
 errors go to stderr. Passwords are read only from stdin, never from an argument.
+
+Push and pull also exit with `1` when any setup was **not done**: skipped or refused without
+the user answering no themselves. That is a newer copy on the server or one deleted there
+(push), a setup whose last pull left out declined commands (push), a setup over the 5 MB limit
+(push), an older copy than this PC had (pull), and a file that differs but was never asked
+about (pull). Every other setup is still saved or restored first, then one message lists what
+was not done. A setup the user skipped by answering a question with no is their choice and
+exits with `0`; the same skip made by `--yes` exits with `1`. Parts of a setup that are left
+out on purpose (declined commands, `~/.claude.json` while Claude Code runs) do not change the
+exit code; they are warned about.
 
 ## 11. Tests, CI and deployment
 
@@ -555,6 +578,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `program.ts`        | Every command, flag and help text (commander); parsing only.                                           |
 | `flags.ts`          | Validating `--agent`, `--project` and `--username` values.                                             |
 | `run.ts`            | Runs one invocation: exit codes, Ctrl+C, and the "needs an answer" message with the flags per command. |
+| `setup-outcomes.ts` | What happened to each setup in push and pull, and the one "Not saved / Not restored" error (exit 1).   |
 | `error-messages.ts` | The one line shown when a command fails (rate limits, server errors).                                  |
 | `stdin.ts`          | `--password-stdin`: the first line of a pipe; refuses a terminal.                                      |
 
@@ -599,9 +623,9 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 | File                         | Responsible for                                                                                                        |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `push/push-command.ts`       | `push`: choose agents and scopes, collect, portable paths, encrypt for the revision, upload, handle conflicts.         |
+| `push/push-command.ts`       | `push`: a plan step (choose, collect, every question) and an apply step with no prompter (encrypt, upload).            |
 | `push/bundle-files.ts`       | Collected files ↔ bundle entries (UTF-8 with `{{HOME}}` or base64); keeps local files that only differ in slash style. |
-| `pull/pull-command.ts`       | `pull`: choose, download, verify, rollback check, review, restore, after-restore, remember.                            |
+| `pull/pull-command.ts`       | `pull`: a plan step (choose, download, verify, every question), an apply step with no prompter, then after-restore.    |
 | `pull/saved-setups.ts`       | Listing setups with decrypted names; downloading and checking one (agent, scope, sealed revision).                     |
 | `pull/command-review.ts`     | Finding hooks, status line, MCP servers and the scripts they run, and which are new or changed on this PC.             |
 | `pull/reviewed-settings.ts`  | The settings keys and `env` names the review watches (command, loosening and redirect settings); the drift watch list. |
@@ -613,7 +637,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `env-references.ts` | Finding `${VAR}` references in collected files (Claude Code's own variables excluded).                                                                                                 |
 | `env-section.ts`    | The encrypted `.agentnomad/env.json` section and choosing which values to save (opt-in).                                                                                               |
-| `env-restore.ts`    | On pull: adding saved values that are missing here (not in the environment nor already written), after asking.                                                                         |
+| `env-restore.ts`    | On pull: adding saved values that are missing here (not in the environment nor already written); asking (plan) and writing (apply) are separate.                                       |
 | `shell-profile.ts`  | Writing them, and reading back what is there: a marked block in the shell profile (sh, bash, zsh, fish), rewritten only when it changes, or Windows user variables through PowerShell. |
 | `env-command.ts`    | `agentnomad env`.                                                                                                                                                                      |
 
