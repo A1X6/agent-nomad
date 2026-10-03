@@ -20,6 +20,7 @@ worked example.
 packages/cli/src/agents/
 ├── adapter.ts                  the interfaces you implement (do not change)
 ├── registry.ts                 the registry (do not change)
+├── shared/                     helpers for every adapter (PATH lookup, reading files)
 ├── claude-code/                the reference adapter
 └── example/                    ← your new folder
     ├── example-paths.data.ts   what to sync, skip and refuse, as data
@@ -98,7 +99,7 @@ export const EXAMPLE_PATHS = z
 
 ## Step 3 · The detector
 
-Implement `Detector` from `adapter.ts`. Reuse the helpers in `claude-code/detector.ts`:
+Implement `Detector` from `adapter.ts`. Reuse the helpers in `shared/detector-system.ts`:
 `findExecutable(system, command)` searches PATH like a shell (PATHEXT on Windows), and
 `nodeDetectorSystem(env, homedir, platform)` gives the real file system and a safe
 `--version` runner (no shell, time-limited).
@@ -108,7 +109,7 @@ Implement `Detector` from `adapter.ts`. Reuse the helpers in `claude-code/detect
 import { join } from 'node:path';
 
 import type { DetectedAgent, Detector } from '../adapter.ts';
-import { findExecutable, type DetectorSystem } from '../claude-code/detector.ts';
+import { findExecutable, type DetectorSystem } from '../shared/detector-system.ts';
 
 export const exampleBaseDir = (system: DetectorSystem) =>
   system.env['EXAMPLE_HOME']?.trim() || join(system.homedir, '.example');
@@ -134,13 +135,14 @@ export function createExampleDetector(system: DetectorSystem): Detector {
 
 Implement `Collector`: return `CollectedFile`s whose `path` is relative to the base folder
 (global) or the project root (project), with forward slashes. `createFileGatherer` from
-`claude-code/file-gathering.ts` reads single files and walks folders (following links
-once, skipping clutter and agentnomad's own backup copies).
+`shared/file-gathering.ts` reads single files and walks folders (following links once,
+never into a folder for keys and logins, skipping the clutter your data file names and
+agentnomad's own backup copies).
 
 ```ts
 // packages/cli/src/agents/example/collector.ts
 import type { CollectedFile, Collector } from '../adapter.ts';
-import { createFileGatherer, uniqueByPath } from '../claude-code/file-gathering.ts';
+import { createFileGatherer, uniqueByPath } from '../shared/file-gathering.ts';
 import { EXAMPLE_PATHS } from './example-paths.data.ts';
 
 const under = (path: string, entry: string) => path === entry || path.startsWith(`${entry}/`);
@@ -149,7 +151,9 @@ export function createExampleCollector(options: {
   baseDir: string;
   platform: NodeJS.Platform;
 }): Collector {
-  const files = createFileGatherer(options.platform);
+  const files = createFileGatherer(options.platform, {
+    skippedNames: new Set(EXAMPLE_PATHS.skippedNames),
+  });
   const { path } = files;
 
   return {
@@ -227,6 +231,11 @@ loop) into a shared `agents/shared/` module rather than copying them.
 - **`optionalParts`:** what push saves only after a yes, as data (an id, its scope, what
   there is, the question); the collector gets the chosen ids in `options.include`.
 - **`memoryDescription`:** what push's memory question names.
+- **`envReferences`:** which bundle files hold MCP servers (`mcp`) and settings with an
+  `env` block (`settings`) that can use `${VAR}`, the variables the agent sets itself
+  (`ownVariables`), and an optional `label` for messages. Push offers to save the values
+  these files use and `agentnomad env` lists them; without it, both find none (see
+  `claude-code/env-files.ts`).
 - **`planRestore(context)`:** the agent's own questions in pull's plan step, before anything
   is written, such as reinstalling extensions with the agent's own commands. It returns how
   to write the setup (usually the restorer's `restore`) and a follow-up that runs after
@@ -238,7 +247,7 @@ loop) into a shared `agents/shared/` module rather than copying them.
 ```ts
 // packages/cli/src/agents/example/example-adapter.ts
 import type { AgentAdapter } from '../adapter.ts';
-import { nodeDetectorSystem } from '../claude-code/detector.ts';
+import { nodeDetectorSystem } from '../shared/detector-system.ts';
 import { createExampleCollector } from './collector.ts';
 import { createExampleDetector, exampleBaseDir } from './detector.ts';
 import { createExampleRestorer } from './restorer.ts';
@@ -266,6 +275,10 @@ export function createExampleAdapter(options: {
 
 The `id` is permanent: it is part of every saved bundle's key. Use lowercase letters,
 digits and dashes.
+
+Import only `../adapter.ts`, `../shared/` and generic code (`../../system/`, `@agentnomad/core`),
+never another adapter's folder: a lint rule in `eslint.config.js` refuses it, so a change
+made for one agent cannot change another. A helper two adapters need goes in `shared/`.
 
 ## Step 8 · Register it (the one line)
 
