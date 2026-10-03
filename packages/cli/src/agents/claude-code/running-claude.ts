@@ -8,12 +8,12 @@ export type ClaudeRunningCheck = () => Promise<boolean>;
 
 const LIST_TIMEOUT_MS = 5_000;
 
-function run(file: string, args: readonly string[]): Promise<string | null> {
+function run(file: string, args: readonly string[], timeoutMs: number): Promise<string | null> {
   return new Promise((done) => {
     execFile(
       file,
       args,
-      { timeout: LIST_TIMEOUT_MS, windowsHide: true, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
+      { timeout: timeoutMs, windowsHide: true, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
       (error, stdout) => {
         done(error ? null : stdout);
       },
@@ -25,10 +25,13 @@ function run(file: string, args: readonly string[]): Promise<string | null> {
  * The real process list: `tasklist` on Windows (program names), `ps` elsewhere (full
  * command lines, which also show an npm-installed Claude Code running under node).
  */
-export function systemProcessLister(platform: NodeJS.Platform = process.platform): ProcessLister {
+export function systemProcessLister(
+  platform: NodeJS.Platform = process.platform,
+  timeoutMs = LIST_TIMEOUT_MS,
+): ProcessLister {
   return async () => {
     if (platform === 'win32') {
-      const output = await run('tasklist', ['/FO', 'CSV', '/NH']);
+      const output = await run('tasklist', ['/FO', 'CSV', '/NH'], timeoutMs);
       return output === null
         ? null
         : output
@@ -36,7 +39,7 @@ export function systemProcessLister(platform: NodeJS.Platform = process.platform
             .map((line) => /^"([^"]+)"/.exec(line)?.[1] ?? '')
             .filter((name) => name !== '');
     }
-    const output = await run('ps', ['-A', '-o', 'args=']);
+    const output = await run('ps', ['-A', '-o', 'args='], timeoutMs);
     return output === null ? null : output.split('\n').filter((line) => line.trim() !== '');
   };
 }

@@ -29,6 +29,7 @@ export async function createSecretStore(options: CreateSecretStoreOptions): Prom
     path: join(configDir(options), SECRETS_FILE),
     server: options.server,
     platform: options.platform,
+    env: options.env,
     ...(options.restrictAccess && { restrictAccess: options.restrictAccess }),
   });
   let token: string | null;

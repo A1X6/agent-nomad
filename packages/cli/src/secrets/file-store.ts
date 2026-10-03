@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, win32 } from 'node:path';
 
 import * as z from 'zod';
 
@@ -31,6 +31,8 @@ export interface FileStoreOptions {
   readonly path: string;
   readonly server: string;
   readonly platform?: NodeJS.Platform;
+  /** The CLI's environment; Windows finds its tools through `SystemRoot`. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
   /**
    * Windows: gives only the current user access to a file (T46), since file modes there
    * only control writing. Injectable for tests.
@@ -52,13 +54,22 @@ function run(command: string, args: readonly string[]): Promise<string> {
  * Windows: removes inherited access and grants the current user (by SID, from `whoami`)
  * full control, so the file stays private wherever the config folder is (T46).
  */
-export async function windowsOwnerOnly(file: string): Promise<void> {
-  // By full path: Git for Windows puts a Unix `whoami` earlier on PATH.
-  const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32');
-  const csv = await run(join(system32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh']);
-  const sid = /"(S-1-[0-9-]+)"/.exec(csv)?.[1];
-  if (sid === undefined) throw new Error('Could not find the current user.');
-  await run(join(system32, 'icacls.exe'), [file, '/inheritance:r', '/grant:r', `*${sid}:F`]);
+export function windowsOwnerOnly(
+  env: Readonly<Record<string, string | undefined>>,
+): (file: string) => Promise<void> {
+  return async (file) => {
+    // By full path: Git for Windows puts a Unix `whoami` earlier on PATH.
+    const system32 = win32.join(env['SystemRoot'] ?? 'C:\\Windows', 'System32');
+    const csv = await run(win32.join(system32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh']);
+    const sid = /"(S-1-[0-9-]+)"/.exec(csv)?.[1];
+    if (sid === undefined) throw new Error('Could not find the current user.');
+    await run(win32.join(system32, 'icacls.exe'), [
+      file,
+      '/inheritance:r',
+      '/grant:r',
+      `*${sid}:F`,
+    ]);
+  };
 }
 
 export class SecretsFileError extends Error {
@@ -79,7 +90,8 @@ const isMissing = (error: unknown) =>
 export function createFileStore(options: FileStoreOptions): SecretStore {
   const { path, server } = options;
   const posix = (options.platform ?? process.platform) !== 'win32';
-  const restrictAccess = options.restrictAccess ?? (posix ? null : windowsOwnerOnly);
+  const restrictAccess =
+    options.restrictAccess ?? (posix ? null : windowsOwnerOnly(options.env ?? {}));
 
   /** On macOS/Linux, takes back access others were given to the file or its folder. */
   async function lockDown(): Promise<void> {
