@@ -217,11 +217,23 @@ const isScript = (path: string) =>
 const folderOf = (path: string) => path.slice(0, path.lastIndexOf('/') + 1);
 
 /**
+ * A file that can run as a program when a command names it (T55): a script extension, no
+ * extension at all (`bin/run`), the executable bit, or a `#!` first line. A data file that a
+ * command only reads (`jq … config.json`) is not one.
+ */
+const isProgram = (file: CollectedFile) =>
+  isScript(file.path) ||
+  !/\.[^./]+$/.test(file.path) ||
+  file.executable ||
+  (file.content[0] === 0x23 && file.content[1] === 0x21);
+
+/**
  * Incoming script files that a command runs, matched by path: the command names the
  * script's path within the base folder, the project or (for `.agentnomad/home/...`) the home
  * folder, e.g. `…/.claude/hooks/check.sh` runs `hooks/check.sh`. Commands come from the
  * incoming setup and from this PC's own (T44: a hook already here runs a changed script
- * too), and scripts next to a run script count as well (a helper it loads).
+ * too), and scripts next to a run script count as well (a helper it loads). A named file
+ * counts whatever its name when it can run as a program (T55: `skills/tool/bin/run`).
  */
 function scriptsRun(incoming: readonly CollectedFile[], commands: readonly string[]) {
   const words = commands.flatMap((command) =>
@@ -230,7 +242,7 @@ function scriptsRun(incoming: readonly CollectedFile[], commands: readonly strin
   const relativeOf = (path: string) =>
     path.startsWith(HOME_SCRIPTS_PREFIX) ? path.slice(HOME_SCRIPTS_PREFIX.length) : path;
   const run = incoming.filter((file) => {
-    if (!isScript(file.path)) return false;
+    if (!isProgram(file)) return false;
     const relative = relativeOf(file.path);
     return words.some((word) => word === relative || word.endsWith(`/${relative}`));
   });

