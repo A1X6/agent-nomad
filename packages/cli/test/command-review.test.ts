@@ -108,6 +108,29 @@ describe('reviewRunnable: everything the docs say runs (T44)', () => {
     expect(labels([json('.claude/settings.json', permissions)])).toEqual([]);
   });
 
+  it('warns about auto only in global settings and acceptEdits from any settings file (T56)', () => {
+    const mode = (defaultMode: string) => ({ permissions: { defaultMode } });
+    const shown = (path: string, defaultMode: string) =>
+      reviewRunnable([json(path, mode(defaultMode))], []).map((entry) => entry.command);
+    expect(shown('settings.json', 'auto')).toEqual([
+      'auto (Claude acts without asking; a classifier checks its actions)',
+    ]);
+    expect(shown('.claude/settings.json', 'auto')).toEqual([]);
+    for (const path of ['settings.json', '.claude/settings.json', '.claude/settings.local.json']) {
+      expect(shown(path, 'acceptEdits')).toEqual([
+        'acceptEdits (Claude edits files and runs mkdir, mv and the like without asking)',
+      ]);
+    }
+    for (const quiet of ['default', 'manual', 'plan', 'dontAsk'])
+      expect(shown('settings.json', quiet)).toEqual([]);
+    // A mode that changes from one that asks to one that does not is shown as changed.
+    const review = reviewRunnable(
+      [json('settings.json', mode('bypassPermissions'))],
+      [json('settings.json', mode('acceptEdits'))],
+    );
+    expect(review.map((entry) => entry.change)).toEqual(['changed']);
+  });
+
   it('shows an MCP server whose env, headers or headersHelper changed', () => {
     const server = { command: 'npx', args: ['gh-mcp'] };
     const here = json('.mcp.json', { mcpServers: { gh: server } });
