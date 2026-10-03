@@ -203,8 +203,10 @@ It implements `Restorer.restore(target, files, onConflict, context)`:
 2. Skip files that are identical to what is on disk.
 3. For a different existing file, call `onConflict(path, question)`: it answers from what
    the plan asked (or `--merge` / `--overwrite` / `--yes`). Use `createMergeStrategies`
-   and `selectMergeStrategy` from `@agentnomad/core` to plan merge (JSON by key; others
-   side by side) and overwrite (with a timestamped backup).
+   and `selectMergeStrategy` from `@agentnomad/core` to plan merge and overwrite (with a
+   timestamped backup): pass it the merges your formats need in a `MergeChoices` (Claude
+   Code: `[jsonMerge]`); anything none of them handles is kept side by side. A merge for
+   another format (TOML, Markdown) is one more `MergeStrategy` in that list.
 4. Write atomically (temporary file, then rename), keep a replaced file's permissions,
    use LF for scripts (CRLF for `.bat`/`.cmd` on Windows), set the executable bit on
    macOS and Linux.

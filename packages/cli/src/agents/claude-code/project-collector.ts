@@ -1,13 +1,7 @@
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { findAutoMemory } from './auto-memory.ts';
-import {
-  commandsInSettings,
-  commandWords,
-  createFileGatherer,
-  type FileGatherer,
-  jsonFile,
-  uniqueByPath,
-} from './file-gathering.ts';
+import { createFileGatherer, type FileGatherer, jsonFile, uniqueByPath } from './file-gathering.ts';
+import { commandsInSettings, commandWords } from './settings-commands.ts';
 import { PLUGINS_BUNDLE_PATH, SCRIPT_EXTENSIONS } from './global-paths.ts';
 import { readPluginManifest } from './plugins.ts';
 import {

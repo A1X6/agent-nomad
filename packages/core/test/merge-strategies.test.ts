@@ -185,6 +185,8 @@ describe('json merge: combine by key, incoming wins', () => {
 });
 
 describe('selectMergeStrategy: the user choice and file type decide the strategy', () => {
+  const claudeChoices = { merges: [jsonMerge], fallback: textSideBySide, overwrite };
+
   it.each([
     ['merge', 'settings.json', 'json-merge'],
     ['merge', '.mcp.json', 'json-merge'],
@@ -194,6 +196,22 @@ describe('selectMergeStrategy: the user choice and file type decide the strategy
     ['overwrite', 'settings.json', 'overwrite'],
     ['overwrite', 'CLAUDE.md', 'overwrite'],
   ] as const)('%s + %s uses %s', (choice, path, expected) => {
-    expect(selectMergeStrategy(strategies, choice, path).name).toBe(expected);
+    expect(selectMergeStrategy(claudeChoices, choice, path).name).toBe(expected);
+  });
+
+  it('a merge for another format plugs in as one more list entry, first match wins (SOLID-07)', () => {
+    const tomlMerge = {
+      name: 'toml-merge',
+      appliesTo: (path: string) => path.endsWith('.toml'),
+      resolve: () => [],
+    };
+    const choices = { ...claudeChoices, merges: [tomlMerge, jsonMerge] };
+    expect(selectMergeStrategy(choices, 'merge', 'config.toml').name).toBe('toml-merge');
+    expect(selectMergeStrategy(choices, 'merge', 'settings.json').name).toBe('json-merge');
+    expect(selectMergeStrategy(choices, 'merge', 'AGENTS.md').name).toBe('text-side-by-side');
+    expect(selectMergeStrategy(choices, 'overwrite', 'config.toml').name).toBe('overwrite');
+    expect(selectMergeStrategy({ ...choices, merges: [] }, 'merge', 'a.json').name).toBe(
+      'text-side-by-side',
+    );
   });
 });

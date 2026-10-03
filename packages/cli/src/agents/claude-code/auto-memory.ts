@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 
-import { parseSettings } from './file-gathering.ts';
+import { parseSettings } from './settings-commands.ts';
 import { homePathProblem } from './global-paths.ts';
 import { MAX_PROJECT_DIR_NAME } from './project-paths.ts';
 

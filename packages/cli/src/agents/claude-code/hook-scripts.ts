@@ -1,6 +1,7 @@
 import { posix, win32 } from 'node:path';
 
-import { bundlePathInside, commandsInSettings, commandWords } from './file-gathering.ts';
+import { bundlePathInside } from './file-gathering.ts';
+import { commandsInSettings, commandWords } from './settings-commands.ts';
 import {
   GLOBAL_REFUSED,
   HOME_SCRIPTS_PREFIX,

@@ -15,6 +15,8 @@
  */
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 
+import * as z from 'zod';
+
 import { CLAUDE_CODE_PATHS } from '../../src/agents/claude-code/claude-code-paths.data.ts';
 import { docsTopLevelNames, driftReport, reportMarkdown } from './drift.ts';
 
@@ -31,9 +33,11 @@ async function fetchText(url: string): Promise<string> {
 async function latestVersion(): Promise<string> {
   const given = process.env['DRIFT_LATEST']?.trim();
   if (given) return given;
-  const body = JSON.parse(await fetchText(REGISTRY_URL)) as { version?: unknown };
-  if (typeof body.version !== 'string') throw new Error(`${REGISTRY_URL}: no version`);
-  return body.version;
+  const body = z
+    .object({ version: z.string() })
+    .safeParse(JSON.parse(await fetchText(REGISTRY_URL)));
+  if (!body.success) throw new Error(`${REGISTRY_URL}: no version`);
+  return body.data.version;
 }
 
 async function freshEntries(): Promise<string[] | null> {

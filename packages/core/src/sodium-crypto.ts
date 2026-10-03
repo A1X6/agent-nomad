@@ -30,15 +30,22 @@ function deriveKeys(password: string, salt: Uint8Array, params: KdfParams): Deri
   // Re-checked here: the settings arrive from the server at prelogin.
   const checked = KdfParamsSchema.parse(params);
   requireLength('Salt', salt, SALT_BYTES);
-  // NFC: the same password typed on macOS, Windows or Linux becomes the same bytes.
-  const master = sodium.crypto_pwhash(
-    KEY_BYTES,
-    password.normalize('NFC'),
-    salt,
-    checked.passes,
-    checked.memoryKiB * 1024,
-    sodium.crypto_pwhash_ALG_ARGON2ID13,
-  );
+  // NFC: the same password typed on macOS, Windows or Linux becomes the same bytes. Encoded
+  // here the way libsodium encodes a string itself, so the bytes can be wiped afterwards.
+  const passwordBytes = sodium.from_string(password.normalize('NFC'));
+  let master: Uint8Array;
+  try {
+    master = sodium.crypto_pwhash(
+      KEY_BYTES,
+      passwordBytes,
+      salt,
+      checked.passes,
+      checked.memoryKiB * 1024,
+      sodium.crypto_pwhash_ALG_ARGON2ID13,
+    );
+  } finally {
+    sodium.memzero(passwordBytes);
+  }
   try {
     return {
       authKey: sodium.crypto_kdf_derive_from_key(KEY_BYTES, AUTH_KEY_ID, KDF_CONTEXT, master),

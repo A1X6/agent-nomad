@@ -2,7 +2,7 @@ import { posix, win32 } from 'node:path';
 
 import * as z from 'zod';
 
-import { findExecutable, type DetectorSystem } from './detector.ts';
+import { findExecutable, type DetectorSystem, type ExecutableLookupSystem } from './detector.ts';
 
 /** A program a hook or the status line runs, and how to install it elsewhere if known. */
 export interface ProgramInfo {
@@ -29,7 +29,9 @@ const NpmManifestSchema = z.object({
  * npm puts the launcher in its prefix (Windows) or prefix/bin (macOS, Linux), next to
  * `node_modules/<name>` or `lib/node_modules/<name>`.
  */
-export function createProgramLocator(system: DetectorSystem): ProgramLocator {
+export function createProgramLocator(
+  system: ExecutableLookupSystem & Pick<DetectorSystem, 'readText'>,
+): ProgramLocator {
   const path = system.platform === 'win32' ? win32 : posix;
   return async (command) => {
     const executable = await findExecutable(system, command);

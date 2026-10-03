@@ -18,7 +18,7 @@ import {
   claudeConfigDir,
   findClaudeExecutable,
   findExecutable,
-  type DetectorSystem,
+  type ExecutableLookupSystem,
 } from './detector.ts';
 import { createFileGatherer } from './file-gathering.ts';
 import { PLUGINS_BUNDLE_PATH, PROGRAMS_BUNDLE_PATH } from './global-paths.ts';
@@ -64,7 +64,7 @@ function readJson<S extends z.ZodType>(
 }
 
 export interface AfterRestoreDeps {
-  readonly system: DetectorSystem;
+  readonly system: ExecutableLookupSystem;
   /** Runs a found program (`claude`, `npm`); injected for tests. */
   readonly cli?: (path: string) => ClaudeCli;
   /** Writes saved claude.ai skills as local skills (T42), with the restorer's safety rules. */

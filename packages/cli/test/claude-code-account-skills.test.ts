@@ -15,7 +15,7 @@ import {
   planAccountSkills,
   readSyncedSkills,
   type CollectedFile,
-  type DetectorSystem,
+  type ExecutableLookupSystem,
   type Prompter,
   type Reporter,
 } from '../src/index.ts';
@@ -209,14 +209,11 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
   ) {
     const asked: string[] = [];
     const lines: string[] = [];
-    const system: DetectorSystem = {
+    const system: ExecutableLookupSystem = {
       platform: process.platform,
       homedir: home,
       env: { PATH: '' },
-      isDirectory: () => Promise.resolve(false),
       isExecutable: () => Promise.resolve(false),
-      readText: () => Promise.resolve(null),
-      runVersion: () => Promise.resolve(null),
     };
     const restorer = createClaudeCodeRestorer({
       baseDir: base,
