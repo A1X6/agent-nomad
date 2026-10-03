@@ -2,7 +2,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { BundleParams } from '@agentnomad/contracts';
 import {
   createGzipBundleCodec,
   createSodiumCryptoService,
@@ -14,9 +13,14 @@ import {
 } from '@agentnomad/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  fakeBundleServer,
+  memorySecretStore,
+  recordingReporter,
+  scriptedPrompter,
+} from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
-  ApiError,
   CLAUDE_ENV_REFERENCES,
   createAgentRegistry,
   createClaudeCodeAdapter,
@@ -29,14 +33,10 @@ import {
   PromptCancelledError,
   SetupsNotDoneError,
   type AgentAdapter,
-  type ApiClient,
-  type BundleUpload,
   type CollectedFile,
   type Prompter,
   type PushApplyDeps,
   type PushDeps,
-  type Reporter,
-  type SecretName,
   type SecretStore,
 } from '../src/index.ts';
 
@@ -50,6 +50,7 @@ beforeAll(async () => {
   crypto = await createSodiumCryptoService();
   dataKey = crypto.randomBytes(32);
 });
+const loggedIn = () => memorySecretStore({ loggedIn: dataKey });
 
 let dir: string;
 beforeEach(async () => {
@@ -98,98 +99,11 @@ function fakeAdapter(
   };
 }
 
-/** A server that keeps uploads by agent and scope key and enforces revisions like the real one. */
-function fakeServer() {
-  const stored = new Map<string, { upload: BundleUpload; revision: number }>();
-  const puts: { params: BundleParams; upload: BundleUpload }[] = [];
-  const key = (params: BundleParams) => `${params.agent}/${params.scopeKey}`;
-  const api: ApiClient = {
-    auth: {} as ApiClient['auth'],
-    bundles: {
-      list: () =>
-        Promise.resolve({
-          items: [...stored.entries()].map(([id, entry]) => ({
-            agent: 'claude-code' as const,
-            scopeKey: id.slice('claude-code/'.length),
-            nameEnc: entry.upload.nameEnc ?? null,
-            revision: entry.revision,
-            formatVersion: 1,
-            sizeBytes: entry.upload.ciphertext.byteLength,
-            updatedAt: '2026-09-25T12:00:00Z',
-          })),
-          nextCursor: null,
-        }),
-      get: () => Promise.reject(new Error('not used')),
-      delete: () => Promise.reject(new Error('not used')),
-      put: (params, upload) => {
-        puts.push({ params, upload });
-        const current = stored.get(key(params))?.revision ?? 0;
-        if (upload.expectedRevision !== current) {
-          return Promise.reject(
-            new ApiError(
-              409,
-              'revision_conflict',
-              'newer',
-              current > 0 ? { currentRevision: current } : {},
-            ),
-          );
-        }
-        stored.set(key(params), { upload, revision: current + 1 });
-        return Promise.resolve({ revision: current + 1, updatedAt: '2026-09-25T12:00:00Z' });
-      },
-    },
-  };
-  return { api, stored, puts };
-}
-
-function loggedIn(): SecretStore {
-  const saved = new Map<SecretName, string>([
-    ['session-token', 't'.repeat(43)],
-    ['data-key', Buffer.from(dataKey).toString('base64')],
-  ]);
-  return {
-    backend: 'keychain',
-    get: (name) => Promise.resolve(saved.get(name) ?? null),
-    set: () => Promise.resolve(),
-    setMany: () => Promise.resolve(),
-    delete: () => Promise.resolve(),
-  };
-}
-
-function scripted(answers: unknown[]) {
-  const asked: string[] = [];
-  const next = (message: string): unknown => {
-    asked.push(message);
-    if (answers.length === 0) throw new Error(`No answer scripted for "${message}"`);
-    return answers.shift();
-  };
-  const prompter: Prompter = {
-    select: <T extends string>(message: string) => Promise.resolve(next(message) as T),
-    multiselect: <T extends string>(message: string) => Promise.resolve(next(message) as T[]),
-    text: (message) => Promise.resolve(next(message) as string),
-    password: (message) => Promise.resolve(next(message) as string),
-    confirm: (message) => Promise.resolve(next(message) as boolean),
-  };
-  return { prompter, asked };
-}
-
-function recorder() {
-  const lines: string[] = [];
-  const reporter: Reporter = {
-    info: (m) => lines.push(`info: ${m}`),
-    success: (m) => lines.push(`success: ${m}`),
-    warn: (m) => lines.push(`warn: ${m}`),
-    error: (m) => lines.push(`error: ${m}`),
-    spinner: () => ({ start: () => undefined, stop: () => undefined }),
-  };
-  return { reporter, lines };
-}
-
 function setup(
   answers: unknown[],
   options: {
     adapter?: AgentAdapter;
-    server?: ReturnType<typeof fakeServer>;
+    server?: ReturnType<typeof fakeBundleServer>;
     secrets?: SecretStore;
     cwd?: string;
     env?: Record<string, string>;
@@ -199,9 +113,9 @@ function setup(
     prompter?: Prompter;
   } = {},
 ) {
-  const server = options.server ?? fakeServer();
-  const script = scripted(answers);
-  const { reporter, lines } = recorder();
+  const server = options.server ?? fakeBundleServer();
+  const script = scriptedPrompter(answers);
+  const { reporter, lines } = recordingReporter();
   const state = createLocalState({
     path: join(dir, `${options.pc ?? 'this-pc'}.json`),
     server: 'api.test',
@@ -230,7 +144,7 @@ const noFlags = { global: false, yes: false };
 
 /** What the server received, decrypted with the owner's key. */
 async function received(
-  server: ReturnType<typeof fakeServer>,
+  server: ReturnType<typeof fakeBundleServer>,
   scope: { kind: 'global' } | { kind: 'project'; name: string },
 ) {
   const scopeKey = scopeKeyFor(crypto, dataKey, scope);
@@ -310,7 +224,7 @@ describe('agentnomad push', () => {
   });
 
   it('a second push from the same folder asks no name and moves to the next revision', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     await setup(['both', 'my-app', false], { server }).command.push(noFlags);
     const second = setup(['both', false], { server });
     await second.command.push(noFlags);
@@ -467,7 +381,7 @@ describe('agentnomad push', () => {
   });
 
   it('asks before replacing a newer copy from another PC; no keeps it', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
 
@@ -482,7 +396,7 @@ describe('agentnomad push', () => {
   });
 
   it('--yes never overwrites a newer copy', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
     const desktop = setup([], { server, pc: 'desktop' });
     await expect(desktop.command.push({ global: true, yes: true })).rejects.toThrow(
@@ -494,7 +408,7 @@ describe('agentnomad push', () => {
   });
 
   it('replaces the newer copy when the user says yes, and remembers the new revision', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
     const desktop = setup(['global', false, true], { server, pc: 'desktop' });
     await desktop.command.push(noFlags);
@@ -563,7 +477,7 @@ describe('agentnomad push', () => {
   });
 
   it('--yes skips a newer copy, saves the other setups, then exits with code 1 (BUG-03)', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
     const desktop = setup([], { server, pc: 'desktop' });
     const pushed = desktop.command.push({ global: true, project: 'my-app', yes: true });
@@ -577,7 +491,7 @@ describe('agentnomad push', () => {
   });
 
   it('--yes skips a copy deleted on the server; a yes from the user saves it again', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     const t = setup(['global', false], { server });
     await t.command.push(noFlags);
     server.stored.clear();
@@ -593,7 +507,7 @@ describe('agentnomad push', () => {
   });
 
   it('the plan step asks every question and uploads nothing; apply uploads and asks nothing (T59)', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
     const desktop = setup(['global', false, true], { server, pc: 'desktop' });
     const keys = { secrets: loggedIn(), crypto, dataKey };
@@ -618,7 +532,7 @@ describe('agentnomad push', () => {
   });
 
   it('apply never asks: a copy saved from another PC after the plan is not done (T59)', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     const t = setup(['global', false], { server });
     const keys = { secrets: loggedIn(), crypto, dataKey };
     const plan = await createPushPlanner(t.deps).plan(noFlags, keys);
@@ -651,7 +565,7 @@ describe('agentnomad push', () => {
     }
     /** Answers `answers` in order, then cancels the next question (Ctrl+C). */
     const cancelling = (answers: unknown[]): Prompter => {
-      const script = scripted(answers);
+      const script = scriptedPrompter(answers);
       const cancelled = () => Promise.reject(new PromptCancelledError());
       return {
         ...script.prompter,
@@ -670,7 +584,7 @@ describe('agentnomad push', () => {
     });
 
     it('Ctrl+C at the last question, after the key was used', async () => {
-      const server = fakeServer();
+      const server = fakeBundleServer();
       await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
       // "What to save?" and memory are answered; "replace the newer copy?" is cancelled.
       const t = setup([], { server, pc: 'desktop', prompter: cancelling(['global', false]) });
@@ -711,13 +625,7 @@ describe('agentnomad push', () => {
   });
 
   it('needs a login first', async () => {
-    const empty: SecretStore = {
-      backend: 'keychain',
-      get: () => Promise.resolve(null),
-      set: () => Promise.resolve(),
-      setMany: () => Promise.resolve(),
-      delete: () => Promise.resolve(),
-    };
+    const empty = memorySecretStore();
     await expect(setup([], { secrets: empty }).command.push(noFlags)).rejects.toBeInstanceOf(
       NotLoggedInError,
     );

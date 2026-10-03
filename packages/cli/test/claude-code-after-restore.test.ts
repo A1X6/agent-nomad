@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { recordingReporter, scriptedPrompter } from './fakes.ts';
+
 import {
   createClaudeCodeAfterRestore,
   type ProgramCli,
@@ -56,29 +58,18 @@ function system(executables: string[]): ExecutableLookupSystem {
 }
 
 function context(files: CollectedFile[], answers: boolean[] = [true, true]) {
-  const lines: string[] = [];
-  const asked: string[] = [];
+  const script = scriptedPrompter(answers);
+  const { reporter, lines } = recordingReporter({ levels: false });
   const ctx: FollowUpPlanContext = {
     target: { kind: 'global' },
     files,
     assumeYes: false,
     allowCommands: false,
     parts: new Map(),
-    prompter: {
-      confirm: (message: string) => {
-        asked.push(message);
-        return Promise.resolve(answers.shift() ?? false);
-      },
-    } as unknown as FollowUpPlanContext['prompter'],
-    reporter: {
-      info: (m) => lines.push(m),
-      success: (m) => lines.push(m),
-      warn: (m) => lines.push(m),
-      error: (m) => lines.push(m),
-      spinner: () => ({ start: () => undefined, stop: () => undefined }),
-    },
+    prompter: script.prompter,
+    reporter,
   };
-  return { ctx, lines, asked };
+  return { ctx, lines, asked: script.asked };
 }
 
 function recordingCli() {

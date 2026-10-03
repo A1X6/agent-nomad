@@ -11,6 +11,7 @@ import {
 } from '@agentnomad/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { fakeApi, memorySecretStore, recordingReporter, scriptedPrompter } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import * as z from 'zod';
 
@@ -26,13 +27,8 @@ import {
   setupLabel,
   timeAgo,
   type AgentAdapter,
-  type ApiClient,
   type LocalState,
-  type Prompter,
-  type Reporter,
-  SECRET_NAMES,
   type SecretName,
-  type SecretStore,
 } from '../src/index.ts';
 
 const NOW = new Date('2026-09-25T12:00:00Z');
@@ -104,8 +100,7 @@ function fakeServer() {
     },
   ];
   const deleted: string[] = [];
-  const api = {
-    auth: {},
+  const api = fakeApi({
     bundles: {
       list: () =>
         Promise.resolve({
@@ -117,70 +112,17 @@ function fakeServer() {
         return Promise.resolve();
       },
     },
-  } as unknown as ApiClient;
+  });
   return { api, items, deleted, keyOf: (name: string) => project(name).scopeKey };
-}
-
-function loggedIn(saved = new Map<SecretName, string>()): SecretStore {
-  saved
-    .set('session-token', 't'.repeat(43))
-    .set('data-key', Buffer.from(dataKey).toString('base64'));
-  return {
-    backend: 'keychain',
-    get: (name) => Promise.resolve(saved.get(name) ?? null),
-    set: (name, value) => {
-      saved.set(name, value);
-      return Promise.resolve();
-    },
-    setMany: (values) => {
-      for (const name of SECRET_NAMES) {
-        const value = values[name];
-        if (value !== undefined) saved.set(name, value);
-      }
-      return Promise.resolve();
-    },
-    delete: (name) => {
-      saved.delete(name);
-      return Promise.resolve();
-    },
-  };
-}
-
-function scripted(answers: unknown[]) {
-  const asked: string[] = [];
-  const answer = (message: string) => {
-    asked.push(message);
-    return Promise.resolve(answers.shift());
-  };
-  const prompter = {
-    select: answer,
-    multiselect: answer,
-    text: answer,
-    password: answer,
-    confirm: answer,
-  } as unknown as Prompter;
-  return { prompter, asked };
-}
-
-function recorder() {
-  const lines: string[] = [];
-  const reporter: Reporter = {
-    info: (m) => lines.push(`info: ${m}`),
-    success: (m) => lines.push(`success: ${m}`),
-    warn: (m) => lines.push(`warn: ${m}`),
-    error: (m) => lines.push(`error: ${m}`),
-    spinner: () => ({ start: () => undefined, stop: () => undefined }),
-  };
-  return { reporter, lines };
 }
 
 function commands(
   server: ReturnType<typeof fakeServer>,
   answers: unknown[] = [],
-  secrets = loggedIn(),
+  secrets = memorySecretStore({ loggedIn: dataKey }),
 ) {
-  const script = scripted(answers);
-  const { reporter, lines } = recorder();
+  const script = scriptedPrompter(answers);
+  const { reporter, lines } = recordingReporter();
   const handlers = createSetupCommands({
     prompter: script.prompter,
     reporter,
@@ -217,13 +159,7 @@ describe('agentnomad list', () => {
     const t = commands(empty);
     await t.list();
     expect(t.lines[0]).toContain('Nothing is saved yet');
-    const none: SecretStore = {
-      backend: 'file',
-      get: () => Promise.resolve(null),
-      set: () => Promise.resolve(),
-      setMany: () => Promise.resolve(),
-      delete: () => Promise.resolve(),
-    };
+    const none = memorySecretStore({ backend: 'file' });
     await expect(commands(fakeServer(), [], none).list()).rejects.toBeInstanceOf(NotLoggedInError);
   });
 });
@@ -376,11 +312,11 @@ describe('agentnomad account delete', () => {
     stdin?: string,
     saved = new Map<SecretName, string>(),
   ) {
-    const script = scripted(answers);
-    const { reporter, lines } = recorder();
-    const secrets = loggedIn(saved);
+    const script = scriptedPrompter(answers);
+    const { reporter, lines } = recordingReporter();
+    const secrets = memorySecretStore({ loggedIn: dataKey, saved });
     const sent: string[] = [];
-    const api = {
+    const api = fakeApi({
       auth: {
         prelogin: () =>
           Promise.resolve({
@@ -393,12 +329,12 @@ describe('agentnomad account delete', () => {
               parallelism: 1,
             },
           }),
-        deleteAccount: (request: { authKey: string }) => {
+        deleteAccount: (request) => {
           sent.push(request.authKey);
           return deleteAccount();
         },
       },
-    } as unknown as ApiClient;
+    });
     const handlers = createAuthCommands({
       prompter: script.prompter,
       reporter,

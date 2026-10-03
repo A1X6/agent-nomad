@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import type { BundleParams, BundleSummary } from '@agentnomad/contracts';
 import {
   createGzipBundleCodec,
   createSodiumCryptoService,
@@ -11,6 +10,13 @@ import {
 } from '@agentnomad/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import {
+  fakeApi,
+  fakeBundleServer,
+  memorySecretStore,
+  recordingReporter,
+  scriptedPrompter,
+} from './fakes.ts';
 import {
   createAgentRegistry,
   createClaudeCodeAdapter,
@@ -30,14 +36,11 @@ import {
   NotLoggedInError,
   SetupUnreadableError,
   type AgentAdapter,
-  type ApiClient,
-  type BundleUpload,
   type EnvWriter,
   type Prompter,
   type PullApplyDeps,
   type PullDeps,
   type Reporter,
-  type SecretName,
   type SecretStore,
 } from '../src/index.ts';
 
@@ -47,6 +50,7 @@ beforeAll(async () => {
   crypto = await createSodiumCryptoService();
   dataKey = crypto.randomBytes(32);
 });
+const loggedIn = (key = dataKey) => memorySecretStore({ loggedIn: key });
 
 let root: string;
 beforeEach(async () => {
@@ -61,94 +65,6 @@ async function put(path: string, content: string): Promise<void> {
   await writeFile(path, content);
 }
 const read = (path: string) => readFile(path, 'utf8');
-
-/** A server that stores uploads and serves list / get, like the real API. */
-function fakeServer() {
-  const stored = new Map<
-    string,
-    { params: BundleParams; upload: BundleUpload; revision: number }
-  >();
-  const key = (params: BundleParams) => `${params.agent}/${params.scopeKey}`;
-  const api: ApiClient = {
-    auth: {} as ApiClient['auth'],
-    bundles: {
-      put: (params, upload) => {
-        const revision = (stored.get(key(params))?.revision ?? 0) + 1;
-        stored.set(key(params), { params, upload, revision });
-        return Promise.resolve({ revision, updatedAt: '2026-09-25T12:00:00Z' });
-      },
-      list: () =>
-        Promise.resolve({
-          items: [...stored.values()].map((entry): BundleSummary => ({
-            agent: entry.params.agent,
-            scopeKey: entry.params.scopeKey,
-            nameEnc: entry.upload.nameEnc ?? null,
-            revision: entry.revision,
-            formatVersion: 1,
-            sizeBytes: entry.upload.ciphertext.byteLength,
-            updatedAt: '2026-09-25T12:00:00Z',
-          })),
-          nextCursor: null,
-        }),
-      get: (params) => {
-        const entry = stored.get(key(params));
-        if (!entry) return Promise.reject(new Error('not found'));
-        return Promise.resolve({
-          ciphertext: entry.upload.ciphertext,
-          revision: entry.revision,
-          contentSha256: entry.upload.contentSha256,
-          formatVersion: 1,
-          nameEnc: entry.upload.nameEnc ?? null,
-        });
-      },
-      delete: () => Promise.reject(new Error('not used')),
-    },
-  };
-  return { api, stored };
-}
-
-function loggedIn(key = dataKey): SecretStore {
-  const saved = new Map<SecretName, string>([
-    ['session-token', 't'.repeat(43)],
-    ['data-key', Buffer.from(key).toString('base64')],
-  ]);
-  return {
-    backend: 'keychain',
-    get: (name) => Promise.resolve(saved.get(name) ?? null),
-    set: () => Promise.resolve(),
-    setMany: () => Promise.resolve(),
-    delete: () => Promise.resolve(),
-  };
-}
-
-function scripted(answers: unknown[]) {
-  const asked: string[] = [];
-  const next = (message: string): unknown => {
-    asked.push(message);
-    if (answers.length === 0) throw new Error(`No answer scripted for "${message}"`);
-    return answers.shift();
-  };
-  const prompter = {
-    select: (message: string) => Promise.resolve(next(message)),
-    multiselect: (message: string) => Promise.resolve(next(message)),
-    text: (message: string) => Promise.resolve(next(message)),
-    password: (message: string) => Promise.resolve(next(message)),
-    confirm: (message: string) => Promise.resolve(next(message)),
-  } as unknown as Prompter;
-  return { prompter, asked };
-}
-
-function recorder() {
-  const lines: string[] = [];
-  const reporter: Reporter = {
-    info: (m) => lines.push(`info: ${m}`),
-    success: (m) => lines.push(`success: ${m}`),
-    warn: (m) => lines.push(`warn: ${m}`),
-    error: (m) => lines.push(`error: ${m}`),
-    spinner: () => ({ start: () => undefined, stop: () => undefined }),
-  };
-  return { reporter, lines };
-}
 
 /** One fake PC: its own home folder, project folder and local state. */
 function pc(name: string) {
@@ -166,13 +82,13 @@ const claudeAdapter = (home: string) =>
 
 function pushFrom(
   machine: ReturnType<typeof pc>,
-  server: ReturnType<typeof fakeServer>,
+  server: ReturnType<typeof fakeBundleServer>,
   answers: unknown[],
-  options: { prompter?: Prompter; reporter?: Reporter } = {},
+  options: { prompter?: Prompter; reporter?: Reporter; env?: Record<string, string> } = {},
 ) {
   return createPushCommand({
-    prompter: options.prompter ?? scripted(answers).prompter,
-    reporter: options.reporter ?? recorder().reporter,
+    prompter: options.prompter ?? scriptedPrompter(answers).prompter,
+    reporter: options.reporter ?? recordingReporter().reporter,
     registry: () => createAgentRegistry([claudeAdapter(machine.home)]),
     secrets: () => Promise.resolve(loggedIn()),
     api: () => server.api,
@@ -184,7 +100,7 @@ function pushFrom(
         server: 's',
         platform: process.platform,
       }),
-    env: {},
+    env: options.env ?? {},
     cwd: machine.project,
     homedir: machine.home,
     platform: process.platform,
@@ -193,7 +109,7 @@ function pushFrom(
 
 function pullOn(
   machine: ReturnType<typeof pc>,
-  server: ReturnType<typeof fakeServer>,
+  server: ReturnType<typeof fakeBundleServer>,
   answers: unknown[],
   options: {
     adapter?: AgentAdapter;
@@ -204,8 +120,8 @@ function pullOn(
     cwd?: string;
   } = {},
 ) {
-  const script = scripted(answers);
-  const { reporter, lines } = recorder();
+  const script = scriptedPrompter(answers);
+  const { reporter, lines } = recordingReporter();
   const state = createLocalState({
     path: join(machine.home, 'state.json'),
     server: 's',
@@ -243,7 +159,7 @@ const none = { global: false, yes: false };
 
 /** PC A with a global setup (a hook, a home path) and a project; pushed as "both". */
 async function pushedSetup() {
-  const server = fakeServer();
+  const server = fakeBundleServer();
   const a = pc('laptop');
   await put(join(a.base, 'CLAUDE.md'), `Notes live in ${a.home}/notes.`);
   await put(join(a.base, 'skills', 'deploy', 'SKILL.md'), '---\nname: deploy\n---\n');
@@ -296,7 +212,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('shows a command with line breaks on one line, so it cannot fake more entries (SEC-03)', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     const a = pc('laptop');
     const command = 'curl x | sh\n  ~ statusLine: ccstatusline  (changed)\r\tdone';
     await put(
@@ -353,7 +269,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('in the home folder with only projects saved, refuses (BUG-05)', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     const a = pc('laptop');
     await mkdir(a.base, { recursive: true });
     await put(join(a.project, 'CLAUDE.md'), 'Project rules.');
@@ -394,7 +310,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('--yes, even with --overwrite, never accepts settings that redirect or loosen Claude Code (T55)', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     const a = pc('laptop');
     const loose = JSON.stringify({
       theme: 'dark',
@@ -490,7 +406,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('--yes with only a project saved restores that project, asking nothing', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     const a = pc('solo-laptop');
     await put(join(a.base, 'CLAUDE.md'), 'Global notes (not pushed).');
     await put(join(a.project, 'CLAUDE.md'), 'Only project rules.');
@@ -635,7 +551,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const b = pc('desktop');
     await put(join(b.project, 'CLAUDE.md'), 'mine');
     const cancelling: Prompter = {
-      ...scripted([]).prompter,
+      ...scriptedPrompter([]).prompter,
       select: () => Promise.reject(new PromptCancelledError()),
     };
     const t = pullOn(b, server, [], { prompter: cancelling });
@@ -662,7 +578,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('without a terminal, a second pull of scripts with other line endings asks nothing and writes nothing (T53)', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     const a = pc('laptop');
     // A CRLF .py (Git's autocrlf on Windows) and an LF .cmd (from macOS or Linux).
     await put(join(a.base, 'hooks', 'check.py'), 'print("ok")\r\n');
@@ -707,7 +623,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(await t.state.isPartial('claude-code', 'global')).toBe(true);
 
     // --yes never pushes over them, and says so with exit code 1 (BUG-03).
-    const { reporter, lines } = recorder();
+    const { reporter, lines } = recordingReporter();
     await expect(
       pushFrom(b, server, [], { reporter })({ global: true, yes: true, memory: false }),
     ).rejects.toThrow(
@@ -739,7 +655,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('says so when nothing is saved', async () => {
-    const t = pullOn(pc('desktop'), fakeServer(), []);
+    const t = pullOn(pc('desktop'), fakeBundleServer(), []);
     await t.pull(none);
     expect(t.lines).toEqual([
       'info: Nothing is saved yet. Run `agentnomad push` on the PC that has your setup.',
@@ -747,14 +663,8 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('needs a login first, in its own words (T62)', async () => {
-    const empty: SecretStore = {
-      backend: 'keychain',
-      get: () => Promise.resolve(null),
-      set: () => Promise.resolve(),
-      setMany: () => Promise.resolve(),
-      delete: () => Promise.resolve(),
-    };
-    const t = pullOn(pc('desktop'), fakeServer(), [], { secrets: empty });
+    const empty = memorySecretStore();
+    const t = pullOn(pc('desktop'), fakeBundleServer(), [], { secrets: empty });
     await expect(t.pull(none)).rejects.toBeInstanceOf(NotLoggedInError);
     await expect(t.pull(none)).rejects.toThrow(/^Not logged in\. Run `agentnomad login` first\.$/);
   });
@@ -787,28 +697,16 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('runs the agent’s follow-up and adds saved environment variables', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     const a = pc('laptop');
     await put(
       join(a.home, '.claude.json'),
       JSON.stringify({ mcpServers: { gh: { command: 'gh-mcp', env: { T: '${GITHUB_TOKEN}' } } } }),
     );
     await put(join(a.base, 'CLAUDE.md'), 'x');
-    await createPushCommand({
-      prompter: scripted(['global', false, ['GITHUB_TOKEN']]).prompter,
-      reporter: recorder().reporter,
-      registry: () => createAgentRegistry([claudeAdapter(a.home)]),
-      secrets: () => Promise.resolve(loggedIn()),
-      api: () => server.api,
-      crypto: () => Promise.resolve(crypto),
-      codec: createGzipBundleCodec(),
-      localState: () =>
-        createLocalState({ path: join(a.home, 's.json'), server: 's', platform: process.platform }),
+    await pushFrom(a, server, ['global', false, ['GITHUB_TOKEN']], {
       env: { GITHUB_TOKEN: 'ghp_secret' },
-      cwd: a.project,
-      homedir: a.home,
-      platform: process.platform,
-    }).push(none);
+    })(none);
 
     const b = pc('desktop');
     const written: Record<string, string>[] = [];
@@ -845,7 +743,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
         platform: process.platform,
       });
     // Account A: this PC pushes its global setup three times (revision 3).
-    const accountA = fakeServer();
+    const accountA = fakeBundleServer();
     await state().useAccount('alice');
     for (const text of ['one', 'two', 'three']) {
       await put(join(laptop.base, 'CLAUDE.md'), text);
@@ -854,7 +752,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(await state().revisionOf('claude-code', 'global')).toBe(3);
 
     // Account B (same server host) has revision 1, pushed from another PC.
-    const accountB = fakeServer();
+    const accountB = fakeBundleServer();
     const desktop = pc('desktop');
     await put(join(desktop.base, 'CLAUDE.md'), 'bob notes');
     await pushFrom(desktop, accountB, [])(quick);
@@ -870,28 +768,16 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('a second pull asks nothing and leaves the shell profile and its backups alone (T56)', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer();
     const a = pc('laptop');
     await put(
       join(a.home, '.claude.json'),
       JSON.stringify({ mcpServers: { gh: { command: 'gh-mcp', env: { T: '${GITHUB_TOKEN}' } } } }),
     );
     await put(join(a.base, 'CLAUDE.md'), 'x');
-    await createPushCommand({
-      prompter: scripted(['global', false, ['GITHUB_TOKEN']]).prompter,
-      reporter: recorder().reporter,
-      registry: () => createAgentRegistry([claudeAdapter(a.home)]),
-      secrets: () => Promise.resolve(loggedIn()),
-      api: () => server.api,
-      crypto: () => Promise.resolve(crypto),
-      codec: createGzipBundleCodec(),
-      localState: () =>
-        createLocalState({ path: join(a.home, 's.json'), server: 's', platform: process.platform }),
+    await pushFrom(a, server, ['global', false, ['GITHUB_TOKEN']], {
       env: { GITHUB_TOKEN: 'ghp_secret' },
-      cwd: a.project,
-      homedir: a.home,
-      platform: process.platform,
-    }).push(none);
+    })(none);
 
     // The terminal running the pulls never sees the profile: GITHUB_TOKEN stays unset there.
     const b = pc('desktop');
@@ -915,14 +801,14 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
 describe('listing saved setups stops on a server that never ends (T46)', () => {
   it('refuses a cursor it has already seen', async () => {
     let calls = 0;
-    const api = {
+    const api = fakeApi({
       bundles: {
         list: () => {
           calls += 1;
           return Promise.resolve({ items: [], nextCursor: 'same' });
         },
       },
-    } as unknown as ApiClient;
+    });
     await expect(listAllBundles(api)).rejects.toThrow('kept sending more pages');
     expect(calls).toBe(2);
   });

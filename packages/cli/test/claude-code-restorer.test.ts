@@ -15,6 +15,8 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { recordingReporter, scriptedPrompter } from './fakes.ts';
+
 import {
   AnswerNeededError,
   createClaudeCodeAdapter,
@@ -39,7 +41,6 @@ import {
   type ConflictQuestion,
   type ManagedSettingsSystem,
   type Prompter,
-  type Reporter,
   type RestorePlanContext,
 } from '../src/index.ts';
 
@@ -1093,25 +1094,8 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.';
 
   function planStep(running: boolean[], answers: string[], prompter?: Prompter) {
-    const asked: string[] = [];
-    const scripted = {
-      select: (message: string) => {
-        asked.push(message);
-        return Promise.resolve(answers.shift());
-      },
-      confirm: (message: string) => {
-        asked.push(message);
-        return Promise.resolve(false);
-      },
-    } as unknown as Prompter;
-    const lines: string[] = [];
-    const reporter: Reporter = {
-      info: (m) => lines.push(m),
-      success: (m) => lines.push(m),
-      warn: (m) => lines.push(m),
-      error: (m) => lines.push(m),
-      spinner: () => ({ start: () => undefined, stop: () => undefined }),
-    };
+    const script = scriptedPrompter(answers);
+    const { reporter, lines } = recordingReporter({ levels: false });
     const adapter = createClaudeCodeAdapter({
       env: { PATH: '' },
       homedir: home,
@@ -1126,7 +1110,7 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
         files: [incoming],
         conflicts: new Map([['.agentnomad/claude.json', 'merge']]),
         conflictAnswer: undefined,
-        prompter: prompter ?? scripted,
+        prompter: prompter ?? script.prompter,
         reporter,
         assumeYes: false,
         allowCommands: false,
@@ -1134,7 +1118,7 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
         ...overrides,
       });
     };
-    return { plan, asked, lines };
+    return { plan, asked: script.asked, lines };
   }
 
   it('"I closed it, continue" checks again, then the restore merges it', async () => {

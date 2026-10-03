@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 
-import type { BundleParams, BundleSummary } from '@agentnomad/contracts';
 import {
   createGzipBundleCodec,
   createSodiumCryptoService,
@@ -19,13 +18,18 @@ import type {
   ConflictToAsk,
   ScopeTarget,
 } from '../src/agents/adapter.ts';
-import type { ApiClient, BundleUpload } from '../src/api/api-client.ts';
+import type { ApiClient } from '../src/api/api-client.ts';
 import { createPullCommand } from '../src/pull/pull-command.ts';
 import { createPushCommand } from '../src/push/push-command.ts';
-import type { SecretName, SecretStore } from '../src/secrets/secret-store.ts';
 import { createLocalState } from '../src/state/local-state.ts';
 import { AnswerNeededError, createNoTerminalPrompter } from '../src/ui/no-terminal-prompter.ts';
-import type { Prompter, Reporter } from '../src/ui/prompter.ts';
+import type { Prompter } from '../src/ui/prompter.ts';
+import {
+  fakeBundleServer,
+  memorySecretStore,
+  recordingReporter,
+  scriptedPrompter,
+} from './fakes.ts';
 
 /*
  * The agent boundary (T61): push and pull run a second agent from its adapter alone. This
@@ -57,92 +61,6 @@ const exists = (path: string) =>
     () => true,
     () => false,
   );
-
-function fakeServer(): ApiClient {
-  const stored = new Map<
-    string,
-    { params: BundleParams; upload: BundleUpload; revision: number }
-  >();
-  const key = (params: BundleParams) => `${params.agent}/${params.scopeKey}`;
-  return {
-    auth: {} as ApiClient['auth'],
-    bundles: {
-      put: (params, upload) => {
-        const revision = (stored.get(key(params))?.revision ?? 0) + 1;
-        stored.set(key(params), { params, upload, revision });
-        return Promise.resolve({ revision, updatedAt: '2026-10-03T12:00:00Z' });
-      },
-      list: () =>
-        Promise.resolve({
-          items: [...stored.values()].map((entry): BundleSummary => ({
-            agent: entry.params.agent,
-            scopeKey: entry.params.scopeKey,
-            nameEnc: entry.upload.nameEnc ?? null,
-            revision: entry.revision,
-            formatVersion: 1,
-            sizeBytes: entry.upload.ciphertext.byteLength,
-            updatedAt: '2026-10-03T12:00:00Z',
-          })),
-          nextCursor: null,
-        }),
-      get: (params) => {
-        const entry = stored.get(key(params));
-        if (!entry) return Promise.reject(new Error('not found'));
-        return Promise.resolve({
-          ciphertext: entry.upload.ciphertext,
-          revision: entry.revision,
-          contentSha256: entry.upload.contentSha256,
-          formatVersion: 1,
-          nameEnc: entry.upload.nameEnc ?? null,
-        });
-      },
-      delete: () => Promise.reject(new Error('not used')),
-    },
-  };
-}
-
-function loggedIn(): SecretStore {
-  const saved = new Map<SecretName, string>([
-    ['session-token', 't'.repeat(43)],
-    ['data-key', Buffer.from(dataKey).toString('base64')],
-  ]);
-  return {
-    backend: 'keychain',
-    get: (name) => Promise.resolve(saved.get(name) ?? null),
-    set: () => Promise.resolve(),
-    setMany: () => Promise.resolve(),
-    delete: () => Promise.resolve(),
-  };
-}
-
-function scripted(answers: unknown[]) {
-  const asked: string[] = [];
-  const next = (message: string): unknown => {
-    asked.push(message);
-    if (answers.length === 0) throw new Error(`No answer scripted for "${message}"`);
-    return answers.shift();
-  };
-  const prompter = {
-    select: (message: string) => Promise.resolve(next(message)),
-    multiselect: (message: string) => Promise.resolve(next(message)),
-    text: (message: string) => Promise.resolve(next(message)),
-    password: (message: string) => Promise.resolve(next(message)),
-    confirm: (message: string) => Promise.resolve(next(message)),
-  } as unknown as Prompter;
-  return { prompter, asked };
-}
-
-function recorder() {
-  const lines: string[] = [];
-  const reporter: Reporter = {
-    info: (m) => lines.push(`info: ${m}`),
-    success: (m) => lines.push(`success: ${m}`),
-    warn: (m) => lines.push(`warn: ${m}`),
-    error: (m) => lines.push(`error: ${m}`),
-    spinner: () => ({ start: () => undefined, stop: () => undefined }),
-  };
-  return { reporter, lines };
-}
 
 /** What the Example CLI adapter saw, for the assertions. */
 interface Seen {
@@ -283,7 +201,7 @@ function depsFor(
   prompter: Prompter,
   seen: Seen,
 ) {
-  const { reporter, lines } = recorder();
+  const { reporter, lines } = recordingReporter();
   const state = createLocalState({
     path: join(pc.home, 'state.json'),
     server: 's',
@@ -293,7 +211,7 @@ function depsFor(
     prompter,
     reporter,
     registry: () => createAgentRegistry([exampleAdapter(pc.home, seen)]),
-    secrets: () => Promise.resolve(loggedIn()),
+    secrets: () => Promise.resolve(memorySecretStore({ loggedIn: dataKey })),
     api: () => server,
     crypto: () => Promise.resolve(crypto),
     codec: createGzipBundleCodec(),
@@ -315,25 +233,25 @@ const newSeen = (): Seen => ({ collected: [], followUps: [] });
 
 /** PC A pushes its Example CLI setup, the prompts library included by flag. */
 async function pushed() {
-  const server = fakeServer();
+  const server = fakeBundleServer('2026-10-03T12:00:00Z').api;
   const a = machine('laptop');
   await put(join(a.base, 'settings.toml'), 'theme = "dark"\n');
   await put(join(a.base, 'hooks', 'check.sh'), 'echo ok\n');
   await put(join(a.base, 'extensions.json'), '["lint"]');
   await put(join(a.base, 'prompts', 'review.md'), 'Review this.');
   const seen = newSeen();
-  const push = createPushCommand(depsFor(a, server, scripted([]).prompter, seen).deps).push;
+  const push = createPushCommand(depsFor(a, server, scriptedPrompter([]).prompter, seen).deps).push;
   await push({ global: true, yes: true, parts: new Map([['prompts', true]]) });
   return { server, seen };
 }
 
 describe('a second agent goes through push and pull from its adapter alone (T61)', () => {
   it('push asks the agent’s own questions and collects its optional part', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer('2026-10-03T12:00:00Z').api;
     const a = machine('laptop');
     await put(join(a.base, 'settings.toml'), 'theme = "dark"\n');
     const seen = newSeen();
-    const script = scripted([false, true]);
+    const script = scriptedPrompter([false, true]);
     await createPushCommand(depsFor(a, server, script.prompter, seen).deps).push({
       global: true,
       yes: false,
@@ -350,7 +268,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
     const b = machine('desktop');
     await put(join(b.base, 'settings.toml'), 'theme = "light"\n');
     const seen = newSeen();
-    const script = scripted([true, 'overwrite', true]);
+    const script = scriptedPrompter([true, 'overwrite', true]);
     const t = depsFor(b, server, script.prompter, seen);
     await createPullCommand(t.deps).pull({ global: true, yes: false });
 
@@ -387,7 +305,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
   });
 
   it('push offers the values its MCP servers use, from the agent’s own files (ARCH-01)', async () => {
-    const server = fakeServer();
+    const server = fakeBundleServer('2026-10-03T12:00:00Z').api;
     const a = machine('laptop');
     await put(
       join(a.base, 'mcp.json'),
@@ -395,7 +313,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
         mcpServers: { docs: { env: { TOKEN: '${EXAMPLE_TOKEN}', DIR: '${EXAMPLE_HOME}' } } },
       }),
     );
-    const script = scripted([false, false, ['EXAMPLE_TOKEN']]);
+    const script = scriptedPrompter([false, false, ['EXAMPLE_TOKEN']]);
     const pushing = depsFor(a, server, script.prompter, newSeen());
     await createPushCommand({
       ...pushing.deps,
