@@ -188,24 +188,29 @@ export type PowerShellRunner = (
   env: Readonly<Record<string, string>>,
 ) => Promise<string>;
 
-export const realPowerShell: PowerShellRunner = (script, env) =>
-  new Promise((done, fail) => {
-    execFile(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', script],
-      { env: { ...process.env, ...env }, windowsHide: true, encoding: 'utf8', timeout: 30_000 },
-      (error, stdout) => {
-        if (error) fail(new Error(`PowerShell failed: ${error.message}`, { cause: error }));
-        else done(stdout);
-      },
-    );
-  });
+/** The real PowerShell, started with the CLI's (injected) environment plus the statement's. */
+export function realPowerShell(
+  baseEnv: Readonly<Record<string, string | undefined>>,
+): PowerShellRunner {
+  return (script, env) =>
+    new Promise((done, fail) => {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', script],
+        { env: { ...baseEnv, ...env }, windowsHide: true, encoding: 'utf8', timeout: 30_000 },
+        (error, stdout) => {
+          if (error) fail(new Error(`PowerShell failed: ${error.message}`, { cause: error }));
+          else done(stdout);
+        },
+      );
+    });
+}
 
 /**
  * Windows: the user's environment variables (like "Edit environment variables for your
  * account"). Values never appear on a command line, where other programs could see them.
  */
-export function createWindowsEnvWriter(run: PowerShellRunner = realPowerShell): EnvWriter {
+export function createWindowsEnvWriter(run: PowerShellRunner): EnvWriter {
   return {
     where: 'your Windows user environment variables',
     async write(variables) {

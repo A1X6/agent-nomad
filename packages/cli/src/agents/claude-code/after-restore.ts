@@ -63,7 +63,7 @@ export interface AfterRestoreDeps {
  * offer to install programs its hooks or status line need (T25), each after asking.
  */
 export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
-  const cli = deps.cli ?? ((path: string) => createClaudeCli(path, deps.system.env));
+  const cli = deps.cli ?? ((path: string) => createClaudeCli(path, deps.system));
 
   async function plugins(context: AfterRestoreContext): Promise<void> {
     const manifest = readJson(context.files, PLUGINS_BUNDLE_PATH, PluginManifestSchema);
@@ -82,7 +82,7 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
     const projectDir = context.target.kind === 'project' ? context.target.projectDir : undefined;
     await syncPlugins({
       manifest,
-      current: await readCurrentPlugins(baseDir, projectDir),
+      current: await readCurrentPlugins(baseDir, deps.system.platform, projectDir),
       claude: cli(claudePath),
       prompter: context.prompter,
       reporter: context.reporter,

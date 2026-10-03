@@ -28,6 +28,7 @@ import { createEnvCommand } from './env/env-command.ts';
 import {
   createShellProfileWriter,
   createWindowsEnvWriter,
+  realPowerShell,
   shellProfileFor,
 } from './env/shell-profile.ts';
 import { createPullCommand } from './pull/pull-command.ts';
@@ -130,7 +131,7 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
 
   const envWriter = () =>
     app.platform === 'win32'
-      ? createWindowsEnvWriter()
+      ? createWindowsEnvWriter(realPowerShell(app.env))
       : createShellProfileWriter(shellProfileFor(app.env['SHELL'], app.homedir, app.platform));
 
   return {

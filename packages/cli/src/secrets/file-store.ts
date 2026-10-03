@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, win32 } from 'node:path';
 
 import * as z from 'zod';
 
@@ -31,6 +31,8 @@ export interface FileStoreOptions {
   readonly path: string;
   readonly server: string;
   readonly platform?: NodeJS.Platform;
+  /** The CLI's environment; Windows finds its tools through `SystemRoot`. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
   /**
    * Windows: gives only the current user access to a file (T46), since file modes there
    * only control writing. Injectable for tests.
@@ -49,16 +51,66 @@ function run(command: string, args: readonly string[]): Promise<string> {
 }
 
 /**
- * Windows: removes inherited access and grants the current user (by SID, from `whoami`)
- * full control, so the file stays private wherever the config folder is (T46).
+ * The principals in an `icacls <file>` listing, as icacls names them. The first entry
+ * follows the file name on the same line; the rest are indented below it.
  */
-export async function windowsOwnerOnly(file: string): Promise<void> {
-  // By full path: Git for Windows puts a Unix `whoami` earlier on PATH.
-  const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32');
-  const csv = await run(join(system32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh']);
-  const sid = /"(S-1-[0-9-]+)"/.exec(csv)?.[1];
-  if (sid === undefined) throw new Error('Could not find the current user.');
-  await run(join(system32, 'icacls.exe'), [file, '/inheritance:r', '/grant:r', `*${sid}:F`]);
+export function aclPrincipals(listing: string, file: string): string[] {
+  const principals: string[] = [];
+  for (const line of listing.split(/\r?\n/)) {
+    const entry = (line.startsWith(file) ? line.slice(file.length) : line).trim();
+    const principal = /^(.+?):\(/.exec(entry)?.[1];
+    if (principal !== undefined) principals.push(principal);
+  }
+  return principals;
+}
+
+/**
+ * The principals to take off the file: everyone but the current user, and only when
+ * exactly one entry is recognisably the current user (by name or SID). Otherwise none, so
+ * a user that icacls names differently from `whoami` never loses their own access.
+ */
+export function principalsToRemove(
+  principals: readonly string[],
+  user: { readonly name: string; readonly sid: string },
+): string[] {
+  const isUser = (principal: string) =>
+    principal.toLowerCase() === user.name.toLowerCase() ||
+    principal.toUpperCase() === user.sid.toUpperCase();
+  if (principals.filter(isUser).length !== 1) return [];
+  return principals.filter((principal) => !isUser(principal));
+}
+
+/**
+ * Windows: removes inherited access, grants the current user (by SID, from `whoami`)
+ * full control and removes every other principal's explicit access, so the file stays
+ * private wherever the config folder is (T46). Explicit entries appear where the folder
+ * passes nothing down: the file then gets the creator's default access list, which for an
+ * elevated administrator also names SYSTEM and Administrators.
+ */
+export function windowsOwnerOnly(
+  env: Readonly<Record<string, string | undefined>>,
+): (file: string) => Promise<void> {
+  return async (file) => {
+    // By full path: Git for Windows puts a Unix `whoami` earlier on PATH.
+    const system32 = win32.join(env['SystemRoot'] ?? 'C:\\Windows', 'System32');
+    const csv = await run(win32.join(system32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh']);
+    const match = /^"([^"]*)","(S-1-[0-9-]+)"/.exec(csv.trim());
+    if (match === null) throw new Error('Could not find the current user.');
+    const [, name = '', sid = ''] = match;
+    const icacls = win32.join(system32, 'icacls.exe');
+    await run(icacls, [file, '/inheritance:r', '/grant:r', `*${sid}:F`]);
+    const others = async () =>
+      principalsToRemove(aclPrincipals(await run(icacls, [file]), file), { name, sid });
+    const extra = await others();
+    if (extra.length === 0) return;
+    // A principal icacls cannot name is shown as its bare SID, which icacls takes with `*`.
+    const sids = extra.map((principal) =>
+      /^S-1-[0-9-]+$/i.test(principal) ? `*${principal}` : principal,
+    );
+    await run(icacls, [file, '/remove', ...sids]);
+    const left = await others();
+    if (left.length > 0) throw new Error(`Could not remove access for ${left.join(', ')}.`);
+  };
 }
 
 export class SecretsFileError extends Error {
@@ -79,7 +131,8 @@ const isMissing = (error: unknown) =>
 export function createFileStore(options: FileStoreOptions): SecretStore {
   const { path, server } = options;
   const posix = (options.platform ?? process.platform) !== 'win32';
-  const restrictAccess = options.restrictAccess ?? (posix ? null : windowsOwnerOnly);
+  const restrictAccess =
+    options.restrictAccess ?? (posix ? null : windowsOwnerOnly(options.env ?? {}));
 
   /** On macOS/Linux, takes back access others were given to the file or its folder. */
   async function lockDown(): Promise<void> {

@@ -336,7 +336,7 @@ describe('plugin reinstall on pull', () => {
 
   it('reads what this PC already has', async () => {
     await realisticPlugins();
-    const current = await readCurrentPlugins(base, project());
+    const current = await readCurrentPlugins(base, process.platform, project());
     expect(current.marketplaces.has('brag')).toBe(true);
     expect(current.installed.has('brag@brag|user')).toBe(true);
     expect(current.installed.has('team-lint@company|project')).toBe(true);

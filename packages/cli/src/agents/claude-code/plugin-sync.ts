@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { posix, win32 } from 'node:path';
 
 import * as z from 'zod';
 
@@ -56,11 +56,13 @@ export function planPluginSync(manifest: PluginManifest, current: CurrentPlugins
 /** Reads this PC's `known_marketplaces.json` and `installed_plugins.json`. */
 export async function readCurrentPlugins(
   baseDir: string,
+  platform: NodeJS.Platform,
   projectDir?: string,
 ): Promise<CurrentPlugins> {
+  const path = platform === 'win32' ? win32 : posix;
   const read = async (name: string): Promise<unknown> => {
     try {
-      return JSON.parse(await readFile(join(baseDir, 'plugins', name), 'utf8'));
+      return JSON.parse(await readFile(path.join(baseDir, 'plugins', name), 'utf8'));
     } catch {
       return null;
     }
@@ -213,50 +215,81 @@ export async function syncPlugins(deps: SyncPluginsDeps): Promise<PluginSyncResu
   return result;
 }
 
+type RunResult = Awaited<ReturnType<ClaudeCli['run']>>;
+
+/** Starts a program without a shell (Node's `execFile`); `verbatim`: no quoting on Windows. */
+export type StartProgram = (
+  file: string,
+  args: readonly string[],
+  options: {
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+    readonly timeoutMs: number;
+    readonly verbatim: boolean;
+  },
+) => Promise<RunResult>;
+
+const startProgram: StartProgram = (file, args, options) =>
+  new Promise((done) => {
+    execFile(
+      file,
+      [...args],
+      {
+        cwd: options.cwd,
+        env: { ...options.env },
+        timeout: options.timeoutMs,
+        windowsHide: true,
+        windowsVerbatimArguments: options.verbatim,
+        encoding: 'utf8',
+        maxBuffer: 16 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        const code = error && typeof error.code === 'number' ? error.code : error ? 1 : 0;
+        done({ exitCode: code, stdout, stderr });
+      },
+    );
+  });
+
 /** Windows launchers npm creates; they need `cmd.exe` to run. */
 const SHIMS = new Set(['.cmd', '.bat']);
-const CMD_UNSAFE = /["&|<>^%!]/;
+/** What cmd.exe acts on in an argument; spaces too, since the arguments are joined unquoted. */
+const CMD_UNSAFE = /["&|<>^%!\s\p{Cc}]/u;
+/** What cmd.exe still acts on inside the quotes around the launcher's path. */
+const CMD_UNSAFE_PATH = /["%!\p{Cc}]/u;
 
 /**
- * The real `claude` command. Arguments come from a validated manifest; a Windows `.cmd`
- * launcher is run through `cmd.exe`, so arguments with its special characters are refused.
+ * The real `claude` (or `npm`) command. Arguments come from a validated manifest. On Windows a
+ * `.cmd` launcher runs through `cmd.exe` with one command line passed as written (Node would
+ * escape the quotes in it), so arguments cmd.exe would read differently are refused.
  */
 export function createClaudeCli(
   claudePath: string,
-  env: Readonly<Record<string, string | undefined>>,
-  timeoutMs = 5 * 60_000,
+  system: {
+    readonly platform: NodeJS.Platform;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  },
+  options: { readonly timeoutMs?: number; readonly start?: StartProgram } = {},
 ): ClaudeCli {
-  const shim = SHIMS.has(extname(claudePath).toLowerCase());
+  const shim = system.platform === 'win32' && SHIMS.has(win32.extname(claudePath).toLowerCase());
+  const start = options.start ?? startProgram;
+  const timeoutMs = options.timeoutMs ?? 5 * 60_000;
   return {
     run(args, cwd) {
-      if (shim && args.some((arg) => CMD_UNSAFE.test(arg))) {
+      const common = { cwd, env: system.env, timeoutMs };
+      if (!shim) return start(claudePath, args, { ...common, verbatim: false });
+      if (
+        CMD_UNSAFE_PATH.test(claudePath) ||
+        args.some((arg) => arg === '' || CMD_UNSAFE.test(arg))
+      ) {
         return Promise.resolve({
           exitCode: 1,
           stdout: '',
           stderr: 'Unsafe characters for cmd.exe',
         });
       }
-      const [file, fileArgs] = shim
-        ? ['cmd.exe', ['/d', '/s', '/c', `"${claudePath}"`, ...args]]
-        : [claudePath, [...args]];
-      return new Promise((done) => {
-        execFile(
-          file,
-          fileArgs,
-          {
-            cwd,
-            env: { ...env },
-            timeout: timeoutMs,
-            windowsHide: true,
-            encoding: 'utf8',
-            maxBuffer: 16 * 1024 * 1024,
-          },
-          (error, stdout, stderr) => {
-            const code = error && typeof error.code === 'number' ? error.code : error ? 1 : 0;
-            done({ exitCode: code, stdout, stderr });
-          },
-        );
-      });
+      // `/s`: cmd.exe drops the outer quotes and runs the rest exactly as written.
+      const line = `"${[`"${claudePath}"`, ...args].join(' ')}"`;
+      return start('cmd.exe', ['/d', '/s', '/c', line], { ...common, verbatim: true });
     },
   };
 }
