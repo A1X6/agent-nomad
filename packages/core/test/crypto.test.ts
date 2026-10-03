@@ -69,8 +69,8 @@ describe('deriveKeys', () => {
   });
 
   it('treats the same password typed on different OSes as equal (Unicode NFC)', async () => {
-    const composed = await crypto.deriveKeys('café', salt, params); // é as one character
-    const decomposed = await crypto.deriveKeys('café', salt, params); // e + accent
+    const composed = await crypto.deriveKeys('caf\u00e9', salt, params); // U+00E9 as one character
+    const decomposed = await crypto.deriveKeys('cafe\u0301', salt, params); // e + U+0301 combining accent
     expect(toHex(decomposed.authKey)).toBe(toHex(composed.authKey));
   });
 
