@@ -322,7 +322,7 @@ the fakes the existing tests use.
       folder is enough), including a pull onto a PC that already has a different setup.
 - [ ] Anything that runs programs is shown by pull before it is written: your restorer's
       `reviewRunnable` lists it (Claude Code's is `claude-code/command-review.ts`).
-- [ ] `pnpm lint` passes: `push/`, `pull/` and `cli/` must not import your folder.
+- [ ] `pnpm lint` passes: `push/`, `pull/`, `cli/`, `env/` and `commands/` (and every other generic folder) must not import your folder.
 - [ ] README (supported agents), [ROADMAP.md](ROADMAP.md) and
       [ARCHITECTURE.md](ARCHITECTURE.md) (file reference) updated.
 - [ ] The [threat model](security/threat-model.md) still holds: no credentials collected,

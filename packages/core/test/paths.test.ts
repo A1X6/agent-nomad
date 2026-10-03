@@ -55,6 +55,10 @@ describe('toNativePath: bundle path to a real path on each OS', () => {
     // 8.3 short names reach a folder under another name (T43).
     'PROGRA~1/x.md',
     'SSH~1',
+    'backup~1.txt',
+    'skills/ABCDEF~1.MD',
+    'AB12~123.md',
+    'plan~2.md',
   ])('refuses %j on Windows only', (path) => {
     expect(() => onWin.toNativePath('C:\\base', path)).toThrow(/Windows/);
     expect(onLinux.toNativePath('/base', path)).toBe(`/base/${path}`);
@@ -64,6 +68,14 @@ describe('toNativePath: bundle path to a real path on each OS', () => {
     expect(onWin.toNativePath('C:\\b', 'console.md')).toBe('C:\\b\\console.md');
     expect(onWin.toNativePath('C:\\b', 'com10.md')).toBe('C:\\b\\com10.md');
   });
+
+  // An 8.3 short name has at most 8 characters before the dot and 3 after it (UX-05).
+  it.each(['release-notes~3.md', 'notes~2024.md', 'abcdefg~1.md', 'x~1.json', 'a~1.b.md'])(
+    'allows %j on Windows, which is too long to be a short name',
+    (path) => {
+      expect(onWin.toNativePath('C:\\b', path)).toBe(`C:\\b\\${path}`);
+    },
+  );
 });
 
 describe('toBundlePath: real path back to a bundle path', () => {

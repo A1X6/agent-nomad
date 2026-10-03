@@ -57,10 +57,13 @@ export default defineConfig(
     },
   },
   {
-    // The agent boundary (T61): the commands and the shared env scan (ARCH-01) reach an
-    // agent only through the adapter interfaces in `agents/adapter.ts`, so a second agent
-    // needs no change here.
-    files: ['packages/cli/src/{push,pull,cli,env}/**/*.ts'],
+    // The agent boundary (T61): every generic folder (the commands, the shared env scan and
+    // what they build on) reaches an agent only through the adapter interfaces in
+    // `agents/adapter.ts`, so a second agent needs no change here. Only `app.ts` and
+    // `index.ts` name an agent's folder.
+    files: [
+      'packages/cli/src/{api,auth,cli,commands,config,env,pull,push,secrets,state,system,ui}/**/*.ts',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',

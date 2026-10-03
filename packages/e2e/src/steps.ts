@@ -94,6 +94,10 @@ function expectNothingReadable(server: LocalServer, known: Known): void {
     EDIT.trim(),
     'Old notes on the third PC',
     'Write release notes.',
+    // What the stale PC uploads in step 3 (QA-07).
+    'Stale notes',
+    'Stale project',
+    'stale-only',
     'first@example.com',
     'second@example.com',
     'demo',

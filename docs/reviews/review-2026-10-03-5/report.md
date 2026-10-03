@@ -252,7 +252,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### UX-05 · Low · The Windows short-name rule refuses long names that can never be 8.3 aliases
 
-- [ ] **Where:** `packages/core/src/path-resolver.ts:11-12` (`SHORT_NAME = /~\d+(\.[^.]*)?$/`), used at `:41`; reached on pull through `packages/cli/src/agents/claude-code/restorer.ts:293-294`.
+- [x] **Where:** `packages/core/src/path-resolver.ts:11-12` (`SHORT_NAME = /~\d+(\.[^.]*)?$/`), used at `:41`; reached on pull through `packages/cli/src/agents/claude-code/restorer.ts:293-294`.
 - **Problem:** any segment that ends in `~<digits>` (plus any extension) is refused on Windows as "a Windows short name". Run on the real function: `release-notes~3` → refused, `notes~2024.md` → refused (also `SSH~1`, `PROGRA~1`, `backup~1.txt`, which are right). An 8.3 alias has at most 8 characters before the dot and at most 3 after it, so `release-notes~3` (15) and `notes~2024.md` cannot reach another file under that name.
 - **Why it matters:** a file pushed from macOS or Linux with such a name (draft and version names like `plan~2.md` are short and stay refused; long ones like `release-notes~3.md` are not aliases) is skipped on every Windows pull with a misleading reason. The rule is security-relevant (T43), so it errs the safe way; this is about the message and a lost file, not a hole.
 - **Fix:** refuse only names that fit 8.3: base (before the first dot) at most 8 characters containing `~<digits>`, extension at most 3, e.g. `/^[^.]{0,6}~\d{1,6}(\.[^.]{0,3})?$/` with the base length checked to be ≤ 8. Keep `SSH~1`, `PROGRA~1/x.md`, `backup~1.txt` refused in `paths.test.ts:55-57` and add `release-notes~3.md` as allowed.
@@ -288,7 +288,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DEAD-04 · Low · Core re-exports `GLOBAL_SCOPE_KEY`, and only core's own test uses that path
 
-- [ ] **Where:** `packages/core/src/project-names.ts:13-14` (`export { GLOBAL_SCOPE_KEY };`); users: `packages/core/test/project-names.test.ts:8,78-79` only. Production imports it from contracts: `packages/cli/src/pull/saved-setups.ts:3,95`, `packages/server/src/bundles/bundle-service.ts:1,129`.
+- [x] **Where:** `packages/core/src/project-names.ts:13-14` (`export { GLOBAL_SCOPE_KEY };`); users: `packages/core/test/project-names.test.ts:8,78-79` only. Production imports it from contracts: `packages/cli/src/pull/saved-setups.ts:3,95`, `packages/server/src/bundles/bundle-service.ts:1,129`.
 - **Problem:** one constant has two public import paths. knip does not flag it because the test counts as a user.
 - **Why it matters:** the same kind of leftover review 4 cleaned up (T65 rule: a name only used in its own package is not exported); a reader sees two sources of truth for a value that is part of the stored format.
 - **Fix:** drop the re-export and its comment; import `GLOBAL_SCOPE_KEY` from `@agentnomad/contracts` in the core test.
@@ -386,7 +386,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DUP-09 · Low · `sodium-crypto.ts` still keeps its own copies of the shared byte sizes (review 1 DUP-01 named this line)
 
-- [ ] **Where:** `packages/core/src/sodium-crypto.ts:6-7` (`KEY_BYTES = 32`, `SALT_BYTES = 16`); the shared ones: `packages/contracts/src/api/common.ts:4-7` (`KDF_SALT_BYTES`, `AUTH_KEY_BYTES`, `WRAPPED_DATA_KEY_BYTES`), `packages/core/src/envelopes.ts:6` (`DATA_KEY_BYTES`).
+- [x] **Where:** `packages/core/src/sodium-crypto.ts:6-7` (`KEY_BYTES = 32`, `SALT_BYTES = 16`); the shared ones: `packages/contracts/src/api/common.ts:4-7` (`KDF_SALT_BYTES`, `AUTH_KEY_BYTES`, `WRAPPED_DATA_KEY_BYTES`), `packages/core/src/envelopes.ts:6` (`DATA_KEY_BYTES`).
 - **Problem:** `docs/reviews/review-2026-10-03.md:238` lists "`KDF_SALT_BYTES = 16`: … `core/src/sodium-crypto.ts:7` (already exported by contracts)" under DUP-01, ticked as fixed. The CLI copy was removed (`auth-commands.ts` now imports it); the core copy is still there. `KEY_BYTES` likewise stands for both `AUTH_KEY_BYTES` (derived keys) and `DATA_KEY_BYTES` (AEAD key), and `WRAPPED_DATA_KEY_BYTES = 72` depends on `NONCE_BYTES + 32 + TAG_BYTES` here without code tying them (only `crypto.test.ts:173` checks it).
 - **Why it matters:** small: if the salt length in the contract changed, the CLI would generate the new size and core would refuse it with a `RangeError` at login. The finding is mainly that a ticked fix is incomplete.
 - **Fix:** `import { AUTH_KEY_BYTES, KDF_SALT_BYTES } from '@agentnomad/contracts'` in `sodium-crypto.ts`, use `KDF_SALT_BYTES` for the salt check and `AUTH_KEY_BYTES` for the derived keys (keep the AEAD key check on `DATA_KEY_BYTES` from `envelopes.ts`).
@@ -504,7 +504,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-12 · Low · Docs and config comments that did not follow the latest changes
 
-- [ ] **Where:** (each line also says what is wrong)
+- [x] **Where:** (each line also says what is wrong)
   - `docs/ARCHITECTURE.md:592-806` (Part 2, "what every file does"): three source files have no row: `packages/cli/src/env/loader-variables.ts`, `packages/cli/src/ui/printable.ts` (named by T71's SEC-03 text at `:409-411` but not in the `ui/` table `:652-657`), `packages/e2e/src/push-env-value.ts` (only in the `knip.json` row `:818`, not in the e2e table `:800-805`). Checked by matching every `packages/*/src/**/*.ts` basename against the document.
   - `docs/ADDING-AN-AGENT.md:325`: the checklist says "`push/`, `pull/` and `cli/` must not import your folder"; since T73 `env/` is in the rule too (`eslint.config.js:63`, ARCHITECTURE:331), and `commands/` should be (ARCH-04).
   - `docs/ARCHITECTURE.md:565-566` ("The release starts only for a commit whose CI run on `main` passed") and `.github/workflows/release.yml:20-21` ("must have passed CI on main first"): the gate at `release.yml:33` counts any successful `ci.yml` run for the SHA, whatever branch triggered it (worker-t72 noted the same). The "on main" part is enforced separately (`:70`, tag commit must be an ancestor of `origin/main`). Harmless (same SHA = same code), but the text describes a stricter check than the code does.
@@ -516,7 +516,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-13 · Low · The threat model was not updated for review 4's security fixes (T69, T71)
 
-- [ ] **Where:** `docs/security/threat-model.md:3` ("updated through T66"), threat 13 at `:48`, the findings tables `:63-118`.
+- [x] **Where:** `docs/security/threat-model.md:3` ("updated through T66"), threat 13 at `:48`, the findings tables `:63-118`.
 - **Problem:** review 4 fixed three security findings in the pull review: SEC-01 (one malformed hook or MCP server hid every other one; now each is read separately and an unreadable one is shown), SEC-02 (fence closing rule for ` ```! ` blocks) and SEC-03 (review lines printed with real line breaks; now `printableLine`). ARCHITECTURE §7 (`:398-401`, `:409-411`) describes all three. The threat model does not: threat 13's row still describes the review without "unreadable entries are shown, never skipped" or the line-break escaping, and unlike every earlier review (findings 9-40, each with its fix) these three are not recorded. A `grep` for `unreadable`, `printableLine`, `T69` or `T71` in the file finds nothing.
 - **Why it matters:** the threat model is the document SECURITY.md sends readers to for "every defence, how it is tested"; it now understates what the pull review guarantees and drops the history of three security fixes.
 - **Fix:** add rows 41-43 (review of 2026-10-03, review 4) with the T69/T71 fixes; extend threat 13's "How it is handled" with "a hook or MCP server that cannot be read is shown as unreadable, never left out; review lines show line breaks escaped"; change the header to "updated through T74".
@@ -525,7 +525,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-14 · Low · An unfilled template placeholder in the committed review 4 report
 
-- [ ] **Where:** `docs/reviews/review-2026-10-03-4/report.md:5` — "**Coverage:** 243 of {{FILES}} files read in full, 33,614 lines."
+- [x] **Where:** `docs/reviews/review-2026-10-03-4/report.md:5` — "**Coverage:** 243 of {{FILES}} files read in full, 33,614 lines."
 - **Problem:** the assembly template's `{{FILES}}` was never replaced. `files.md:3` in the same folder says 243 files.
 - **Why it matters:** cosmetic, but it is the committed record of the review, and it makes the coverage line unreadable. The assemble script for review 5 should fill (or assert) every placeholder.
 - **Fix:** "243 of 243 files read in full"; in the assemble script, fail when `{{` remains in the output.
@@ -534,7 +534,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-15 · Low · README's "what the server stores" list is still the short one (review 4 READ-11 fixed only SECURITY.md and the threat model)
 
-- [ ] **Where:** `README.md:185-187`; compare `SECURITY.md:57-59` and `docs/security/threat-model.md:122-125`.
+- [x] **Where:** `README.md:185-187`; compare `SECURITY.md:57-59` and `docs/security/threat-model.md:122-125`.
 - **Problem:** README says "The server stores only ciphertext, a keyed hash of each project name, your username and the device name of each login." READ-11 (review 4) added "the agentnomad version of each request, and your IP address (kept only as a keyed pseudonym for rate limits)" to SECURITY.md and the threat model; README, the page most users read, was not changed. (The CLI version is logged rather than stored, but the IP pseudonym is stored in `rate_limits`.)
 - **Why it matters:** the privacy promise differs between the README and SECURITY.md; "only" makes the README one strictly wrong.
 - **Fix:** "The server stores ciphertext, a keyed hash of each project name, your username, the device name of each login, and a keyed pseudonym of your IP address for rate limits (see SECURITY.md)."
@@ -582,7 +582,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### ARCH-04 · Low · The agent-boundary lint rule does not cover `commands/` (`list`, `status`, `delete`)
 
-- [ ] **Where:** `eslint.config.js:63` (`files: ['packages/cli/src/{push,pull,cli,env}/**/*.ts']`); the uncovered module `packages/cli/src/commands/setup-commands.ts`; the docs that describe the rule: `docs/ARCHITECTURE.md:328-333`, `docs/ADDING-AN-AGENT.md:325` and `:335`.
+- [x] **Where:** `eslint.config.js:63` (`files: ['packages/cli/src/{push,pull,cli,env}/**/*.ts']`); the uncovered module `packages/cli/src/commands/setup-commands.ts`; the docs that describe the rule: `docs/ARCHITECTURE.md:328-333`, `docs/ADDING-AN-AGENT.md:325` and `:335`.
 - **Problem:** ARCHITECTURE §6 says "Push, pull, `list`, `status`, `delete` and `agents` only use the registry and these interfaces", and the guide's "What you do not touch" table lists `list`, `status`, `delete` for the same reason. But `list`, `status` and `delete` live in `commands/setup-commands.ts`, and the `no-restricted-imports` block only names `push`, `pull`, `cli` and `env`. Today the file imports only `../agents/adapter.ts` (checked), so nothing is broken; nothing stops the next change from importing `../agents/claude-code/…` there. ARCH-01 of review 4 (T73) added `env/` to this list; `commands/` was missed.
 - **Why it matters:** the boundary is what keeps "a new agent is a new folder plus one line" true; three of the six generic commands are outside it.
 - **Fix:** `files: ['packages/cli/src/{push,pull,cli,env,commands}/**/*.ts']`; in ARCHITECTURE:331 and ADDING-AN-AGENT:325 name `commands/` (and `env/`, see READ-12).
@@ -647,7 +647,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### QA-07 · Low · The e2e leak check does not look for anything the stale PC uploads
 
-- [ ] **Where:** `packages/e2e/src/steps.ts:437-441` (the stale PC writes `Stale notes.` / `Stale project.` and pushes project `stale-only`); the secret list `:78-101`; the check at `:466`.
+- [x] **Where:** `packages/e2e/src/steps.ts:437-441` (the stale PC writes `Stale notes.` / `Stale project.` and pushes project `stale-only`); the secret list `:78-101`; the check at `:466`.
 - **Problem:** step 3's `expectNothingReadable(server, secretsHere)` searches every request of the step, including the stale PC's successful upload of project `stale-only` (`:446` asserts it was saved). None of that upload's contents is in the list: not `Stale notes`, not `Stale project`, not the project name `stale-only`. The list is fixed to the first PC's setup plus the homes, keys and tokens.
 - **Why it matters:** CONTRIBUTING ("Tests") says a change to push or the bundle belongs in the e2e steps "including the check that nothing readable leaves the PC". The stale PC is the only push in step 3 that is not a pull-then-push of known content, and it is also the only upload of a project whose name was never searched for. A regression that leaks project names or contents only on a PC with no local revision (the path that uses `expectedRevision 0` and a new project name) would pass.
 - **Fix:** add `'Stale notes'`, `'Stale project'` and `'stale-only'` to the list (or pass step-specific extras into `expectNothingReadable`).
