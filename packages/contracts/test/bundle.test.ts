@@ -10,7 +10,7 @@ import {
 describe('project names are checked as they are stored, NFC-normalised (T45)', () => {
   it.each([
     ['one that grows past 100 characters', '\u0958'.repeat(100)],
-    ['one that grows past 400 bytes', '\ufb2c'.repeat(100)],
+    ['one that grows past 100 characters (Hebrew presentation forms)', '\ufb2c'.repeat(100)],
   ])('refuses %s', (_, name) => {
     expect(ProjectNameSchema.safeParse(name).success).toBe(false);
   });

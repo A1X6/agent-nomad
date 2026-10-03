@@ -1,6 +1,6 @@
 # Threat model (T38)
 
-- **Reviewed:** 2026-09-26, at the end of the v1 build (T01–T37), before the first release.
+- **Reviewed:** 2026-09-26, updated through T66; first reviewed at the end of the v1 build (T01–T37), before the first release.
 - **Covers:** the `agentnomad` CLI, the API server and its database, and the path in between.
 - **Result:** 8 findings, all fixed on the `t38-security-review` branch (see [Findings](#findings)); the
   risks we accept are listed under [Accepted risks](#accepted-risks).
@@ -120,7 +120,9 @@ Found in the 2026-10-03 code review, about threat 13 (a compromised PC of the us
 ## Accepted risks
 
 - **Readable to the server:** the username, the device name (the PC's host name) of each session,
-  and metadata: which agent, how many setups, their sizes, revisions and save times.
+  and metadata: which agent, how many setups, their sizes, revisions and save times; the
+  agentnomad version of each request, and your IP address (kept only as a keyed pseudonym for
+  rate limits).
 - **Anyone who knows a username can pause its logins** with 10 wrong guesses every 15 minutes
   (never the account's own sessions or its account delete). Per-account counting is what stops
   password guessing from many IPs; it is a pause, not a lockout.

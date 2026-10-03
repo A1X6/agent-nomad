@@ -55,7 +55,8 @@ already compromised PC, and denial of service by volume.
   contents, a project name) is in it, also inside compressed or encoded data.
 
 **What the server can see:** your username, the device name (the PC's host name) of each
-login, and for each saved setup its agent, size, revision and times. **There is no password
+login, for each saved setup its agent, size, revision and times, the agentnomad version of
+each request, and your IP address (kept only as a keyed pseudonym for rate limits). **There is no password
 recovery:** forgetting your password makes your saved setups unreadable for everyone.
 
 The full analysis, including every defence, how it is tested and the risks we accept, is

@@ -22,12 +22,14 @@ export function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/** Hex in either case to bytes. Throws on anything else, rather than return wrong bytes. */
 export function fromHex(text: string): Uint8Array {
+  if (!/^(?:[0-9a-f]{2})*$/i.test(text)) throw new Error('Not a hex string');
   const pairs = text.match(/../g) ?? [];
   return Uint8Array.from(pairs, (pair) => parseInt(pair, 16));
 }
 
-/** Same length and same bytes. */
+/** Same length and same bytes. Not constant-time; never for secrets. */
 export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }

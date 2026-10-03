@@ -512,7 +512,8 @@ exit code; they are warned about.
 | Cross-OS             | The same three steps on different machines, the database handed over as an artifact: macOS → Windows → macOS and Linux → Windows → Linux                                                                                                                                                            | `.github/workflows/ci.yml` |
 
 CI runs `pnpm check` (typecheck, lint, format, tests) on macOS, Linux and Windows with
-Node 22.13 and 24, the real Linux keychain (GNOME Keyring), and the two cross-OS chains.
+Node 22.13 and 24, the real Linux keychain (GNOME Keyring), and the two cross-OS chains,
+each chain in its own jobs, so a failure in one does not skip the other's later steps.
 On every OS and Node version it also builds the npm package, installs it globally, and runs
 the e2e steps with the installed `agentnomad` command. One job (Linux, Node 24) also runs
 `pnpm audit --prod` (known advisories in the packages users install) and
@@ -524,10 +525,12 @@ audit every Wednesday, so a new advisory is noticed without a push. The same job
 is still reported), and any finding fails the build (T65): a name used only in its own file
 is not exported, and the few exports kept for other code to use are tagged `@public` in their
 JSDoc (the adapter interface `AgentInspector`, the crypto interfaces `PasswordKdf` and
-`RandomSource`, and two wire types in `contracts`). It also runs a report that never fails
-the build: `pnpm test:coverage` (Vitest with V8 coverage of `packages/*/src`; a summary in
-the log, the full report as the `coverage` artifact; no threshold yet). `pnpm test` does not
-collect coverage.
+`RandomSource`, and two wire types in `contracts`). In that job the tests run once, with
+coverage, in place of `pnpm check`'s plain run: `pnpm test:coverage` (Vitest with V8
+coverage of `packages/*/src`; a summary in the log, the full report as the `coverage`
+artifact; a failing test fails the build, there is no coverage threshold yet). `pnpm test`
+does not collect coverage. A newer push cancels a branch's older run, except on `main` and
+`dev`, where every commit keeps its run for the release gate and Render.
 Actions are pinned by commit.
 
 **The npm package.** `packages/cli/scripts/build-release.ts` bundles our own code (cli,
@@ -542,7 +545,8 @@ package, wait for the owner's approval, publish the tested tarball through npm t
 publishing with provenance (no npm token exists), then check `npx agentnomad` on every OS. The release starts only for a commit
 whose CI run on `main` passed, and verifies on Node 22.13 and 24.
 
-Deployment: Render builds `main` from `render.yaml` after CI; database migrations
+Deployment: Render builds `main` from `render.yaml` after CI, installing and compiling only
+the server and `contracts` (`--filter @agentnomad/server...`, `tsc --build packages/server`); database migrations
 (`packages/server/drizzle`) are run by hand with the direct connection string, and the API
 only gets the pooled one.
 
@@ -779,7 +783,7 @@ Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 | `packages/cli/scripts/drift/`           | The weekly Claude Code drift check: `drift.ts` (comparison and report), `check-claude-code.ts` (fetches the sources).                                                                                                 |
 | `.github/workflows/drift-check.yml`     | Runs the drift check every Monday and files or updates the `drift` issue.                                                                                                                                             |
 | `render.yaml`                           | The Render service (build, start, health check).                                                                                                                                                                      |
-| `knip.json`                             | The unused-code check (`pnpm knip`): workspace entry points (including the e2e push helper, which runs as a child process).                                                                                           |     |
+| `knip.json`                             | The unused-code check (`pnpm knip`): workspace entry points (including the e2e push helper, which runs as a child process).                                                                                           |
 | `pnpm-workspace.yaml`                   | Workspace packages and dependency overrides.                                                                                                                                                                          |
 | `tsconfig.base.json`, `tsconfig.json`   | Strict TypeScript settings and project references.                                                                                                                                                                    |
 | `eslint.config.js`, `vitest.config.ts`  | Lint rules, the test projects and the coverage settings.                                                                                                                                                              |

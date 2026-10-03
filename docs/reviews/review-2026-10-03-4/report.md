@@ -158,7 +158,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### PERF-02 · Low · The Linux / Node 24 CI job runs the whole test suite twice
 
-- [ ] **Where:** `.github/workflows/ci.yml:53-54` (`pnpm check` runs `vitest run`) and `:70-73` (`pnpm test:coverage` runs it again with coverage)
+- [x] **Where:** `.github/workflows/ci.yml:53-54` (`pnpm check` runs `vitest run`) and `:70-73` (`pnpm test:coverage` runs it again with coverage)
 - **Problem:** The same 1,200+ tests run twice in the job that also does the audit, the migration check, knip, the package build and the e2e steps, all under a 15-minute timeout (`:23`).
 - **Why it matters:** A few minutes per push on the slowest job, and less headroom before the timeout as tests grow.
 - **Fix:** In that one job, run `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:coverage` instead of `pnpm check` (coverage still fails on a failing test; keep `continue-on-error` off for it there), and `pnpm check` in the others.
@@ -167,7 +167,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### PERF-03 · Low · Render installs and compiles the whole monorepo to deploy the server
 
-- [ ] **Where:** `render.yaml:16` (`corepack pnpm install --frozen-lockfile && corepack pnpm build`); root `package.json:16` (`build` = `tsc --build` over all five packages, `tsconfig.json:3-9`)
+- [x] **Where:** `render.yaml:16` (`corepack pnpm install --frozen-lockfile && corepack pnpm build`); root `package.json:16` (`build` = `tsc --build` over all five packages, `tsconfig.json:3-9`)
 - **Problem:** The API needs only `contracts` and `server`, but the build installs every workspace's dependencies (CLI keychain bindings, PGlite, Vite, ESLint, …) and compiles `core`, `cli` and `e2e` too.
 - **Why it matters:** Slower deploys on the free plan, and a type error in the CLI or e2e code (which `buildFilter` does not watch) blocks the next server deploy.
 - **Fix:** `corepack pnpm install --frozen-lockfile --filter @agentnomad/server... && corepack pnpm exec tsc --build packages/server`.
@@ -319,7 +319,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DUP-08 · Low · Core tests carry their own hex helper
 
-- [ ] **Where:** `packages/core/test/crypto.test.ts:17-18`; `packages/core/test/project-names.test.ts:25-26`
+- [x] **Where:** `packages/core/test/crypto.test.ts:17-18`; `packages/core/test/project-names.test.ts:25-26`
 - **Problem:** Both define `hex = (bytes) => Array.from(bytes, …padStart(2,'0')).join('')`, the same as `toHex` in `packages/contracts/src/encoding.ts:21-23`, which core already depends on.
 - **Fix:** `import { toHex } from '@agentnomad/contracts'` in both tests.
 - **Effort:** S
@@ -407,7 +407,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-09 · Low · The project name's 400-byte limit can never be reached, and two tests describe the wrong case
 
-- [ ] **Where:** `packages/contracts/src/bundle.ts:44-47`; `packages/contracts/test/bundle.test.ts:11-14`; `packages/core/test/project-names.test.ts:115-123`
+- [x] **Where:** `packages/contracts/src/bundle.ts:44-47`; `packages/contracts/test/bundle.test.ts:11-14`; `packages/core/test/project-names.test.ts:115-123`
 - **Problem:** After NFC the name must be at most 100 UTF-16 units; one unit is at most 3 bytes of UTF-8 (a 4-byte character takes 2 units), so the name is at most 300 bytes and `utf8Length(stored) <= 400` is never the rule that refuses. The test "refuses one that grows past 400 bytes" (`'שּׁ'.repeat(100)`) is refused by the 100-unit rule (it normalises to 300 units). The test "fits the API size limit even for the longest name in 4-byte characters" uses 50 emoji (200 bytes); the real worst case is 100 three-byte characters (300 bytes).
 - **Why it matters:** A reader trusts the 400-byte rule and the tests that seem to prove it; the second test does not test the worst case it names. Nothing is unsafe: 24 + 300 + 16 = 340 bytes fits `MAX_NAME_ENC_BYTES` (512).
 - **Fix:** Keep the byte check as a guard but say in the comment that the 100-unit rule bounds it at 300 bytes; rename the bundle test to "grows past 100 characters (Hebrew presentation forms)"; use `'￿'.repeat(100)` (or another 3-byte character) for the worst case in the project-names test.
@@ -416,7 +416,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-10 · Low · A broken table row in ARCHITECTURE.md
 
-- [ ] **Where:** `docs/ARCHITECTURE.md:782`
+- [x] **Where:** `docs/ARCHITECTURE.md:782`
 - **Problem:** The `knip.json` row ends with an extra empty cell (`|     |`), so the row has three cells in a two-column table.
 - **Fix:** Remove the trailing `     |`.
 - **Effort:** S
@@ -424,7 +424,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-11 · Low · "What the server can see" leaves out the CLI version and the IP address
 
-- [ ] **Where:** `SECURITY.md:152-154`; `docs/security/threat-model.md:122-123` (accepted risks) and `:3` ("Reviewed: 2026-09-26", although the file now records T55, T56 and T66)
+- [x] **Where:** `SECURITY.md:152-154`; `docs/security/threat-model.md:122-123` (accepted risks) and `:3` ("Reviewed: 2026-09-26", although the file now records T55, T56 and T66)
 - **Problem:** Both lists name the username, device names and setup metadata. Since T57 every request also carries the CLI version (`x-an-client`), which the server logs (`docs/ARCHITECTURE.md:463-465`), and the server sees each visitor's IP (stored only as a keyed pseudonym in `rate_limits`, `docs/ARCHITECTURE.md:449-451`).
 - **Why it matters:** These are the user-facing privacy promises; they should match what the server receives, even when the extra items are harmless.
 - **Fix:** Add "the agentnomad version of each request, and your IP address (kept only as a keyed pseudonym for rate limits)" to both lists; change the threat model header to "Reviewed 2026-09-26, updated through T66".
@@ -433,7 +433,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-12 · Low · ROADMAP.md still says the runnable review will move behind the adapter
 
-- [ ] **Where:** `docs/ROADMAP.md:54-56`; also `:133` (the "claude.ai account items" stage sits after v2 and is missing from the stage table at `:5-11`)
+- [x] **Where:** `docs/ROADMAP.md:54-56`; also `:133` (the "claude.ai account items" stage sits after v2 and is missing from the stage table at `:5-11`)
 - **Problem:** The roadmap says the review "will move behind the adapter (an `inspector.runnable` hook) with the second agent". T61 already did it, as `Restorer.reviewRunnable` (`packages/cli/src/agents/adapter.ts:134`), and ADDING-AN-AGENT.md already describes that.
 - **Why it matters:** A contributor planning the second agent reads two different stories, and the hook name in the roadmap does not exist.
 - **Fix:** Replace the bullet with "The runs-programs review is per adapter (`Restorer.reviewRunnable`); each agent describes its own." Move the claude.ai section up to the other v1.x stages and add it to the table.
@@ -451,7 +451,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-14 · Low · A test picks its secret by comparing the request body text
 
-- [ ] **Where:** `packages/e2e/test/plaintext.test.ts:55-62`
+- [x] **Where:** `packages/e2e/test/plaintext.test.ts:55-62`
 - **Problem:** `const tricky = body === JSON.stringify(...) ? ... : secret;` decides the expected secret by string-comparing the parameter, instead of passing it in the `it.each` row.
 - **Why it matters:** A reader must work out the special case; adding a row with its own secret means touching the condition.
 - **Fix:** Make each row `[name, body, secret]` and drop the condition.
@@ -480,7 +480,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### BP-03 · Low · `fromHex` accepts any text and the encoding helpers have no tests of their own
 
-- [ ] **Where:** `packages/contracts/src/encoding.ts:25-28` (`fromHex`), `:31-33` (`sameBytes`); callers `packages/server/src/auth/server-keys.ts:64`, `packages/server/src/http/routes/bundles.ts:143`
+- [x] **Where:** `packages/contracts/src/encoding.ts:25-28` (`fromHex`), `:31-33` (`sameBytes`); callers `packages/server/src/auth/server-keys.ts:64`, `packages/server/src/http/routes/bundles.ts:143`
 - **Problem:** `fromHex` drops an odd last character and turns non-hex pairs into 0 (`fromHex('abc')` → 1 byte, `fromHex('zz')` → `[0]`). `sameBytes` is not constant-time, and nothing says so. No test file imports `toBase64`, `fromBase64`, `toHex`, `fromHex` or `sameBytes` directly; they are covered only through other packages.
 - **Why it matters:** Today every caller passes checked input (the header is schema-checked; the stored hash was written by the server), so nothing is wrong now. But these are the one shared copy every package uses (T62); a future caller with unchecked input gets wrong bytes instead of an error, or uses `sameBytes` on a secret.
 - **Fix:** In `fromHex`, throw unless the text matches `/^(?:[0-9a-f]{2})*$/i`; add a JSDoc line to `sameBytes`: "not constant-time; never for secrets". Add `contracts/test/encoding.test.ts` with round trips (empty, all 256 byte values) and the invalid-hex cases.
@@ -489,7 +489,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### BP-04 · Low · CI cancels an older run on `main`, which the release gate then cannot find
 
-- [ ] **Where:** `.github/workflows/ci.yml:14-17` (`cancel-in-progress: true` for every ref); `.github/workflows/release.yml:163-175` (needs a successful CI run for the tagged commit)
+- [x] **Where:** `.github/workflows/ci.yml:14-17` (`cancel-in-progress: true` for every ref); `.github/workflows/release.yml:163-175` (needs a successful CI run for the tagged commit)
 - **Problem:** Two pushes to `main` within one CI run (about 10 minutes) cancel the first run. That commit then never gets a successful CI run, so tagging it fails the `ci-passed` gate; Render's `checksPass` also never deploys it.
 - **Why it matters:** Only a nuisance (tag the later commit, or re-run CI), but the failure message "No successful CI run for …" does not say the run was cancelled.
 - **Fix:** Cancel only on feature branches: `cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}`.
@@ -673,7 +673,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-14 · Low · `interfaces.test.ts` tests fakes written inside the test
 
-- [ ] **Where:** `packages/core/test/interfaces.test.ts:19-36` (fake `CryptoService`, fake `overwrite` strategy), `:39-58`
+- [x] **Where:** `packages/core/test/interfaces.test.ts:19-36` (fake `CryptoService`, fake `overwrite` strategy), `:39-58`
 - **Problem:** The first two tests call objects defined in the same file, so they would pass whatever `core/src` does. The third (`HOME_PLACEHOLDER` is `{{HOME}}`) repeats `paths.test.ts:105-107`. What they mean to prove (a full `CryptoService` fits where `Aead` or `Digest` is asked) is already checked by the type checker wherever the real service is passed.
 - **Why it matters:** Tests that cannot fail add run time and give a false sense of coverage.
 - **Fix:** Delete the file, or turn it into a type-only check (`expectTypeOf<CryptoService>().toMatchTypeOf<Aead>()`).
@@ -682,7 +682,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-15 · Low · One failing cross-OS chain skips the other chain's later steps
 
-- [ ] **Where:** `.github/workflows/ci.yml:190-214` (`needs: e2e-step-1`, `needs: e2e-step-2`)
+- [x] **Where:** `.github/workflows/ci.yml:190-214` (`needs: e2e-step-1`, `needs: e2e-step-2`)
 - **Problem:** `e2e-step-2` needs the whole `e2e-step-1` matrix, which holds both chains (mac-win-mac and linux-win-linux). If step 1 fails on macOS, step 2 and 3 of the Linux chain are skipped too, although its step 1 passed. `fail-fast: false` does not change this.
 - **Why it matters:** A macOS-only problem hides whether Linux → Windows → Linux still works, so one CI run shows less than it could.
 - **Fix:** Split the chains into separate jobs (e.g. `mac-step-1/2/3` and `linux-step-1/2/3`, reusing the `&e2e-steps` anchor), so each chain only needs its own previous step.
