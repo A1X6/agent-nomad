@@ -20,10 +20,23 @@ function isHidden(code: number): boolean {
  * make a review list look harmless. Each such character is shown as `\u{…}` instead.
  */
 export function printable(text: string): string {
+  return shownAs(text, isHidden);
+}
+
+/**
+ * `printable` for a value shown on one line of a list (SEC-03): line breaks and tabs are
+ * shown as `\u{…}` too, so a command from a bundle cannot add lines that look like more
+ * entries of a review list.
+ */
+export function printableLine(text: string): string {
+  return shownAs(text, (code) => isHidden(code) || code === 0x09 || code === 0x0a);
+}
+
+function shownAs(text: string, hidden: (code: number) => boolean): string {
   let shown = '';
   for (const char of text) {
     const code = char.codePointAt(0) ?? 0;
-    shown += isHidden(code) ? `\\u{${code.toString(16).padStart(4, '0')}}` : char;
+    shown += hidden(code) ? `\\u{${code.toString(16).padStart(4, '0')}}` : char;
   }
   return shown;
 }

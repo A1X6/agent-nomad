@@ -4,6 +4,7 @@ import type { AgentRegistry } from '../agents/adapter.ts';
 import type { ApiClient } from '../api/api-client.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, ScopeFlags } from '../cli/commands.ts';
+import { setupLabel } from '../cli/setup-outcomes.ts';
 import { listSavedSetups, type SavedSetup } from '../pull/saved-setups.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
@@ -37,9 +38,6 @@ export function timeAgo(iso: string, now: Date): string {
   if (days < 30) return plural(days, 'day');
   return iso.slice(0, 10);
 }
-
-const setupName = (setup: SavedSetup) =>
-  setup.projectName === null ? 'global setup' : `project "${setup.projectName}"`;
 
 /** Setups matching `--agent`, `--global`, `--project`; all of them when none is given. */
 function matching(setups: readonly SavedSetup[], flags: ScopeFlags): SavedSetup[] {
@@ -95,13 +93,13 @@ export function createSetupCommands(
         return;
       }
       const now = deps.now?.() ?? new Date();
-      const width = Math.max(...setups.map((setup) => setupName(setup).length));
+      const width = Math.max(...setups.map((setup) => setupLabel(null, setup.projectName).length));
       const lines: string[] = [];
       for (const [agent, group] of byAgent(setups)) {
         lines.push(displayName(agent));
         for (const setup of group) {
           lines.push(
-            `  ${setupName(setup).padEnd(width)}  revision ${String(setup.revision)}  ${formatSize(setup.sizeBytes).padStart(6)}  ${timeAgo(setup.updatedAt, now)}`,
+            `  ${setupLabel(null, setup.projectName).padEnd(width)}  revision ${String(setup.revision)}  ${formatSize(setup.sizeBytes).padStart(6)}  ${timeAgo(setup.updatedAt, now)}`,
           );
         }
       }
@@ -115,7 +113,7 @@ export function createSetupCommands(
       const shown = [...byAgent(matching(setups, flags)).values()].flat();
       const lines = shown.map((setup) => {
         const here = known[`${setup.agent}/${setup.scopeKey}`];
-        const label = `${displayName(setup.agent)} ${setupName(setup)}`;
+        const label = setupLabel(displayName(setup.agent), setup.projectName);
         if (here === undefined) return `· ${label}: never pulled or pushed on this PC`;
         if (here === setup.revision) return `✓ ${label}: up to date (revision ${String(here)})`;
         if (here < setup.revision) {
@@ -152,15 +150,15 @@ export function createSetupCommands(
         reporter.info('Nothing is saved, so there is nothing to delete.');
         return;
       }
-      if (options.global || options.project !== undefined) {
-        if (chosen.length === 0)
-          throw new Error('No saved setup matches. Run `agentnomad list` to see them.');
-      } else {
+      if (chosen.length === 0) {
+        throw new Error('No saved setup matches. Run `agentnomad list` to see them.');
+      }
+      if (!options.global && options.project === undefined) {
         const keys = await prompter.multiselect(
           'Which saved setups to delete from the server? (Your files on this PC are not touched.)',
           chosen.map((setup) => ({
             value: `${setup.agent}/${setup.scopeKey}`,
-            label: `${displayName(setup.agent)} ${setupName(setup)}`,
+            label: setupLabel(displayName(setup.agent), setup.projectName),
             hint: `revision ${String(setup.revision)}`,
           })),
           { required: false, initial: [] },
@@ -171,7 +169,7 @@ export function createSetupCommands(
           return;
         }
       }
-      const names = chosen.map((setup) => `${displayName(setup.agent)} ${setupName(setup)}`);
+      const names = chosen.map((setup) => setupLabel(displayName(setup.agent), setup.projectName));
       if (
         !options.yes &&
         !(await prompter.confirm(
@@ -188,7 +186,7 @@ export function createSetupCommands(
         );
         await deps.localState().forgetRevision(setup.agent, setup.scopeKey);
         reporter.success(
-          `Deleted the ${displayName(setup.agent)} ${setupName(setup)} from the server.`,
+          `Deleted the ${setupLabel(displayName(setup.agent), setup.projectName)} from the server.`,
         );
       }
     },

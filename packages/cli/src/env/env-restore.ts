@@ -18,17 +18,11 @@ export interface RestoreEnvDeps {
   readonly isRedirectVariable: (name: string) => boolean;
 }
 
-export interface RestoreEnvResult {
-  readonly added: readonly string[];
-  readonly alreadySet: readonly string[];
-  readonly declined: boolean;
-}
-
 /**
  * Which saved variables this PC already has (T56): set in this process's environment, or
  * with the saved value already where the writer puts it (the shell profile block or the
  * Windows user variables), which a terminal opened before the last pull does not see yet.
- * Shared by the restore and pull's no-terminal pre-check.
+ * Used by `planEnvRestore`.
  */
 async function splitEnvValues(
   variables: Readonly<Record<string, string>>,
@@ -42,19 +36,6 @@ async function splitEnvValues(
   return { alreadySet: names.filter((name) => !missing.includes(name)), missing };
 }
 
-/**
- * On pull (T30): adds the saved variables that are missing on this PC to the shell profile
- * (or Windows user variables), after asking. Values are never shown. Variables that make a
- * shell or runtime load code (`NODE_OPTIONS`, `PROMPT_COMMAND`, …) or send programs'
- * requests elsewhere (`HTTPS_PROXY`, `ANTHROPIC_BASE_URL`, …) get their own question with
- * "no" as the default, and `--yes` alone never adds them (T44, T56).
- */
-export async function restoreEnvValues(deps: RestoreEnvDeps): Promise<RestoreEnvResult> {
-  const plan = await planEnvRestore(deps);
-  if (plan.toAdd.length > 0) await writeEnvValues(deps, plan.toAdd);
-  return { added: plan.toAdd, alreadySet: plan.alreadySet, declined: plan.declined };
-}
-
 /** Which saved values pull will add, chosen before it writes anything (T59). */
 export interface EnvRestorePlan {
   readonly toAdd: readonly string[];
@@ -62,7 +43,14 @@ export interface EnvRestorePlan {
   readonly declined: boolean;
 }
 
-/** The questions of `restoreEnvValues`: shows what is missing and asks; writes nothing. */
+/**
+ * On pull (T30, plan step of T59): shows the saved variables that are missing on this PC and
+ * asks which to add to the shell profile (or Windows user variables); writes nothing. Values
+ * are never shown. Variables that make a shell or runtime load code (`NODE_OPTIONS`,
+ * `PROMPT_COMMAND`, …) or send programs' requests elsewhere (`HTTPS_PROXY`,
+ * `ANTHROPIC_BASE_URL`, …) get their own question with "no" as the default, and `--yes`
+ * alone never adds them (T44, T56).
+ */
 export async function planEnvRestore(
   deps: Omit<RestoreEnvDeps, 'writer'> & {
     readonly writer: Pick<EnvWriter, 'current' | 'where'>;
@@ -132,7 +120,7 @@ export async function planEnvRestore(
   return { toAdd, alreadySet, declined };
 }
 
-/** Writes the chosen saved values (the apply half of `restoreEnvValues`); asks nothing. */
+/** Writes the values `planEnvRestore` chose (pull's apply step); asks nothing. */
 export async function writeEnvValues(
   deps: {
     readonly section: EnvSection;

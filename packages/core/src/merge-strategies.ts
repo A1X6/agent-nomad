@@ -37,11 +37,16 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 /** Invisible character some Windows editors put at the start of text files. */
 const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
 
-/** A whole number too large to survive `JSON.parse`, anywhere inside `value` (T45). */
-function hasUnsafeInteger(value: unknown): boolean {
-  if (typeof value === 'number') return Number.isInteger(value) && !Number.isSafeInteger(value);
-  if (Array.isArray(value)) return value.some(hasUnsafeInteger);
-  if (isJsonObject(value)) return Object.values(value).some(hasUnsafeInteger);
+/**
+ * A number `JSON.parse` could not keep, anywhere inside `value`: a whole number past the safe
+ * range (T45), or one too large for a double (`1e400` is `Infinity`, written back as `null`).
+ */
+function hasUnsafeNumber(value: unknown): boolean {
+  if (typeof value === 'number') {
+    return !Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value));
+  }
+  if (Array.isArray(value)) return value.some(hasUnsafeNumber);
+  if (isJsonObject(value)) return Object.values(value).some(hasUnsafeNumber);
   return false;
 }
 
@@ -54,7 +59,7 @@ function parseJsonObject(bytes: Uint8Array): Record<string, unknown> | undefined
   const text = raw.startsWith(BYTE_ORDER_MARK) ? raw.slice(1) : raw;
   try {
     const value: unknown = JSON.parse(text);
-    return isJsonObject(value) && !hasUnsafeInteger(value) ? value : undefined;
+    return isJsonObject(value) && !hasUnsafeNumber(value) ? value : undefined;
   } catch {
     return undefined;
   }

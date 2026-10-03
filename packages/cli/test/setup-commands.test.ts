@@ -23,6 +23,7 @@ import {
   formatSize,
   NotLoggedInError,
   OutcomeUnknownError,
+  setupLabel,
   timeAgo,
   type AgentAdapter,
   type ApiClient,
@@ -346,6 +347,25 @@ describe('agentnomad delete', () => {
     await expect(
       commands(server).delete({ global: false, project: 'nope', yes: true }),
     ).rejects.toThrow('No saved setup matches');
+  });
+
+  it('--agent with nothing saved for that agent says so instead of an empty checklist (UX-04)', async () => {
+    const server = fakeServer();
+    const t = commands(server);
+    await expect(t.delete({ global: false, agents: ['codex'], yes: false })).rejects.toThrow(
+      'No saved setup matches. Run `agentnomad list` to see them.',
+    );
+    expect(t.asked).toEqual([]);
+    expect(server.deleted).toEqual([]);
+  });
+});
+
+describe('setup labels in messages (DUP-05)', () => {
+  it('names the global setup or the project, after the agent when given', () => {
+    expect(setupLabel('Claude Code', null)).toBe('Claude Code global setup');
+    expect(setupLabel('Claude Code', 'my-app')).toBe('Claude Code project "my-app"');
+    expect(setupLabel(null, null)).toBe('global setup');
+    expect(setupLabel(null, 'my-app')).toBe('project "my-app"');
   });
 });
 

@@ -23,13 +23,14 @@ import type { ApiClient } from '../api/api-client.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
 import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
-import { finishSetups, type SetupOutcome } from '../cli/setup-outcomes.ts';
+import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { planEnvRestore, writeEnvValues } from '../env/env-restore.ts';
 import { ENV_BUNDLE_PATH, parseEnvSection, type EnvSection } from '../env/env-section.ts';
 import type { EnvWriter } from '../env/shell-profile.ts';
 import { fromBundleFiles, preferLocalEquivalents } from '../push/bundle-files.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
+import { printableLine } from '../ui/printable.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { downloadSetup, listSavedSetups, type SavedSetup } from './saved-setups.ts';
 
@@ -107,7 +108,7 @@ export interface PullPlan {
 type ConflictAnswer = ConflictChoice | 'merge-all' | 'overwrite-all';
 
 const describe = (adapter: AgentAdapter, setup: SavedSetup) =>
-  `${adapter.displayName} ${setup.projectName === null ? 'global setup' : `project "${setup.projectName}"`}`;
+  setupLabel(adapter.displayName, setup.projectName);
 
 /**
  * Pull's plan step (T59): chooses saved setups, downloads and checks them, and asks every
@@ -337,7 +338,7 @@ export function createPullPlanner(deps: PullDeps) {
           `The ${describe(adapter, setup)} would add or change these, which run programs on this PC:`,
           ...review.map(
             (entry) =>
-              `  ${entry.change === 'new' ? '+' : '~'} ${entry.label}: ${entry.command}${entry.change === 'changed' ? '  (changed)' : ''}`,
+              `  ${entry.change === 'new' ? '+' : '~'} ${printableLine(entry.label)}: ${printableLine(entry.command)}${entry.change === 'changed' ? '  (changed)' : ''}`,
           ),
         ].join('\n'),
       );

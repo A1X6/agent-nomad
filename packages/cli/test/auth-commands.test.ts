@@ -338,8 +338,94 @@ describe('already logged in', () => {
       secrets: t.secrets,
     });
     await again.commands.register(ASK);
-    expect(t.server.calls).toEqual(['register', 'logout', 'register']);
+    // The old session ends only once the new account and its session exist (UX-01).
+    expect(t.server.calls).toEqual(['register', 'register', 'logout']);
     expect(t.server.sessions.size).toBe(1);
+    expect(t.server.sessions.has(t.secrets.saved.get('session-token') ?? '')).toBe(true);
+  });
+});
+
+describe('already logged in: the current login stays until the new one works (UX-01)', () => {
+  const QUESTION = 'You are already logged in on this PC. Log out and continue?';
+
+  /** "ahmed" registered and logged in on this PC; returns what is saved here now. */
+  async function loggedInAsAhmed() {
+    const t = setup(registerAnswers());
+    await t.commands.register(ASK);
+    t.server.calls.length = 0;
+    return { server: t.server, secrets: t.secrets, before: new Map(t.secrets.saved) };
+  }
+
+  /** The login on this PC and its session on the server are both untouched. */
+  function expectKept(pcLogin: Awaited<ReturnType<typeof loggedInAsAhmed>>) {
+    expect(pcLogin.secrets.saved).toEqual(pcLogin.before);
+    expect(pcLogin.server.sessions.has(pcLogin.before.get('session-token') ?? '')).toBe(true);
+    expect(pcLogin.server.calls).not.toContain('logout');
+  }
+
+  it('a wrong password keeps the current login', async () => {
+    const pcLogin = await loggedInAsAhmed();
+    const t = setup([true, 'ahmed', 'plum-garage-violin-99'], pcLogin);
+    await expect(t.commands.login(ASK)).rejects.toThrow('Wrong username or password');
+    expect(t.script.asked[0]).toBe(QUESTION);
+    expectKept(pcLogin);
+  });
+
+  it('a wrong piped password with --yes keeps the current login', async () => {
+    const pcLogin = await loggedInAsAhmed();
+    const t = setup([], { ...pcLogin, stdin: 'plum-garage-violin-99' });
+    await expect(
+      t.commands.login({ yes: true, passwordStdin: true, username: 'ahmed' }),
+    ).rejects.toThrow('Wrong username or password');
+    expectKept(pcLogin);
+  });
+
+  it('Ctrl+C at the password keeps the current login', async () => {
+    const pcLogin = await loggedInAsAhmed();
+    const t = setup([true, 'ahmed', new PromptCancelledError()], pcLogin);
+    await expect(t.commands.login(ASK)).rejects.toBeInstanceOf(PromptCancelledError);
+    expectKept(pcLogin);
+  });
+
+  it('a data key that does not unlock ends only the new session (T66)', async () => {
+    const pcLogin = await loggedInAsAhmed();
+    const user = pcLogin.server.users.get('ahmed');
+    if (user === undefined) throw new Error('not registered');
+    const wrapped = Buffer.from(user.wrappedDataKey, 'base64');
+    wrapped[30] = (wrapped[30] ?? 0) ^ 1;
+    pcLogin.server.users.set('ahmed', { ...user, wrappedDataKey: wrapped.toString('base64') });
+    const t = setup([true, 'ahmed', STRONG], pcLogin);
+    await expect(t.commands.login(ASK)).rejects.toThrow('could not be unlocked');
+    expect(pcLogin.server.calls).toEqual(['prelogin', 'login', 'logout']);
+    expect(pcLogin.server.logoutTokens).toHaveLength(1);
+    expect(pcLogin.server.logoutTokens[0]).not.toBe(pcLogin.before.get('session-token'));
+    expect(pcLogin.secrets.saved).toEqual(pcLogin.before);
+    expect(pcLogin.server.sessions.has(pcLogin.before.get('session-token') ?? '')).toBe(true);
+  });
+
+  it('register: a taken username or a "no" at the warning keeps the current login', async () => {
+    const pcLogin = await loggedInAsAhmed();
+    const taken = setup([true, ...registerAnswers('ahmed')], pcLogin);
+    await expect(taken.commands.register(ASK)).rejects.toMatchObject({ code: 'username_taken' });
+    expectKept(pcLogin);
+
+    const no = setup([true, 'second', false], pcLogin);
+    await no.commands.register(ASK);
+    expect(no.lines.at(-1)).toBe('info: No account was created.');
+    expectKept(pcLogin);
+  });
+
+  it('a login that works ends the old session, then saves the new one', async () => {
+    const pcLogin = await loggedInAsAhmed();
+    const t = setup([true, 'ahmed', STRONG], pcLogin);
+    await t.commands.login(ASK);
+    expect(pcLogin.server.calls).toEqual(['prelogin', 'login', 'logout']);
+    // The old session, read from this PC's store, not the new one.
+    expect(pcLogin.server.logoutTokens).toEqual([undefined]);
+    const token = pcLogin.secrets.saved.get('session-token') ?? '';
+    expect(token).not.toBe(pcLogin.before.get('session-token'));
+    expect([...pcLogin.server.sessions]).toEqual([token]);
+    expect(pcLogin.secrets.saved.get('data-key')).toBe(pcLogin.before.get('data-key'));
   });
 });
 
@@ -524,7 +610,7 @@ describe('from a script (--username, --password-stdin, --yes)', () => {
     const again = setup([], { server: t.server, secrets: t.secrets, stdin: STRONG });
     await again.commands.login(flags());
     expect(again.script.asked).toEqual([]);
-    expect(t.server.calls).toEqual(['register', 'logout', 'prelogin', 'login']);
+    expect(t.server.calls).toEqual(['register', 'prelogin', 'login', 'logout']);
   });
 
   it('without --yes, an existing login is still asked about', async () => {
@@ -566,6 +652,30 @@ describe('logout', () => {
     expect(out.lines.some((line) => line.startsWith('warn: Could not reach the server'))).toBe(
       true,
     );
+  });
+
+  it('names what the server said when it answered but did not end the session (UX-02)', async () => {
+    const failures: [Error, string][] = [
+      [
+        new ApiError(429, 'rate_limited', 'Too many requests', { retryAfterSeconds: 60 }),
+        'Too many attempts. Try again in 1 minute',
+      ],
+      [
+        new ApiError(500, 'internal_error', 'boom'),
+        'Something went wrong on the server. Try again later',
+      ],
+    ];
+    for (const [failure, reason] of failures) {
+      const t = setup(registerAnswers());
+      await t.commands.register(ASK);
+      t.server.failLogout(failure);
+      const out = setup([], { server: t.server, secrets: t.secrets });
+      await out.commands.logout();
+      expect(t.secrets.saved.size).toBe(0);
+      expect(out.lines.filter((line) => line.startsWith('warn:'))).toEqual([
+        `warn: The server did not end the session (${reason}), so only this PC was logged out. The session on the server ends by itself after 30 days unused.`,
+      ]);
+    }
   });
 
   it('quietly logs out when the server session had already expired', async () => {

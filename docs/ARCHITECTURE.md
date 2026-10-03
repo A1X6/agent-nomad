@@ -219,7 +219,14 @@ sequenceDiagram
   C->>C: unwrap data key, keychain ← both
 ```
 
-`logout` ends the session on the server and always forgets it on the PC, even offline.
+`logout` ends the session on the server and always forgets it on the PC, even offline. When
+the server answers but does not end it (a rate limit, a server error), the warning gives the
+server's reason instead of "Could not reach the server".
+
+A login or register on a PC that already holds a login asks first (`--yes` answers yes), then
+keeps the current login until the new one works: only when the new session and data key are
+in hand is the old session ended and the new one saved (UX-01). A wrong password, a taken
+username, a "no" or Ctrl+C before that leaves the current login as it was.
 
 When login succeeds on the server but the data key does not unwrap with this password, the
 new session is never saved on the PC: login sends `POST /auth/logout` once with that session's
@@ -284,20 +291,22 @@ which the plan never asked about, is left as it is and the setup counts as not d
   are.
 - Pull never deletes files.
 - `--merge` and `--overwrite` answer every file at once; JSON merges by key (the incoming
-  side wins), other text files are kept and the incoming copy is saved next to them.
+  side wins), other text files are kept and the incoming copy is saved next to them. A JSON
+  file holding a number JSON cannot keep (past the safe integer range, or too large for a
+  double, such as `1e400`) is kept side by side too.
 - `--yes` never accepts new commands, plugin reinstalls or npm installs; `--allow-commands`
   does.
 
 ### The other commands
 
-| Command          | What it does                                                                                                                                                      |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list`           | Every saved setup, grouped by agent, with revision, size and age. Project names are decrypted on this PC.                                                         |
-| `status`         | For each saved setup: up to date, newer on the server, never pulled here, or deleted on the server. Uses only the revisions this PC remembers; downloads nothing. |
-| `delete`         | Deletes saved setups from the server after confirming; files on the PC are untouched.                                                                             |
-| `account delete` | Deletes the account and every setup. Always needs the username and the password (the server checks the auth key), so a stolen session cannot do it.               |
-| `agents`         | Supported agents, whether each is installed here, its version and folder, and organization-managed settings.                                                      |
-| `env`            | Which environment variables this PC's setups use and whether each is set here. Never shows a value.                                                               |
+| Command          | What it does                                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list`           | Every saved setup, grouped by agent, with revision, size and age. Project names are decrypted on this PC.                                                                       |
+| `status`         | For each saved setup: up to date, newer on the server, never pulled here, or deleted on the server. Uses only the revisions this PC remembers; downloads nothing.               |
+| `delete`         | Deletes saved setups from the server after confirming; files on the PC are untouched.                                                                                           |
+| `account delete` | Deletes the account and every setup. Always needs the username and the password (the server checks the auth key), so a stolen session cannot do it.                             |
+| `agents`         | Supported agents, whether each is installed here, its version and folder, and organization-managed settings.                                                                    |
+| `env`            | Which environment variables this PC's setups use and whether each is set here (the home folder and the agent's own folder count as the global setup only). Never shows a value. |
 
 ## 6. Agent adapters
 
@@ -392,7 +401,9 @@ and `ANTHROPIC_BASE_URL`), need their own yes, and `--yes` alone never adds them
 value already in agentnomad's block of the shell profile (on Windows: a user variable with
 that value) counts as set, even in a terminal opened before it was added, so pulling again
 asks nothing; a block that would not change is neither backed up nor written (T56). Everything printed from a bundle
-or the server goes through `printable`, so escape sequences are shown, never acted on.
+or the server goes through `printable`, so escape sequences are shown, never acted on; the
+label and command of each review entry go through `printableLine`, which also shows line
+breaks and tabs as `\u{…}`, so a command cannot add lines that look like more entries (SEC-03).
 
 **claude.ai skills (T42, opt-in):** Claude Code downloads the skills of the user's claude.ai
 account into `skills/synced/<account>/` and manages that folder; agentnomad never writes
@@ -609,16 +620,16 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `cli/`: parsing and outcomes
 
-| File                | Responsible for                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------------------ |
-| `commands.ts`       | The option types for every command and the `CommandHandlers` interface.                                |
-| `program.ts`        | Every command, flag and help text (commander); parsing only.                                           |
-| `project-folder.ts` | The home folder and the agent's own folder are never a project (push and pull).                        |
-| `flags.ts`          | Validating `--agent`, `--project` and `--username` values.                                             |
-| `run.ts`            | Runs one invocation: exit codes, Ctrl+C, and the "needs an answer" message with the flags per command. |
-| `setup-outcomes.ts` | What happened to each setup in push and pull, and the one "Not saved / Not restored" error (exit 1).   |
-| `error-messages.ts` | The one line shown when a command fails (rate limits, server errors).                                  |
-| `stdin.ts`          | `--password-stdin`: the first line of a pipe; refuses a terminal.                                      |
+| File                | Responsible for                                                                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commands.ts`       | The option types for every command and the `CommandHandlers` interface.                                                                             |
+| `program.ts`        | Every command, flag and help text (commander); parsing only.                                                                                        |
+| `project-folder.ts` | The home folder and the agent's own folder are never a project (push, pull and `env`).                                                              |
+| `flags.ts`          | Validating `--agent`, `--project` and `--username` values.                                                                                          |
+| `run.ts`            | Runs one invocation: exit codes, Ctrl+C, and the "needs an answer" message with the flags per command.                                              |
+| `setup-outcomes.ts` | What happened to each setup in push and pull, the one "Not saved / Not restored" error (exit 1), and `setupLabel`, how every message names a setup. |
+| `error-messages.ts` | The one line shown when a command fails (rate limits, server errors).                                                                               |
+| `stdin.ts`          | `--password-stdin`: the first line of a pipe; refuses a terminal.                                                                                   |
 
 ### `ui/`: questions and messages
 
