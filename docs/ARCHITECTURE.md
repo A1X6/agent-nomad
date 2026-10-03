@@ -310,7 +310,10 @@ file is a one-line change there:
 produced it. A home-folder file must be a known tool's settings or a script the setup's
 own hooks or status line run, and never in a folder whose files run by themselves (Startup,
 `.config/autostart`, `Library/LaunchAgents`, fish and PowerShell profile folders), so a
-bundle cannot drop a file that runs by itself. Refusals ignore case. On Windows, names with
+bundle cannot drop a file that runs by itself. The same holds in Claude Code's own folder: a
+script outside the synced folders is written only when the setup's hooks or status line run
+it, and never in Claude Code's own state (`knownState`: `chrome/`, `local/`, `state/`, …),
+which is refused like never-synced entries (T55). Refusals ignore case. On Windows, names with
 `:`, device names, trailing dots and 8.3 short names are refused. Two entries that differ
 only in case or Unicode form are one file on Windows and macOS: only the first is written. An
 entry that cannot be written is skipped with a warning; the rest continue. `~/.claude.json`
@@ -325,13 +328,18 @@ runs, when new or changed compared with this PC, is listed before anything is wr
 (commands, and `http` hooks that send data to an address), the status line, settings that
 run a command (`apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`, `gcpAuthRefresh`,
 `otelHeadersHelper`, `fileSuggestion`), loader variables in a settings `env` block
-(`NODE_OPTIONS`, `LD_PRELOAD`, …), `bypassPermissions` in global settings and
-`enableAllProjectMcpServers`, MCP servers (the whole definition is compared, so a new `env`
-or `headersHelper` shows), scripts that commands here or in the bundle run and the scripts
-next to them, known tool settings (ccstatusline), and skill, command and subagent files with
+(`NODE_OPTIONS`, `LD_PRELOAD`, …) and `env` names that redirect Claude Code
+(`ANTHROPIC_BASE_URL` and the other endpoints, proxies, `NODE_EXTRA_CA_CERTS`, its shell
+variables, OpenTelemetry endpoints, `PATH`), `bypassPermissions` in global settings,
+`permissions.allow` rules and `permissions.additionalDirectories` new on this PC, a new or
+changed `sandbox` block, `enableAllProjectMcpServers`, MCP servers (the whole definition is
+compared, so a new `env` or `headersHelper` shows), files that commands here or in the bundle
+run (matched by path; any file that can run: a script extension, no extension, the executable
+bit or a `#!` line) and the scripts next to them, known tool settings (ccstatusline), and skill, command and subagent files with
 commands that run by themselves (`runnable-markdown.ts`: a `` !`command` `` placeholder, a
 ` ```! ` block, frontmatter `hooks`). Commands written as instructions are never flagged.
-Declining skips the files that hold them. Saved environment values that make programs load
+The keys and names come from `reviewed-settings.ts`, each checked against Claude Code's
+settings reference. Declining skips the files that hold them. Saved environment values that make programs load
 code need their own yes, and `--yes` alone never adds them. Everything printed from a bundle
 or the server goes through `printable`, so escape sequences are shown, never acted on.
 
@@ -357,7 +365,8 @@ drift check (`.github/workflows/drift-check.yml`) compares the data file with th
 Claude Code. It reads the official
 [.claude directory docs](https://code.claude.com/docs/en/claude-directory), runs a fresh
 Claude Code in an empty folder to see what it creates, and collects the changelog entries
-about files and setup since the data file's `reviewedVersion`. Anything new goes into one
+about files and setup, or naming a settings key the pull review watches
+(`reviewed-settings.ts`), since the data file's `reviewedVersion`. Anything new goes into one
 open GitHub issue labelled `drift`; the fresh install runs with no write permissions.
 
 ## 8. The server
@@ -574,6 +583,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `pull/pull-command.ts`       | `pull`: choose, download, verify, rollback check, review, restore, after-restore, remember.                            |
 | `pull/saved-setups.ts`       | Listing setups with decrypted names; downloading and checking one (agent, scope, sealed revision).                     |
 | `pull/command-review.ts`     | Finding hooks, status line, MCP servers and the scripts they run, and which are new or changed on this PC.             |
+| `pull/reviewed-settings.ts`  | The settings keys and `env` names the review watches (command, loosening and redirect settings); the drift watch list. |
 | `commands/setup-commands.ts` | `list`, `status` and `delete`.                                                                                         |
 
 ### `env/`: environment variables in setups

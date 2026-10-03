@@ -9,6 +9,7 @@ import {
 } from '../agents/claude-code/global-paths.ts';
 import { runnableInMarkdown } from '../agents/claude-code/runnable-markdown.ts';
 import { LOADER_VARIABLE } from '../env/loader-variables.ts';
+import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
 
 /**
  * Things in a setup that run programs on this PC (T34, T44), as Claude Code's docs describe
@@ -39,17 +40,10 @@ const SETTINGS_FILES = new Set([
 const MCP_FILES = new Set(['.mcp.json', '.agentnomad/claude.json']);
 
 /**
- * Settings keys whose value is a command Claude Code runs ("with your own command" in its
- * settings reference); every one is accepted in any settings file.
+ * Labels that many entries share (each hook, allow rule or directory is one entry): a new
+ * one beside others is new, never a change of the others.
  */
-const COMMAND_SETTINGS = [
-  'apiKeyHelper',
-  'awsAuthRefresh',
-  'awsCredentialExport',
-  'gcpAuthRefresh',
-  'otelHeadersHelper',
-  'fileSuggestion',
-];
+const LIST_LABELS = /^(hook |setting permissions\.(allow|additionalDirectories)$)/;
 
 /** Folders whose Markdown files are skills, custom commands or subagents. */
 const MARKDOWN_FOLDERS = /^(\.claude\/)?(skills|commands|agents)\//;
@@ -145,8 +139,9 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
   }
   const env = Env.safeParse(json['env']);
   for (const [name, value] of Object.entries(env.success ? env.data : {})) {
-    // In a settings `env` block they reach Claude Code and every hook it starts.
-    if (LOADER_VARIABLE.test(name)) {
+    // In a settings `env` block they reach Claude Code and every hook it starts. Redirect
+    // variables send its requests elsewhere or choose what it runs commands with (T55).
+    if (LOADER_VARIABLE.test(name) || isRedirectVariable(name)) {
       entries.push(entry(file.path, `setting env ${name}`, `${name}=${String(value)}`));
     }
   }
@@ -164,6 +159,21 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
         'bypassPermissions (Claude asks nothing)',
       ),
     );
+  }
+  // Rules that approve tools and folders Claude may use without asking, from any settings
+  // file (a project's after the folder is trusted): one entry each, so only new ones show.
+  const strings = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  for (const key of ['allow', 'additionalDirectories']) {
+    for (const rule of strings(permissions.success ? permissions.data[key] : undefined)) {
+      entries.push(entry(file.path, `setting permissions.${key}`, rule));
+    }
+  }
+  // The sandbox block as a whole: a change anywhere in it may open commands or the network.
+  const sandbox = Json.safeParse(json['sandbox']);
+  if (sandbox.success) {
+    const shown = stable(sandbox.data);
+    entries.push(entry(file.path, 'setting sandbox', shown, shown));
   }
   if (json['enableAllProjectMcpServers'] === true) {
     entries.push(
@@ -217,11 +227,23 @@ const isScript = (path: string) =>
 const folderOf = (path: string) => path.slice(0, path.lastIndexOf('/') + 1);
 
 /**
+ * A file that can run as a program when a command names it (T55): a script extension, no
+ * extension at all (`bin/run`), the executable bit, or a `#!` first line. A data file that a
+ * command only reads (`jq … config.json`) is not one.
+ */
+const isProgram = (file: CollectedFile) =>
+  isScript(file.path) ||
+  !/\.[^./]+$/.test(file.path) ||
+  file.executable ||
+  (file.content[0] === 0x23 && file.content[1] === 0x21);
+
+/**
  * Incoming script files that a command runs, matched by path: the command names the
  * script's path within the base folder, the project or (for `.agentnomad/home/...`) the home
  * folder, e.g. `…/.claude/hooks/check.sh` runs `hooks/check.sh`. Commands come from the
  * incoming setup and from this PC's own (T44: a hook already here runs a changed script
- * too), and scripts next to a run script count as well (a helper it loads).
+ * too), and scripts next to a run script count as well (a helper it loads). A named file
+ * counts whatever its name when it can run as a program (T55: `skills/tool/bin/run`).
  */
 function scriptsRun(incoming: readonly CollectedFile[], commands: readonly string[]) {
   const words = commands.flatMap((command) =>
@@ -230,7 +252,7 @@ function scriptsRun(incoming: readonly CollectedFile[], commands: readonly strin
   const relativeOf = (path: string) =>
     path.startsWith(HOME_SCRIPTS_PREFIX) ? path.slice(HOME_SCRIPTS_PREFIX.length) : path;
   const run = incoming.filter((file) => {
-    if (!isScript(file.path)) return false;
+    if (!isProgram(file)) return false;
     const relative = relativeOf(file.path);
     return words.some((word) => word === relative || word.endsWith(`/${relative}`));
   });
@@ -261,9 +283,9 @@ export function reviewRunnable(
     )
     .map((item) => ({
       ...item,
-      // A named entry (not a hook) that is here with another definition is a change.
+      // A named entry (not one of a list) that is here with another definition is a change.
       change:
-        !item.label.startsWith('hook ') && here.some((existing) => existing.label === item.label)
+        !LIST_LABELS.test(item.label) && here.some((existing) => existing.label === item.label)
           ? ('changed' as const)
           : ('new' as const),
     }));
