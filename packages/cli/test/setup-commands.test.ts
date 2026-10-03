@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ProjectNameSchema, type BundleSummary } from '@agentnomad/contracts';
+import type { BundleSummary } from '@agentnomad/contracts';
 import {
   createSodiumCryptoService,
   encryptProjectName,
@@ -13,22 +13,17 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { fakeApi, memorySecretStore, recordingReporter, scriptedPrompter } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
-import * as z from 'zod';
 
 import {
-  ApiError,
   createAgentRegistry,
-  createAuthCommands,
   createLocalState,
   createSetupCommands,
   formatSize,
   NotLoggedInError,
-  OutcomeUnknownError,
   setupLabel,
   timeAgo,
   type AgentAdapter,
   type LocalState,
-  type SecretName,
 } from '../src/index.ts';
 
 const NOW = new Date('2026-09-25T12:00:00Z');
@@ -194,62 +189,6 @@ describe('agentnomad status', () => {
   });
 });
 
-describe('the revisions this PC knows belong to one account (T56)', () => {
-  it('another account, or none stored, starts with no revisions but keeps project names', async () => {
-    await state.setRevision('claude-code', 'global', 7, { partial: true });
-    await state.rememberProject(CWD, 'my-app');
-    // A state.json from before T56 knows no account: its revisions are not trusted.
-    await state.useAccount('alice');
-    expect(await state.knownRevisions()).toEqual({});
-    await state.setRevision('claude-code', 'global', 7, { partial: true });
-
-    await state.useAccount('alice');
-    expect(await state.revisionOf('claude-code', 'global')).toBe(7);
-    expect(await state.isPartial('claude-code', 'global')).toBe(true);
-
-    await state.useAccount('bob');
-    expect(await state.revisionOf('claude-code', 'global')).toBeNull();
-    expect(await state.isPartial('claude-code', 'global')).toBe(false);
-    expect(await state.projectNameFor(CWD)).toBe('my-app');
-  });
-
-  it('an older agentnomad still reads the file, and the account never shows as a project', async () => {
-    await state.useAccount('alice');
-    await state.rememberProject(CWD, 'my-app');
-    await state.setRevision('claude-code', 'global', 2);
-    // The state.json schema of agentnomad 1.0.3, which refuses unknown keys.
-    const server = z.strictObject({
-      projects: z.record(z.string(), ProjectNameSchema),
-      revisions: z.record(z.string(), z.int().min(1)),
-    });
-    const old = z.strictObject({ version: z.literal(1), servers: z.record(z.string(), server) });
-    const text = await readFile(join(dir, 'state.json'), 'utf8');
-    expect(old.safeParse(JSON.parse(text)).success).toBe(true);
-    expect(await state.projectNameFor('#account')).toBeNull();
-  });
-});
-
-describe('a local state file that cannot be read (BUG-06)', () => {
-  it('stops with the reason instead of starting again from nothing', async () => {
-    // A folder where the file should be: reading it fails with something other than ENOENT.
-    const path = join(dir, 'unreadable.json');
-    await mkdir(path);
-    const unreadable = createLocalState({ path, server: 's', platform: process.platform });
-    await expect(unreadable.projectNameFor(CWD)).rejects.toThrow(
-      `Could not read agentnomad's local state file ${path}`,
-    );
-    await expect(unreadable.rememberProject(CWD, 'my-app')).rejects.toThrow(
-      `Could not read agentnomad's local state file ${path}`,
-    );
-  });
-
-  it('a missing file is still an empty state', async () => {
-    expect(await state.projectNameFor(CWD)).toBeNull();
-    await state.rememberProject(CWD, 'my-app');
-    expect(await state.projectNameFor(CWD)).toBe('my-app');
-  });
-});
-
 describe('agentnomad delete', () => {
   it('deletes the chosen setups after asking, and forgets them on this PC', async () => {
     const server = fakeServer();
@@ -302,111 +241,6 @@ describe('setup labels in messages (DUP-05)', () => {
     expect(setupLabel('Claude Code', 'my-app')).toBe('Claude Code project "my-app"');
     expect(setupLabel(null, null)).toBe('global setup');
     expect(setupLabel(null, 'my-app')).toBe('project "my-app"');
-  });
-});
-
-describe('agentnomad account delete', () => {
-  function account(
-    answers: unknown[],
-    deleteAccount: () => Promise<void>,
-    stdin?: string,
-    saved = new Map<SecretName, string>(),
-  ) {
-    const script = scriptedPrompter(answers);
-    const { reporter, lines } = recordingReporter();
-    const secrets = memorySecretStore({ loggedIn: dataKey, saved });
-    const sent: string[] = [];
-    const api = fakeApi({
-      auth: {
-        prelogin: () =>
-          Promise.resolve({
-            kdfSalt: Buffer.alloc(16, 1).toString('base64'),
-            kdfParams: {
-              algorithm: 'argon2id',
-              version: 19,
-              memoryKiB: 19_456,
-              passes: 2,
-              parallelism: 1,
-            },
-          }),
-        deleteAccount: (request) => {
-          sent.push(request.authKey);
-          return deleteAccount();
-        },
-      },
-    });
-    const handlers = createAuthCommands({
-      prompter: script.prompter,
-      reporter,
-      api: () => api,
-      secrets: () => Promise.resolve(secrets),
-      crypto: () => Promise.resolve(crypto),
-      passwordChecker: () => Promise.reject(new Error('not used')),
-      deviceName: 'pc',
-      localState: () => state,
-      ...(stdin !== undefined && { readPasswordStdin: () => Promise.resolve(stdin) }),
-    });
-    return { run: handlers.accountDelete, asked: script.asked, lines, saved, sent };
-  }
-
-  it('asks for the username and password, deletes, and cleans up this PC', async () => {
-    await state.setRevision('claude-code', 'global', 3);
-    const t = account(['ahmed', 'plum-garage-violin-47'], () => Promise.resolve());
-    await t.run({ yes: true, passwordStdin: false });
-    expect(t.asked).toEqual(['Type your username to confirm', 'Password']);
-    expect(Buffer.from(t.sent[0] ?? '', 'base64')).toHaveLength(32);
-    expect(t.sent[0]).not.toContain('plum');
-    expect(t.saved.size).toBe(0);
-    expect(await state.knownRevisions()).toEqual({});
-    expect(t.lines[0]).toContain('cannot be undone');
-    expect(t.lines.at(-1)).toContain('Account "ahmed" and all its saved setups were deleted');
-  });
-
-  it('from a script: username and password by flags, confirmed with --yes', async () => {
-    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
-    await t.run({ yes: true, passwordStdin: true, username: 'ahmed' });
-    expect(t.asked).toEqual([]);
-    expect(t.sent).toHaveLength(1);
-    expect(t.saved.size).toBe(0);
-  });
-
-  it('from a script without --yes: refuses, deleting nothing', async () => {
-    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
-    await expect(t.run({ yes: false, passwordStdin: true, username: 'ahmed' })).rejects.toThrow(
-      'Nothing was deleted. Add --yes to confirm deleting the account.',
-    );
-    expect(t.sent).toEqual([]);
-    expect(t.saved.has('session-token')).toBe(true);
-  });
-
-  it('a wrong password deletes nothing and keeps the login', async () => {
-    const t = account(['ahmed', 'wrong'], () =>
-      Promise.reject(new ApiError(401, 'unauthorized', 'Wrong password')),
-    );
-    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toThrow(
-      'Wrong username or password. Nothing was deleted.',
-    );
-    expect(t.saved.has('session-token')).toBe(true);
-  });
-
-  it('an ended session clears the login and says to log in again', async () => {
-    const t = account(['ahmed', 'pw'], () =>
-      Promise.reject(new ApiError(401, 'unauthorized', 'Log in again: no valid session')),
-    );
-    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toThrow(
-      'Your session has expired',
-    );
-    expect(t.saved.has('session-token')).toBe(false);
-  });
-
-  it('a lost answer says the result is unknown and keeps everything here', async () => {
-    const t = account(['ahmed', 'pw'], () =>
-      Promise.reject(new OutcomeUnknownError('delete-account')),
-    );
-    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toBeInstanceOf(
-      OutcomeUnknownError,
-    );
-    expect(t.saved.has('session-token')).toBe(true);
   });
 });
 

@@ -145,6 +145,40 @@ describe('file store', () => {
       servers: { [SERVER]: { 'data-key': 'k' } },
     });
   });
+
+  it('on Windows, gives only this user access to the file (T46)', async () => {
+    const restricted: string[] = [];
+    const store = createFileStore({
+      path: join(dir, 'secrets.json'),
+      server: SERVER,
+      platform: 'win32',
+      restrictAccess: (file) => {
+        restricted.push(file);
+        return Promise.resolve();
+      },
+    });
+    await store.set('data-key', 'key');
+    expect(restricted).toHaveLength(1);
+    // The temporary file, before it takes the real name (the shared atomic write's name, T62).
+    expect(restricted[0]).toMatch(/\.secrets\.json\.agentnomad-tmp-[0-9a-f]+$/);
+  });
+
+  it('saves a whole login with one file write (PERF-02)', async () => {
+    const restricted: string[] = [];
+    const store = createFileStore({
+      path: join(dir, 'secrets.json'),
+      server: SERVER,
+      platform: 'win32',
+      restrictAccess: (file) => {
+        restricted.push(file);
+        return Promise.resolve();
+      },
+    });
+    await store.setMany({ 'session-token': 'token', 'data-key': 'key' });
+    expect(restricted).toHaveLength(1);
+    expect(await store.get('session-token')).toBe('token');
+    expect(await store.get('data-key')).toBe('key');
+  });
 });
 
 describe('keychain store', () => {
@@ -207,40 +241,6 @@ describe('createSecretStore', () => {
       restrictAccess: () => Promise.resolve(),
     });
     expect(await file.get('data-key')).toBeNull();
-  });
-
-  it('on Windows, gives only this user access to the file (T46)', async () => {
-    const restricted: string[] = [];
-    const store = createFileStore({
-      path: join(dir, 'secrets.json'),
-      server: SERVER,
-      platform: 'win32',
-      restrictAccess: (file) => {
-        restricted.push(file);
-        return Promise.resolve();
-      },
-    });
-    await store.set('data-key', 'key');
-    expect(restricted).toHaveLength(1);
-    // The temporary file, before it takes the real name (the shared atomic write's name, T62).
-    expect(restricted[0]).toMatch(/\.secrets\.json\.agentnomad-tmp-[0-9a-f]+$/);
-  });
-
-  it('saves a whole login with one file write (PERF-02)', async () => {
-    const restricted: string[] = [];
-    const store = createFileStore({
-      path: join(dir, 'secrets.json'),
-      server: SERVER,
-      platform: 'win32',
-      restrictAccess: (file) => {
-        restricted.push(file);
-        return Promise.resolve();
-      },
-    });
-    await store.setMany({ 'session-token': 'token', 'data-key': 'key' });
-    expect(restricted).toHaveLength(1);
-    expect(await store.get('session-token')).toBe('token');
-    expect(await store.get('data-key')).toBe('key');
   });
 
   it('falls back when the keychain fails to read (e.g. locked, no D-Bus)', async () => {

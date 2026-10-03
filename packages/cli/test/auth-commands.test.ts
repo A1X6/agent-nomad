@@ -10,9 +10,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { memorySecretStore, recordingReporter, scriptedPrompter } from './fakes.ts';
+import { fakeApi, memorySecretStore, recordingReporter, scriptedPrompter } from './fakes.ts';
 
 import {
   ApiError,
@@ -25,6 +25,7 @@ import {
   loadZxcvbnChecker,
   NetworkError,
   NO_RECOVERY_WARNING,
+  OutcomeUnknownError,
   PromptCancelledError,
   SessionExpiredError,
   withSession,
@@ -888,5 +889,126 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
       expect(keys.handedOut).toEqual([]);
       expect(server.users.has('ahmed')).toBe(true);
     });
+  });
+});
+
+describe('agentnomad account delete, logged in with a local state', () => {
+  let dir: string;
+  let state: LocalState;
+  let dataKey: Uint8Array;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'agentnomad-account-'));
+    state = createLocalState({
+      path: join(dir, 'state.json'),
+      server: 's',
+      platform: process.platform,
+    });
+    dataKey = realCrypto.randomBytes(32);
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  function account(
+    answers: unknown[],
+    deleteAccount: () => Promise<void>,
+    stdin?: string,
+    saved = new Map<SecretName, string>(),
+  ) {
+    const script = scriptedPrompter(answers);
+    const { reporter, lines } = recordingReporter();
+    const secrets = memorySecretStore({ loggedIn: dataKey, saved });
+    const sent: string[] = [];
+    const api = fakeApi({
+      auth: {
+        prelogin: () =>
+          Promise.resolve({
+            kdfSalt: Buffer.alloc(16, 1).toString('base64'),
+            kdfParams: {
+              algorithm: 'argon2id',
+              version: 19,
+              memoryKiB: 19_456,
+              passes: 2,
+              parallelism: 1,
+            },
+          }),
+        deleteAccount: (request) => {
+          sent.push(request.authKey);
+          return deleteAccount();
+        },
+      },
+    });
+    const handlers = createAuthCommands({
+      prompter: script.prompter,
+      reporter,
+      api: () => api,
+      secrets: () => Promise.resolve(secrets),
+      crypto: () => Promise.resolve(realCrypto),
+      passwordChecker: () => Promise.reject(new Error('not used')),
+      deviceName: 'pc',
+      localState: () => state,
+      ...(stdin !== undefined && { readPasswordStdin: () => Promise.resolve(stdin) }),
+    });
+    return { run: handlers.accountDelete, asked: script.asked, lines, saved, sent };
+  }
+
+  it('asks for the username and password, deletes, and cleans up this PC', async () => {
+    await state.setRevision('claude-code', 'global', 3);
+    const t = account(['ahmed', 'plum-garage-violin-47'], () => Promise.resolve());
+    await t.run({ yes: true, passwordStdin: false });
+    expect(t.asked).toEqual(['Type your username to confirm', 'Password']);
+    expect(Buffer.from(t.sent[0] ?? '', 'base64')).toHaveLength(32);
+    expect(t.sent[0]).not.toContain('plum');
+    expect(t.saved.size).toBe(0);
+    expect(await state.knownRevisions()).toEqual({});
+    expect(t.lines[0]).toContain('cannot be undone');
+    expect(t.lines.at(-1)).toContain('Account "ahmed" and all its saved setups were deleted');
+  });
+
+  it('from a script: username and password by flags, confirmed with --yes', async () => {
+    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
+    await t.run({ yes: true, passwordStdin: true, username: 'ahmed' });
+    expect(t.asked).toEqual([]);
+    expect(t.sent).toHaveLength(1);
+    expect(t.saved.size).toBe(0);
+  });
+
+  it('from a script without --yes: refuses, deleting nothing', async () => {
+    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
+    await expect(t.run({ yes: false, passwordStdin: true, username: 'ahmed' })).rejects.toThrow(
+      'Nothing was deleted. Add --yes to confirm deleting the account.',
+    );
+    expect(t.sent).toEqual([]);
+    expect(t.saved.has('session-token')).toBe(true);
+  });
+
+  it('a wrong password deletes nothing and keeps the login', async () => {
+    const t = account(['ahmed', 'wrong'], () =>
+      Promise.reject(new ApiError(401, 'unauthorized', 'Wrong password')),
+    );
+    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toThrow(
+      'Wrong username or password. Nothing was deleted.',
+    );
+    expect(t.saved.has('session-token')).toBe(true);
+  });
+
+  it('an ended session clears the login and says to log in again', async () => {
+    const t = account(['ahmed', 'pw'], () =>
+      Promise.reject(new ApiError(401, 'unauthorized', 'Log in again: no valid session')),
+    );
+    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toThrow(
+      'Your session has expired',
+    );
+    expect(t.saved.has('session-token')).toBe(false);
+  });
+
+  it('a lost answer says the result is unknown and keeps everything here', async () => {
+    const t = account(['ahmed', 'pw'], () =>
+      Promise.reject(new OutcomeUnknownError('delete-account')),
+    );
+    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toBeInstanceOf(
+      OutcomeUnknownError,
+    );
+    expect(t.saved.has('session-token')).toBe(true);
   });
 });
