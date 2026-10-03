@@ -875,9 +875,15 @@ describe('restorer: per-OS fixes', () => {
   });
 
   it.runIf(posix)('makes scripts runnable on macOS and Linux, even from a Windows PC', async () => {
+    // The hooks run both scripts, so they are restored (T55).
+    const hooks = [
+      { type: 'command', command: '~/.claude/hooks/a.sh' },
+      { type: 'command', command: 'sh ~/.claude/hooks/b.sh' },
+    ];
     await restorer().restorer.restore(
       { kind: 'global' },
       [
+        file('settings.json', JSON.stringify({ hooks: { Stop: [{ hooks }] } })),
         file('hooks/a.sh', 'echo a\n', true),
         file('hooks/b.sh', '#!/bin/sh\necho b\n'),
         file('CLAUDE.md', 'x'),
