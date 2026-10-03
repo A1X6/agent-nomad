@@ -16,7 +16,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { collectedJson } from './fakes.ts';
+import { collected, collectedJson, fakeEnvWriter, recordingReporter } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
   isRedirectVariable,
@@ -94,11 +94,7 @@ describe('finding ${VAR} references', () => {
   });
 
   it('ignores files that are not JSON', () => {
-    const broken = {
-      path: '.mcp.json',
-      content: new TextEncoder().encode('{ nope'),
-      executable: false,
-    };
+    const broken = collected('.mcp.json', '{ nope');
     expect(scanEnvReferences([broken], CLAUDE_ENV_REFERENCES).variables).toEqual([]);
   });
 });
@@ -443,23 +439,13 @@ describe('restoring values on pull', () => {
     return { added: plan.toAdd, alreadySet: plan.alreadySet, declined: plan.declined };
   }
 
-  function recordingWriter() {
-    const written: Record<string, string>[] = [];
-    const writer: EnvWriter = {
-      where: '~/.zshrc',
-      current: () => Promise.resolve(new Map()),
-      write: (variables) => {
-        written.push({ ...variables });
-        return Promise.resolve({ backup: '/home/a/.zshrc.agentnomad-backup-x' });
-      },
-    };
-    return { writer, written };
-  }
+  const recordingWriter = () =>
+    fakeEnvWriter({ where: '~/.zshrc', backup: '/home/a/.zshrc.agentnomad-backup-x' });
   const section = { variables: { GITHUB_TOKEN: 'ghp_secret', API_KEY: 'key-1' } };
 
   it('adds only missing variables, after asking, and never shows values', async () => {
     const { writer, written } = recordingWriter();
-    const lines: string[] = [];
+    const { reporter, lines } = recordingReporter({ levels: false });
     const result = await restoreEnvValues({
       isRedirectVariable,
       section,
@@ -467,11 +453,7 @@ describe('restoring values on pull', () => {
       writer,
       agentName: 'Other Agent',
       prompter: { confirm: () => Promise.resolve(true) },
-      reporter: {
-        info: (m) => lines.push(m),
-        success: (m) => lines.push(m),
-        warn: (m) => lines.push(m),
-      },
+      reporter,
     });
     expect(result).toEqual({ added: ['GITHUB_TOKEN'], alreadySet: ['API_KEY'], declined: false });
     expect(written).toEqual([{ GITHUB_TOKEN: 'ghp_secret' }]);
@@ -489,7 +471,7 @@ describe('restoring values on pull', () => {
       env: {},
       writer,
       prompter: { confirm: () => Promise.resolve(false) },
-      reporter: { info: () => undefined, success: () => undefined, warn: () => undefined },
+      reporter: recordingReporter().reporter,
     });
     expect(result.declined).toBe(true);
     expect(written).toEqual([]);
@@ -506,7 +488,7 @@ describe('restoring values on pull', () => {
         current: () => Promise.resolve(new Map(Object.entries(section.variables))),
       },
       prompter: { confirm: () => Promise.reject(new Error('must not ask')) },
-      reporter: { info: () => undefined, success: () => undefined, warn: () => undefined },
+      reporter: recordingReporter().reporter,
     });
     expect(result).toEqual({ added: [], alreadySet: ['API_KEY', 'GITHUB_TOKEN'], declined: false });
     expect(written).toEqual([]);
@@ -520,16 +502,14 @@ describe('restoring values on pull', () => {
       env: {},
       writer: { ...writer, current: () => Promise.resolve(new Map([['API_KEY', 'older']])) },
       prompter: { confirm: () => Promise.resolve(true) },
-      reporter: { info: () => undefined, success: () => undefined, warn: () => undefined },
+      reporter: recordingReporter().reporter,
     });
     expect(result.added).toEqual(['API_KEY', 'GITHUB_TOKEN']);
     expect(written).toEqual([section.variables]);
   });
 
   it('--yes alone never adds a variable that sends traffic elsewhere (T56)', async () => {
-    const lines: string[] = [];
-    const push = (m: string) => lines.push(m);
-    const reporter = { info: push, success: push, warn: push };
+    const { reporter, lines } = recordingReporter({ levels: false });
     const redirects = {
       variables: { API_KEY: 'key-1', HTTPS_PROXY: 'http://p', ANTHROPIC_BASE_URL: 'https://x' },
     };
@@ -588,11 +568,7 @@ describe('restoring values on pull', () => {
     const loaders = {
       variables: { API_KEY: 'key-1', NODE_OPTIONS: '--require /tmp/x.js', PROMPT_COMMAND: 'x' },
     };
-    const quiet = () => {
-      const lines: string[] = [];
-      const push = (m: string) => lines.push(m);
-      return { lines, reporter: { info: push, success: push, warn: push } };
-    };
+    const quiet = () => recordingReporter({ levels: false });
 
     it('--yes adds the others but never these, and says how to accept them', async () => {
       const { writer, written } = recordingWriter();
@@ -673,7 +649,7 @@ describe('agentnomad env', () => {
   });
 
   async function run(env: Record<string, string>, cwd = '/work/app') {
-    const lines: string[] = [];
+    const { reporter, lines } = recordingReporter({ levels: false });
     await createEnvCommand({
       registry: () => ({
         list: () => [
@@ -688,11 +664,7 @@ describe('agentnomad env', () => {
         ],
         get: () => undefined,
       }),
-      reporter: {
-        info: (m) => lines.push(m),
-        success: (m) => lines.push(m),
-        warn: (m) => lines.push(m),
-      },
+      reporter,
       env,
       cwd,
       homedir: '/h',

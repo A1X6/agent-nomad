@@ -5,7 +5,6 @@
  * bundle cannot write where it should not.
  */
 import { BundlePathSchema } from '@agentnomad/contracts';
-import { windowsNameProblem } from '@agentnomad/core';
 
 import { ENV_BUNDLE_PATH } from '../../env/env-section.ts';
 import { RESERVED_DIR } from '../adapter.ts';
@@ -34,8 +33,6 @@ import {
   PROJECT_NEVER_SYNCED,
   PROJECT_ROOT_FILES,
 } from './project-paths.ts';
-
-export { windowsNameProblem };
 
 /** Where a bundle entry belongs, or why it is refused. */
 export type RestoreDestination =

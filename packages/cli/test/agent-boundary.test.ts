@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 
@@ -25,7 +25,9 @@ import { createLocalState } from '../src/state/local-state.ts';
 import { AnswerNeededError, createNoTerminalPrompter } from '../src/ui/no-terminal-prompter.ts';
 import type { Prompter } from '../src/ui/prompter.ts';
 import {
+  exists,
   fakeBundleServer,
+  fakeEnvWriter,
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
@@ -52,12 +54,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
-
-const exists = (path: string) =>
-  stat(path).then(
-    () => true,
-    () => false,
-  );
 
 /** What the Example CLI adapter saw, for the assertions. */
 interface Seen {
@@ -217,11 +213,7 @@ function depsFor(
     crypto: () => Promise.resolve(crypto),
     codec: createGzipBundleCodec(),
     localState: () => state,
-    envWriter: () => ({
-      where: 'test profile',
-      current: () => Promise.resolve(new Map<string, string>()),
-      write: () => Promise.resolve({ backup: null }),
-    }),
+    envWriter: () => fakeEnvWriter().writer,
     env: {},
     cwd: join(pc.home, 'code'),
     homedir: pc.home,
@@ -328,18 +320,11 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
     ]);
 
     const b = machine('desktop');
-    const written: Record<string, string>[] = [];
+    const { writer, written } = fakeEnvWriter();
     const pulling = depsFor(b, server, createNoTerminalPrompter(), newSeen());
     await createPullCommand({
       ...pulling.deps,
-      envWriter: () => ({
-        where: 'test profile',
-        current: () => Promise.resolve(new Map<string, string>()),
-        write: (variables) => {
-          written.push({ ...variables });
-          return Promise.resolve({ backup: null });
-        },
-      }),
+      envWriter: () => writer,
     }).pull({ global: true, yes: true });
     expect(written).toEqual([{ EXAMPLE_TOKEN: 'token-1' }]);
   });

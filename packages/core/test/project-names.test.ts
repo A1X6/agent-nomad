@@ -58,7 +58,9 @@ describe('projectScopeKey', () => {
   });
 
   it('treats the same name typed on different OSes as equal (Unicode NFC)', () => {
-    expect(projectScopeKey(crypto, dataKey, 'café')).toBe(projectScopeKey(crypto, dataKey, 'café'));
+    expect(projectScopeKey(crypto, dataKey, 'caf\u00e9')).toBe(
+      projectScopeKey(crypto, dataKey, 'cafe\u0301'),
+    );
   });
 
   it('is case-sensitive, like the name the user typed', () => {

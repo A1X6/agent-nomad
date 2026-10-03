@@ -18,7 +18,6 @@ import {
   createAgentRegistry,
   createLocalState,
   createSetupCommands,
-  formatSize,
   NotLoggedInError,
   setupLabel,
   timeAgo,
@@ -254,13 +253,5 @@ describe('formatting', () => {
     ['2026-01-02T12:00:00Z', '2026-01-02'],
   ])('%s is %s', (iso, text) => {
     expect(timeAgo(iso, NOW)).toBe(text);
-  });
-
-  it('sizes', () => {
-    expect([formatSize(900), formatSize(5120), formatSize(2.5 * 1024 * 1024)]).toEqual([
-      '900 B',
-      '5 KB',
-      '2.5 MB',
-    ]);
   });
 });

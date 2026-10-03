@@ -611,8 +611,13 @@ only gets the pooled one.
 
 # Part 2 · File reference
 
-Paths are relative to each package's `src/`. Tests mirror these files under each package's
-`test/`.
+Paths are relative to each package's `src/`. A module's tests are in each package's `test/`,
+in the file named after the module (with `claude-code-` in front for the Claude Code adapter's
+files, e.g. `agents/claude-code/restore-rules.ts` → `claude-code-restore-rules.test.ts`), or
+after the folder for a folder of small modules (`ui.test.ts`, `system.test.ts`,
+`secret-store.test.ts`). Tests that run a whole command or the API through several modules
+are named after what they run (`pull-command.test.ts`, `bundle-routes.test.ts`,
+`limits-and-logs.test.ts`, `agent-boundary.test.ts`).
 
 ## `packages/contracts/src`
 

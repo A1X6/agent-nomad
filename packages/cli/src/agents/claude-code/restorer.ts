@@ -7,6 +7,7 @@ import {
   createPathResolver,
   selectMergeStrategy,
   sourceOsOf,
+  windowsNameProblem,
   type MergeChoices,
   type PlannedWrite,
 } from '@agentnomad/core';
@@ -34,12 +35,7 @@ import {
 import { pathWords, settingsCommands } from './settings-commands.ts';
 import { CLAUDE_JSON_BUNDLE_PATH, extensionOf } from './global-paths.ts';
 import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
-import {
-  globalDestination,
-  projectDestination,
-  type RestoreDestination,
-  windowsNameProblem,
-} from './restore-rules.ts';
+import { globalDestination, projectDestination, type RestoreDestination } from './restore-rules.ts';
 import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
 

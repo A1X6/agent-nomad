@@ -1,10 +1,17 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { collected, recordingReporter, scriptedPrompter, writeTestFile } from './fakes.ts';
+import {
+  collected,
+  readJson,
+  readText,
+  recordingReporter,
+  scriptedPrompter,
+  writeTestFile,
+} from './fakes.ts';
 import {
   AnswerNeededError,
   createClaudeCodeAdapter,
@@ -24,9 +31,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
-
-const read = (path: string) => readFile(path, 'utf8');
-const readJson = async (path: string) => JSON.parse(await read(path)) as Record<string, unknown>;
 
 /** Answers every conflict question the same way. */
 const answer = (choice: ConflictChoice) => () => Promise.resolve(choice);
@@ -89,7 +93,7 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     const planned = await t.plan();
     expect(t.asked).toEqual([QUESTION]);
     const report = await planned.restore(answer('merge'), {});
-    expect(await read(join(home, '.claude.json'))).toBe('{}');
+    expect(await readText(join(home, '.claude.json'))).toBe('{}');
     expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
     expect(t.asked).toHaveLength(1);
   });
@@ -100,7 +104,7 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     const planned = await t.plan({ assumeYes: true });
     expect(t.asked).toEqual([]);
     const report = await planned.restore(answer('merge'), {});
-    expect(await read(join(home, '.claude.json'))).toBe('{}');
+    expect(await readText(join(home, '.claude.json'))).toBe('{}');
     expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
   });
 
@@ -119,7 +123,7 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     await writeTestFile(join(home, '.claude.json'), '{}');
     const t = planStep([true], [], createNoTerminalPrompter());
     await expect(t.plan()).rejects.toBeInstanceOf(AnswerNeededError);
-    expect(await read(join(home, '.claude.json'))).toBe('{}');
+    expect(await readText(join(home, '.claude.json'))).toBe('{}');
   });
 });
 
@@ -137,11 +141,9 @@ describe('Claude Code adapter', () => {
   });
 
   it('detects, collects global and project setups, and restores them', async () => {
-    await mkdir(join(home, '.claude'), { recursive: true });
-    await writeFile(join(home, '.claude', 'CLAUDE.md'), 'global rules');
+    await writeTestFile(join(home, '.claude', 'CLAUDE.md'), 'global rules');
     const project = join(home, 'app');
-    await mkdir(project);
-    await writeFile(join(project, 'CLAUDE.md'), 'project rules');
+    await writeTestFile(join(project, 'CLAUDE.md'), 'project rules');
 
     const claude = adapter();
     expect(await claude.detector.detect()).toEqual({
@@ -169,8 +171,7 @@ describe('Claude Code adapter', () => {
 
   it('uses CLAUDE_CONFIG_DIR for every part', async () => {
     const custom = join(home, 'work-claude');
-    await mkdir(custom);
-    await writeFile(join(custom, 'CLAUDE.md'), 'custom');
+    await writeTestFile(join(custom, 'CLAUDE.md'), 'custom');
     const claude = adapter({ PATH: '', CLAUDE_CONFIG_DIR: custom });
     expect((await claude.detector.detect()).baseDir).toBe(custom);
     const files = await claude.collector.collect({ kind: 'global' }, { includeMemory: false });

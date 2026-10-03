@@ -1,0 +1,154 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { writeTestFile } from './fakes.ts';
+import {
+  createClaudeCodeProjectCollector,
+  findAutoMemory,
+  projectDirName,
+  repositoryRoot,
+  type CollectedFile,
+} from '../src/index.ts';
+
+let root: string;
+let home: string;
+let base: string;
+let project: string;
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), 'agentnomad-auto-memory-'));
+  home = join(root, 'home');
+  base = join(home, '.claude');
+  project = join(root, 'work', 'my-app');
+  await mkdir(base, { recursive: true });
+  await mkdir(project, { recursive: true });
+});
+afterEach(async () => {
+  await rm(root, { recursive: true, force: true });
+});
+
+const options = (env: Record<string, string> = {}) => ({
+  baseDir: base,
+  homedir: home,
+  platform: process.platform,
+  env,
+});
+
+/** The project collector, which takes auto memory as `.agentnomad/auto-memory/`. */
+function collect(includeMemory = false) {
+  return createClaudeCodeProjectCollector(options()).collect(
+    { kind: 'project', projectDir: project },
+    { includeMemory },
+  );
+}
+const paths = (files: readonly CollectedFile[]) => files.map((file) => file.path);
+const text = (files: readonly CollectedFile[], path: string) =>
+  new TextDecoder().decode(files.find((file) => file.path === path)?.content);
+
+/** The folder Claude Code keeps this project's auto memory in. */
+const memoryDir = (repo = project) => join(base, 'projects', projectDirName(repo), 'memory');
+
+describe('auto memory location', () => {
+  it('names the folder like Claude Code: every non-letter or digit becomes -', () => {
+    expect(projectDirName('E:\\Projects\\agent-nomad')).toBe('E--Projects-agent-nomad');
+    expect(projectDirName('/home/ahmed/my_app.v2')).toBe('-home-ahmed-my-app-v2');
+  });
+
+  it('uses the repository root, so subfolders share one memory', async () => {
+    await mkdir(join(project, '.git'));
+    const sub = join(project, 'packages', 'api');
+    await mkdir(sub, { recursive: true });
+    expect(await repositoryRoot(sub, process.platform)).toBe(resolve(project));
+    expect(await findAutoMemory({ ...options(), projectDir: sub })).toEqual({
+      kind: 'folder',
+      dir: memoryDir(),
+    });
+  });
+
+  it('uses the main repository for a git worktree', async () => {
+    await mkdir(join(project, '.git', 'worktrees', 'feature'), { recursive: true });
+    await writeFile(join(project, '.git', 'worktrees', 'feature', 'commondir'), '../..\n');
+    const worktree = join(root, 'work', 'my-app-feature');
+    await writeTestFile(
+      join(worktree, '.git'),
+      `gitdir: ${join(project, '.git', 'worktrees', 'feature')}\n`,
+    );
+    expect(await repositoryRoot(worktree, process.platform)).toBe(resolve(project));
+  });
+
+  it('uses the project folder outside git', async () => {
+    expect(await repositoryRoot(project, process.platform)).toBe(resolve(project));
+  });
+
+  it('honours autoMemoryDirectory from the project settings', async () => {
+    await writeTestFile(
+      join(project, '.claude', 'settings.local.json'),
+      JSON.stringify({ autoMemoryDirectory: '~/notes/my-app-memory' }),
+    );
+    await writeTestFile(join(home, 'notes', 'my-app-memory', 'MEMORY.md'), 'custom');
+    expect(await findAutoMemory({ ...options(), projectDir: project })).toEqual({
+      kind: 'folder',
+      dir: join(home, 'notes', 'my-app-memory'),
+    });
+    expect(text(await collect(true), '.agentnomad/auto-memory/MEMORY.md')).toBe('custom');
+  });
+
+  it('takes only Markdown files from auto memory (T43)', async () => {
+    await writeTestFile(
+      join(project, '.claude', 'settings.local.json'),
+      JSON.stringify({ autoMemoryDirectory: '~/notes/my-app-memory' }),
+    );
+    await writeTestFile(join(home, 'notes', 'my-app-memory', 'MEMORY.md'), 'notes');
+    await writeTestFile(join(home, 'notes', 'my-app-memory', 'run.sh'), 'echo hi');
+    expect(paths(await collect(true)).filter((path) => path.includes('auto-memory'))).toEqual([
+      '.agentnomad/auto-memory/MEMORY.md',
+    ]);
+  });
+
+  it('never reads a memory folder that is a folder for keys (T43)', async () => {
+    await writeTestFile(
+      join(project, '.claude', 'settings.json'),
+      JSON.stringify({ autoMemoryDirectory: '~/.ssh' }),
+    );
+    await writeTestFile(join(home, '.ssh', 'notes.md'), 'secret');
+    expect(await findAutoMemory({ ...options(), projectDir: project })).toEqual({
+      kind: 'refused',
+      dir: join(home, '.ssh'),
+      reason: 'it is a folder for keys and logins',
+    });
+    expect(paths(await collect(true))).toEqual(['.claude/settings.json']);
+  });
+
+  it('skips a memory folder set in user settings, since every project shares it', async () => {
+    await writeTestFile(
+      join(base, 'settings.json'),
+      JSON.stringify({ autoMemoryDirectory: '~/all-memory' }),
+    );
+    await writeTestFile(join(home, 'all-memory', 'MEMORY.md'), 'shared');
+    expect((await findAutoMemory({ ...options(), projectDir: project })).kind).toBe('shared');
+    expect(paths(await collect(true))).toEqual([]);
+  });
+
+  it('honours CLAUDE_CODE_PROJECT_DIR_NAME beside CLAUDE_CONFIG_DIR', async () => {
+    const env = { CLAUDE_CONFIG_DIR: base, CLAUDE_CODE_PROJECT_DIR_NAME: 'work' };
+    expect(await findAutoMemory({ ...options(env), projectDir: project })).toEqual({
+      kind: 'folder',
+      dir: join(base, 'projects', 'work', 'memory'),
+    });
+  });
+
+  it('finds the hashed folder of a very long path, or reports it unknown', async () => {
+    const long = join(root, 'x'.repeat(220));
+    await mkdir(long, { recursive: true });
+    const cut = projectDirName(resolve(long)).slice(0, 200);
+    expect((await findAutoMemory({ ...options(), projectDir: long })).kind).toBe('unknown');
+    await mkdir(join(base, 'projects', `${cut}-a1b2c3`), { recursive: true });
+    expect(await findAutoMemory({ ...options(), projectDir: long })).toEqual({
+      kind: 'folder',
+      dir: join(base, 'projects', `${cut}-a1b2c3`, 'memory'),
+    });
+  });
+});

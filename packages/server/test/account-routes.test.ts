@@ -7,8 +7,8 @@ import {
   deleteAccountRequest,
   errorCode,
   loginRequest,
+  putSetup,
   registerForToken,
-  sha256Hex,
 } from './support/fixtures.ts';
 
 /** Each test user has its own auth key (derived from their password in real life). */
@@ -31,18 +31,7 @@ const login = (username: string) =>
   loginRequest(t.app, username, authKeyOf(username), { deviceName: 'desktop' });
 
 async function pushGlobal(token: string): Promise<void> {
-  const body = bytes(64, 7);
-  const res = await t.app.request('/bundles/claude-code/global', {
-    method: 'PUT',
-    body,
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/octet-stream',
-      'x-an-expected-revision': '0',
-      'x-an-content-sha256': sha256Hex(body),
-      'x-an-format-version': '1',
-    },
-  });
+  const res = await putSetup(t.app, token, { expected: 0, body: bytes(64, 7) });
   expect(res.status).toBe(200);
 }
 

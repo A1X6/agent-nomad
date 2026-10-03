@@ -451,11 +451,7 @@ describe('agentnomad push', () => {
   });
 
   it('keeps binary files byte for byte', async () => {
-    const png = {
-      path: 'skills/logo.png',
-      content: new Uint8Array([0x89, 0x50, 0, 255, 1]),
-      executable: false,
-    };
+    const png = collected('skills/logo.png', new Uint8Array([0x89, 0x50, 0, 255, 1]));
     const t = setup(['global', false], { adapter: fakeAdapter({ global: [png] }) });
     await t.command.push(noFlags);
     const { bundle } = await received(t.server, { kind: 'global' });
