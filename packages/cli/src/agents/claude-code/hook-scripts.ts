@@ -8,6 +8,7 @@ import {
   homePathProblem,
   SCRIPT_EXTENSIONS,
 } from './global-paths.ts';
+import { PROJECT_NEVER_SYNCED } from './project-paths.ts';
 
 export interface HookScriptContext {
   readonly homedir: string;
@@ -63,6 +64,44 @@ export function hookScripts(settingsJson: string, context: HookScriptContext): H
       } else if (inHome !== null && homePathProblem(inHome) === null) {
         bundlePath = HOME_SCRIPTS_PREFIX + inHome;
       } else {
+        continue;
+      }
+      found.set(bundlePath, { nativePath, bundlePath });
+    }
+  }
+  return [...found.values()];
+}
+
+export interface ProjectHookScriptContext {
+  readonly projectDir: string;
+  readonly platform: NodeJS.Platform;
+}
+
+/**
+ * The scripts that the hooks and status line in a project's settings run, when they are
+ * inside the project: written as `$CLAUDE_PROJECT_DIR/...`, relative to the project (hooks
+ * start there) or as an absolute path inside it (T26). Bundle paths are project-relative.
+ * Push collects only these and pull writes a script outside `.claude/` only when it is one
+ * of these (DUP-03: one rule for both).
+ */
+export function projectHookScripts(
+  settingsJson: string,
+  context: ProjectHookScriptContext,
+): HookScript[] {
+  const path = context.platform === 'win32' ? win32 : posix;
+  const project =
+    /^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\}|%CLAUDE_PROJECT_DIR%)(?=[\\/]|$)/i;
+  const found = new Map<string, HookScript>();
+  for (const command of commandsInSettings(settingsJson)) {
+    for (const word of commandWords(command)) {
+      // Backslashes are separators on every OS: the bundle may come from Windows.
+      const expanded = word.replace(project, () => context.projectDir).replace(/\\/g, '/');
+      // The home folder, other variables and another OS's absolute paths are not in the project.
+      if (!path.isAbsolute(expanded) && /^([A-Za-z]:|\/|~|\$|%)/.test(expanded)) continue;
+      if (!SCRIPT_EXTENSIONS.has(path.extname(expanded).toLowerCase())) continue;
+      const nativePath = path.resolve(context.projectDir, expanded);
+      const bundlePath = bundlePathInside(path, context.projectDir, nativePath);
+      if (bundlePath === null || PROJECT_NEVER_SYNCED.some((entry) => under(bundlePath, entry))) {
         continue;
       }
       found.set(bundlePath, { nativePath, bundlePath });

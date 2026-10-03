@@ -393,7 +393,10 @@ compared, so a new `env` or `headersHelper` shows), files that commands here or 
 run (matched by path; any file that can run: a script extension, no extension, the executable
 bit or a `#!` line) and the scripts next to them, known tool settings (ccstatusline), and skill, command and subagent files with
 commands that run by themselves (`runnable-markdown.ts`: a `` !`command` `` placeholder, a
-` ```! ` block, frontmatter `hooks`). Commands written as instructions are never flagged.
+` ```! ` block at any indentation, as in a list item, frontmatter `hooks`; a fence closes
+only on the same character, at least as long). Commands written as instructions are never flagged. Hooks and MCP servers are read
+one by one: one that cannot be read is shown as unreadable (its JSON), never left out, and
+hides no other.
 The keys and names come from `reviewed-settings.ts`, each checked against Claude Code's
 settings reference. Declining skips the files that hold them. Saved environment values that make programs load
 code, or send programs' requests elsewhere (the redirect names above, such as `HTTPS_PROXY`
@@ -570,6 +573,9 @@ only gets the pooled one.
   the real ones. Everything is testable without a network, a terminal or a keychain.
 - **Contracts at every boundary.** API bodies, headers, the bundle, files read back from
   disk (`programs.json`, `plugins.json`, the env section) are all parsed with Zod.
+  `programs.json` and `plugins.json` are checked entry by entry with the schemas push also
+  checks before saving; pull names an entry it refuses, or a file it cannot read, and still
+  offers the rest. `system/json.ts` (`parseJsonWith`) returns why a file could not be read.
 - **Open for extension.** New agents, merge strategies, storage (Postgres → R2) or rate
   limiters plug in behind interfaces; nothing existing changes.
 - **Formats never change in place.** Bundle format, key labels and hash prefixes carry a
@@ -681,6 +687,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `system/files.ts`       | `writeFileAtomically` (temporary file, then rename; mode, folder mode, following a link, a step before the rename), `writeTargetOf` and `isMissing`. |
 | `system/paths.ts`       | `samePath` and `pathKey`: folders compared per OS (Windows ignores case).                                                                            |
+| `system/json.ts`        | `parseJsonWith`: JSON text or bytes checked with a schema, the value or why it could not be read.                                                    |
 | `system/run-program.ts` | `runProgram`: one `execFile` wrapper (no shell, timeout, never rejects) for every program the CLI starts.                                            |
 
 ### `push/`, `pull/`, `commands/`: the setup commands
@@ -714,31 +721,31 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `agents/claude-code/`: the Claude Code adapter
 
-| File                                  | Responsible for                                                                                                                                                      |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude-code-adapter.ts`              | Assembles the adapter from the parts below.                                                                                                                          |
-| `claude-code-paths.data.ts`           | **The data file:** every list of what to sync, skip or refuse, schema-checked.                                                                                       |
-| `global-paths.ts`, `project-paths.ts` | Named views of the data file for the global and project collectors.                                                                                                  |
-| `detector.ts`                         | Finding `claude` and its version; the base folder (`CLAUDE_CONFIG_DIR`). `findExecutable` takes only `ExecutableLookupSystem` (platform, home, env, `isExecutable`). |
-| `file-gathering.ts`                   | Reading files and folders into bundle entries.                                                                                                                       |
-| `settings-commands.ts`                | Parsing settings and command lines: the commands a `settings.json` runs, their words and program. No file access.                                                    |
-| `global-collector.ts`                 | Collecting the global setup, `~/.claude.json` keys, hook scripts, tool settings, programs, plugins.                                                                  |
-| `project-collector.ts`                | Collecting a project's setup and, when chosen, its auto memory.                                                                                                      |
-| `hook-scripts.ts`                     | Which scripts the hooks and status line run: what push collects and pull allows back.                                                                                |
-| `account-skills.ts`                   | claude.ai skills (T42): reading `skills/synced/` (only `creatorType: user`), saving a copy, and what pull may add as local skills.                                   |
-| `auto-memory.ts`                      | Finding a project's auto memory folder the way Claude Code does.                                                                                                     |
-| `restore-rules.ts`                    | Where each bundle entry may go, or why it is refused (including Windows name rules).                                                                                 |
-| `restorer.ts`                         | Writing a setup: atomic writes, permissions, line endings, conflicts; what pull asks first.                                                                          |
-| `claude-json-merge.ts`                | The `~/.claude.json` merge: only MCP servers and preferences, a backup first, never while Claude Code runs.                                                          |
-| `command-review.ts`                   | Finding hooks, status line, MCP servers and the scripts they run, and which are new or changed on this PC.                                                           |
-| `reviewed-settings.ts`                | The settings keys and `env` names the review watches (command, loosening and redirect settings); the drift watch list.                                               |
-| `running-claude.ts`                   | Is Claude Code (or the Claude app) running (command lines)?                                                                                                          |
-| `plugins.ts`                          | Reading installed plugins and marketplaces into `.agentnomad/plugins.json`.                                                                                          |
-| `plugin-sync.ts`                      | Reinstalling what is missing with `claude plugin` commands: the questions, then the installs.                                                                        |
-| `programs.ts`                         | Finding the programs hooks start and whether npm installed them.                                                                                                     |
-| `after-restore.ts`                    | Pull's follow-up: plugins, missing programs and claude.ai skills; asked in the plan step, installed after writing.                                                   |
-| `managed-settings.ts`                 | Detecting organization-managed settings per OS (never synced) and explaining what they block.                                                                        |
-| `unknown-files.ts`                    | Reporting files in Claude Code's folder that the data file does not know.                                                                                            |
+| File                                  | Responsible for                                                                                                                                                                |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `claude-code-adapter.ts`              | Assembles the adapter from the parts below.                                                                                                                                    |
+| `claude-code-paths.data.ts`           | **The data file:** every list of what to sync, skip or refuse, schema-checked.                                                                                                 |
+| `global-paths.ts`, `project-paths.ts` | Named views of the data file for the global and project collectors.                                                                                                            |
+| `detector.ts`                         | Finding `claude` and its version; the base folder (`CLAUDE_CONFIG_DIR`). `findExecutable` takes only `ExecutableLookupSystem` (platform, home, env, `isExecutable`).           |
+| `file-gathering.ts`                   | Reading files and folders into bundle entries.                                                                                                                                 |
+| `settings-commands.ts`                | Parsing settings and command lines: the commands a `settings.json` runs (hooks read one by one, so a malformed one hides no other), their words and program. No file access.   |
+| `global-collector.ts`                 | Collecting the global setup, `~/.claude.json` keys, hook scripts, tool settings, programs, plugins.                                                                            |
+| `project-collector.ts`                | Collecting a project's setup and, when chosen, its auto memory.                                                                                                                |
+| `hook-scripts.ts`                     | Which scripts the hooks and status line run, for the global setup and for a project: what push collects and pull allows back (one rule for both).                              |
+| `account-skills.ts`                   | claude.ai skills (T42): reading `skills/synced/` (only `creatorType: user`), saving a copy, and what pull may add as local skills.                                             |
+| `auto-memory.ts`                      | Finding a project's auto memory folder the way Claude Code does.                                                                                                               |
+| `restore-rules.ts`                    | Where each bundle entry may go, or why it is refused (including Windows name rules).                                                                                           |
+| `restorer.ts`                         | Writing a setup: atomic writes, permissions, line endings, conflicts; what pull asks first.                                                                                    |
+| `claude-json-merge.ts`                | The `~/.claude.json` merge: only MCP servers and preferences, a backup first, never while Claude Code runs; `ClaudeJsonError`.                                                 |
+| `command-review.ts`                   | Finding hooks, status line, MCP servers and the scripts they run, and which are new or changed on this PC. An entry that cannot be read is shown as unreadable.                |
+| `reviewed-settings.ts`                | The settings keys and `env` names the review watches (command, loosening and redirect settings); the drift watch list.                                                         |
+| `running-claude.ts`                   | Is Claude Code (or the Claude app) running (command lines)?                                                                                                                    |
+| `plugins.ts`                          | Reading installed plugins and marketplaces into `.agentnomad/plugins.json`; the entry schemas push and pull both check; the one reader of `installed_plugins.json`.            |
+| `plugin-sync.ts`                      | Reinstalling what is missing with `claude plugin` commands: the questions (`askPluginSync`), then the installs (`installPlugins`); `createProgramCli` runs `claude` and `npm`. |
+| `programs.ts`                         | Finding the programs hooks start and whether npm installed them; the `programs.json` entry schema push and pull both check.                                                    |
+| `after-restore.ts`                    | Pull's follow-up: plugins, missing programs and claude.ai skills; asked in the plan step, installed after writing.                                                             |
+| `managed-settings.ts`                 | Detecting organization-managed settings per OS (never synced) and explaining what they block.                                                                                  |
+| `unknown-files.ts`                    | Reporting files in Claude Code's folder that the data file does not know.                                                                                                      |
 
 ## `packages/server/src`
 

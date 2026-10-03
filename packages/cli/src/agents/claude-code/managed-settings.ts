@@ -3,6 +3,7 @@ import { posix, win32 } from 'node:path';
 
 import * as z from 'zod';
 
+import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { runProgram } from '../../system/run-program.ts';
 
 /**
@@ -71,12 +72,7 @@ export function managedSettingsDir(
 
 function keysOf(text: string | null): string[] {
   if (text === null) return [];
-  try {
-    const parsed = z.record(z.string(), z.unknown()).safeParse(JSON.parse(text));
-    return parsed.success ? Object.keys(parsed.data) : [];
-  } catch {
-    return [];
-  }
+  return Object.keys(valueOrNull(parseJsonWith(z.record(z.string(), z.unknown()), text)) ?? {});
 }
 
 /** Finds every managed settings source on this PC and which policy keys they set. */

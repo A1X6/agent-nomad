@@ -21,7 +21,7 @@ import type {
   ScopeTarget,
 } from '../adapter.ts';
 import { writeFileAtomically } from '../../system/files.ts';
-import { hookScripts } from './hook-scripts.ts';
+import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { reviewRunnable } from './command-review.ts';
 import {
@@ -35,7 +35,6 @@ import { CLAUDE_JSON_BUNDLE_PATH, extensionOf } from './global-paths.ts';
 import {
   globalDestination,
   projectDestination,
-  projectHookScripts,
   type RestoreDestination,
   windowsNameProblem,
 } from './restore-rules.ts';
@@ -268,12 +267,19 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           }
         };
       const ask = stopping(onConflict);
-      const projectScripts = projectHookScripts(
-        incoming
-          .filter((entry) =>
-            ['.claude/settings.json', '.claude/settings.local.json'].includes(entry.path),
-          )
-          .map((entry) => new TextDecoder().decode(entry.content)),
+      const projectScripts = new Set(
+        target.kind === 'project'
+          ? incoming
+              .filter((entry) =>
+                ['.claude/settings.json', '.claude/settings.local.json'].includes(entry.path),
+              )
+              .flatMap((entry) =>
+                projectHookScripts(new TextDecoder().decode(entry.content), {
+                  projectDir: target.projectDir,
+                  platform: options.platform,
+                }).map((script) => script.bundlePath),
+              )
+          : [],
       );
       const settings = incoming.find((entry) => entry.path === 'settings.json');
       const globalScripts = new Set(

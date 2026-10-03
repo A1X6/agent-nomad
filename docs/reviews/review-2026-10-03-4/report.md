@@ -66,7 +66,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### BUG-01 · Medium · Push saves plugins and programs that pull's stricter schema refuses whole, and pull says nothing
 
-- [ ] **Where:** push side, unchecked: `packages/cli/src/agents/claude-code/plugins.ts:93-105` (`marketplaceAddArgument` accepts any `https://` or `git@` string), `:156` (plugin id check looser than pull's), `packages/cli/src/agents/claude-code/global-collector.ts:169` (written with no schema check), `packages/cli/src/agents/claude-code/settings-commands.ts:73` (`programOf` accepts names starting with `.`, `_` or `-`). Pull side, strict and silent: `packages/cli/src/agents/claude-code/plugins.ts:37-59` (`PluginManifestSchema`: `add` refuses `%`, `&`, `;`; ids must start with a letter or digit), `packages/cli/src/agents/claude-code/after-restore.ts:37-49` (programs schema), `:51-64` (`readJson` returns `null` on any failure), `:97-98` and `:129-130` (`null` means "nothing to do", no message).
+- [x] **Where:** push side, unchecked: `packages/cli/src/agents/claude-code/plugins.ts:93-105` (`marketplaceAddArgument` accepts any `https://` or `git@` string), `:156` (plugin id check looser than pull's), `packages/cli/src/agents/claude-code/global-collector.ts:169` (written with no schema check), `packages/cli/src/agents/claude-code/settings-commands.ts:73` (`programOf` accepts names starting with `.`, `_` or `-`). Pull side, strict and silent: `packages/cli/src/agents/claude-code/plugins.ts:37-59` (`PluginManifestSchema`: `add` refuses `%`, `&`, `;`; ids must start with a letter or digit), `packages/cli/src/agents/claude-code/after-restore.ts:37-49` (programs schema), `:51-64` (`readJson` returns `null` on any failure), `:97-98` and `:129-130` (`null` means "nothing to do", no message).
 - **Problem:** The push side and the pull side check the same file with different rules. A marketplace saved from a `url` source with a percent-encoded path or a query string (`https://host/my%20market.json`, `…?a=1&b=2`) is saved by push; on pull `PluginManifestSchema` rejects the **whole** `plugins.json`, so not one plugin is offered and no warning is printed. Verified: plain URL `true`, `%20` `false`, `&` `false`. The same holds for a plugin id such as `.x@m` (push regex `[A-Za-z0-9._-]+@…` vs pull `[A-Za-z0-9][…]*@…`) and for a program named `_tool` in `programs.json`.
 - **Why it matters:** A user's plugins silently fail to come back on the new PC, and nothing tells them why. Refusing such URLs on pull is right (they reach a command line); the bug is that push saves them and pull hides the refusal.
 - **Fix:** Export the entry schemas (marketplace, plugin, program) and use them on both sides. On push, check each entry and move failures into the manifest's `skipped` list (push already reports `skipped`, e.g. "its marketplace is a local folder"). On pull, when `.agentnomad/plugins.json` or `programs.json` is present but unreadable, warn ("Saved plugins could not be read: …") instead of returning `nothingToDo` silently. Optionally parse per entry so one bad entry does not drop the rest.
@@ -84,7 +84,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### BUG-03 · Low · `installed_plugins.json` is read twice with different rules for "this project"
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/plugin-sync.ts:57-88` (its own schema; `install.projectPath !== projectDir` at `:83`); `packages/cli/src/agents/claude-code/plugins.ts:71-81` (`InstalledPluginsSchema`) and `:140-145` (uses `samePath`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/plugin-sync.ts:57-88` (its own schema; `install.projectPath !== projectDir` at `:83`); `packages/cli/src/agents/claude-code/plugins.ts:71-81` (`InstalledPluginsSchema`) and `:140-145` (uses `samePath`)
 - **Problem:** Push decides which project plugins belong to a project with `samePath` (case-insensitive on Windows, normalized). Pull's "is it already installed here?" check uses plain string equality. On Windows, the same folder written as `e:\projects\app` by one and `E:\Projects\app` by the other (the current folder's drive-letter case depends on how the shell was started) counts as "not installed".
 - **Why it matters:** Pull then offers to reinstall project plugins that are already there, on every pull, and runs `claude plugin install` again. Two readers of one file will drift further over time.
 - **Fix:** One reader of `installed_plugins.json` in `plugins.ts` (one schema), used by both `readPluginManifest` and `readCurrentPlugins`, comparing with `samePath(..., platform)`.
@@ -104,7 +104,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### SEC-01 · Medium · One malformed hook or MCP server hides every hook or server in that file from the pull review
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/command-review.ts:46-54` (schemas `Hook`, `Hooks`, `Servers`), `:109-110` (hooks parsed as one record), `:199-200` (servers parsed as one record); the same all-or-nothing parse in `packages/cli/src/agents/claude-code/settings-commands.ts:9-18,32-33` (`commandsInSettings`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/command-review.ts:46-54` (schemas `Hook`, `Hooks`, `Servers`), `:109-110` (hooks parsed as one record), `:199-200` (servers parsed as one record); the same all-or-nothing parse in `packages/cli/src/agents/claude-code/settings-commands.ts:9-18,32-33` (`commandsInSettings`)
 - **Problem:** `Hooks.safeParse(json['hooks'])` and `Servers.safeParse(json['mcpServers'])` validate the whole block at once. If any single entry does not match (one hook with `args: [1]`, a stray `"_note": "…"` string under `hooks`, one server set to `null`), `success` is false and the code falls back to `{}`: **no** hook or **no** MCP server from that file is listed for review. The file itself is still written. Verified with the real source:
   ```
   hooks valid      -> 1 entry      hooks + bad args -> 0      hooks + note str -> 0
@@ -118,12 +118,13 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### SEC-02 · Low · A ` ```! ` block is missed when an earlier code block holds a fence line of the other character
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/runnable-markdown.ts:17-27`
+- [x] **Where:** `packages/cli/src/agents/claude-code/runnable-markdown.ts:17-27`
 - **Problem:** Any fence line with an empty info string closes the current block, whatever its character (`` ` `` vs `~`) or length. Markdown (CommonMark) closes a fence only with the same character and at least the same length. Text such as ` ``` / example / ~~~ / ``` / ```! / curl … | sh / ``` ` is read as: the `~~~` closes the first block, the next ` ``` ` opens a plain block, and the real ` ```! ` block is then inside that plain block and is not reported. Verified: `runnableInMarkdown(...)` returned `[]`.
 - **Why it matters:** The ` ```! ` block runs by itself when the skill loads; the pull review is the only place it is shown. The trigger is an unusual (or deliberately crafted) Markdown file, so the risk is low.
 - **Fix:** Remember the opening fence's character and length; close only on a line of the same character, at least that long, with nothing after it; treat a fence indented 4 or more spaces as plain text. Add the case above to the tests.
 - **Effort:** S
 - **Confidence:** high for the detector; medium that Claude Code's own parser would run that block (it follows CommonMark as far as I know).
+- **Fixed differently (T69):** the closing rule is as above, but a fence still opens at any indentation. A block inside a list item is indented with the item, so reading a fence indented 4 or more spaces as plain text would hide a block that runs. The review fails toward showing.
 
 #### SEC-03 · Low · Review lists print commands from a bundle with their line breaks
 
@@ -216,7 +217,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DEAD-01 · Low · `syncPlugins` is kept only for tests
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/plugin-sync.ts:135` (`SyncPluginsDeps`), `:247-250` (`syncPlugins`); used only in `packages/cli/test/claude-code-plugins.test.ts` and `packages/cli/test/managed-settings.test.ts`
+- [x] **Where:** `packages/cli/src/agents/claude-code/plugin-sync.ts:135` (`SyncPluginsDeps`), `:247-250` (`syncPlugins`); used only in `packages/cli/test/claude-code-plugins.test.ts` and `packages/cli/test/managed-settings.test.ts`
 - **Problem:** Since T61, production calls `askPluginSync` in the plan step and `installPlugins` in the follow-up (`after-restore.ts:108,119`). `syncPlugins` (ask then install in one call) is no longer used by the CLI; `knip` does not flag it because test files count as users.
 - **Why it matters:** The tests exercise a combination production never runs, and a reader may think pull still asks and installs in one go.
 - **Fix:** Remove `syncPlugins` and `SyncPluginsDeps`; point those tests at `askPluginSync` + `installPlugins`.
@@ -270,7 +271,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DUP-03 · Low · Two different implementations of "which project scripts do the hooks run"
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/project-collector.ts:39-59` (push) and `packages/cli/src/agents/claude-code/restore-rules.ts:118-134` (`projectHookScripts`, pull)
+- [x] **Where:** `packages/cli/src/agents/claude-code/project-collector.ts:39-59` (push) and `packages/cli/src/agents/claude-code/restore-rules.ts:118-134` (`projectHookScripts`, pull)
 - **Problem:** For the global setup one function, `hook-scripts.ts` `hookScripts`, serves both push and pull. For projects there are two, with different rules: the collector accepts an absolute path that is inside the project (`/home/ana/app/scripts/a.sh` → `scripts/a.sh`), while `projectHookScripts` skips every word starting with `/`, a drive letter, `~`, `$` or `%`. Such a script is saved by push and then refused by pull with "not part of a Claude Code setup".
 - **Why it matters:** Push and pull disagree about the same setup, and any future rule change must be made twice.
 - **Fix:** Move the project rule next to `hookScripts` in `hook-scripts.ts` as one function that takes the project folder when it has one, and call it from both the collector and the restorer.
@@ -279,7 +280,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DUP-04 · Low · "Parse JSON text with a schema, `null` on failure" is written six times
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/after-restore.ts:51-64`, `plugins.ts:107-114`, `command-review.ts:57-64`, `settings-commands.ts:21-28`, `managed-settings.ts:72-80`, `account-skills.ts:65-74`
+- [x] **Where:** `packages/cli/src/agents/claude-code/after-restore.ts:51-64`, `plugins.ts:107-114`, `command-review.ts:57-64`, `settings-commands.ts:21-28`, `managed-settings.ts:72-80`, `account-skills.ts:65-74`
 - **Problem:** The same try / `JSON.parse` / `safeParse` / `null` block in six files, each with small differences (bytes vs text, file vs bundle entry).
 - **Why it matters:** Small, but it is how BUG-01's silent `null` crept in: none of the copies can report _why_ a file was dropped.
 - **Fix:** One helper, e.g. `parseJsonWith(schema, text | bytes): { value } | { problem }`, in `settings-commands.ts` (already the "parsing" module) or `system/`, returning the problem so callers can warn.
@@ -329,7 +330,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-01 · Low · Names that say something other than what the code does
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/plugin-sync.ts:11,299` (`ClaudeCli`, `createClaudeCli`) also run `npm` (`after-restore.ts:69,94,163`); `hookScripts` names three different things: the exported function (`hook-scripts.ts:40`), an inner function of the project collector (`project-collector.ts:39`) and a `Set` parameter (`restore-rules.ts:69,87,142`); `unknown-files.ts:50` hard-codes `'.agentnomad/'` instead of `RESERVED_DIR` / `HOME_SCRIPTS_PREFIX` from `global-paths.ts`.
+- [x] **Where:** `packages/cli/src/agents/claude-code/plugin-sync.ts:11,299` (`ClaudeCli`, `createClaudeCli`) also run `npm` (`after-restore.ts:69,94,163`); `hookScripts` names three different things: the exported function (`hook-scripts.ts:40`), an inner function of the project collector (`project-collector.ts:39`) and a `Set` parameter (`restore-rules.ts:69,87,142`); `unknown-files.ts:50` hard-codes `'.agentnomad/'` instead of `RESERVED_DIR` / `HOME_SCRIPTS_PREFIX` from `global-paths.ts`.
 - **Problem / why it matters:** A reader of `after-restore.ts` sees `cli(npmPath)` returning a `ClaudeCli`; a search for `hookScripts` lands in three unrelated places; the literal path breaks silently if the reserved folder name changes.
 - **Fix:** Rename to `ProgramCli` / `createProgramCli` (or `LauncherCli`); rename the collector's inner function to `projectHookScriptFiles` and the `Set` parameters to `allowedScripts`; use the constant.
 - **Effort:** S
@@ -518,7 +519,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### ARCH-03 · Low · The restore side imports the global collector for one error class
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/claude-json-merge.ts:12` imports `ClaudeJsonError` from `packages/cli/src/agents/claude-code/global-collector.ts:37-43`
+- [x] **Where:** `packages/cli/src/agents/claude-code/claude-json-merge.ts:12` imports `ClaudeJsonError` from `packages/cli/src/agents/claude-code/global-collector.ts:37-43`
 - **Problem:** The `~/.claude.json` merge (restore) depends on the global collector module (push) only to reuse its error class, so the restorer's import graph pulls in the whole collector (plugins, programs, account skills).
 - **Why it matters:** Push and pull halves were split on purpose (SOLID-05); this import ties them back together and makes the collector harder to change on its own.
 - **Fix:** Move `ClaudeJsonError` into `claude-json-merge.ts` (or a small `claude-json.ts` holding the path rule, the key selection and the error) and import it from the collector.

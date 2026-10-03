@@ -31,6 +31,7 @@ import {
   lineEndingsFor,
   projectDestination,
   projectDirName,
+  projectHookScripts,
   sameForRestore,
   type ClaudeCodeRestorer,
   type CollectedFile,
@@ -1187,5 +1188,50 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     const t = planStep([true], [], createNoTerminalPrompter());
     await expect(t.plan()).rejects.toBeInstanceOf(AnswerNeededError);
     expect(await read(join(home, '.claude.json'))).toBe('{}');
+  });
+});
+
+describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
+  it('restores a script that a hook names by its absolute path in the project', async () => {
+    const source = join(root, 'old', 'my-app');
+    const command = `${join(source, 'scripts', 'a.sh')} --fix`;
+    await put(
+      join(source, '.claude', 'settings.json'),
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
+    );
+    await put(join(source, 'scripts', 'a.sh'), 'echo hi');
+    const files = await createClaudeCodeProjectCollector({
+      baseDir: base,
+      homedir: home,
+      platform: process.platform,
+      env: {},
+    }).collect({ kind: 'project', projectDir: source }, { includeMemory: false });
+    expect(files.map((entry) => entry.path)).toContain('scripts/a.sh');
+
+    // Pulled into the same folder (a reinstalled PC), the script comes back.
+    await rm(join(source, 'scripts'), { recursive: true });
+    const report = await restorer().restorer.restore(
+      { kind: 'project', projectDir: source },
+      files,
+      answer('overwrite').resolve,
+    );
+    expect(report.written).toContain('scripts/a.sh');
+  });
+
+  it.each([
+    ['$CLAUDE_PROJECT_DIR/scripts/a.sh', ['scripts/a.sh']],
+    ['scripts\\a.sh', ['scripts/a.sh']],
+    ['~/a.sh', []],
+    ['$HOME/a.sh', []],
+    ['../outside/a.sh', []],
+  ])('reads %s', (word, expected) => {
+    const settings = JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: word }] }] },
+    });
+    expect(
+      projectHookScripts(settings, { projectDir: project, platform: process.platform }).map(
+        (script) => script.bundlePath,
+      ),
+    ).toEqual(expected);
   });
 });

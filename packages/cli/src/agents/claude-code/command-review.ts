@@ -4,7 +4,8 @@ import * as z from 'zod';
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { MCP_FILES, SETTINGS_FILES } from '../../env/env-references.ts';
 import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
-import { commandWords } from './settings-commands.ts';
+import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { commandWords, hookItems } from './settings-commands.ts';
 import { HOME_SCRIPTS_PREFIX, isScript, TOOL_CONFIG_FILES } from './global-paths.ts';
 import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
@@ -43,25 +44,10 @@ const LIST_LABELS = /^(hook |setting permissions\.(allow|additionalDirectories)$
 const MARKDOWN_FOLDERS = /^(\.claude\/)?(skills|commands|agents)\//;
 
 const Json = z.record(z.string(), z.unknown());
-const Hook = z.looseObject({
-  type: z.string().optional(),
-  command: z.string().optional(),
-  args: z.array(z.string()).optional(),
-  url: z.string().optional(),
-});
-const Hooks = z.record(z.string(), z.array(z.looseObject({ hooks: z.array(Hook).optional() })));
 const Command = z.looseObject({ command: z.string().optional() });
-const Servers = z.record(z.string(), Json);
 const Env = z.record(z.string(), z.unknown());
 
-function parse(file: CollectedFile): Record<string, unknown> | null {
-  try {
-    const parsed = Json.safeParse(JSON.parse(new TextDecoder().decode(file.content)));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
+const parse = (file: CollectedFile) => valueOrNull(parseJsonWith(Json, file.content));
 
 /** JSON with sorted keys, so two copies of the same object compare equal. */
 function stable(value: unknown): string {
@@ -82,6 +68,13 @@ const entry = (file: string, label: string, command: string, identity = slashes(
   command,
   identity,
 });
+
+/**
+ * A part of a file that cannot be read as Claude Code expects (SEC-01): shown as its JSON,
+ * so pull still asks about it instead of leaving it out of the review.
+ */
+const unreadable = (file: string, label: string, value: unknown) =>
+  entry(file, `${label} (unreadable)`, stable(value), stable(value));
 
 /** An MCP server as shown: what runs or where it connects, plus what else it carries. */
 function describeServer(server: Record<string, unknown>): string {
@@ -106,18 +99,20 @@ function describeServer(server: Record<string, unknown>): string {
 
 function settingsEntries(file: CollectedFile, json: Record<string, unknown>): RunnableEntry[] {
   const entries: RunnableEntry[] = [];
-  const hooks = Hooks.safeParse(json['hooks']);
-  for (const [event, groups] of Object.entries(hooks.success ? hooks.data : {})) {
-    for (const group of groups) {
-      for (const hook of group.hooks ?? []) {
-        if (hook.command !== undefined) {
-          const command = [hook.command, ...(hook.args ?? [])].join(' ');
-          entries.push(entry(file.path, `hook ${event}`, command));
-        } else if (hook.type === 'http' && hook.url !== undefined) {
-          // Sends what the hook sees (tool input, prompts) to that address.
-          entries.push(entry(file.path, `hook ${event} (sends data to)`, hook.url));
-        }
-      }
+  // One hook at a time: a malformed one is shown as unreadable and hides no other (SEC-01).
+  for (const item of hookItems(json['hooks'])) {
+    if (!('hook' in item)) {
+      const label = item.event === null ? 'hooks' : `hook ${item.event}`;
+      entries.push(unreadable(file.path, label, item.unreadable));
+      continue;
+    }
+    const { event, hook } = item;
+    if (hook.command !== undefined) {
+      const command = [hook.command, ...(hook.args ?? [])].join(' ');
+      entries.push(entry(file.path, `hook ${event}`, command));
+    } else if (hook.type === 'http' && hook.url !== undefined) {
+      // Sends what the hook sees (tool input, prompts) to that address.
+      entries.push(entry(file.path, `hook ${event} (sends data to)`, hook.url));
     }
   }
   const statusLine = Command.safeParse(json['statusLine']);
@@ -176,6 +171,24 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
 }
 
 /**
+ * The MCP servers of a file, one at a time (SEC-01): a server that is not an object, or a
+ * `mcpServers` block that is not one, is shown as unreadable and hides no other server.
+ */
+function serverEntries(file: CollectedFile, servers: unknown): RunnableEntry[] {
+  if (servers === undefined) return [];
+  const all = Json.safeParse(servers);
+  if (!all.success) return [unreadable(file.path, 'MCP servers', servers)];
+  return Object.entries(all.data).flatMap(([name, value]) => {
+    const server = Json.safeParse(value);
+    if (!server.success) return [unreadable(file.path, `MCP server ${name}`, value)];
+    const shown = describeServer(server.data);
+    return shown === ''
+      ? []
+      : [entry(file.path, `MCP server ${name}`, shown, slashes(stable(server.data)))];
+  });
+}
+
+/**
  * Everything in these files that runs programs: hooks (commands and addresses they send to),
  * the status line, command settings, loader variables in `env`, permission settings that
  * stop Claude Code asking, MCP servers (the whole definition is compared), and skill,
@@ -196,13 +209,7 @@ function runnableEntries(files: readonly CollectedFile[]): RunnableEntry[] {
     const json = SETTINGS_FILES.has(file.path) || MCP_FILES.has(file.path) ? parse(file) : null;
     if (json === null) continue;
     if (SETTINGS_FILES.has(file.path)) entries.push(...settingsEntries(file, json));
-    const servers = Servers.safeParse(json['mcpServers']);
-    for (const [name, server] of Object.entries(servers.success ? servers.data : {})) {
-      const shown = describeServer(server);
-      if (shown !== '') {
-        entries.push(entry(file.path, `MCP server ${name}`, shown, slashes(stable(server))));
-      }
-    }
+    entries.push(...serverEntries(file, json['mcpServers']));
   }
   return entries;
 }
