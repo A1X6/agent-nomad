@@ -246,6 +246,9 @@ export function createAuthCommands(
             dataKey = unwrapDataKey(crypto, fromBase64(answer.wrappedDataKey), keys.passwordKey);
           } catch (error) {
             if (!(error instanceof DecryptionError)) throw error;
+            // This PC cannot use the new session and never saves it, so end it on the server
+            // with its own token. Best effort: a failed logout never replaces this error.
+            await api.auth.logout(answer.sessionToken).catch(() => undefined);
             throw new Error(
               'Logged in, but your data key could not be unlocked with this password.',
               {

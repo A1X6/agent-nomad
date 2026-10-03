@@ -202,10 +202,12 @@ export function createHttpApiClient(options: HttpApiClientOptions): ApiClient {
     return awake;
   }
 
+  const bearer = (token: string) => ({ authorization: `${AUTHORIZATION_SCHEME} ${token}` });
+
   async function authorization(): Promise<Record<string, string>> {
     const token = await options.getSessionToken();
     if (token === null) throw new NotLoggedInError();
-    return { authorization: `${AUTHORIZATION_SCHEME} ${token}` };
+    return bearer(token);
   }
 
   async function send(
@@ -255,12 +257,14 @@ export function createHttpApiClient(options: HttpApiClientOptions): ApiClient {
         return parseJson(response, ClientAnswerSchemas.login);
       },
 
-      async logout() {
+      async logout(sessionToken) {
+        const stored = sessionToken === undefined;
         const response = await send({
           method: 'POST',
           path: API_ROUTES.logout,
-          headers: await authorization(),
-          retry: true,
+          headers: stored ? await authorization() : bearer(sessionToken),
+          // A given token is a best-effort clean-up: one attempt, never a wait for retries.
+          retry: stored,
         });
         // A retry after a lost answer finds the session already gone: that is the goal.
         if (response.status === 401 && response.lostAnswer) return;
