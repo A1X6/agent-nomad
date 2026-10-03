@@ -551,6 +551,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | File             | Responsible for                                                                                                                                          |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `index.ts`       | Re-exports everything.                                                                                                                                   |
+| `encoding.ts`    | Base64, hex and comparing bytes with web-standard APIs; the one copy every package uses (T62).                                                           |
 | `primitives.ts`  | Shared building blocks: base64 of an exact length, SHA-256 hex, timestamps, short single-line text.                                                      |
 | `bundle.ts`      | The plaintext bundle format: format version, agent id, scope, source OS, agent version, revision, files; safe relative paths; project name rules.        |
 | `api/common.ts`  | Crypto byte sizes, the 5 MB bundle cap, route paths, custom header names (`x-an-client` too), the client version format, error codes and the error body. |
@@ -560,19 +561,19 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ## `packages/core/src`
 
-| File                   | Responsible for                                                                                                              |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `index.ts`             | Re-exports everything.                                                                                                       |
-| `crypto.ts`            | The crypto interfaces (`PasswordKdf`, `Aead`, `KeyedHash`, `Digest`, `RandomSource`, `CryptoService`) and `DecryptionError`. |
-| `sodium-crypto.ts`     | The implementation on libsodium: Argon2id, splitting the master key, XChaCha20-Poly1305, keyed BLAKE2b, SHA-256.             |
-| `envelopes.ts`         | Wrapping the data key; sealing and opening bundles bound to format version, agent and scope key.                             |
-| `project-names.ts`     | Scope keys (keyed hash of a project name) and encrypted project names.                                                       |
-| `bundle-codec.ts`      | The `BundleCodec` interface (bundle ↔ bytes) and `BundleFormatError`.                                                        |
-| `gzip-bundle-codec.ts` | JSON + gzip, with the 64 MB decompression cap and a schema check.                                                            |
-| `paths.ts`             | The `PathResolver` interface, `{{HOME}}`, `PathError`.                                                                       |
-| `path-resolver.ts`     | Portable paths: bundle path ↔ native path per OS, home folder ↔ `{{HOME}}` in file contents, Windows name rules.             |
-| `merge.ts`             | The `MergeStrategy` interface: plans writes for one conflicting file, never touches disk.                                    |
-| `merge-strategies.ts`  | JSON merge by key, text "keep yours, add theirs next to it", overwrite with a timestamped backup; picking one per file.      |
+| File                   | Responsible for                                                                                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.ts`             | Re-exports everything.                                                                                                                                            |
+| `crypto.ts`            | The crypto interfaces (`PasswordKdf`, `Aead`, `KeyedHash`, `Digest`, `RandomSource`, `CryptoService`) and `DecryptionError`.                                      |
+| `sodium-crypto.ts`     | The implementation on libsodium: Argon2id, splitting the master key, XChaCha20-Poly1305, keyed BLAKE2b, SHA-256.                                                  |
+| `envelopes.ts`         | Wrapping the data key; sealing and opening bundles bound to format version, agent and scope key.                                                                  |
+| `project-names.ts`     | Scope keys (keyed hash of a project name) and encrypted project names.                                                                                            |
+| `bundle-codec.ts`      | The `BundleCodec` interface (bundle ↔ bytes) and `BundleFormatError`.                                                                                             |
+| `gzip-bundle-codec.ts` | JSON + gzip, with the 64 MB decompression cap and a schema check.                                                                                                 |
+| `paths.ts`             | The `PathResolver` interface, `{{HOME}}`, `PathError`, and `sourceOsOf` (a platform as a bundle source OS).                                                       |
+| `path-resolver.ts`     | Portable paths: bundle path ↔ native path per OS, home folder ↔ `{{HOME}}` in file contents, Windows name rules.                                                  |
+| `merge.ts`             | The `MergeStrategy` interface: plans writes for one conflicting file, never touches disk.                                                                         |
+| `merge-strategies.ts`  | JSON merge by key, text "keep yours, add theirs next to it", overwrite with a timestamped backup; picking one per file; `backupStamp`, the one backup time stamp. |
 
 ## `packages/cli/src`
 
@@ -605,6 +606,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `prompter.ts`             | The `Prompter` (questions) and `Reporter` (messages, spinners) interfaces.                |
 | `clack-prompter.ts`       | Both on @clack/prompts; warnings and errors to stderr; plain spinners without a terminal. |
 | `no-terminal-prompter.ts` | The prompter for scripts: every question fails with `AnswerNeededError`.                  |
+| `format-size.ts`          | Sizes as `5 KB` or `1.2 MB`, for push and `list`.                                         |
 
 ### `api/`: talking to the server
 
@@ -628,12 +630,20 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 | File                             | Responsible for                                                                             |
 | -------------------------------- | ------------------------------------------------------------------------------------------- |
-| `secrets/secret-store.ts`        | The `SecretStore` interface.                                                                |
+| `secrets/secret-store.ts`        | The `SecretStore` interface; `setMany` saves a whole login in one write.                    |
 | `secrets/keychain-store.ts`      | The OS keychain through @napi-rs/keyring (Linux pinned to Secret Service).                  |
-| `secrets/file-store.ts`          | The user-only file fallback, written atomically.                                            |
+| `secrets/file-store.ts`          | The user-only file fallback, written with the shared atomic write.                          |
 | `secrets/create-secret-store.ts` | Picks the keychain when it works, else the file.                                            |
 | `config/config-dir.ts`           | agentnomad's folder: `%APPDATA%\agentnomad` or `$XDG_CONFIG_HOME` / `~/.config/agentnomad`. |
 | `state/local-state.ts`           | `state.json`: project names per folder, known revisions and their account, per server.      |
+
+### `system/`: files and programs, one copy each (T62)
+
+| File                    | Responsible for                                                                                                                                      |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system/files.ts`       | `writeFileAtomically` (temporary file, then rename; mode, folder mode, following a link, a step before the rename), `writeTargetOf` and `isMissing`. |
+| `system/paths.ts`       | `samePath` and `pathKey`: folders compared per OS (Windows ignores case).                                                                            |
+| `system/run-program.ts` | `runProgram`: one `execFile` wrapper (no shell, timeout, never rejects) for every program the CLI starts.                                            |
 
 ### `push/`, `pull/`, `commands/`: the setup commands
 
@@ -647,22 +657,22 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `env/`: environment variables in setups
 
-| File                | Responsible for                                                                                                                                                                        |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `env-references.ts` | Finding `${VAR}` references in collected files (Claude Code's own variables excluded).                                                                                                 |
-| `env-section.ts`    | The encrypted `.agentnomad/env.json` section and choosing which values to save (opt-in).                                                                                               |
-| `env-restore.ts`    | On pull: adding saved values that are missing here (not in the environment nor already written); asking (plan) and writing (apply) are separate.                                       |
-| `shell-profile.ts`  | Writing them, and reading back what is there: a marked block in the shell profile (sh, bash, zsh, fish), rewritten only when it changes, or Windows user variables through PowerShell. |
-| `env-command.ts`    | `agentnomad env`.                                                                                                                                                                      |
+| File                | Responsible for                                                                                                                                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env-references.ts` | Finding `${VAR}` references in collected files (Claude Code's own variables excluded).                                                                                                                          |
+| `env-section.ts`    | The encrypted `.agentnomad/env.json` section and choosing which values to save (opt-in).                                                                                                                        |
+| `env-restore.ts`    | On pull: adding saved values that are missing here (not in the environment nor already written); asking (plan) and writing (apply) are separate.                                                                |
+| `shell-profile.ts`  | Writing them, and reading back what is there: a marked block in the shell profile (sh, bash, zsh, fish), rewritten only when it changes, or Windows user variables through one PowerShell call for all of them. |
+| `env-command.ts`    | `agentnomad env`.                                                                                                                                                                                               |
 
 ### `agents/`: the plug-in layer
 
-| File                | Responsible for                                                                                                                           |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `adapter.ts`        | The adapter interfaces: `Detector`, `Collector`, `Restorer`, `AgentInspector`, `AgentAdapter`, `AgentRegistry`, and the types they share. |
-| `registry.ts`       | `createAgentRegistry`: the list of adapters, by id.                                                                                       |
-| `notices.ts`        | What commands say about any agent: comparing versions for pull's warning, and files an adapter does not know.                             |
-| `agents-command.ts` | `agentnomad agents`.                                                                                                                      |
+| File                | Responsible for                                                                                                                                                            |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `adapter.ts`        | The adapter interfaces: `Detector`, `Collector`, `Restorer`, `AgentInspector`, `AgentAdapter`, `AgentRegistry`, the types they share, and `ChosenAgent` for push and pull. |
+| `registry.ts`       | `createAgentRegistry`: the list of adapters, by id.                                                                                                                        |
+| `notices.ts`        | What commands say about any agent: comparing versions for pull's warning, files an adapter does not know, and `showNotices` (each notice once).                            |
+| `agents-command.ts` | `agentnomad agents`.                                                                                                                                                       |
 
 ### `agents/claude-code/`: the Claude Code adapter
 
@@ -698,7 +708,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `server.ts`                                                                    | Composition root: settings, Neon pool (its errors logged), keys, limiter, services, app.             |
 | `index.ts`                                                                     | Re-exports for tests and the e2e server.                                                             |
 | `port.ts`                                                                      | The port from `PORT`.                                                                                |
-| `encoding.ts`                                                                  | Base64, hex and UTF-8 with web-standard APIs.                                                        |
+| `encoding.ts`                                                                  | Base64url and UTF-8 for tokens; base64 and hex come from contracts.                                  |
 | `db/env.ts`                                                                    | Reading and checking `DATABASE_URL` and `SERVER_SECRET`.                                             |
 | `db/schema.ts`                                                                 | The Drizzle tables and their constraints.                                                            |
 | `db/database.ts`                                                               | The driver-independent `Database` type (Neon in production, PGlite in tests).                        |
