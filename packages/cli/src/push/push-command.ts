@@ -324,9 +324,9 @@ export function createPushPlanner(deps: PushDeps) {
   }
 
   /**
-   * Whether to upload one collected setup, and over which revision. Asks before dropping
-   * commands a partial pull left out (T46) and before replacing a copy the server has in
-   * another revision than this PC knows (T38); a no from the user is their choice, a skip by
+   * Whether to upload one collected setup, and over which revision. Asks before pushing a
+   * setup whose last pull did not restore everything (T46, BUG-05) and before replacing a
+   * copy the server has in another revision than this PC knows (T38); a no from the user is their choice, a skip by
    * `--yes` is not done.
    */
   async function decide(
@@ -340,15 +340,16 @@ export function createPushPlanner(deps: PushDeps) {
       options.yes ? { setup, result: 'not-done', reason } : { setup, result: 'declined' };
     const state = deps.localState();
 
-    // This PC's copy lacks the commands its last pull left out, so replacing the saved one
-    // would drop them for every PC.
+    // This PC's last pull left out declined commands or kept files it did not ask about, so
+    // replacing the saved copy could drop parts of it for every PC. state.json does not say
+    // which, so the words fit both (UX-01).
     if (await state.isPartial(item.adapter.id, scopeKey)) {
-      const question = `This PC's last pull of the ${setup} left out commands you declined, so pushing now removes them from the saved copy (and from your other PCs on their next pull). Push anyway?`;
+      const question = `This PC's last pull of the ${setup} did not restore everything, so pushing now may drop parts of the saved copy (and of your other PCs on their next pull). Push anyway?`;
       if (options.yes || !(await prompter.confirm(question, false))) {
         reporter.warn(
-          `Skipped the ${setup}: its last pull here left out commands you declined. Pull it with --allow-commands (or answer yes) first, or push without --yes to choose.`,
+          `Skipped the ${setup}: its last pull here did not restore everything. Run \`agentnomad pull\` first and answer its questions, or push without --yes to choose.`,
         );
-        return skipped('its last pull here left out commands you declined');
+        return skipped('its last pull here did not restore everything');
       }
     }
 

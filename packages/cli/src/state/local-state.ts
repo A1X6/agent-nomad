@@ -6,7 +6,7 @@ import * as z from 'zod';
 import { isMissing, writeFileAtomically } from '../system/files.ts';
 import { pathKey } from '../system/paths.ts';
 
-/** Suffix of the note that a pull left out declined commands (T46). */
+/** Suffix of the note that a pull did not restore everything (T46, BUG-05). */
 const PARTIAL = '#partial';
 
 /**
@@ -26,9 +26,10 @@ const ServerStateSchema = z.strictObject({
    */
   projects: z.record(z.string(), ProjectNameSchema),
   /**
-   * `<agent>/<scopeKey>` → the revision this PC last pushed or pulled. A pull that left out
-   * commands the user declined is also noted as `<agent>/<scopeKey>#partial` (T46); kept in
-   * this map so older versions still read the file.
+   * `<agent>/<scopeKey>` → the revision this PC last pushed or pulled. A pull that did not
+   * restore everything (declined commands, or differing files it left as they were) is also
+   * noted as `<agent>/<scopeKey>#partial` (T46, BUG-05); kept in this map so older versions
+   * still read the file. The note does not say which.
    */
   revisions: z.record(z.string(), z.int().min(1)),
 });
@@ -74,14 +75,14 @@ export interface LocalState {
   projectNameFor(folder: string): Promise<string | null>;
   rememberProject(folder: string, name: string): Promise<void>;
   revisionOf(agent: string, scopeKey: string): Promise<number | null>;
-  /** `partial`: the pull left out commands the user declined (T46). */
+  /** `partial`: the pull did not restore everything (T46, BUG-05). */
   setRevision(
     agent: string,
     scopeKey: string,
     revision: number,
     options?: { partial?: boolean },
   ): Promise<void>;
-  /** Whether this PC's last pull of the setup left out commands the user declined (T46). */
+  /** Whether this PC's last pull of the setup did not restore everything (T46, BUG-05). */
   isPartial(agent: string, scopeKey: string): Promise<boolean>;
   /** Every revision this PC knows, by `<agent>/<scopeKey>` (T35 status). */
   knownRevisions(): Promise<Readonly<Record<string, number>>>;

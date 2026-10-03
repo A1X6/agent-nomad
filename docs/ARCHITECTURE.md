@@ -250,8 +250,9 @@ not retried and never replaces that error; the session then ends by itself on th
    says so.
 6. Compare each setup's revision on the server with the one this PC last knew. If another
    PC saved a newer copy (or deleted it), the user is asked whether to replace it (with
-   `--yes`: never). If this PC's last pull of a setup left out commands the user declined,
-   pushing it would drop them for every PC: push asks first, and `--yes` skips it with a note.
+   `--yes`: never). If this PC's last pull of a setup did not restore everything (declined
+   commands, or differing files it left as they were), pushing it could drop them for every
+   PC: push asks first, and `--yes` skips it with a note.
 7. Paths are made portable, the bundle is built, compressed and **encrypted for the exact
    revision it will become** (the one on the server, plus one).
 8. Upload with that expected revision, and remember the new revision for this PC. If another
@@ -530,7 +531,7 @@ errors go to stderr. Passwords are read only from stdin, never from an argument.
 
 Push and pull also exit with `1` when any setup was **not done**: skipped or refused without
 the user answering no themselves. That is a newer copy on the server or one deleted there
-(push), a setup whose last pull left out declined commands (push), a setup over the 5 MB limit
+(push), a setup whose last pull did not restore everything (push), a setup over the 5 MB limit
 (push), an older copy than this PC had (pull), and a file that differs but was never asked
 about (pull). Every other setup is still saved or restored first, then one message lists what
 was not done. A setup the user skipped by answering a question with no is their choice and
