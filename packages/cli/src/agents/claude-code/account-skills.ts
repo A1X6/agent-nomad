@@ -4,7 +4,7 @@ import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import type { CollectedFile } from '../adapter.ts';
-import type { FileGatherer } from './file-gathering.ts';
+import type { FileGatherer } from '../shared/file-gathering.ts';
 import { RESERVED_DIR } from './global-paths.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 

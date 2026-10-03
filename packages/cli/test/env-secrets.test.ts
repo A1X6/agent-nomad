@@ -19,6 +19,7 @@ import { stubRestorer } from './stub-restorer.ts';
 import {
   isRedirectVariable,
   BLOCK_END,
+  CLAUDE_ENV_REFERENCES,
   BLOCK_START,
   chooseEnvValues,
   createEnvCommand,
@@ -66,7 +67,7 @@ const mcpJson = file('.mcp.json', {
 
 describe('finding ${VAR} references', () => {
   it('finds them in MCP servers, with where each is used, and ignores Claude Code’s own', () => {
-    expect(scanEnvReferences([mcpJson]).variables).toEqual([
+    expect(scanEnvReferences([mcpJson], CLAUDE_ENV_REFERENCES).variables).toEqual([
       { name: 'API_BASE', usedBy: ['MCP server api (.mcp.json)'] },
       { name: 'API_KEY', usedBy: ['MCP server api (.mcp.json)'] },
       { name: 'GITHUB_TOKEN', usedBy: ['MCP server github (.mcp.json)'] },
@@ -85,6 +86,7 @@ describe('finding ${VAR} references', () => {
         }),
         file('CLAUDE.md', { note: '${NOT_SCANNED}' }),
       ],
+      CLAUDE_ENV_REFERENCES,
       'global',
     );
     expect(scan.variables).toEqual([
@@ -100,12 +102,12 @@ describe('finding ${VAR} references', () => {
       content: new TextEncoder().encode('{ nope'),
       executable: false,
     };
-    expect(scanEnvReferences([broken]).variables).toEqual([]);
+    expect(scanEnvReferences([broken], CLAUDE_ENV_REFERENCES).variables).toEqual([]);
   });
 });
 
 describe('saving values on push (opt-in)', () => {
-  const scan = scanEnvReferences([mcpJson]);
+  const scan = scanEnvReferences([mcpJson], CLAUDE_ENV_REFERENCES);
 
   it('offers only variables set here, none ticked, and saves only the ticked ones', async () => {
     const offered: string[] = [];
@@ -622,6 +624,7 @@ describe('agentnomad env', () => {
       collect: (target) => Promise.resolve(target.kind === 'global' ? global : project),
     },
     restorer: stubRestorer(),
+    envReferences: CLAUDE_ENV_REFERENCES,
   });
 
   async function run(env: Record<string, string>, cwd = '/work/app') {
@@ -681,9 +684,10 @@ describe('agentnomad env', () => {
   });
 
   it('marks variables the settings set', () => {
-    const scan = scanEnvReferences([
-      file('settings.json', { env: { X: '1' }, apiKeyHelper: '${X}' }),
-    ]);
+    const scan = scanEnvReferences(
+      [file('settings.json', { env: { X: '1' }, apiKeyHelper: '${X}' })],
+      CLAUDE_ENV_REFERENCES,
+    );
     expect(describeEnv(scan, {})[0]).toContain('set in settings');
     expect(quotePosix("a'b")).toBe(`'a'\\''b'`);
   });

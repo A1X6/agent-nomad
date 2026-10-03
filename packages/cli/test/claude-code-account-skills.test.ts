@@ -14,6 +14,7 @@ import {
   globalDestination,
   planAccountSkills,
   readSyncedSkills,
+  SKIPPED_NAMES,
   type CollectedFile,
   type ExecutableLookupSystem,
   type Prompter,
@@ -97,7 +98,10 @@ async function syncedSetup(): Promise<void> {
 describe('claude.ai skills (T42): reading and saving', () => {
   it("finds only the user's own synced skills; every synced name is known", async () => {
     await syncedSetup();
-    const found = await readSyncedSkills(createFileGatherer(process.platform), base);
+    const found = await readSyncedSkills(
+      createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES }),
+      base,
+    );
     expect(found.problem).toBeNull();
     expect(found.own.map((skill) => skill.name)).toEqual(['my-skill']);
     expect([...found.allNames].sort()).toEqual(['my-skill', 'pdf', 'synced', 'team-skill']);
@@ -105,7 +109,7 @@ describe('claude.ai skills (T42): reading and saving', () => {
 
   it('saves them under the reserved folder, never as skills/synced', async () => {
     await syncedSetup();
-    const files = createFileGatherer(process.platform);
+    const files = createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES });
     const collected = await collectAccountSkills(files, await readSyncedSkills(files, base));
     expect(collected.map((file) => file.path).sort()).toEqual([
       `${ACCOUNT_SKILLS_PREFIX}my-skill/SKILL.md`,
@@ -122,7 +126,10 @@ describe('claude.ai skills (T42): reading and saving', () => {
     );
     await put(synced('my-skill', 'SKILL.md'), 'x');
     await put(synced('brand-new', 'SKILL.md'), 'y');
-    const found = await readSyncedSkills(createFileGatherer(process.platform), base);
+    const found = await readSyncedSkills(
+      createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES }),
+      base,
+    );
     expect(found.problem).toBeNull();
     expect(found.own.map((skill) => skill.name)).toEqual(['my-skill']);
     expect([...found.allNames].sort()).toEqual(['brand-new', 'my-skill']);
@@ -131,7 +138,10 @@ describe('claude.ai skills (T42): reading and saving', () => {
   it('a missing or unknown manifest saves nothing and says why', async () => {
     await put(synced('my-skill', 'SKILL.md'), 'x');
     await put(synced('manifest.json'), '{"version": 2, "entries": []}');
-    const found = await readSyncedSkills(createFileGatherer(process.platform), base);
+    const found = await readSyncedSkills(
+      createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES }),
+      base,
+    );
     expect(found.own).toEqual([]);
     expect(found.problem).toContain('in a format agentnomad does not know');
   });

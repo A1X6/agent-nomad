@@ -14,13 +14,14 @@ import {
 import type {
   CollectedFile,
   ConflictResolver,
-  FileConflict,
+  ConflictToAsk,
   RestoreContext,
   RestoreReport,
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
 import { writeFileAtomically } from '../../system/files.ts';
+import { createFileGatherer } from '../shared/file-gathering.ts';
 import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { reviewRunnable } from './command-review.ts';
@@ -29,9 +30,8 @@ import {
   createClaudeJsonMerge,
   type MutableReport,
 } from './claude-json-merge.ts';
-import { createFileGatherer } from './file-gathering.ts';
 import { commandsInSettings, commandWords } from './settings-commands.ts';
-import { CLAUDE_JSON_BUNDLE_PATH, extensionOf } from './global-paths.ts';
+import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, SKIPPED_NAMES } from './global-paths.ts';
 import {
   globalDestination,
   projectDestination,
@@ -132,7 +132,7 @@ export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform)
  * It never asks: every answer comes from pull's plan step (T61).
  */
 export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRestorer {
-  const files = createFileGatherer(options.platform);
+  const files = createFileGatherer(options.platform, { skippedNames: SKIPPED_NAMES });
   const { path } = files;
   const os = sourceOsOf(options.platform);
   const resolver = createPathResolver({ os, homeDir: options.homedir });
@@ -225,8 +225,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
      * listed whenever the setup has it: its other keys are not collected, so whether it
      * would change is only known while writing.
      */
-    conflicts(incoming, current): FileConflict[] {
-      const found: FileConflict[] = [];
+    conflicts(incoming, current): ConflictToAsk[] {
+      const found: ConflictToAsk[] = [];
       // One lookup table, not a search per file: a setup may hold thousands (PERF-01).
       const byPath = new Map(current.map((entry) => [entry.path, entry]));
       for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {

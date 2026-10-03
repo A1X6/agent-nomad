@@ -81,7 +81,7 @@ export type ConflictResolver = (
 ) => Promise<ConflictChoice>;
 
 /** One file here that differs from the pulled one, and what to ask about it (T61). */
-export interface FileConflict {
+export interface ConflictToAsk {
   /** Bundle path. */
   readonly path: string;
   readonly question: ConflictQuestion;
@@ -104,6 +104,21 @@ export interface RunnableEntry {
 
 export interface ReviewedEntry extends RunnableEntry {
   readonly change: 'new' | 'changed';
+}
+
+/**
+ * Where an agent's setup refers to environment variables as `${VAR}` (T30): push offers to
+ * save their values and `agentnomad env` lists them (ARCH-01).
+ */
+export interface EnvReferenceFiles {
+  /** Bundle paths of files with MCP servers (an `mcpServers` object), e.g. `.mcp.json`. */
+  readonly mcp: ReadonlySet<string>;
+  /** Bundle paths of settings files; their `env` block sets variables for the agent. */
+  readonly settings: ReadonlySet<string>;
+  /** Variables the agent sets itself for hooks and servers; never the user's secrets. */
+  readonly ownVariables: ReadonlySet<string>;
+  /** A readable name for a file in messages, when its bundle path is not one. */
+  label?(path: string): string;
 }
 
 /** What a restore did, for the summary shown to the user. Paths are bundle paths. */
@@ -144,7 +159,7 @@ export interface Restorer {
   conflicts(
     files: readonly CollectedFile[],
     current: readonly CollectedFile[],
-  ): readonly FileConflict[];
+  ): readonly ConflictToAsk[];
   restore(
     target: ScopeTarget,
     files: readonly CollectedFile[],
@@ -215,6 +230,8 @@ export interface AgentAdapter {
   readonly collector: Collector;
   readonly restorer: Restorer;
   readonly inspector?: AgentInspector;
+  /** Files that can use environment variables; without it, none are found or saved. */
+  readonly envReferences?: EnvReferenceFiles;
   /** What push saves only after a yes (T61). */
   readonly optionalParts?: readonly OptionalPart[];
   /**

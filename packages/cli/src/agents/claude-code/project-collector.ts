@@ -1,7 +1,12 @@
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { findAutoMemory } from './auto-memory.ts';
-import { createFileGatherer, type FileGatherer, jsonFile, uniqueByPath } from './file-gathering.ts';
-import { PLUGINS_BUNDLE_PATH } from './global-paths.ts';
+import {
+  createFileGatherer,
+  type FileGatherer,
+  jsonFile,
+  uniqueByPath,
+} from '../shared/file-gathering.ts';
+import { PLUGINS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
 import { projectHookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import {
@@ -30,7 +35,7 @@ const isNeverSynced = (bundlePath: string) =>
  * opt-in auto memory goes under `.agentnomad/auto-memory/`.
  */
 export function createClaudeCodeProjectCollector(options: ProjectCollectorOptions): Collector {
-  const { path } = createFileGatherer(options.platform);
+  const { path } = createFileGatherer(options.platform, { skippedNames: SKIPPED_NAMES });
 
   /** The script files the project's hooks run, when they are inside the project. */
   async function projectHookScriptFiles(
@@ -57,6 +62,7 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
     // A shared, unknown or refused folder is not this project's to take.
     if (location.kind !== 'folder') return [];
     const files = createFileGatherer(options.platform, {
+      skippedNames: SKIPPED_NAMES,
       homedir: options.homedir,
       within: location.dir,
       ...(onSkipped && { onSkipped }),
@@ -76,6 +82,7 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
       const found: CollectedFile[] = [];
       // A cloned repository is not trusted: its links must stay inside the project (T45).
       const files = createFileGatherer(options.platform, {
+        skippedNames: SKIPPED_NAMES,
         homedir: options.homedir,
         within: projectDir,
         ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),

@@ -1,29 +1,16 @@
 import * as z from 'zod';
 
+import type { EnvReferenceFiles } from '../agents/adapter.ts';
+import { parseJsonWith, valueOrNull } from '../system/json.ts';
+
 /** A file of a collected setup (only path and bytes are needed here). */
 export interface ScannedFile {
   readonly path: string;
   readonly content: Uint8Array;
 }
 
-/** Variables Claude Code sets itself for hooks and servers; never the user's secrets. */
-const CLAUDE_OWN_VARIABLES = new Set([
-  'CLAUDE_PROJECT_DIR',
-  'CLAUDE_PLUGIN_ROOT',
-  'CLAUDE_PLUGIN_DATA',
-  'CLAUDE_CONFIG_DIR',
-]);
-
 /** `${NAME}` or `${NAME:-default}`, as Claude Code expands them. */
 const REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g;
-
-/** Files that can hold `${VAR}` references: MCP servers and settings. */
-export const MCP_FILES: ReadonlySet<string> = new Set(['.mcp.json', '.agentnomad/claude.json']);
-export const SETTINGS_FILES: ReadonlySet<string> = new Set([
-  'settings.json',
-  '.claude/settings.json',
-  '.claude/settings.local.json',
-]);
 
 interface EnvUsage {
   readonly name: string;
@@ -39,57 +26,54 @@ export interface EnvScan {
 
 const JsonObjectSchema = z.record(z.string(), z.unknown());
 
-function parseJson(file: ScannedFile): Record<string, unknown> | null {
-  try {
-    const parsed = JsonObjectSchema.safeParse(JSON.parse(new TextDecoder().decode(file.content)));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Every `${VAR}` in a JSON value, in any string at any depth. */
-function referencesIn(value: unknown): string[] {
+/** Every `${VAR}` in a JSON value, in any string at any depth, but the agent's own. */
+function referencesIn(value: unknown, ownVariables: ReadonlySet<string>): string[] {
   // Values come from JSON.parse, so they are never undefined and always stringify.
   const text = JSON.stringify(value);
   return [...text.matchAll(REFERENCE)]
     .map((match) => match[1] ?? '')
-    .filter((name) => name !== '' && !CLAUDE_OWN_VARIABLES.has(name));
+    .filter((name) => name !== '' && !ownVariables.has(name));
 }
 
-/** A readable name for a file in messages: `~/.claude.json` for the reserved entry. */
-const fileLabel = (path: string) => (path === '.agentnomad/claude.json' ? '~/.claude.json' : path);
-
 /**
- * Finds the environment variables a setup depends on (T30): `${VAR}` in MCP servers and
- * settings, with where each one is used. Never reads or returns any value.
+ * Finds the environment variables a setup depends on (T30): `${VAR}` in the MCP servers and
+ * settings files the agent names (ARCH-01), with where each one is used. Never reads or
+ * returns any value.
  */
-export function scanEnvReferences(files: readonly ScannedFile[], scopeLabel?: string): EnvScan {
+export function scanEnvReferences(
+  files: readonly ScannedFile[],
+  references: EnvReferenceFiles | undefined,
+  scopeLabel?: string,
+): EnvScan {
   const usage = new Map<string, Set<string>>();
   const setBySettings = new Set<string>();
+  if (references === undefined) return { variables: [], setBySettings };
+  const { mcp, settings, ownVariables } = references;
   const use = (name: string, where: string) => {
     const label = scopeLabel ? `${where}, ${scopeLabel}` : where;
     usage.set(name, (usage.get(name) ?? new Set()).add(label));
   };
 
   for (const file of files) {
-    if (!MCP_FILES.has(file.path) && !SETTINGS_FILES.has(file.path)) continue;
-    const json = parseJson(file);
+    if (!mcp.has(file.path) && !settings.has(file.path)) continue;
+    const json = valueOrNull(parseJsonWith(JsonObjectSchema, file.content));
     if (json === null) continue;
-    const label = fileLabel(file.path);
+    const label = references.label?.(file.path) ?? file.path;
 
     const servers = JsonObjectSchema.safeParse(json['mcpServers']);
     const rest = Object.fromEntries(Object.entries(json).filter(([key]) => key !== 'mcpServers'));
     if (servers.success) {
       for (const [server, config] of Object.entries(servers.data)) {
-        for (const name of referencesIn(config)) use(name, `MCP server ${server} (${label})`);
+        for (const name of referencesIn(config, ownVariables)) {
+          use(name, `MCP server ${server} (${label})`);
+        }
       }
     }
-    if (SETTINGS_FILES.has(file.path)) {
+    if (settings.has(file.path)) {
       const env = JsonObjectSchema.safeParse(json['env']);
       if (env.success) for (const name of Object.keys(env.data)) setBySettings.add(name);
     }
-    for (const name of referencesIn(rest)) use(name, label);
+    for (const name of referencesIn(rest, ownVariables)) use(name, label);
   }
 
   const variables = [...usage.entries()]
