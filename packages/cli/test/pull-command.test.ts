@@ -15,8 +15,12 @@ import {
   createAgentRegistry,
   createClaudeCodeAdapter,
   createLocalState,
+  createPullApplier,
   createPullCommand,
+  createPullPlanner,
   createNoTerminalPrompter,
+  PromptCancelledError,
+  SetupsNotDoneError,
   listAllBundles,
   createPushCommand,
   createShellProfileWriter,
@@ -28,6 +32,8 @@ import {
   type BundleUpload,
   type EnvWriter,
   type Prompter,
+  type PullApplyDeps,
+  type PullDeps,
   type Reporter,
   type SecretName,
   type SecretStore,
@@ -201,8 +207,8 @@ function pullOn(
     server: 's',
     platform: process.platform,
   });
-  const pull = createPullCommand({
-    prompter: options.prompter ?? script.prompter,
+  // What apply gets: everything but the prompter.
+  const applyDeps: PullApplyDeps = {
     reporter,
     registry: () => createAgentRegistry([options.adapter ?? claudeAdapter(machine.home)]),
     secrets: () => Promise.resolve(options.secrets ?? loggedIn()),
@@ -220,9 +226,14 @@ function pullOn(
     cwd: machine.project,
     homedir: machine.home,
     platform: process.platform,
-  }).pull;
-  return { pull, asked: script.asked, lines, state };
+  };
+  const deps: PullDeps = { ...applyDeps, prompter: options.prompter ?? script.prompter };
+  const pull = createPullCommand(deps).pull;
+  return { pull, deps, applyDeps, asked: script.asked, lines, state };
 }
+
+/** The session and data key the plan step gets from the handler. */
+const keysOf = (secrets = loggedIn()) => ({ secrets, crypto, dataKey });
 
 const none = { global: false, yes: false };
 
@@ -460,7 +471,10 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const scopeKey = scopeKeyFor(crypto, dataKey, { kind: 'global' });
     const yes = pullOn(b, server, []);
     await yes.state.setRevision('claude-code', scopeKey, 3);
-    await yes.pull({ global: true, yes: true, allowCommands: true });
+    // Skipped by --yes, not by the user: exit code 1 (BUG-03).
+    await expect(yes.pull({ global: true, yes: true, allowCommands: true })).rejects.toThrow(
+      'Not restored:\n  - the Claude Code global setup: the saved copy (revision 1) is older than the one this PC had (revision 3)',
+    );
     expect(yes.lines).toContain(
       'warn: The saved Claude Code global setup is revision 1, older than revision 3 that this PC already had. Either it was deleted and saved again from another PC, or the server is sending an old copy.',
     );
@@ -472,6 +486,100 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(asked.asked[0]).toBe('Restore this older copy anyway?');
     expect(await read(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
     expect(await asked.state.revisionOf('claude-code', scopeKey)).toBe(1);
+  });
+
+  it('an older copy skipped by --yes: the other setup is still restored, then exit code 1 (BUG-03)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, []);
+    await t.state.setRevision('claude-code', 'global', 3);
+    const pulled = t.pull({ global: true, project: 'my-app', yes: true, allowCommands: true });
+    await expect(pulled).rejects.toBeInstanceOf(SetupsNotDoneError);
+    await expect(pulled).rejects.toThrow(/^Not restored:\n {2}- the Claude Code global setup: /);
+    // The project came after the skipped global setup and was restored anyway.
+    expect(await read(join(b.project, 'CLAUDE.md'))).toBe('Project rules.');
+    await expect(readdir(b.base)).rejects.toThrow();
+  });
+
+  it('an older copy the user declines is their choice, not a failure (BUG-03)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, [false]);
+    await t.state.setRevision('claude-code', 'global', 3);
+    await t.pull({ global: true, yes: false });
+    expect(t.asked).toEqual(['Restore this older copy anyway?']);
+    await expect(readdir(b.base)).rejects.toThrow();
+  });
+
+  it('the plan step asks every question and writes nothing; apply writes and asks nothing (T59)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    await put(join(b.base, 'CLAUDE.md'), 'mine');
+    const t = pullOn(b, server, [true, 'overwrite']);
+    const options = { global: true, yes: false };
+
+    const plan = await createPullPlanner(t.deps).plan(options, keysOf());
+    expect(t.asked).toEqual(['Allow them?', 'CLAUDE.md already exists here and is different.']);
+    expect(plan?.restores[0]?.conflicts).toEqual(new Map([['CLAUDE.md', 'overwrite']]));
+    expect(await read(join(b.base, 'CLAUDE.md'))).toBe('mine');
+    expect(await t.state.revisionOf('claude-code', 'global')).toBeNull();
+
+    // The apply step's deps have no prompter at all: it cannot ask.
+    expect('prompter' in t.applyDeps).toBe(false);
+    if (plan === null) throw new Error('nothing planned');
+    const outcomes = await createPullApplier(t.applyDeps).apply(plan, options);
+    expect(outcomes).toEqual([{ setup: 'Claude Code global setup', result: 'done' }]);
+    expect(await read(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
+    expect(t.asked).toHaveLength(2);
+    expect(await t.state.revisionOf('claude-code', 'global')).toBe(1);
+  });
+
+  it('a file the plan did not ask about is left alone, and the setup is not done (T59)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    // A restorer that meets a differing file the collector never showed the plan.
+    const base = claudeAdapter(b.home);
+    const adapter: AgentAdapter = {
+      ...base,
+      restorer: {
+        restore: async (_target, _files, onConflict) => {
+          const choice = await onConflict('notes/extra.md', { overwriteAllowed: true });
+          return {
+            written: [],
+            skipped: choice === 'skip' ? ['notes/extra.md'] : [],
+            backups: [],
+            warnings: [],
+          };
+        },
+      },
+    };
+    const t = pullOn(b, server, [], { adapter });
+    await expect(t.pull({ global: true, yes: false, allowCommands: true })).rejects.toThrow(
+      'Not restored:\n  - the Claude Code global setup: not asked about notes/extra.md, so left as they are',
+    );
+    expect(t.asked).toEqual([]);
+
+    // With an answer for every file (--merge), there is nothing left unasked.
+    const merged = pullOn(b, server, [], { adapter });
+    await merged.pull({ global: true, yes: false, allowCommands: true, conflict: 'merge' });
+    expect(merged.asked).toEqual([]);
+  });
+
+  it('Ctrl+C at a file question stops pull before anything is written (T53, T59)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    await put(join(b.project, 'CLAUDE.md'), 'mine');
+    const cancelling: Prompter = {
+      ...scripted([]).prompter,
+      select: () => Promise.reject(new PromptCancelledError()),
+    };
+    const t = pullOn(b, server, [], { prompter: cancelling });
+    await expect(
+      t.pull({ global: true, project: 'my-app', yes: false, allowCommands: true }),
+    ).rejects.toBeInstanceOf(PromptCancelledError);
+    await expect(readFile(join(b.base, 'CLAUDE.md'))).rejects.toThrow();
+    expect(await read(join(b.project, 'CLAUDE.md'))).toBe('mine');
+    expect(await t.state.revisionOf('claude-code', 'global')).toBeNull();
   });
 
   it('without a terminal, a question left open stops pull before anything is written (T46)', async () => {
@@ -533,9 +641,13 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     await t.pull({ global: true, yes: false });
     expect(await t.state.isPartial('claude-code', 'global')).toBe(true);
 
-    // --yes never pushes over them.
+    // --yes never pushes over them, and says so with exit code 1 (BUG-03).
     const { reporter, lines } = recorder();
-    await pushFrom(b, server, [], { reporter })({ global: true, yes: true, memory: false });
+    await expect(
+      pushFrom(b, server, [], { reporter })({ global: true, yes: true, memory: false }),
+    ).rejects.toThrow(
+      'Not saved:\n  - the Claude Code global setup: its last pull here left out commands you declined',
+    );
     expect(server.stored.get('claude-code/global')?.revision).toBe(1);
     expect(lines.some((line) => line.includes('left out commands you declined'))).toBe(true);
 

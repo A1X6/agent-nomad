@@ -29,7 +29,9 @@ Examples:
                                                     log in from a script
 
 With no terminal (a script or CI), nothing is asked: a question the flags do not
-answer stops the command with exit code 1 and names the flags to add.`;
+answer stops the command with exit code 1 and names the flags to add. Push and pull
+also exit with code 1 when a setup was skipped or refused without a "no" from you
+(a newer or older copy, over 5 MB, or skipped by --yes); the rest is done first.`;
 
 /** `--agent`, `--global`, `--project`: shared by the commands that work on saved setups. */
 function scopeOptions() {

@@ -12,19 +12,25 @@ import {
   type BundleCodec,
   type CryptoService,
 } from '@agentnomad/core';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ApiError,
   createAgentRegistry,
   createLocalState,
+  createPushApplier,
   createPushCommand,
+  createPushPlanner,
   NotLoggedInPushError,
+  PromptCancelledError,
+  SetupsNotDoneError,
   type AgentAdapter,
   type ApiClient,
   type BundleUpload,
   type CollectedFile,
   type Prompter,
+  type PushApplyDeps,
+  type PushDeps,
   type Reporter,
   type SecretName,
   type SecretStore,
@@ -96,7 +102,19 @@ function fakeServer() {
   const api: ApiClient = {
     auth: {} as ApiClient['auth'],
     bundles: {
-      list: () => Promise.reject(new Error('not used')),
+      list: () =>
+        Promise.resolve({
+          items: [...stored.entries()].map(([id, entry]) => ({
+            agent: 'claude-code' as const,
+            scopeKey: id.slice('claude-code/'.length),
+            nameEnc: entry.upload.nameEnc ?? null,
+            revision: entry.revision,
+            formatVersion: 1,
+            sizeBytes: entry.upload.ciphertext.byteLength,
+            updatedAt: '2026-09-25T12:00:00Z',
+          })),
+          nextCursor: null,
+        }),
       get: () => Promise.reject(new Error('not used')),
       delete: () => Promise.reject(new Error('not used')),
       put: (params, upload) => {
@@ -173,6 +191,7 @@ function setup(
     /** Which PC: each PC has its own local state file. */
     pc?: string;
     codec?: BundleCodec;
+    prompter?: Prompter;
   } = {},
 ) {
   const server = options.server ?? fakeServer();
@@ -183,8 +202,8 @@ function setup(
     server: 'api.test',
     platform: process.platform,
   });
-  const command = createPushCommand({
-    prompter: script.prompter,
+  // What apply gets: everything but the prompter.
+  const applyDeps: PushApplyDeps = {
     reporter,
     registry: () => createAgentRegistry([options.adapter ?? fakeAdapter()]),
     secrets: () => Promise.resolve(options.secrets ?? loggedIn()),
@@ -196,8 +215,10 @@ function setup(
     cwd: options.cwd ?? PROJECT,
     homedir: HOME,
     platform: process.platform,
-  });
-  return { command, server, script, lines, state };
+  };
+  const deps: PushDeps = { ...applyDeps, prompter: options.prompter ?? script.prompter };
+  const command = createPushCommand(deps);
+  return { command, deps, applyDeps, server, script, lines, state };
 }
 
 const noFlags = { global: false, yes: false };
@@ -411,7 +432,9 @@ describe('agentnomad push', () => {
     const server = fakeServer();
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
     const desktop = setup([], { server, pc: 'desktop' });
-    await desktop.command.push({ global: true, yes: true });
+    await expect(desktop.command.push({ global: true, yes: true })).rejects.toThrow(
+      'Not saved:\n  - the Claude Code global setup: a newer copy exists',
+    );
     expect(desktop.script.asked).toEqual([]);
     expect(desktop.lines.some((line) => line.includes('Run `agentnomad pull` first'))).toBe(true);
     expect((await received(server, { kind: 'global' })).revision).toBe(1);
@@ -477,11 +500,161 @@ describe('agentnomad push', () => {
       decode: () => Promise.reject(new Error('not used')),
     };
     const t = setup(['global', false], { codec });
-    await t.command.push(noFlags);
+    await expect(t.command.push(noFlags)).rejects.toThrow(
+      'Not saved:\n  - the Claude Code global setup: 6.0 MB, over the 5 MB limit',
+    );
     expect(t.server.puts).toEqual([]);
     expect(t.lines.at(-1)).toBe(
       'error: The Claude Code global setup is 6.0 MB after compression and encryption; the limit is 5 MB. Remove large files (e.g. images in skills) and try again.',
     );
+  });
+
+  it('--yes skips a newer copy, saves the other setups, then exits with code 1 (BUG-03)', async () => {
+    const server = fakeServer();
+    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    const desktop = setup([], { server, pc: 'desktop' });
+    const pushed = desktop.command.push({ global: true, project: 'my-app', yes: true });
+    await expect(pushed).rejects.toBeInstanceOf(SetupsNotDoneError);
+    await expect(pushed).rejects.toThrow(
+      'Not saved:\n  - the Claude Code global setup: a newer copy exists',
+    );
+    // The project, planned after the refused global setup, was still saved.
+    expect((await received(server, { kind: 'project', name: 'my-app' })).revision).toBe(1);
+    expect((await received(server, { kind: 'global' })).revision).toBe(1);
+  });
+
+  it('--yes skips a copy deleted on the server; a yes from the user saves it again', async () => {
+    const server = fakeServer();
+    const t = setup(['global', false], { server });
+    await t.command.push(noFlags);
+    server.stored.clear();
+    await expect(t.command.push({ global: true, yes: true })).rejects.toThrow(
+      'the Claude Code global setup: it was deleted on the server',
+    );
+    const again = setup(['global', false, true], { server });
+    await again.command.push(noFlags);
+    expect(again.script.asked.at(-1)).toBe(
+      'The saved Claude Code global setup was deleted since this PC last had it. Save it again?',
+    );
+    expect((await received(server, { kind: 'global' })).revision).toBe(1);
+  });
+
+  it('the plan step asks every question and uploads nothing; apply uploads and asks nothing (T59)', async () => {
+    const server = fakeServer();
+    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    const desktop = setup(['global', false, true], { server, pc: 'desktop' });
+    const keys = { secrets: loggedIn(), crypto, dataKey };
+
+    const plan = await createPushPlanner(desktop.deps).plan(noFlags, keys);
+    expect(desktop.script.asked).toEqual([
+      'Claude Code: what to save?',
+      'Include memory (what Claude learned: subagent and auto memory)?',
+      "A newer copy of the Claude Code global setup (revision 1) was saved from another PC. Replace it with this PC's setup?",
+    ]);
+    expect(plan.uploads.map((upload) => [upload.setup, upload.expectedRevision])).toEqual([
+      ['Claude Code global setup', 1],
+    ]);
+    expect(server.puts).toHaveLength(1);
+
+    // The apply step's deps have no prompter at all: it cannot ask.
+    expect('prompter' in desktop.applyDeps).toBe(false);
+    const outcomes = await createPushApplier(desktop.applyDeps).apply(plan, keys);
+    expect(outcomes).toEqual([{ setup: 'Claude Code global setup', result: 'done' }]);
+    expect((await received(server, { kind: 'global' })).revision).toBe(2);
+    expect(desktop.script.asked).toHaveLength(3);
+  });
+
+  it('apply never asks: a copy saved from another PC after the plan is not done (T59)', async () => {
+    const server = fakeServer();
+    const t = setup(['global', false], { server });
+    const keys = { secrets: loggedIn(), crypto, dataKey };
+    const plan = await createPushPlanner(t.deps).plan(noFlags, keys);
+    // Another PC saves while this push is between its plan and its upload.
+    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+
+    const outcomes = await createPushApplier(t.applyDeps).apply(plan, keys);
+    expect(outcomes).toEqual([
+      { setup: 'Claude Code global setup', result: 'not-done', reason: 'a newer copy exists' },
+    ]);
+    expect(t.lines.at(-1)).toBe(
+      'warn: Skipped the Claude Code global setup: a newer copy was saved from another PC while this push ran. Run `agentnomad pull` first to keep its changes.',
+    );
+    expect((await received(server, { kind: 'global' })).revision).toBe(1);
+  });
+
+  describe('the data key is wiped on every path (BP-01)', () => {
+    /** Every 32-byte array zeroed with fill(0) while `run` ran. */
+    async function wipedKeys(run: () => Promise<unknown>): Promise<Uint8Array[]> {
+      const fill = vi.spyOn(Uint8Array.prototype, 'fill');
+      try {
+        await run().catch(() => undefined);
+        return fill.mock.calls.flatMap((call, index) => {
+          const array = fill.mock.contexts[index] as Uint8Array;
+          return call[0] === 0 && array.length === 32 ? [array] : [];
+        });
+      } finally {
+        fill.mockRestore();
+      }
+    }
+    /** Answers `answers` in order, then cancels the next question (Ctrl+C). */
+    const cancelling = (answers: unknown[]): Prompter => {
+      const script = scripted(answers);
+      const cancelled = () => Promise.reject(new PromptCancelledError());
+      return {
+        ...script.prompter,
+        select: (message, choices) =>
+          answers.length > 0 ? script.prompter.select(message, choices) : cancelled(),
+        confirm: (message) => (answers.length > 0 ? script.prompter.confirm(message) : cancelled()),
+      };
+    };
+
+    it('Ctrl+C at the first question', async () => {
+      const t = setup([], { prompter: cancelling([]) });
+      const wiped = await wipedKeys(() => t.command.push(noFlags));
+      expect(wiped).toHaveLength(1);
+      expect(wiped[0]?.every((byte) => byte === 0)).toBe(true);
+      expect(t.server.puts).toEqual([]);
+    });
+
+    it('Ctrl+C at the last question, after the key was used', async () => {
+      const server = fakeServer();
+      await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+      // "What to save?" and memory are answered; "replace the newer copy?" is cancelled.
+      const t = setup([], { server, pc: 'desktop', prompter: cancelling(['global', false]) });
+      await expect(t.command.push(noFlags)).rejects.toBeInstanceOf(PromptCancelledError);
+      const wiped = await wipedKeys(() =>
+        setup([], { server, pc: 'desktop', prompter: cancelling(['global', false]) }).command.push(
+          noFlags,
+        ),
+      );
+      expect(wiped.length).toBeGreaterThanOrEqual(1);
+      expect(server.puts).toHaveLength(1);
+    });
+
+    it('an error while collecting', async () => {
+      const adapter: AgentAdapter = {
+        ...fakeAdapter(),
+        collector: { collect: () => Promise.reject(new Error('disk gone')) },
+      };
+      const t = setup([], { adapter });
+      const wiped = await wipedKeys(() => t.command.push({ global: true, yes: true }));
+      expect(wiped).toHaveLength(1);
+    });
+
+    it('a setup not done, and a successful push', async () => {
+      const codec: BundleCodec = {
+        encode: () => Promise.resolve(new Uint8Array(6 * 1024 * 1024)),
+        decode: () => Promise.reject(new Error('not used')),
+      };
+      const tooBig = setup([], { codec });
+      expect(
+        (await wipedKeys(() => tooBig.command.push({ global: true, yes: true }))).length,
+      ).toBeGreaterThanOrEqual(1);
+      const saved = setup([]);
+      const wiped = await wipedKeys(() => saved.command.push({ global: true, yes: true }));
+      expect(wiped.length).toBeGreaterThanOrEqual(1);
+      expect(saved.server.stored.size).toBe(1);
+    });
   });
 
   it('needs a login first', async () => {

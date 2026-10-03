@@ -49,6 +49,24 @@ export async function splitEnvValues(
  * "no" as the default, and `--yes` alone never adds them (T44, T56).
  */
 export async function restoreEnvValues(deps: RestoreEnvDeps): Promise<RestoreEnvResult> {
+  const plan = await planEnvRestore(deps);
+  if (plan.toAdd.length > 0) await writeEnvValues(deps, plan.toAdd);
+  return { added: plan.toAdd, alreadySet: plan.alreadySet, declined: plan.declined };
+}
+
+/** Which saved values pull will add, chosen before it writes anything (T59). */
+export interface EnvRestorePlan {
+  readonly toAdd: readonly string[];
+  readonly alreadySet: readonly string[];
+  readonly declined: boolean;
+}
+
+/** The questions of `restoreEnvValues`: shows what is missing and asks; writes nothing. */
+export async function planEnvRestore(
+  deps: Omit<RestoreEnvDeps, 'writer'> & {
+    readonly writer: Pick<EnvWriter, 'current' | 'where'>;
+  },
+): Promise<EnvRestorePlan> {
   const names = Object.keys(deps.section.variables);
   const { alreadySet, missing } = await splitEnvValues(
     deps.section.variables,
@@ -58,7 +76,7 @@ export async function restoreEnvValues(deps: RestoreEnvDeps): Promise<RestoreEnv
   if (missing.length === 0) {
     if (names.length > 0)
       deps.reporter.info('The saved environment variables are already set here.');
-    return { added: [], alreadySet, declined: false };
+    return { toAdd: [], alreadySet, declined: false };
   }
   const loaders = missing.filter((name) => LOADER_VARIABLE.test(name));
   const redirects = missing.filter((name) => !loaders.includes(name) && isRedirectVariable(name));
@@ -108,8 +126,18 @@ export async function restoreEnvValues(deps: RestoreEnvDeps): Promise<RestoreEnv
       }
     }
   }
-  if (toAdd.length === 0) return { added: [], alreadySet, declined };
+  return { toAdd, alreadySet, declined };
+}
 
+/** Writes the chosen saved values (the apply half of `restoreEnvValues`); asks nothing. */
+export async function writeEnvValues(
+  deps: {
+    readonly section: EnvSection;
+    readonly writer: Pick<EnvWriter, 'write' | 'where'>;
+    readonly reporter: Pick<Reporter, 'success'>;
+  },
+  toAdd: readonly string[],
+): Promise<void> {
   const values = Object.fromEntries(
     toAdd.map((name) => [name, deps.section.variables[name] ?? '']),
   );
@@ -121,5 +149,4 @@ export async function restoreEnvValues(deps: RestoreEnvDeps): Promise<RestoreEnv
       'Open a new terminal (and restart Claude Code) so they take effect.',
     ].join('\n'),
   );
-  return { added: toAdd, alreadySet, declined };
 }
