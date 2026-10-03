@@ -10,7 +10,7 @@ import { nodeManagedSettingsSystem } from '../src/agents/claude-code/managed-set
 import { createClaudeCli, type StartProgram } from '../src/agents/claude-code/plugin-sync.ts';
 import { systemProcessLister } from '../src/agents/claude-code/running-claude.ts';
 import { realPowerShell } from '../src/env/shell-profile.ts';
-import { windowsOwnerOnly } from '../src/secrets/file-store.ts';
+import { aclPrincipals, windowsOwnerOnly } from '../src/secrets/file-store.ts';
 
 const win32 = process.platform === 'win32';
 const posix = !win32;
@@ -159,11 +159,35 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
     );
   });
 
+  it('aclPrincipals reads every principal of an icacls listing (a GitHub runner, every OS)', () => {
+    const file = 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\agentnomad system-v3MTv6\\secret.json';
+    const pad = ' '.repeat(file.length + 1);
+    const listing = [
+      `${file} NT AUTHORITY\\SYSTEM:(F)`,
+      `${pad}BUILTIN\\Administrators:(F)`,
+      `${pad}runnervmfi6oq\\runneradmin:(F)`,
+      `${pad}S-1-5-21-1-2-3-1001:(I)(RX)`,
+      '',
+      'Successfully processed 1 files; Failed processing 0 files',
+      '',
+    ].join('\r\n');
+    expect(aclPrincipals(listing, file)).toEqual([
+      'NT AUTHORITY\\SYSTEM',
+      'BUILTIN\\Administrators',
+      'runnervmfi6oq\\runneradmin',
+      'S-1-5-21-1-2-3-1001',
+    ]);
+  });
+
   it.runIf(win32)('windowsOwnerOnly leaves only the current user on a temp file', async () => {
     const file = join(dir, 'secret.json');
     await writeFile(file, '{}');
+    const icacls = (args: string[]) => promisify(execFile)('icacls', args, { encoding: 'utf8' });
+    // What a GitHub runner's elevated account leaves on a new file: SYSTEM and
+    // Administrators by name, not inherited.
+    await icacls([file, '/grant', '*S-1-5-18:F', '*S-1-5-32-544:F']);
     await windowsOwnerOnly(process.env)(file);
-    const { stdout: acl } = await promisify(execFile)('icacls', [file], { encoding: 'utf8' });
+    const { stdout: acl } = await icacls([file]);
     // One entry, full control, nothing inherited: "<file> PC\user:(F)".
     const entries = acl.split(/\r?\n/).filter((line) => line.includes(':('));
     expect(entries, acl).toHaveLength(1);
