@@ -517,18 +517,16 @@ the e2e steps with the installed `agentnomad` command. One job (Linux, Node 24) 
 `pnpm audit --prod` (known advisories in the packages users install) and
 `pnpm --filter @agentnomad/server db:check` (`drizzle-kit check`: the migrations agree with
 each other; offline, no database or secret). `.github/workflows/audit.yml` runs the same
-audit every Wednesday, so a new advisory is noticed without a push. The same job runs two
-reports that never fail the build: `pnpm test:coverage` (Vitest with V8 coverage of
-`packages/*/src`; a summary in the log, the full report as the `coverage` artifact; no
-threshold yet) and `pnpm knip --no-exit-code` (unused files, dependencies and exports, set
-up in `knip.json`; `includeEntryExports` is on, so an export only re-exported by an
-`index.ts` and used nowhere is still reported). T65 cleared its findings: a name used only in
-its own file is not exported, and the few exports kept for other code to use are tagged
-`@public` in their JSDoc (the adapter interface `AgentInspector`, the crypto interfaces
-`PasswordKdf` and `RandomSource`, and two wire types in `contracts`). Its only findings left
-are seven exports in `packages/cli/src/api/` and `auth/auth-commands.ts`, which were out of
-T65's reach; once they are fixed the step can drop `--no-exit-code` and fail the build.
-`pnpm test` does not collect coverage.
+audit every Wednesday, so a new advisory is noticed without a push. The same job runs
+`pnpm knip` (unused files, dependencies and exports, set up in `knip.json`;
+`includeEntryExports` is on, so an export only re-exported by an `index.ts` and used nowhere
+is still reported), and any finding fails the build (T65): a name used only in its own file
+is not exported, and the few exports kept for other code to use are tagged `@public` in their
+JSDoc (the adapter interface `AgentInspector`, the crypto interfaces `PasswordKdf` and
+`RandomSource`, and two wire types in `contracts`). It also runs a report that never fails
+the build: `pnpm test:coverage` (Vitest with V8 coverage of `packages/*/src`; a summary in
+the log, the full report as the `coverage` artifact; no threshold yet). `pnpm test` does not
+collect coverage.
 Actions are pinned by commit.
 
 **The npm package.** `packages/cli/scripts/build-release.ts` bundles our own code (cli,

@@ -15,7 +15,7 @@ import type {
  * Account and session endpoints. Logout and account delete use the stored session token,
  * unless logout is given one.
  */
-export interface AuthApi {
+interface AuthApi {
   prelogin(request: PreloginRequest): Promise<PreloginResponse>;
   register(request: RegisterRequest): Promise<SessionResponse>;
   login(request: LoginRequest): Promise<LoginResponse>;
@@ -27,7 +27,7 @@ export interface AuthApi {
   deleteAccount(request: DeleteAccountRequest): Promise<void>;
 }
 
-export interface ListBundlesOptions {
+interface ListBundlesOptions {
   readonly cursor?: string;
   /** 1–100; the server defaults to 50. */
   readonly limit?: number;
@@ -55,7 +55,7 @@ export interface DownloadedBundle {
 }
 
 /** Saved-setup endpoints. All need a session. */
-export interface BundlesApi {
+interface BundlesApi {
   list(options?: ListBundlesOptions): Promise<ListBundlesResponse>;
   get(params: BundleParams): Promise<DownloadedBundle>;
   put(params: BundleParams, upload: BundleUpload): Promise<PutBundleResponse>;

@@ -81,11 +81,10 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-      # Unused files, dependencies and exports (knip.json). Report only until the seven T65 left
-      # in src/api/ and auth/auth-commands.ts are fixed; then drop --no-exit-code.
-      - name: Unused code report
+      # Unused files, dependencies and exports (knip.json). Any finding fails the build (T65).
+      - name: Unused code check
         if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
-        run: pnpm knip --no-exit-code
+        run: pnpm knip
 
       # T40: the npm package exactly as users get it: built, packed, installed globally, and
       # run as the `agentnomad` command, on every OS and both Node versions.
