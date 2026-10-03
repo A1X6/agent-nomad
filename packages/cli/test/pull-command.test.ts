@@ -80,16 +80,31 @@ const claudeAdapter = (home: string) =>
     isClaudeRunning: () => Promise.resolve(false),
   });
 
+/** The real adapter, with a detector that reports this Claude Code version. */
+function claudeAdapterAt(home: string, version: string): AgentAdapter {
+  return {
+    ...claudeAdapter(home),
+    detector: {
+      detect: () => Promise.resolve({ installed: true, baseDir: join(home, '.claude'), version }),
+    },
+  };
+}
+
 function pushFrom(
   machine: ReturnType<typeof pc>,
   server: ReturnType<typeof fakeBundleServer>,
   answers: unknown[],
-  options: { prompter?: Prompter; reporter?: Reporter; env?: Record<string, string> } = {},
+  options: {
+    prompter?: Prompter;
+    reporter?: Reporter;
+    env?: Record<string, string>;
+    adapter?: AgentAdapter;
+  } = {},
 ) {
   return createPushCommand({
     prompter: options.prompter ?? scriptedPrompter(answers).prompter,
     reporter: options.reporter ?? recordingReporter().reporter,
-    registry: () => createAgentRegistry([claudeAdapter(machine.home)]),
+    registry: () => createAgentRegistry([options.adapter ?? claudeAdapter(machine.home)]),
     secrets: () => Promise.resolve(loggedIn()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
@@ -680,19 +695,28 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('warns when this PC runs an older Claude Code than the setup came from', async () => {
-    const { server } = await pushedSetup();
-    // The pushed setup has no stamp (no claude on PATH); fake a newer one on this PC's side.
+    const server = fakeBundleServer();
+    const a = pc('laptop');
+    await put(join(a.base, 'CLAUDE.md'), 'Notes.');
+    await pushFrom(a, server, [], { adapter: claudeAdapterAt(a.home, '9.0.0') })({
+      global: true,
+      yes: true,
+      memory: false,
+    });
     const b = pc('desktop');
-    const base = claudeAdapter(b.home);
-    const adapter: AgentAdapter = {
-      ...base,
-      detector: {
-        detect: () => Promise.resolve({ installed: true, baseDir: b.base, version: '1.0.0' }),
-      },
-    };
-    const t = pullOn(b, server, [], { adapter });
+    const t = pullOn(b, server, [], { adapter: claudeAdapterAt(b.home, '1.0.0') });
     await t.pull({ global: true, yes: true });
-    // No stamp in the bundle: nothing to compare, so no warning.
+    expect(t.lines).toContain(
+      'warn: This setup was saved from Claude Code 9.0.0, but this PC has 1.0.0. Update Claude Code so every setting works.',
+    );
+  });
+
+  it('gives no version warning for a setup saved without a version stamp', async () => {
+    // pushedSetup runs with no claude on PATH, so the bundle has no version stamp.
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, [], { adapter: claudeAdapterAt(b.home, '1.0.0') });
+    await t.pull({ global: true, yes: true });
     expect(t.lines.some((line) => line.includes('was saved from'))).toBe(false);
   });
 
