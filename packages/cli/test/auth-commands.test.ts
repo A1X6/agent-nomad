@@ -30,6 +30,7 @@ import {
   type PasswordChecker,
   type Prompter,
   type Reporter,
+  SECRET_NAMES,
   type SecretName,
   type SecretStore,
 } from '../src/index.ts';
@@ -63,6 +64,13 @@ function memorySecrets(backend: SecretStore['backend'] = 'keychain') {
     get: (name) => Promise.resolve(saved.get(name) ?? null),
     set: (name, value) => {
       saved.set(name, value);
+      return Promise.resolve();
+    },
+    setMany: (values) => {
+      for (const name of SECRET_NAMES) {
+        const value = values[name];
+        if (value !== undefined) saved.set(name, value);
+      }
       return Promise.resolve();
     },
     delete: (name) => {

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { NOT_YET_AVAILABLE, type CommandHandlers } from '../src/cli/commands.ts';
+import type { CommandHandlers } from '../src/cli/commands.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
 import { SetupsNotDoneError } from '../src/cli/setup-outcomes.ts';
 import { AnswerNeededError } from '../src/ui/no-terminal-prompter.ts';
@@ -273,13 +273,12 @@ describe('outcomes', () => {
     },
   );
 
-  it('says which task brings a command that is not built yet', async () => {
-    const messages: string[] = [];
-    const code = await runCli(['push'], {
-      handlers: NOT_YET_AVAILABLE,
-      reporter: { error: (m) => messages.push(m), warn: (m) => messages.push(m) },
+  it("shows a failing command's own message and exits with failed", async () => {
+    const message = '"agentnomad push" is not available yet (coming in T33).';
+    const { code, messages } = await run(['push'], {
+      push: () => Promise.reject(new Error(message)),
     });
     expect(code).toBe(EXIT.failed);
-    expect(messages).toEqual(['"agentnomad push" is not available yet (coming in T33).']);
+    expect(messages).toEqual([`error: ${message}`]);
   });
 });

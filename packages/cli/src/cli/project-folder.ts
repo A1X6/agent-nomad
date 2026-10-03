@@ -1,11 +1,4 @@
-import { posix, win32 } from 'node:path';
-
-/** Same folder on this OS: Windows paths ignore case. */
-export function samePath(a: string, b: string, platform: NodeJS.Platform): boolean {
-  const path = platform === 'win32' ? win32 : posix;
-  const [x, y] = [path.resolve(a), path.resolve(b)];
-  return platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
-}
+import { samePath } from '../system/paths.ts';
 
 export interface ProjectFolderContext {
   readonly homedir: string;

@@ -1,8 +1,9 @@
-import { execFile } from 'node:child_process';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 
 import * as z from 'zod';
+
+import { runProgram } from '../../system/run-program.ts';
 
 /**
  * Settings an organization enforces on this PC (T31). They belong to the PC, not the user:
@@ -203,22 +204,15 @@ export function nodeManagedSettingsSystem(
     async listDir(dir) {
       return readdir(dir).catch(() => []);
     },
-    readRegistry(hive) {
-      return new Promise((done) => {
-        execFile(
-          'reg',
-          ['query', `${hive}\\SOFTWARE\\Policies\\ClaudeCode`, '/v', 'Settings'],
-          { windowsHide: true, encoding: 'utf8', timeout: 10_000 },
-          (error, stdout) => {
-            if (error) {
-              done(null);
-              return;
-            }
-            // "    Settings    REG_SZ    {...}"
-            done(/Settings\s+REG_(?:EXPAND_)?SZ\s+(.*)$/m.exec(stdout)?.[1]?.trim() ?? '');
-          },
-        );
-      });
+    async readRegistry(hive) {
+      const { stdout, error } = await runProgram(
+        'reg',
+        ['query', `${hive}\\SOFTWARE\\Policies\\ClaudeCode`, '/v', 'Settings'],
+        { timeoutMs: 10_000 },
+      );
+      if (error) return null;
+      // "    Settings    REG_SZ    {...}"
+      return /Settings\s+REG_(?:EXPAND_)?SZ\s+(.*)$/m.exec(stdout)?.[1]?.trim() ?? '';
     },
   };
 }

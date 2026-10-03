@@ -227,3 +227,19 @@ export interface AgentRegistry {
   list(): readonly AgentAdapter[];
   get(id: AgentId): AgentAdapter | undefined;
 }
+
+/** An agent chosen for a push or pull, with what its detector found. */
+export interface ChosenAgent {
+  readonly adapter: AgentAdapter;
+  readonly version: string | null;
+  readonly baseDir: string | null;
+}
+
+export const chosenAgent = (entry: {
+  readonly adapter: AgentAdapter;
+  readonly found: DetectedAgent;
+}): ChosenAgent => ({
+  adapter: entry.adapter,
+  version: entry.found.version,
+  baseDir: entry.found.baseDir,
+});

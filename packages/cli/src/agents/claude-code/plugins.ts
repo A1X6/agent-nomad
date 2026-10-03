@@ -3,6 +3,8 @@ import { posix, win32 } from 'node:path';
 
 import * as z from 'zod';
 
+import { samePath } from '../../system/paths.ts';
+
 /**
  * Plugins are reinstalled, never copied (T29): push saves which marketplaces and plugins
  * are installed, and pull runs Claude Code's own `claude plugin` commands.
@@ -135,16 +137,12 @@ export async function readPluginManifest(
     (await readJson(path.join(pluginsDir, 'known_marketplaces.json'), KnownMarketplacesSchema)) ??
     {};
 
-  const samePath = (a: string, b: string) => {
-    const [x, y] = [path.resolve(a), path.resolve(b)];
-    return input.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
-  };
   const wanted = (entry: { scope: string; projectPath?: string | undefined }) =>
     input.scope.kind === 'global'
       ? entry.scope === 'user'
       : (entry.scope === 'project' || entry.scope === 'local') &&
         entry.projectPath !== undefined &&
-        samePath(entry.projectPath, input.scope.projectDir);
+        samePath(entry.projectPath, input.scope.projectDir, input.platform);
 
   const marketplaces = new Map<string, MarketplaceEntry>();
   const plugins: PluginEntry[] = [];

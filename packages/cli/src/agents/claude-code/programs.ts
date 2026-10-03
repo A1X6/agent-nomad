@@ -14,9 +14,13 @@ export interface ProgramInfo {
 /** Looks a command up on this PC; `null` when it is not installed here. */
 export type ProgramLocator = (command: string) => Promise<ProgramInfo | null>;
 
+/** An npm package name (scoped or not) and an exact version: all that reaches an install command. */
+export const NPM_PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
+export const NPM_VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
 const NpmManifestSchema = z.object({
-  name: z.string().regex(/^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/),
-  version: z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/),
+  name: z.string().regex(NPM_PACKAGE_NAME),
+  version: z.string().regex(NPM_VERSION),
   bin: z.union([z.string(), z.record(z.string(), z.string())]).optional(),
 });
 

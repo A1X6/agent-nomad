@@ -1,10 +1,10 @@
-import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, win32 } from 'node:path';
+import { chmod, readFile, rm, stat } from 'node:fs/promises';
+import { dirname, win32 } from 'node:path';
 
 import * as z from 'zod';
 
+import { isMissing, writeFileAtomically } from '../system/files.ts';
+import { runProgram } from '../system/run-program.ts';
 import type { SecretName, SecretStore } from './secret-store.ts';
 
 /** File name of the fallback store inside the config folder. */
@@ -41,13 +41,10 @@ export interface FileStoreOptions {
 }
 
 /** Runs a Windows tool without a shell; its standard output, or a rejection. */
-function run(command: string, args: readonly string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(command, [...args], { timeout: 10_000, windowsHide: true }, (error, stdout) => {
-      if (error) reject(new Error(`${command} failed: ${error.message}`, { cause: error }));
-      else resolve(stdout);
-    });
-  });
+async function run(command: string, args: readonly string[]): Promise<string> {
+  const { stdout, error } = await runProgram(command, args, { timeoutMs: 10_000 });
+  if (error) throw new Error(`${command} failed: ${error.message}`, { cause: error });
+  return stdout;
 }
 
 /**
@@ -120,9 +117,6 @@ export class SecretsFileError extends Error {
   }
 }
 
-const isMissing = (error: unknown) =>
-  error instanceof Error && 'code' in error && error.code === 'ENOENT';
-
 /**
  * SecretStore in a file only this user can read, for PCs without a keychain (servers,
  * WSL, SSH). The secrets are not encrypted here: the file permissions are the protection,
@@ -172,21 +166,16 @@ export function createFileStore(options: FileStoreOptions): SecretStore {
       await rm(path, { force: true });
       return;
     }
-    await mkdir(dirname(path), { recursive: true, mode: DIR_MODE });
-    const temp = join(dirname(path), `.${SECRETS_FILE}.${randomBytes(6).toString('hex')}.tmp`);
-    try {
-      await writeFile(temp, `${JSON.stringify(file, null, 2)}\n`, {
-        mode: FILE_MODE,
-        flag: 'wx',
-      });
+    await writeFileAtomically(path, `${JSON.stringify(file, null, 2)}\n`, {
+      mode: FILE_MODE,
+      dirMode: DIR_MODE,
+      ...(options.platform !== undefined && { platform: options.platform }),
       // Before it takes the real name, so the secrets are never readable by others. Best
       // effort: without the tools the folder's own permissions still apply.
-      await restrictAccess?.(temp).catch(() => undefined);
-      await rename(temp, path);
-    } catch (error) {
-      await rm(temp, { force: true });
-      throw error;
-    }
+      beforeRename: async (temp) => {
+        await restrictAccess?.(temp).catch(() => undefined);
+      },
+    });
     await lockDown();
   }
 
@@ -198,6 +187,11 @@ export function createFileStore(options: FileStoreOptions): SecretStore {
     async set(name, value) {
       const file = await load();
       file.servers[server] = { ...file.servers[server], [name]: value };
+      await save(file);
+    },
+    async setMany(values) {
+      const file = await load();
+      file.servers[server] = { ...file.servers[server], ...values };
       await save(file);
     },
     async delete(name: SecretName) {

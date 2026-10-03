@@ -1,3 +1,5 @@
+import { fromBase64 } from '@agentnomad/contracts';
+
 import { ApiError, NotLoggedInError } from '../api/api-errors.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 
@@ -17,8 +19,7 @@ export interface LocalSession {
 }
 
 export async function saveLocalSession(secrets: SecretStore, session: LocalSession): Promise<void> {
-  await secrets.set('session-token', session.sessionToken);
-  await secrets.set('data-key', session.dataKey);
+  await secrets.setMany({ 'session-token': session.sessionToken, 'data-key': session.dataKey });
 }
 
 /** Forgets the login on this PC. Never fails because one secret was already gone. */
@@ -47,12 +48,15 @@ export async function withSession<T>(secrets: SecretStore, request: () => Promis
   }
 }
 
-/** The unlocked data key of this PC's login; NotLoggedInError when there is none. */
-export async function readDataKey(secrets: SecretStore): Promise<Uint8Array> {
+/**
+ * The unlocked data key of this PC's login; NotLoggedInError when there is none, with
+ * `message` when the command words it its own way.
+ */
+export async function readDataKey(secrets: SecretStore, message?: string): Promise<Uint8Array> {
   const [token, dataKey] = await Promise.all([
     secrets.get('session-token'),
     secrets.get('data-key'),
   ]);
-  if (token === null || dataKey === null) throw new NotLoggedInError();
-  return new Uint8Array(Buffer.from(dataKey, 'base64'));
+  if (token === null || dataKey === null) throw new NotLoggedInError(message);
+  return fromBase64(dataKey);
 }

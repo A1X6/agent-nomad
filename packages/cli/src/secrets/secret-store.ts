@@ -1,5 +1,6 @@
 /** The secrets kept on this PC between commands. */
-export type SecretName = 'session-token' | 'data-key';
+export const SECRET_NAMES = ['session-token', 'data-key'] as const;
+export type SecretName = (typeof SECRET_NAMES)[number];
 
 /**
  * Keeps secrets on this PC (T22): the OS keychain, or a user-only file where no keychain
@@ -11,6 +12,8 @@ export interface SecretStore {
   /** `null` when the secret is not stored (e.g. not logged in). */
   get(name: SecretName): Promise<string | null>;
   set(name: SecretName, value: string): Promise<void>;
+  /** Several secrets at once: the file store writes its file once (PERF-02). */
+  setMany(values: Readonly<Partial<Record<SecretName, string>>>): Promise<void>;
   /** Does nothing when the secret is not stored. */
   delete(name: SecretName): Promise<void>;
 }

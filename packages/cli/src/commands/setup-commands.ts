@@ -7,6 +7,7 @@ import type { CommandHandlers, ScopeFlags } from '../cli/commands.ts';
 import { listSavedSetups, type SavedSetup } from '../pull/saved-setups.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
+import { formatSize } from '../ui/format-size.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 
 export interface SetupCommandDeps {
@@ -22,14 +23,6 @@ export interface SetupCommandDeps {
   /** Clock for "2 hours ago"; injectable for tests. */
   readonly now?: () => Date;
 }
-
-/** `5 KB`, `1.2 MB`. */
-export const formatSize = (bytes: number) =>
-  bytes < 1024
-    ? `${String(bytes)} B`
-    : bytes < 1024 * 1024
-      ? `${(bytes / 1024).toFixed(0)} KB`
-      : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 /** `just now`, `5 minutes ago`, `2 hours ago`, `yesterday`, `3 days ago`, or the date. */
 export function timeAgo(iso: string, now: Date): string {

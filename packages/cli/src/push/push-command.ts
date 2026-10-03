@@ -5,29 +5,32 @@ import {
   MAX_BUNDLE_BYTES,
   ProjectNameSchema,
   type Bundle,
+  toBase64,
+  toHex,
   type BundleScope,
-  type SourceOs,
 } from '@agentnomad/contracts';
 import {
   createPathResolver,
   encryptProjectName,
   scopeKeyFor,
   sealBundle,
+  sourceOsOf,
   type BundleCodec,
   type CryptoService,
 } from '@agentnomad/core';
 
-import type {
-  AgentAdapter,
-  AgentRegistry,
-  CollectedFile,
-  DetectedAgent,
-  ScopeTarget,
+import {
+  chosenAgent,
+  type AgentAdapter,
+  type AgentRegistry,
+  type ChosenAgent,
+  type CollectedFile,
+  type ScopeTarget,
 } from '../agents/adapter.ts';
-import { unknownEntriesNotice } from '../agents/notices.ts';
+import { showNotices, unknownEntriesNotice } from '../agents/notices.ts';
 import type { ApiClient } from '../api/api-client.ts';
 import { ApiError } from '../api/api-errors.ts';
-import { withSession } from '../auth/local-session.ts';
+import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PushOptions } from '../cli/commands.ts';
 import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
 import { finishSetups, type SetupOutcome } from '../cli/setup-outcomes.ts';
@@ -36,6 +39,7 @@ import { chooseEnvValues, envSectionFile } from '../env/env-section.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
 import { listSavedRevisions } from '../pull/saved-setups.ts';
+import { formatSize } from '../ui/format-size.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { toBundleFiles } from './bundle-files.ts';
 
@@ -58,13 +62,8 @@ export interface PushDeps {
 /** What the apply step gets: no prompter, so it cannot ask anything (T59). */
 export type PushApplyDeps = Omit<PushDeps, 'prompter'>;
 
-/** Not logged in on this PC (no session or no unlocked data key). */
-export class NotLoggedInPushError extends Error {
-  constructor() {
-    super('You are not logged in on this PC. Run `agentnomad login` first.');
-    this.name = 'NotLoggedInPushError';
-  }
-}
+/** What push says without a login: its own wording, kept as it was (carry-over D). */
+const NOT_LOGGED_IN_ON_THIS_PC = 'You are not logged in on this PC. Run `agentnomad login` first.';
 
 /** The logged-in session and the data key, for the length of one push. */
 export interface PushKeys {
@@ -74,19 +73,6 @@ export interface PushKeys {
 }
 
 type ScopeChoice = 'global' | 'project' | 'both';
-
-/** An agent chosen for this push, with what its detector found. */
-interface ChosenAgent {
-  readonly adapter: AgentAdapter;
-  readonly version: string | null;
-  readonly baseDir: string | null;
-}
-
-const chosenAgent = (entry: { adapter: AgentAdapter; found: DetectedAgent }): ChosenAgent => ({
-  adapter: entry.adapter,
-  version: entry.found.version,
-  baseDir: entry.found.baseDir,
-});
 
 /** One save: an agent and a scope. */
 interface PushItem {
@@ -119,18 +105,6 @@ export interface PushPlan {
   /** Setups already decided while planning: nothing to save, or skipped. */
   readonly outcomes: readonly SetupOutcome[];
 }
-
-const toHex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
-const sizeOf = (bytes: number) =>
-  bytes < 1024
-    ? `${String(bytes)} B`
-    : bytes < 1024 * 1024
-      ? `${(bytes / 1024).toFixed(0)} KB`
-      : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-
-/** `darwin` / `win32` stay; anything else counts as Linux for the bundle's source OS. */
-const sourceOsOf = (platform: NodeJS.Platform): SourceOs =>
-  platform === 'darwin' || platform === 'win32' ? platform : 'linux';
 
 const describe = (item: PushItem) =>
   `${item.adapter.displayName} ${item.scope.kind === 'global' ? 'global setup' : `project "${item.scope.name}"`}`;
@@ -294,16 +268,6 @@ export function createPushPlanner(deps: PushDeps) {
     return { includeMemory, include };
   }
 
-  async function showNotices(agents: readonly { adapter: AgentAdapter }[]): Promise<void> {
-    const shown = new Set<string>();
-    for (const { adapter } of agents) {
-      for (const notice of (await adapter.inspector?.notices('push')) ?? []) {
-        if (!shown.has(notice)) reporter.warn(notice);
-        shown.add(notice);
-      }
-    }
-  }
-
   /** Collects one setup and asks which environment values go with it; `null`: nothing to save. */
   async function collectItem(
     item: PushItem,
@@ -409,7 +373,11 @@ export function createPushPlanner(deps: PushDeps) {
       }
       const items = await chooseItems(agents, options);
       const contents = await chooseContents(agents, items, options);
-      await showNotices(agents);
+      await showNotices(
+        agents.map(({ adapter }) => adapter),
+        'push',
+        reporter,
+      );
 
       const outcomes: SetupOutcome[] = [];
       const collected: { item: PushItem; bundle: Omit<Bundle, 'revision'> }[] = [];
@@ -471,12 +439,12 @@ export function createPushApplier(deps: PushApplyDeps) {
       } else {
         const nameEnc =
           planned.scope.kind === 'project'
-            ? Buffer.from(
+            ? toBase64(
                 encryptProjectName(crypto, dataKey, planned.scope.name, {
                   agent: bundle.agent,
                   scopeKey,
                 }),
-              ).toString('base64')
+              )
             : undefined;
         try {
           const { revision } = await withSession(keys.secrets, () =>
@@ -505,9 +473,13 @@ export function createPushApplier(deps: PushApplyDeps) {
 
     if (result.kind === 'too-large') {
       reporter.error(
-        `The ${setup} is ${sizeOf(result.size)} after compression and encryption; the limit is 5 MB. Remove large files (e.g. images in skills) and try again.`,
+        `The ${setup} is ${formatSize(result.size)} after compression and encryption; the limit is 5 MB. Remove large files (e.g. images in skills) and try again.`,
       );
-      return { setup, result: 'not-done', reason: `${sizeOf(result.size)}, over the 5 MB limit` };
+      return {
+        setup,
+        result: 'not-done',
+        reason: `${formatSize(result.size)}, over the 5 MB limit`,
+      };
     }
     if (result.kind === 'conflict') {
       reporter.warn(
@@ -517,7 +489,7 @@ export function createPushApplier(deps: PushApplyDeps) {
     }
     const count = bundle.files.length;
     reporter.success(
-      `Saved the ${setup}: ${String(count)} file${count === 1 ? '' : 's'}, ${sizeOf(result.size)} (revision ${String(result.revision)}).`,
+      `Saved the ${setup}: ${String(count)} file${count === 1 ? '' : 's'}, ${formatSize(result.size)} (revision ${String(result.revision)}).`,
     );
     return { setup, result: 'done' };
   }
@@ -543,12 +515,7 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
   return {
     async push(options) {
       const secrets = await deps.secrets();
-      const [token, dataKeyText] = await Promise.all([
-        secrets.get('session-token'),
-        secrets.get('data-key'),
-      ]);
-      if (token === null || dataKeyText === null) throw new NotLoggedInPushError();
-      const dataKey = new Uint8Array(Buffer.from(dataKeyText, 'base64'));
+      const dataKey = await readDataKey(secrets, NOT_LOGGED_IN_ON_THIS_PC);
       // Wiped on every path from here on, also when a question is cancelled (BP-01).
       try {
         const keys: PushKeys = { secrets, crypto: await deps.crypto(), dataKey };

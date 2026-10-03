@@ -316,8 +316,14 @@ describe('writing the profile', () => {
     );
     calls.length = 0;
     await writer.write({ GITHUB_TOKEN: 'ghp_secret', API_KEY: 'new' });
-    const sets = calls.filter((call) => call.env['AGENTNOMAD_ENV_VALUE'] !== undefined);
-    expect(sets.map((call) => call.env['AGENTNOMAD_ENV_NAME'])).toEqual(['API_KEY']);
+    const sets = calls.filter((call) => call.env['AGENTNOMAD_ENV_COUNT'] !== undefined);
+    expect(sets.map((call) => call.env)).toEqual([
+      {
+        AGENTNOMAD_ENV_COUNT: '1',
+        AGENTNOMAD_ENV_NAME_0: 'API_KEY',
+        AGENTNOMAD_ENV_VALUE_0: 'new',
+      },
+    ]);
     expect(calls.every((call) => !call.script.includes('ghp_secret'))).toBe(true);
   });
 
@@ -344,9 +350,41 @@ describe('writing the profile', () => {
     expect(calls[0]?.env).toEqual({ AGENTNOMAD_ENV_NAMES: 'GITHUB_TOKEN' });
     expect(calls[1]?.script).not.toContain('ghp_secret');
     expect(calls[1]?.env).toEqual({
-      AGENTNOMAD_ENV_NAME: 'GITHUB_TOKEN',
-      AGENTNOMAD_ENV_VALUE: 'ghp_secret',
+      AGENTNOMAD_ENV_COUNT: '1',
+      AGENTNOMAD_ENV_NAME_0: 'GITHUB_TOKEN',
+      AGENTNOMAD_ENV_VALUE_0: 'ghp_secret',
     });
+  });
+
+  it('Windows: sets several user variables with one PowerShell, not one each (PERF-02)', async () => {
+    const calls: { script: string; env: Readonly<Record<string, string>> }[] = [];
+    const writer = createWindowsEnvWriter((script, env) => {
+      calls.push({ script, env });
+      return Promise.resolve(Buffer.from('{}').toString('base64'));
+    });
+    await writer.write({ A_TOKEN: 'one', B_TOKEN: 'two', C_TOKEN: 'three' });
+    // One read, then one write for all three.
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.env).toEqual({
+      AGENTNOMAD_ENV_COUNT: '3',
+      AGENTNOMAD_ENV_NAME_0: 'A_TOKEN',
+      AGENTNOMAD_ENV_VALUE_0: 'one',
+      AGENTNOMAD_ENV_NAME_1: 'B_TOKEN',
+      AGENTNOMAD_ENV_VALUE_1: 'two',
+      AGENTNOMAD_ENV_NAME_2: 'C_TOKEN',
+      AGENTNOMAD_ENV_VALUE_2: 'three',
+    });
+    expect(calls.every((call) => !/one|two|three/.test(call.script))).toBe(true);
+  });
+
+  it('Windows: writes nothing when every variable already has its value', async () => {
+    const calls: string[] = [];
+    const writer = createWindowsEnvWriter((script) => {
+      calls.push(script);
+      return Promise.resolve(Buffer.from('{"A_TOKEN":"one"}').toString('base64'));
+    });
+    await writer.write({ A_TOKEN: 'one' });
+    expect(calls).toHaveLength(1);
   });
 });
 

@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { runProgram } from '../../system/run-program.ts';
 
 /** Lists the command lines (or program names) of running processes; `null` when unknown. */
 export type ProcessLister = () => Promise<readonly string[] | null>;
@@ -18,23 +18,14 @@ export type RunForOutput = (
 
 const LIST_TIMEOUT_MS = 10_000;
 
-const runForOutput: RunForOutput = (file, args, options) =>
-  new Promise((done) => {
-    execFile(
-      file,
-      [...args],
-      {
-        env: { ...options.env },
-        timeout: options.timeoutMs,
-        windowsHide: true,
-        encoding: 'utf8',
-        maxBuffer: 8 * 1024 * 1024,
-      },
-      (error, stdout) => {
-        done(error ? null : stdout);
-      },
-    );
+const runForOutput: RunForOutput = async (file, args, options) => {
+  const { stdout, error } = await runProgram(file, args, {
+    env: options.env,
+    timeoutMs: options.timeoutMs,
+    maxBuffer: 8 * 1024 * 1024,
   });
+  return error ? null : stdout;
+};
 
 /**
  * Every process's command line (its name when the command line is hidden, as for another

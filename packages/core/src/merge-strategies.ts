@@ -1,3 +1,4 @@
+import { sameBytes } from '@agentnomad/contracts';
 import { strFromU8, strToU8 } from 'fflate';
 
 import type { FileConflict, MergeStrategy, PlannedWrite } from './merge.ts';
@@ -22,15 +23,11 @@ export interface MergeStrategies {
 }
 
 /** `2026-09-24T17:42:50.123Z` to `20260924T174250Z`: sortable, and no colons (Windows-safe). */
-function timestamp(date: Date): string {
+export function backupStamp(date: Date): string {
   return date
     .toISOString()
     .replace(/\.\d{3}Z$/, 'Z')
     .replace(/[-:]/g, '');
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -93,7 +90,7 @@ export function createMergeStrategies(options: MergeStrategyOptions = {}): Merge
     resolve: ({ path, existing, incoming }: FileConflict): readonly PlannedWrite[] =>
       sameBytes(existing, incoming)
         ? []
-        : [{ path: `${path}${INCOMING_MARKER}${timestamp(now())}`, content: incoming }],
+        : [{ path: `${path}${INCOMING_MARKER}${backupStamp(now())}`, content: incoming }],
   };
 
   const overwrite: MergeStrategy = {
@@ -103,7 +100,7 @@ export function createMergeStrategies(options: MergeStrategyOptions = {}): Merge
       sameBytes(existing, incoming)
         ? []
         : [
-            { path: `${path}${BACKUP_MARKER}${timestamp(now())}`, content: existing },
+            { path: `${path}${BACKUP_MARKER}${backupStamp(now())}`, content: existing },
             { path, content: incoming },
           ],
   };

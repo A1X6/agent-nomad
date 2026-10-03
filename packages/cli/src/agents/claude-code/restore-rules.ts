@@ -23,7 +23,8 @@ import {
   PROGRAMS_BUNDLE_PATH,
   RESERVED_DIR,
   homePathProblem,
-  SCRIPT_EXTENSIONS,
+  extensionOf,
+  isScript,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
 import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts';
@@ -56,8 +57,6 @@ const under = (path: string, folder: string) => path === folder || path.startsWi
 /** For refusals: Windows and macOS ignore case, so `Plugins/…` is `plugins/…` there (T43). */
 const underAnyCase = (path: string, folder: string) =>
   under(path.toLowerCase(), folder.toLowerCase());
-const extensionOf = (path: string) => /(\.[^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
-const isScript = (path: string) => SCRIPT_EXTENSIONS.has(extensionOf(path));
 
 const refused = (reason: string): RestoreDestination => ({ kind: 'refused', reason });
 

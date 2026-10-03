@@ -1,9 +1,9 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 
 import * as z from 'zod';
 
+import { runProgram } from '../../system/run-program.ts';
 import type { Prompter, Reporter } from '../../ui/prompter.ts';
 import type { MarketplaceEntry, PluginEntry, PluginManifest } from './plugins.ts';
 
@@ -263,26 +263,13 @@ export type StartProgram = (
   },
 ) => Promise<RunResult>;
 
-const startProgram: StartProgram = (file, args, options) =>
-  new Promise((done) => {
-    execFile(
-      file,
-      [...args],
-      {
-        cwd: options.cwd,
-        env: { ...options.env },
-        timeout: options.timeoutMs,
-        windowsHide: true,
-        windowsVerbatimArguments: options.verbatim,
-        encoding: 'utf8',
-        maxBuffer: 16 * 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        const code = error && typeof error.code === 'number' ? error.code : error ? 1 : 0;
-        done({ exitCode: code, stdout, stderr });
-      },
-    );
+const startProgram: StartProgram = async (file, args, options) => {
+  const { exitCode, stdout, stderr } = await runProgram(file, args, {
+    ...options,
+    maxBuffer: 16 * 1024 * 1024,
   });
+  return { exitCode, stdout, stderr };
+};
 
 /** Windows launchers npm creates; they need `cmd.exe` to run. */
 const SHIMS = new Set(['.cmd', '.bat']);

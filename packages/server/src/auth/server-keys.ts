@@ -1,6 +1,6 @@
-import { KDF_SALT_BYTES } from '@agentnomad/contracts';
+import { KDF_SALT_BYTES, fromHex, toHex } from '@agentnomad/contracts';
 
-import { fromHex, toHex, utf8 } from '../encoding.ts';
+import { utf8 } from '../encoding.ts';
 
 /**
  * Secrets only the server holds, derived from SERVER_SECRET (never stored in the database).

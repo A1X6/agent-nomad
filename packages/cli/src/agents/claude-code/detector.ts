@@ -1,10 +1,10 @@
-import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 
 import * as z from 'zod';
 
+import { runProgram } from '../../system/run-program.ts';
 import type { DetectedAgent, Detector } from '../adapter.ts';
 
 /** Environment variable that moves Claude Code's whole `~/.claude` folder elsewhere. */
@@ -182,17 +182,11 @@ export function nodeDetectorSystem(
         return null;
       }
     },
-    runVersion(file) {
-      return new Promise((done) => {
-        execFile(
-          file,
-          ['--version'],
-          { timeout: VERSION_TIMEOUT_MS, windowsHide: true, encoding: 'utf8' },
-          (error, stdout) => {
-            done(error ? null : stdout);
-          },
-        );
+    async runVersion(file) {
+      const { stdout, error } = await runProgram(file, ['--version'], {
+        timeoutMs: VERSION_TIMEOUT_MS,
       });
+      return error ? null : stdout;
     },
   };
 }

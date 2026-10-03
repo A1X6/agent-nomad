@@ -45,8 +45,7 @@ export async function createSecretStore(options: CreateSecretStoreOptions): Prom
     ]).catch(() => [null, null] as const);
     if (fileToken !== null && fileKey !== null) {
       try {
-        await keychain.set('session-token', fileToken);
-        await keychain.set('data-key', fileKey);
+        await keychain.setMany({ 'session-token': fileToken, 'data-key': fileKey });
       } catch {
         return file;
       }

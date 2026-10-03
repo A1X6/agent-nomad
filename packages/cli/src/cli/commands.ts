@@ -73,29 +73,3 @@ export interface CommandHandlers {
   accountDelete(options: CredentialOptions): Promise<void>;
   env(): Promise<void>;
 }
-
-/** The command exists but is built in a later task. */
-export class NotAvailableYetError extends Error {
-  constructor(command: string, task: string) {
-    super(`"agentnomad ${command}" is not available yet (coming in ${task}).`);
-    this.name = 'NotAvailableYetError';
-  }
-}
-
-const later = (command: string, task: string) => () =>
-  Promise.reject(new NotAvailableYetError(command, task));
-
-/** Placeholders until each command's task replaces it. */
-export const NOT_YET_AVAILABLE: CommandHandlers = {
-  register: later('register', 'T23'),
-  login: later('login', 'T23'),
-  logout: later('logout', 'T23'),
-  push: later('push', 'T33'),
-  pull: later('pull', 'T34'),
-  list: later('list', 'T35'),
-  agents: later('agents', 'T35'),
-  status: later('status', 'T35'),
-  delete: later('delete', 'T35'),
-  accountDelete: later('account delete', 'T35'),
-  env: later('env', 'T30'),
-};

@@ -29,6 +29,7 @@ import {
   type LocalState,
   type Prompter,
   type Reporter,
+  SECRET_NAMES,
   type SecretName,
   type SecretStore,
 } from '../src/index.ts';
@@ -130,6 +131,13 @@ function loggedIn(saved = new Map<SecretName, string>()): SecretStore {
       saved.set(name, value);
       return Promise.resolve();
     },
+    setMany: (values) => {
+      for (const name of SECRET_NAMES) {
+        const value = values[name];
+        if (value !== undefined) saved.set(name, value);
+      }
+      return Promise.resolve();
+    },
     delete: (name) => {
       saved.delete(name);
       return Promise.resolve();
@@ -212,6 +220,7 @@ describe('agentnomad list', () => {
       backend: 'file',
       get: () => Promise.resolve(null),
       set: () => Promise.resolve(),
+      setMany: () => Promise.resolve(),
       delete: () => Promise.resolve(),
     };
     await expect(commands(fakeServer(), [], none).list()).rejects.toBeInstanceOf(NotLoggedInError);

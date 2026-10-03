@@ -18,8 +18,8 @@ export const CLAUDE_OWN_VARIABLES = new Set([
 const REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g;
 
 /** Files that can hold `${VAR}` references: MCP servers and settings. */
-const MCP_FILES = new Set(['.mcp.json', '.agentnomad/claude.json']);
-const SETTINGS_FILES = new Set([
+export const MCP_FILES: ReadonlySet<string> = new Set(['.mcp.json', '.agentnomad/claude.json']);
+export const SETTINGS_FILES: ReadonlySet<string> = new Set([
   'settings.json',
   '.claude/settings.json',
   '.claude/settings.local.json',
