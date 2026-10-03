@@ -15,7 +15,9 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { stubRestorer } from './stub-restorer.ts';
 import {
+  isRedirectVariable,
   BLOCK_END,
   BLOCK_START,
   chooseEnvValues,
@@ -367,6 +369,7 @@ describe('restoring values on pull', () => {
     const { writer, written } = recordingWriter();
     const lines: string[] = [];
     const result = await restoreEnvValues({
+      isRedirectVariable,
       section,
       env: { API_KEY: 'already-here' },
       writer,
@@ -386,6 +389,7 @@ describe('restoring values on pull', () => {
   it('writes nothing when the user says no', async () => {
     const { writer, written } = recordingWriter();
     const result = await restoreEnvValues({
+      isRedirectVariable,
       section,
       env: {},
       writer,
@@ -399,6 +403,7 @@ describe('restoring values on pull', () => {
   it('counts a value already in its block as set: no question, no write (T56)', async () => {
     const { writer, written } = recordingWriter();
     const result = await restoreEnvValues({
+      isRedirectVariable,
       section,
       env: {},
       writer: {
@@ -415,6 +420,7 @@ describe('restoring values on pull', () => {
   it('a different value in its block is still offered (T56)', async () => {
     const { writer, written } = recordingWriter();
     const result = await restoreEnvValues({
+      isRedirectVariable,
       section,
       env: {},
       writer: { ...writer, current: () => Promise.resolve(new Map([['API_KEY', 'older']])) },
@@ -434,6 +440,7 @@ describe('restoring values on pull', () => {
     };
     const first = recordingWriter();
     const result = await restoreEnvValues({
+      isRedirectVariable,
       section: redirects,
       env: {},
       writer: first.writer,
@@ -450,6 +457,7 @@ describe('restoring values on pull', () => {
     const asked: [string, boolean | undefined][] = [];
     const second = recordingWriter();
     await restoreEnvValues({
+      isRedirectVariable,
       section: redirects,
       env: {},
       writer: second.writer,
@@ -469,6 +477,7 @@ describe('restoring values on pull', () => {
 
     const third = recordingWriter();
     await restoreEnvValues({
+      isRedirectVariable,
       section: redirects,
       env: {},
       writer: third.writer,
@@ -494,6 +503,7 @@ describe('restoring values on pull', () => {
       const { writer, written } = recordingWriter();
       const { lines, reporter } = quiet();
       const result = await restoreEnvValues({
+        isRedirectVariable,
         section: loaders,
         env: {},
         writer,
@@ -510,6 +520,7 @@ describe('restoring values on pull', () => {
     it('--allow-commands adds them too', async () => {
       const { writer, written } = recordingWriter();
       await restoreEnvValues({
+        isRedirectVariable,
         section: loaders,
         env: {},
         writer,
@@ -527,6 +538,7 @@ describe('restoring values on pull', () => {
       const { writer, written } = recordingWriter();
       const asked: [string, boolean | undefined][] = [];
       await restoreEnvValues({
+        isRedirectVariable,
         section: loaders,
         env: {},
         writer,
@@ -561,9 +573,7 @@ describe('agentnomad env', () => {
     collector: {
       collect: (target) => Promise.resolve(target.kind === 'global' ? global : project),
     },
-    restorer: {
-      restore: () => Promise.resolve({ written: [], skipped: [], backups: [], warnings: [] }),
-    },
+    restorer: stubRestorer(),
   });
 
   async function run(env: Record<string, string>) {

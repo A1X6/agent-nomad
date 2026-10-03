@@ -9,12 +9,6 @@ import {
 import type { AgentRegistry } from './agents/adapter.ts';
 import { createAgentsCommand } from './agents/agents-command.ts';
 import { createClaudeCodeAdapter } from './agents/claude-code/claude-code-adapter.ts';
-import { claudeConfigDir, nodeDetectorSystem } from './agents/claude-code/detector.ts';
-import {
-  detectManagedSettings,
-  managedSettingsNotice,
-  nodeManagedSettingsSystem,
-} from './agents/claude-code/managed-settings.ts';
 import { createAgentRegistry } from './agents/registry.ts';
 import type { ApiClient } from './api/api-client.ts';
 import { resolveApiUrl } from './api/api-url.ts';
@@ -112,14 +106,6 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
         env: app.env,
         homedir: app.homedir,
         platform: app.platform,
-        onClaudeRunning: () =>
-          app.prompter.select(
-            'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.',
-            [
-              { value: 'retry', label: 'I closed it, continue' },
-              { value: 'skip', label: 'Skip ~/.claude.json this time' },
-            ],
-          ),
       }),
     ]),
   );
@@ -178,18 +164,7 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       homedir: app.homedir,
       platform: app.platform,
     }),
-    ...createAgentsCommand({
-      registry,
-      reporter: app.reporter,
-      notices: async () => {
-        const system = nodeDetectorSystem(app.env, app.homedir, app.platform);
-        const found = await detectManagedSettings(
-          nodeManagedSettingsSystem(app.env, claudeConfigDir(system), app.platform),
-        );
-        const notice = managedSettingsNotice(found, 'agents');
-        return notice === null ? [] : [notice];
-      },
-    }),
+    ...createAgentsCommand({ registry, reporter: app.reporter }),
     ...createEnvCommand({ registry, reporter: app.reporter, env: app.env, cwd: app.cwd }),
     ...createAuthCommands({
       prompter: app.prompter,

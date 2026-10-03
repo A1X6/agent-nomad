@@ -31,11 +31,8 @@ export interface CollectedFile {
 export interface CollectOptions {
   /** Include opt-in memory folders (subagent and auto memory). */
   readonly includeMemory: boolean;
-  /**
-   * Include a copy of the user's own skills that the agent's online account syncs to this PC
-   * (T42: Claude Code's claude.ai skills). Opt-in; global setup only.
-   */
-  readonly includeAccountSkills?: boolean;
+  /** The adapter's optional parts (their `OptionalPart.id`) to include, e.g. `account-skills`. */
+  readonly include?: ReadonlySet<string>;
   /** Told about each file left out, with why (T45: a link to a refused place, a huge file). */
   readonly onSkipped?: (bundlePath: string, reason: string) => void;
 }
@@ -43,6 +40,25 @@ export interface CollectOptions {
 /** Which files belong to a setup. Never collects credentials or machine state (T25, T26). */
 export interface Collector {
   collect(target: ScopeTarget, options: CollectOptions): Promise<readonly CollectedFile[]>;
+}
+
+/**
+ * Something an agent saves only when the user opts in (T61), e.g. Claude Code's copy of the
+ * user's claude.ai skills (T42). Push asks about each one; `--<id>` / `--no-<id>` answer it.
+ */
+export interface OptionalPart {
+  /** Stable id, e.g. `account-skills`; also the flag name. */
+  readonly id: string;
+  /** The setup it belongs to. */
+  readonly scope: ScopeTarget['kind'];
+  /** What there is to save on this PC, or why it cannot be read. */
+  available(): Promise<{ readonly names: readonly string[]; readonly problem: string | null }>;
+  /** Push's question, e.g. `Also save a copy of your 2 claude.ai skills (a, b)? …`. */
+  question(names: readonly string[]): string;
+  /** Said when it cannot be read, given `available()`'s problem. */
+  unreadable(problem: string): string;
+  /** Said when a flag asks for it but there is nothing to save. */
+  readonly noneFound: string;
 }
 
 /** The user's answer when a pulled file already exists here. */
@@ -54,13 +70,41 @@ export interface ConflictQuestion {
    * the Claude login: then only merge or skip may be offered.
    */
   readonly overwriteAllowed: boolean;
+  /** What to ask, when not `<path> already exists here and is different.` */
+  readonly message?: string;
 }
 
-/** Asks (or decides from flags) what to do with one existing file that differs. */
+/** Answers (from the plan, never by asking) what to do with one existing file that differs. */
 export type ConflictResolver = (
   path: string,
   question: ConflictQuestion,
 ) => Promise<ConflictChoice>;
+
+/** One file here that differs from the pulled one, and what to ask about it (T61). */
+export interface FileConflict {
+  /** Bundle path. */
+  readonly path: string;
+  readonly question: ConflictQuestion;
+}
+
+/**
+ * Something in a setup that runs programs on this PC (T34, T44): a hook, an MCP server, a
+ * script they run. Pull shows the new or changed ones and asks before writing them.
+ */
+export interface RunnableEntry {
+  /** The bundle file it lives in, e.g. `settings.json` or `.mcp.json`. */
+  readonly file: string;
+  /** What it is, e.g. `hook PreToolUse`, `status line`, `MCP server github`. */
+  readonly label: string;
+  /** What runs, e.g. `~/.claude/hooks/check.sh` or `npx gh-mcp` or a URL. */
+  readonly command: string;
+  /** What is compared with this PC; the whole entry, so a change anywhere in it shows. */
+  readonly identity: string;
+}
+
+export interface ReviewedEntry extends RunnableEntry {
+  readonly change: 'new' | 'changed';
+}
 
 /** What a restore did, for the summary shown to the user. Paths are bundle paths. */
 export interface RestoreReport {
@@ -76,12 +120,31 @@ export interface RestoreReport {
 export interface RestoreContext {
   /** OS the setup was pushed from, to flag hooks that only run there. */
   readonly sourceOs?: SourceOs;
-  /** `--yes`: take the safe answer instead of asking (e.g. skip a file an open app rewrites). */
-  readonly assumeYes?: boolean;
 }
 
-/** Writes a pulled setup to disk, with per-OS permissions and line endings (T27). */
+/**
+ * Writes a pulled setup to disk, with per-OS permissions and line endings (T27), and tells
+ * pull's plan step what it must ask first (T61). It never asks anything itself.
+ */
 export interface Restorer {
+  /**
+   * What in `files` runs programs and is new or changed against `current` (this PC's setup
+   * as the collector sees it). Pull shows these and asks before writing (T34).
+   */
+  reviewRunnable(
+    files: readonly CollectedFile[],
+    current: readonly CollectedFile[],
+  ): readonly ReviewedEntry[];
+  /**
+   * Environment variable names that send programs' requests elsewhere (a proxy, another
+   * endpoint): pull gives saved values of these their own question (T44, T56).
+   */
+  isRedirectVariable(name: string): boolean;
+  /** The files here that differ from the pulled ones, in the order `restore` meets them. */
+  conflicts(
+    files: readonly CollectedFile[],
+    current: readonly CollectedFile[],
+  ): readonly FileConflict[];
   restore(
     target: ScopeTarget,
     files: readonly CollectedFile[],
@@ -94,20 +157,21 @@ export interface Restorer {
 export interface AgentInspector {
   /** Entries the collector does not know, e.g. a folder a newer agent version added. */
   unknownEntries(target: ScopeTarget): Promise<readonly string[]>;
-  /** Things to point out before push or pull, e.g. organization-managed settings. */
-  notices(command: 'push' | 'pull'): Promise<readonly string[]>;
-  /**
-   * The user's own skills the agent's online account syncs to this PC, which push can save
-   * a copy of (T42), or why they cannot be read.
-   */
-  accountSkills?(): Promise<{ readonly names: readonly string[]; readonly problem: string | null }>;
+  /** Things to point out before push, pull or `agents`, e.g. organization-managed settings. */
+  notices(command: 'push' | 'pull' | 'agents'): Promise<readonly string[]>;
+  /** What pull says about the version a setup was saved with; `null`: nothing to say. */
+  versionNotice?(savedWith: string | null, here: string | null): string | null;
 }
 
-/** What an agent's follow-up after a restore gets (T34), e.g. to reinstall plugins. */
-export interface AfterRestoreContext {
+/** What an agent's part of pull's plan step gets for one setup (T61). Nothing is written yet. */
+export interface RestorePlanContext {
   readonly target: ScopeTarget;
-  /** The restored setup's files, including agentnomad's own entries (plugins, programs). */
+  /** The files that will be restored, including agentnomad's own entries (plugins, programs). */
   readonly files: readonly CollectedFile[];
+  /** The answer for each file here that differs, by bundle path. */
+  readonly conflicts: ReadonlyMap<string, ConflictChoice>;
+  /** The answer for every other file (flags or "… all remaining files"), if one was given. */
+  readonly conflictAnswer: ConflictChoice | undefined;
   readonly prompter: Prompter;
   readonly reporter: Reporter;
   /** `--yes`: accept without asking where that is safe. */
@@ -117,11 +181,21 @@ export interface AfterRestoreContext {
    * asking. Without it, `--yes` skips those with a note (T38).
    */
   readonly allowCommands: boolean;
-  /**
-   * `--account-skills` / `--no-account-skills`: add saved account skills as local skills, or
-   * not, without asking (T42). `undefined` asks (`--yes` alone: no).
-   */
-  readonly accountSkills?: boolean;
+  /** Optional parts answered by flags (`--account-skills`): id → yes or no; missing: ask. */
+  readonly parts: ReadonlyMap<string, boolean>;
+}
+
+/** What the follow-up after a restore gets: a reporter, and no prompter, so it never asks. */
+export interface AfterRestoreContext {
+  readonly reporter: Reporter;
+}
+
+/** An agent's answers for one pulled setup (T61); carrying them out never asks. */
+export interface AgentRestorePlan {
+  /** Writes the setup's files with the plan's answers (the restorer's `restore`). */
+  restore(onConflict: ConflictResolver, context: RestoreContext): Promise<RestoreReport>;
+  /** Runs after every planned setup was written, e.g. plugin reinstalls (T34). */
+  afterRestore(context: AfterRestoreContext): Promise<void>;
 }
 
 /**
@@ -132,12 +206,20 @@ export interface AgentAdapter {
   readonly id: AgentId;
   /** Shown to users, e.g. `Claude Code`. */
   readonly displayName: string;
+  /** What push's memory question names, e.g. `what Claude learned: subagent and auto memory`. */
+  readonly memoryDescription?: string;
   readonly detector: Detector;
   readonly collector: Collector;
   readonly restorer: Restorer;
   readonly inspector?: AgentInspector;
-  /** Runs after a pull restored a setup, e.g. plugin reinstalls (T34). */
-  readonly afterRestore?: (context: AfterRestoreContext) => Promise<void>;
+  /** What push saves only after a yes (T61). */
+  readonly optionalParts?: readonly OptionalPart[];
+  /**
+   * The agent's own questions for one pulled setup, asked in pull's plan step before
+   * anything is written (T61): e.g. an open app that rewrites a file, plugins to reinstall.
+   * Without it, the restorer writes the files and nothing follows.
+   */
+  planRestore?(context: RestorePlanContext): Promise<AgentRestorePlan>;
 }
 
 /** The only place agents are registered (T28). */

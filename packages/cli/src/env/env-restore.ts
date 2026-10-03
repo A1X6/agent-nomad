@@ -1,4 +1,3 @@
-import { isRedirectVariable } from '../pull/reviewed-settings.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import type { EnvSection } from './env-section.ts';
 import { LOADER_VARIABLE } from './loader-variables.ts';
@@ -15,6 +14,8 @@ export interface RestoreEnvDeps {
   readonly assumeYes?: boolean;
   /** `--allow-commands`: add those too without asking (T44, T56). */
   readonly allowCommands?: boolean;
+  /** Names that send programs' requests elsewhere, from the agent's restorer (T61). */
+  readonly isRedirectVariable: (name: string) => boolean;
 }
 
 export interface RestoreEnvResult {
@@ -79,7 +80,9 @@ export async function planEnvRestore(
     return { toAdd: [], alreadySet, declined: false };
   }
   const loaders = missing.filter((name) => LOADER_VARIABLE.test(name));
-  const redirects = missing.filter((name) => !loaders.includes(name) && isRedirectVariable(name));
+  const redirects = missing.filter(
+    (name) => !loaders.includes(name) && deps.isRedirectVariable(name),
+  );
   const gated = [...loaders, ...redirects].sort();
   const plain = missing.filter((name) => !gated.includes(name));
 

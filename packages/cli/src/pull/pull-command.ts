@@ -4,14 +4,13 @@ import { createPathResolver, type BundleCodec, type CryptoService } from '@agent
 import type {
   AgentAdapter,
   AgentRegistry,
+  AgentRestorePlan,
   CollectedFile,
   ConflictChoice,
   ConflictResolver,
   DetectedAgent,
   ScopeTarget,
 } from '../agents/adapter.ts';
-import { sameForRestore } from '../agents/claude-code/restorer.ts';
-import { agentVersionNotice } from '../agents/claude-code/version-stamp.ts';
 import type { ApiClient } from '../api/api-client.ts';
 import { NotLoggedInError } from '../api/api-errors.ts';
 import { withSession } from '../auth/local-session.ts';
@@ -25,7 +24,6 @@ import { fromBundleFiles, preferLocalEquivalents } from '../push/bundle-files.ts
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
-import { reviewRunnable } from './command-review.ts';
 import { downloadSetup, listSavedSetups, type SavedSetup } from './saved-setups.ts';
 
 export interface PullDeps {
@@ -99,6 +97,8 @@ export interface PlannedRestore {
   readonly conflicts: ReadonlyMap<string, ConflictChoice>;
   /** Saved environment values to add, already chosen. */
   readonly env: { readonly section: EnvSection; readonly toAdd: readonly string[] } | null;
+  /** The agent's own answers for this setup: how to write it and what follows (T61). */
+  readonly agentPlan: AgentRestorePlan;
 }
 
 /** Every answer pull needs, gathered before the first file is written (T59). */
@@ -112,9 +112,6 @@ export interface PullPlan {
 
 type ConflictAnswer = ConflictChoice | 'merge-all' | 'overwrite-all';
 
-/** `~/.claude.json`'s place in a bundle: only ever merged, never replaced. */
-const CLAUDE_JSON_PATH = '.agentnomad/claude.json';
-
 const sourceOsOf = (platform: NodeJS.Platform): SourceOs =>
   platform === 'darwin' || platform === 'win32' ? platform : 'linux';
 
@@ -124,7 +121,7 @@ const describe = (adapter: AgentAdapter, setup: SavedSetup) =>
 /**
  * Pull's plan step (T59): chooses saved setups, downloads and checks them, and asks every
  * question before anything is written: an older copy, what would run programs, each file
- * here that differs, and saved environment values. Without a terminal, a question the flags
+ * here that differs, saved environment values, and each agent's own questions (T61). Without a terminal, a question the flags
  * leave open stops pull here (T46).
  */
 export function createPullPlanner(deps: PullDeps) {
@@ -256,9 +253,7 @@ export function createPullPlanner(deps: PullDeps) {
       if (answer !== undefined)
         return answer === 'overwrite' && !question.overwriteAllowed ? 'merge' : answer;
       const chosen: ConflictAnswer = await prompter.select(
-        question.overwriteAllowed
-          ? `${path} already exists here and is different.`
-          : `${path === CLAUDE_JSON_PATH ? '~/.claude.json' : path}: add your MCP servers and preferences (your login and history stay)?`,
+        question.message ?? `${path} already exists here and is different.`,
         [
           {
             value: 'merge',
@@ -330,7 +325,7 @@ export function createPullPlanner(deps: PullDeps) {
       }
     }
 
-    const versionNote = agentVersionNotice(adapter.displayName, bundle.agentVersion, version);
+    const versionNote = adapter.inspector?.versionNotice?.(bundle.agentVersion, version) ?? null;
     if (versionNote !== null) reporter.warn(versionNote);
 
     const scope: BundleScope = bundle.scope;
@@ -343,7 +338,7 @@ export function createPullPlanner(deps: PullDeps) {
     // are, and anything that runs programs and is new here is confirmed before writing.
     const current = await adapter.collector.collect(target, { includeMemory: true });
     files = preferLocalEquivalents(bundle.files, files, current, resolver);
-    const review = reviewRunnable(files, current);
+    const review = adapter.restorer.reviewRunnable(files, current);
     let declined = false;
     if (review.length > 0) {
       reporter.info(
@@ -372,28 +367,46 @@ export function createPullPlanner(deps: PullDeps) {
     return { adapter, setup, bundle, revision, target, files, current, declined };
   }
 
-  /**
-   * The answer for each file that is here and differs, in the order the restorer meets them.
-   * `~/.claude.json` is asked about whenever the setup has it: its other keys are not
-   * collected, so whether it would change is only known while writing.
-   */
+  /** The answer for each file that is here and differs, as the agent's restorer lists them. */
   async function answerConflicts(
-    { files, current }: Prepared,
+    { adapter, files, current }: Prepared,
     ask: ConflictResolver,
   ): Promise<Map<string, ConflictChoice>> {
     const answers = new Map<string, ConflictChoice>();
-    for (const file of [...files].sort((a, b) => (a.path < b.path ? -1 : 1))) {
-      const here = current.find((entry) => entry.path === file.path);
-      const claudeJson = file.path === CLAUDE_JSON_PATH;
-      if (here === undefined && !claudeJson) continue;
-      if (
-        here !== undefined &&
-        sameForRestore(deps.platform, file.path, here.content, file.content)
-      )
-        continue;
-      answers.set(file.path, await ask(file.path, { overwriteAllowed: !claudeJson }));
+    for (const conflict of adapter.restorer.conflicts(files, current)) {
+      answers.set(conflict.path, await ask(conflict.path, conflict.question));
     }
     return answers;
+  }
+
+  /**
+   * The agent's own questions for one setup (T61), e.g. an open app that rewrites a file, or
+   * plugins to reinstall; without its own plan step, the restorer writes the files.
+   */
+  async function planAgent(
+    restore: Omit<PlannedRestore, 'agentPlan'>,
+    conflictAnswer: ConflictChoice | undefined,
+    options: PullOptions,
+  ): Promise<AgentRestorePlan> {
+    const { adapter, target, files } = restore;
+    if (adapter.planRestore === undefined) {
+      return {
+        restore: (onConflict, context) =>
+          adapter.restorer.restore(target, files, onConflict, context),
+        afterRestore: () => Promise.resolve(),
+      };
+    }
+    return adapter.planRestore({
+      target,
+      files,
+      conflicts: restore.conflicts,
+      conflictAnswer,
+      prompter,
+      reporter,
+      assumeYes: options.yes,
+      allowCommands: options.allowCommands === true,
+      parts: options.parts ?? new Map(),
+    });
   }
 
   return {
@@ -436,7 +449,7 @@ export function createPullPlanner(deps: PullDeps) {
       }
 
       const conflicts = conflictAsker(options);
-      const restores: PlannedRestore[] = [];
+      const answered: Omit<PlannedRestore, 'agentPlan'>[] = [];
       for (const ready of prepared) {
         const answers = await answerConflicts(ready, conflicts.ask);
         const envFile = ready.files.find((file) => file.path === ENV_BUNDLE_PATH);
@@ -453,11 +466,12 @@ export function createPullPlanner(deps: PullDeps) {
                   reporter,
                   assumeYes: options.yes,
                   allowCommands: options.allowCommands === true,
+                  isRedirectVariable: (name) => ready.adapter.restorer.isRedirectVariable(name),
                 })
               ).toAdd,
             }
           : null;
-        restores.push({
+        answered.push({
           adapter: ready.adapter,
           name: describe(ready.adapter, ready.setup),
           setup: ready.setup,
@@ -470,6 +484,14 @@ export function createPullPlanner(deps: PullDeps) {
           env,
         });
       }
+      // Then each agent's own questions, still before anything is written (T61).
+      const restores: PlannedRestore[] = [];
+      for (const restore of answered) {
+        restores.push({
+          ...restore,
+          agentPlan: await planAgent(restore, conflicts.fixed(), options),
+        });
+      }
       return { restores, outcomes, conflictAnswer: conflicts.fixed() };
     },
   };
@@ -477,7 +499,7 @@ export function createPullPlanner(deps: PullDeps) {
 
 /**
  * Pull's apply step (T59): writes each planned setup with the answers from the plan, adds the
- * chosen environment values and remembers the revision. It has no prompter, so it never
+ * chosen environment values, remembers the revision, then runs each agent's follow-up. It has no prompter, so it never
  * asks: a file that differs but was not asked about (only the restorer saw it) is left as it
  * is, and the setup is not done.
  */
@@ -487,9 +509,8 @@ export function createPullApplier(deps: PullApplyDeps) {
   async function applyOne(
     planned: PlannedRestore,
     conflictAnswer: ConflictChoice | undefined,
-    options: PullOptions,
   ): Promise<SetupOutcome> {
-    const { adapter, name, setup, revision, target, files, declined } = planned;
+    const { adapter, name, setup, revision, declined } = planned;
     const notAsked: string[] = [];
     const answer: ConflictResolver = (path, question) => {
       const chosen = planned.conflicts.get(path) ?? conflictAnswer;
@@ -501,10 +522,7 @@ export function createPullApplier(deps: PullApplyDeps) {
         chosen === 'overwrite' && !question.overwriteAllowed ? 'merge' : chosen,
       );
     };
-    const report = await adapter.restorer.restore(target, files, answer, {
-      sourceOs: planned.sourceOs,
-      assumeYes: options.yes,
-    });
+    const report = await planned.agentPlan.restore(answer, { sourceOs: planned.sourceOs });
     for (const warning of report.warnings) reporter.warn(warning);
     const parts = [
       `${String(report.written.length)} written`,
@@ -539,11 +557,13 @@ export function createPullApplier(deps: PullApplyDeps) {
   }
 
   return {
-    async apply(plan: PullPlan, options: PullOptions): Promise<SetupOutcome[]> {
+    async apply(plan: PullPlan): Promise<SetupOutcome[]> {
       const outcomes: SetupOutcome[] = [];
       for (const planned of plan.restores) {
-        outcomes.push(await applyOne(planned, plan.conflictAnswer, options));
+        outcomes.push(await applyOne(planned, plan.conflictAnswer));
       }
+      // The agents' follow-ups (plugins, programs), with the answers from the plan.
+      for (const planned of plan.restores) await planned.agentPlan.afterRestore({ reporter });
       return outcomes;
     },
   };
@@ -552,10 +572,9 @@ export function createPullApplier(deps: PullApplyDeps) {
 /**
  * `agentnomad pull` (T34): choose saved setups, download and decrypt them on this PC,
  * confirm what would run programs, restore with the user's merge / overwrite / skip
- * choices, then offer plugins, programs and environment variables. Plan, then apply (T59);
- * the agent's own follow-up (plugins, programs, account skills) runs last and still gets
- * the prompter, since the adapter interface hands it one. Exits with code 1 when a setup
- * was not restored (BUG-03).
+ * choices, then offer plugins, programs and environment variables. Plan, then apply (T59):
+ * every question, the agent's own ones included (T61), comes before the first write, and
+ * the apply step has no prompter. Exits with code 1 when a setup was not restored (BUG-03).
  */
 export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'> {
   const planner = createPullPlanner(deps);
@@ -576,18 +595,7 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
           dataKey,
         });
         if (plan === null) return;
-        const applied = await applier.apply(plan, options);
-        for (const planned of plan.restores) {
-          await planned.adapter.afterRestore?.({
-            target: planned.target,
-            files: planned.files,
-            prompter: deps.prompter,
-            reporter: deps.reporter,
-            assumeYes: options.yes,
-            allowCommands: options.allowCommands === true,
-            ...(options.accountSkills !== undefined && { accountSkills: options.accountSkills }),
-          });
-        }
+        const applied = await applier.apply(plan);
         finishSetups('pull', [...plan.outcomes, ...applied]);
       } finally {
         dataKey.fill(0);

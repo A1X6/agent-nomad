@@ -2,12 +2,42 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createClaudeCodeAfterRestore,
-  type AfterRestoreContext,
   type ClaudeCli,
   type CollectedFile,
   type DetectorSystem,
+  type FollowUpPlanContext,
+  type ManagedSettings,
   PluginManifestSchema,
 } from '../src/index.ts';
+
+/** Organization-managed settings, injected so no test reads this PC's (SOLID-01). */
+const blockedByPolicy: ManagedSettings = {
+  sources: [{ kind: 'file', where: '/etc/claude-code/managed-settings.json' }],
+  keys: ['strictKnownMarketplaces'],
+  restrictsPlugins: true,
+  restrictsMcpServers: false,
+};
+const noPolicy: ManagedSettings = {
+  sources: [],
+  keys: [],
+  restrictsPlugins: false,
+  restrictsMcpServers: false,
+};
+
+/** The plan step (it asks), then the follow-up it returns (it gets no prompter). */
+function afterRestore(deps: {
+  system: DetectorSystem;
+  cli: (path: string) => ClaudeCli;
+  managed?: ManagedSettings;
+}) {
+  return async (ctx: FollowUpPlanContext) => {
+    const followUp = await createClaudeCodeAfterRestore({
+      ...deps,
+      managedSettings: () => Promise.resolve(deps.managed ?? noPolicy),
+    })(ctx);
+    await followUp({ reporter: ctx.reporter });
+  };
+}
 
 const json = (path: string, value: unknown): CollectedFile => ({
   path,
@@ -30,17 +60,18 @@ function system(executables: string[]): DetectorSystem {
 function context(files: CollectedFile[], answers: boolean[] = [true, true]) {
   const lines: string[] = [];
   const asked: string[] = [];
-  const ctx: AfterRestoreContext = {
+  const ctx: FollowUpPlanContext = {
     target: { kind: 'global' },
     files,
     assumeYes: false,
     allowCommands: false,
+    parts: new Map(),
     prompter: {
       confirm: (message: string) => {
         asked.push(message);
         return Promise.resolve(answers.shift() ?? false);
       },
-    } as unknown as AfterRestoreContext['prompter'],
+    } as unknown as FollowUpPlanContext['prompter'],
     reporter: {
       info: (m) => lines.push(m),
       success: (m) => lines.push(m),
@@ -74,7 +105,7 @@ describe('after a Claude Code restore', () => {
   it('offers to install a missing npm program, and names the others', async () => {
     const { cli, runs } = recordingCli();
     const t = context([programs]);
-    await createClaudeCodeAfterRestore({ system: system(['/usr/bin/npm']), cli })(t.ctx);
+    await afterRestore({ system: system(['/usr/bin/npm']), cli })(t.ctx);
     expect(t.asked).toEqual([
       '"ccstatusline" is not installed here. Install it with `npm install -g ccstatusline@2.2.22`?',
     ]);
@@ -93,7 +124,7 @@ describe('after a Claude Code restore', () => {
     async (allow, ran) => {
       const { cli, runs } = recordingCli();
       const t = context([programs], []);
-      await createClaudeCodeAfterRestore({ system: system(['/usr/bin/npm']), cli })({
+      await afterRestore({ system: system(['/usr/bin/npm']), cli })({
         ...t.ctx,
         assumeYes: true,
         allowCommands: allow,
@@ -111,7 +142,7 @@ describe('after a Claude Code restore', () => {
   it('does nothing for programs already installed', async () => {
     const { cli, runs } = recordingCli();
     const t = context([programs]);
-    await createClaudeCodeAfterRestore({
+    await afterRestore({
       system: system(['/usr/bin/npm', '/usr/bin/ccstatusline', '/usr/bin/terminal-notifier']),
       cli,
     })(t.ctx);
@@ -126,9 +157,7 @@ describe('after a Claude Code restore', () => {
       const bad = json('.agentnomad/programs.json', {
         programs: [{ command: 'x', npm: { package: pkg, version: '1.0.0' } }],
       });
-      await createClaudeCodeAfterRestore({ system: system(['/usr/bin/npm']), cli })(
-        context([bad]).ctx,
-      );
+      await afterRestore({ system: system(['/usr/bin/npm']), cli })(context([bad]).ctx);
       expect(runs).toEqual([]);
     },
   );
@@ -164,11 +193,61 @@ describe('after a Claude Code restore', () => {
       skipped: [],
     });
     const t = context([plugins]);
-    await createClaudeCodeAfterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx);
+    await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx);
     expect(runs).toEqual([
       '/usr/bin/claude plugin marketplace add latent-spaces/brag',
       '/usr/bin/claude plugin install brag@brag --scope user --json',
     ]);
+  });
+
+  it('asks in the plan step and installs only in the follow-up (T61)', async () => {
+    const { cli, runs } = recordingCli();
+    const plugins = json('.agentnomad/plugins.json', {
+      marketplaces: [],
+      plugins: [{ id: 'build@market', scope: 'user', commandSource: true }],
+      skipped: [],
+    });
+    const t = context([plugins, programs], [true, true, true]);
+    const followUp = await createClaudeCodeAfterRestore({
+      system: system(['/usr/bin/claude', '/usr/bin/npm']),
+      cli,
+      managedSettings: () => Promise.resolve(noPolicy),
+    })(t.ctx);
+    expect(t.asked).toEqual([
+      'Reinstall 1 plugin?',
+      'build@market is built by running a command from its marketplace. Allow it?',
+      '"ccstatusline" is not installed here. Install it with `npm install -g ccstatusline@2.2.22`?',
+    ]);
+    expect(runs).toEqual([]);
+    await followUp({ reporter: t.ctx.reporter });
+    expect(runs).toEqual([
+      '/usr/bin/claude plugin install build@market --scope user --json --yes',
+      '/usr/bin/npm install -g ccstatusline@2.2.22',
+    ]);
+    expect(t.asked).toHaveLength(3);
+  });
+
+  it('explains a plugin blocked by the injected managed settings, never this PC’s (SOLID-01)', async () => {
+    const plugins = json('.agentnomad/plugins.json', {
+      marketplaces: [],
+      plugins: [{ id: 'brag@brag', scope: 'user', commandSource: false }],
+      skipped: [],
+    });
+    const blocked = (path: string): ClaudeCli => ({
+      run: (args) =>
+        Promise.resolve({
+          exitCode: 1,
+          stdout: '',
+          stderr: `${path} ${args[1] ?? ''}: blocked by policy`,
+        }),
+    });
+    const t = context([plugins]);
+    await afterRestore({
+      system: system(['/usr/bin/claude']),
+      cli: blocked,
+      managed: blockedByPolicy,
+    })(t.ctx);
+    expect(t.lines.join('\n')).toContain("blocked by your organization's Claude Code policy");
   });
 
   it('says so when Claude Code is not installed, instead of failing', async () => {
@@ -178,7 +257,7 @@ describe('after a Claude Code restore', () => {
       skipped: [],
     });
     const t = context([plugins]);
-    await createClaudeCodeAfterRestore({ system: system([]), cli: recordingCli().cli })(t.ctx);
+    await afterRestore({ system: system([]), cli: recordingCli().cli })(t.ctx);
     expect(t.lines[0]).toContain('the claude command was not found');
   });
 });

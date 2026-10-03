@@ -24,7 +24,7 @@ import type {
   DetectedAgent,
   ScopeTarget,
 } from '../agents/adapter.ts';
-import { unknownEntriesNotice } from '../agents/claude-code/unknown-files.ts';
+import { unknownEntriesNotice } from '../agents/notices.ts';
 import type { ApiClient } from '../api/api-client.ts';
 import { ApiError } from '../api/api-errors.ts';
 import { withSession } from '../auth/local-session.ts';
@@ -96,6 +96,12 @@ interface PushItem {
   readonly target: ScopeTarget;
 }
 
+/** What goes into every setup: memory, and per agent the optional parts chosen (T61). */
+interface Contents {
+  readonly includeMemory: boolean;
+  readonly include: ReadonlyMap<AgentAdapter, ReadonlySet<string>>;
+}
+
 /** One upload the plan decided on: the bundle and the revision it replaces on the server. */
 export interface PlannedUpload {
   readonly adapter: AgentAdapter;
@@ -130,10 +136,11 @@ const describe = (item: PushItem) =>
   `${item.adapter.displayName} ${item.scope.kind === 'global' ? 'global setup' : `project "${item.scope.name}"`}`;
 
 /**
- * Push's plan step (T59): asks every question (agents, scopes, project name, memory, account
- * skills, environment values, replacing a newer copy, pushing after a partial pull), collects
- * each setup and decides what happens to it. Nothing is uploaded here. Without a terminal, a
- * question the flags leave open stops push here, before anything is saved (T46).
+ * Push's plan step (T59): asks every question (agents, scopes, project name, memory, the
+ * agents' optional parts, environment values, replacing a newer copy, pushing after a partial
+ * pull), collects each setup and decides what happens to it. Nothing is uploaded here.
+ * Without a terminal, a question the flags leave open stops push here, before anything is
+ * saved (T46).
  */
 export function createPushPlanner(deps: PushDeps) {
   const { prompter, reporter } = deps;
@@ -241,43 +248,50 @@ export function createPushPlanner(deps: PushDeps) {
     return items;
   }
 
-  /** Memory, and (T42) a copy of the user's own claude.ai skills for the global setup. */
+  /**
+   * Memory, and each agent's optional parts (T61), e.g. Claude Code's copy of the user's own
+   * claude.ai skills for the global setup (T42).
+   */
   async function chooseContents(
     agents: readonly { adapter: AgentAdapter }[],
     items: readonly PushItem[],
     options: PushOptions,
-  ): Promise<{ includeMemory: boolean; includeAccountSkills: boolean }> {
+  ): Promise<Contents> {
+    const described = [
+      ...new Set(agents.flatMap(({ adapter }) => adapter.memoryDescription ?? [])),
+    ].join('; ');
     const includeMemory =
       options.memory ??
       (options.yes
         ? false
         : await prompter.confirm(
-            'Include memory (what Claude learned: subagent and auto memory)?',
+            `Include memory${described === '' ? '' : ` (${described})`}?`,
             false,
           ));
 
-    // Only asked when there are some, and only for the global setup.
-    let includeAccountSkills = false;
-    if (items.some((item) => item.scope.kind === 'global') && options.accountSkills !== false) {
-      const names: string[] = [];
-      for (const { adapter } of agents) {
-        const found = await adapter.inspector?.accountSkills?.();
-        if (found?.problem) reporter.warn(`${found.problem} Your claude.ai skills were not saved.`);
-        names.push(...(found?.names ?? []));
-      }
-      if (names.length > 0) {
-        includeAccountSkills =
-          options.accountSkills ??
-          (!options.yes &&
-            (await prompter.confirm(
-              `Also save a copy of your ${String(names.length)} claude.ai skill${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account.`,
-              false,
-            )));
-      } else if (options.accountSkills === true) {
-        reporter.info('No claude.ai skills of your own were found on this PC.');
+    // Each part is only asked about when there is something, and only for its own scope.
+    const include = new Map<AgentAdapter, Set<string>>();
+    for (const { adapter } of agents) {
+      const chosen = new Set<string>();
+      include.set(adapter, chosen);
+      for (const part of adapter.optionalParts ?? []) {
+        const flag = options.parts?.get(part.id);
+        const saving = items.some(
+          (item) => item.adapter === adapter && item.scope.kind === part.scope,
+        );
+        if (!saving || flag === false) continue;
+        const found = await part.available();
+        if (found.problem) reporter.warn(part.unreadable(found.problem));
+        if (found.names.length > 0) {
+          const yes =
+            flag ?? (!options.yes && (await prompter.confirm(part.question(found.names), false)));
+          if (yes) chosen.add(part.id);
+        } else if (flag === true) {
+          reporter.info(part.noneFound);
+        }
       }
     }
-    return { includeMemory, includeAccountSkills };
+    return { includeMemory, include };
   }
 
   async function showNotices(agents: readonly { adapter: AgentAdapter }[]): Promise<void> {
@@ -293,19 +307,28 @@ export function createPushPlanner(deps: PushDeps) {
   /** Collects one setup and asks which environment values go with it; `null`: nothing to save. */
   async function collectItem(
     item: PushItem,
-    contents: { includeMemory: boolean; includeAccountSkills: boolean },
+    contents: Contents,
     options: PushOptions,
   ): Promise<Omit<Bundle, 'revision'> | null> {
     const leftOut: string[] = [];
+    const parts = new Set(
+      (item.adapter.optionalParts ?? [])
+        .filter(
+          (part) =>
+            part.scope === item.scope.kind && contents.include.get(item.adapter)?.has(part.id),
+        )
+        .map((part) => part.id),
+    );
     const collected: CollectedFile[] = [
       ...(await item.adapter.collector.collect(item.target, {
         includeMemory: contents.includeMemory,
-        includeAccountSkills: contents.includeAccountSkills && item.scope.kind === 'global',
+        include: parts,
         onSkipped: (path, reason) => leftOut.push(`  - ${path}: ${reason}`),
       })),
     ];
     if (leftOut.length > 0) reporter.warn([`${describe(item)}: left out`, ...leftOut].join('\n'));
     const unknown = unknownEntriesNotice(
+      item.adapter.displayName,
       (await item.adapter.inspector?.unknownEntries(item.target)) ?? [],
     );
     if (unknown !== null) reporter.warn(`${describe(item)}: ${unknown}`);

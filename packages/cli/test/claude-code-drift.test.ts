@@ -9,7 +9,7 @@ import {
   reportMarkdown,
 } from '../scripts/drift/drift.ts';
 import { CLAUDE_CODE_PATHS } from '../src/index.ts';
-import { WATCHED_SETTINGS } from '../src/pull/reviewed-settings.ts';
+import { WATCHED_SETTINGS } from '../src/agents/claude-code/reviewed-settings.ts';
 
 /** Every top-level name the ".claude directory" docs page named on 2026-09-26 (Claude Code 2.1.283). */
 const DOCS_NAMES_2026_09_26 = [

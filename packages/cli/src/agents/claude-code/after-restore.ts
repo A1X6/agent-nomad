@@ -2,8 +2,18 @@ import { readdir } from 'node:fs/promises';
 
 import * as z from 'zod';
 
-import type { AfterRestoreContext, CollectedFile, Restorer } from '../adapter.ts';
-import { ACCOUNT_SKILLS_PREFIX, planAccountSkills, readSyncedSkills } from './account-skills.ts';
+import type {
+  AfterRestoreContext,
+  CollectedFile,
+  RestorePlanContext,
+  Restorer,
+} from '../adapter.ts';
+import {
+  ACCOUNT_SKILLS_PART,
+  ACCOUNT_SKILLS_PREFIX,
+  planAccountSkills,
+  readSyncedSkills,
+} from './account-skills.ts';
 import {
   claudeConfigDir,
   findClaudeExecutable,
@@ -12,12 +22,14 @@ import {
 } from './detector.ts';
 import { createFileGatherer } from './file-gathering.ts';
 import { PLUGINS_BUNDLE_PATH, PROGRAMS_BUNDLE_PATH } from './global-paths.ts';
+import { explainPluginFailure, type ManagedSettings } from './managed-settings.ts';
 import {
-  detectManagedSettings,
-  explainPluginFailure,
-  nodeManagedSettingsSystem,
-} from './managed-settings.ts';
-import { createClaudeCli, readCurrentPlugins, syncPlugins, type ClaudeCli } from './plugin-sync.ts';
+  askPluginSync,
+  createClaudeCli,
+  installPlugins,
+  readCurrentPlugins,
+  type ClaudeCli,
+} from './plugin-sync.ts';
 import { PluginManifestSchema } from './plugins.ts';
 
 /** `.agentnomad/programs.json`, checked before anything from it reaches a command line. */
@@ -56,46 +68,66 @@ export interface AfterRestoreDeps {
   readonly cli?: (path: string) => ClaudeCli;
   /** Writes saved claude.ai skills as local skills (T42), with the restorer's safety rules. */
   readonly restorer?: Restorer;
+  /** Organization-managed settings on this PC (T31), read through the adapter (SOLID-01). */
+  readonly managedSettings: () => Promise<ManagedSettings>;
 }
 
+/** What the follow-up's plan step gets: the setup, the prompter and the flags (T61). */
+export type FollowUpPlanContext = Pick<
+  RestorePlanContext,
+  'target' | 'files' | 'prompter' | 'reporter' | 'assumeYes' | 'allowCommands' | 'parts'
+>;
+
+/** Carries out what the plan step decided; gets no prompter, so it never asks. */
+export type FollowUp = (context: AfterRestoreContext) => Promise<void>;
+
+const nothingToDo: FollowUp = () => Promise.resolve();
+
 /**
- * What pull does after writing a Claude Code setup (T34): reinstall its plugins (T29) and
- * offer to install programs its hooks or status line need (T25), each after asking.
+ * What pull does after writing a Claude Code setup (T34): reinstall its plugins (T29), offer
+ * to install programs its hooks or status line need (T25), and offer saved claude.ai skills
+ * (T42). Every question is asked in the plan step, before anything is written (T61); the
+ * follow-up it returns only installs what was agreed to.
  */
 export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
   const cli = deps.cli ?? ((path: string) => createClaudeCli(path, deps.system));
 
-  async function plugins(context: AfterRestoreContext): Promise<void> {
+  async function plugins(context: FollowUpPlanContext): Promise<FollowUp> {
     const manifest = readJson(context.files, PLUGINS_BUNDLE_PATH, PluginManifestSchema);
-    if (manifest === null || manifest.plugins.length === 0) return;
+    if (manifest === null || manifest.plugins.length === 0) return nothingToDo;
     const claudePath = await findClaudeExecutable(deps.system);
     if (claudePath === null) {
       context.reporter.warn(
         `${String(manifest.plugins.length)} saved plugin(s) were not reinstalled: the claude command was not found. Install Claude Code, then pull again.`,
       );
-      return;
+      return nothingToDo;
     }
     const baseDir = claudeConfigDir(deps.system);
-    const managed = await detectManagedSettings(
-      nodeManagedSettingsSystem(deps.system.env, baseDir, deps.system.platform),
-    );
     const projectDir = context.target.kind === 'project' ? context.target.projectDir : undefined;
-    await syncPlugins({
+    const choice = await askPluginSync({
       manifest,
       current: await readCurrentPlugins(baseDir, deps.system.platform, projectDir),
-      claude: cli(claudePath),
       prompter: context.prompter,
       reporter: context.reporter,
-      cwd: projectDir ?? deps.system.homedir,
       assumeYes: context.assumeYes,
       allowCommands: context.allowCommands,
-      explainFailure: (reason) => explainPluginFailure(reason, managed),
     });
+    if (choice.plugins.length === 0) return nothingToDo;
+    return async ({ reporter }) => {
+      const managed = await deps.managedSettings();
+      await installPlugins(choice, {
+        claude: cli(claudePath),
+        reporter,
+        cwd: projectDir ?? deps.system.homedir,
+        explainFailure: (reason) => explainPluginFailure(reason, managed),
+      });
+    };
   }
 
-  async function programs(context: AfterRestoreContext): Promise<void> {
+  async function programs(context: FollowUpPlanContext): Promise<FollowUp> {
     const saved = readJson(context.files, PROGRAMS_BUNDLE_PATH, ProgramsFileSchema);
-    if (saved === null) return;
+    if (saved === null) return nothingToDo;
+    const installs: { readonly npmPath: string; readonly spec: string }[] = [];
     for (const program of saved.programs) {
       if ((await findExecutable(deps.system, program.command)) !== null) continue;
       if (program.npm === null) {
@@ -122,13 +154,38 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
         }
         if (!(await context.prompter.confirm(question, true))) continue;
       }
-      const run = await cli(npmPath).run(['install', '-g', spec], deps.system.homedir);
-      if (run.exitCode === 0) context.reporter.success(`Installed ${spec}.`);
-      else
-        context.reporter.warn(
-          `Could not install ${spec}: ${run.stderr.trim() || `exit code ${String(run.exitCode)}`}`,
-        );
+      installs.push({ npmPath, spec });
     }
+    if (installs.length === 0) return nothingToDo;
+    return async ({ reporter }) => {
+      for (const { npmPath, spec } of installs) {
+        const run = await cli(npmPath).run(['install', '-g', spec], deps.system.homedir);
+        if (run.exitCode === 0) reporter.success(`Installed ${spec}.`);
+        else
+          reporter.warn(
+            `Could not install ${spec}: ${run.stderr.trim() || `exit code ${String(run.exitCode)}`}`,
+          );
+      }
+    };
+  }
+
+  /**
+   * Which saved account skills can be added here: not one this PC gets from its own
+   * claude.ai sync, never over a local skill. `incoming`: local skills the restore is about
+   * to write, which count as local too.
+   */
+  async function accountSkillsHere(files: readonly CollectedFile[], incoming: readonly string[]) {
+    const baseDir = claudeConfigDir(deps.system);
+    const gatherer = createFileGatherer(deps.system.platform);
+    const skillsDir = gatherer.path.join(baseDir, 'skills');
+    const localNames = new Set([
+      ...(await readdir(skillsDir, { withFileTypes: true }).catch(() => []))
+        .filter((entry) => entry.isDirectory() && entry.name !== 'synced')
+        .map((entry) => entry.name.toLowerCase()),
+      ...incoming.map((name) => name.toLowerCase()),
+    ]);
+    const synced = await readSyncedSkills(gatherer, baseDir);
+    return planAccountSkills(files, { syncedNames: synced.allNames, localNames });
   }
 
   /**
@@ -137,20 +194,20 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
    * runs those as a local skill (a synced one does not), so it is marked, and a flag alone
    * (no question asked) adds it only with --allow-commands too.
    */
-  async function accountSkills(context: AfterRestoreContext): Promise<void> {
-    if (context.target.kind !== 'global' || !deps.restorer) return;
-    if (!context.files.some((file) => file.path.startsWith(ACCOUNT_SKILLS_PREFIX))) return;
-    const baseDir = claudeConfigDir(deps.system);
-    const gatherer = createFileGatherer(deps.system.platform);
-    const skillsDir = gatherer.path.join(baseDir, 'skills');
-    const localNames = new Set(
-      (await readdir(skillsDir, { withFileTypes: true }).catch(() => []))
-        .filter((entry) => entry.isDirectory() && entry.name !== 'synced')
-        .map((entry) => entry.name.toLowerCase()),
-    );
-    const synced = await readSyncedSkills(gatherer, baseDir);
-    const plan = planAccountSkills(context.files, { syncedNames: synced.allNames, localNames });
-    if (plan.toAdd.length === 0 && plan.skipped.length === 0) return;
+  async function accountSkills(context: FollowUpPlanContext): Promise<FollowUp> {
+    const { restorer } = deps;
+    if (context.target.kind !== 'global' || !restorer) return nothingToDo;
+    if (!context.files.some((file) => file.path.startsWith(ACCOUNT_SKILLS_PREFIX))) {
+      return nothingToDo;
+    }
+    const restoredSkills = context.files.flatMap((file) => {
+      const [folder, name, rest] = file.path.split('/');
+      return folder === 'skills' && name !== undefined && name !== 'synced' && rest !== undefined
+        ? [name]
+        : [];
+    });
+    const plan = await accountSkillsHere(context.files, restoredSkills);
+    if (plan.toAdd.length === 0 && plan.skipped.length === 0) return nothingToDo;
 
     context.reporter.info(
       [
@@ -162,11 +219,11 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
         ...plan.skipped.map((skill) => `  - ${skill.name}: skipped, ${skill.reason}`),
       ].join('\n'),
     );
-    if (plan.toAdd.length === 0) return;
+    if (plan.toAdd.length === 0) return nothingToDo;
 
-    const fromFlag = context.accountSkills !== undefined;
+    const flag = context.parts.get(ACCOUNT_SKILLS_PART);
     const add =
-      context.accountSkills ??
+      flag ??
       (!context.assumeYes &&
         (await context.prompter.confirm(
           'Add them as local skills? Only needed if this PC uses another claude.ai account, or none.',
@@ -176,11 +233,11 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
       context.reporter.info(
         'Not added. To add them later: agentnomad pull --global --account-skills',
       );
-      return;
+      return nothingToDo;
     }
     // Answered by a flag, not a person: commands only run with --allow-commands as well.
     const blocked = new Set(
-      fromFlag && !context.allowCommands
+      flag !== undefined && !context.allowCommands
         ? plan.toAdd.filter((skill) => skill.runsCommands).map((skill) => skill.name)
         : [],
     );
@@ -189,21 +246,32 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
         `Skipped ${name}: it runs commands as a local skill. Add --allow-commands to add it anyway.`,
       );
     }
-    const files = plan.files.filter((file) => !blocked.has(file.path.split('/')[1] ?? ''));
-    const added = plan.toAdd.filter((skill) => !blocked.has(skill.name)).map((skill) => skill.name);
-    if (added.length === 0) return;
-    const report = await deps.restorer.restore({ kind: 'global' }, files, () =>
-      Promise.resolve('skip'),
+    const approved = new Set(
+      plan.toAdd.filter((skill) => !blocked.has(skill.name)).map((skill) => skill.name),
     );
-    for (const warning of report.warnings) context.reporter.warn(warning);
-    context.reporter.success(
-      `Added ${added.join(', ')} as local skills. If this PC later signs in to the claude.ai account they came from, they sync there too, and your local copy keeps the short name.`,
-    );
+    if (approved.size === 0) return nothingToDo;
+
+    return async ({ reporter }) => {
+      // Checked again now that the setup is written: never over a local skill.
+      const now = await accountSkillsHere(context.files, []);
+      const added = now.toAdd.map((skill) => skill.name).filter((name) => approved.has(name));
+      if (added.length === 0) return;
+      const files = now.files.filter((file) => added.includes(file.path.split('/')[1] ?? ''));
+      const report = await restorer.restore({ kind: 'global' }, files, () =>
+        Promise.resolve('skip'),
+      );
+      for (const warning of report.warnings) reporter.warn(warning);
+      reporter.success(
+        `Added ${added.join(', ')} as local skills. If this PC later signs in to the claude.ai account they came from, they sync there too, and your local copy keeps the short name.`,
+      );
+    };
   }
 
-  return async (context: AfterRestoreContext): Promise<void> => {
-    await plugins(context);
-    await programs(context);
-    await accountSkills(context);
+  /** Asks every question of the follow-up, in order, and returns what to do after writing. */
+  return async (context: FollowUpPlanContext): Promise<FollowUp> => {
+    const steps = [await plugins(context), await programs(context), await accountSkills(context)];
+    return async (applyContext) => {
+      for (const step of steps) await step(applyContext);
+    };
   };
 }

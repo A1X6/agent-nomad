@@ -160,7 +160,6 @@ const claudeAdapter = (home: string) =>
     homedir: home,
     platform: process.platform,
     isClaudeRunning: () => Promise.resolve(false),
-    onClaudeRunning: () => Promise.resolve('skip'),
   });
 
 function pushFrom(
@@ -569,7 +568,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     // The apply step's deps have no prompter at all: it cannot ask.
     expect('prompter' in t.applyDeps).toBe(false);
     if (plan === null) throw new Error('nothing planned');
-    const outcomes = await createPullApplier(t.applyDeps).apply(plan, options);
+    const outcomes = await createPullApplier(t.applyDeps).apply(plan);
     expect(outcomes).toEqual([{ setup: 'Claude Code global setup', result: 'done' }]);
     expect(await read(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
     expect(t.asked).toHaveLength(2);
@@ -579,20 +578,24 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('a file the plan did not ask about is left alone, and the setup is not done (T59)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    // A restorer that meets a differing file the collector never showed the plan.
+    // A restore that meets a differing file the restorer never listed for the plan.
     const base = claudeAdapter(b.home);
     const adapter: AgentAdapter = {
       ...base,
-      restorer: {
-        restore: async (_target, _files, onConflict) => {
-          const choice = await onConflict('notes/extra.md', { overwriteAllowed: true });
-          return {
-            written: [],
-            skipped: choice === 'skip' ? ['notes/extra.md'] : [],
-            backups: [],
-            warnings: [],
-          };
-        },
+      planRestore: async (context) => {
+        if (!base.planRestore) throw new Error('no plan step');
+        return {
+          ...(await base.planRestore(context)),
+          restore: async (onConflict) => {
+            const choice = await onConflict('notes/extra.md', { overwriteAllowed: true });
+            return {
+              written: [],
+              skipped: choice === 'skip' ? ['notes/extra.md'] : [],
+              backups: [],
+              warnings: [],
+            };
+          },
+        };
       },
     };
     const t = pullOn(b, server, [], { adapter });
@@ -780,9 +783,10 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const base = claudeAdapter(b.home);
     const adapter: AgentAdapter = {
       ...base,
-      afterRestore: (context) => {
+      planRestore: (context) => {
         followUps.push(context.files.map((file) => file.path));
-        return Promise.resolve();
+        if (!base.planRestore) throw new Error('no plan step');
+        return base.planRestore(context);
       },
     };
     const writer: EnvWriter = {

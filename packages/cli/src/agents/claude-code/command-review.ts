@@ -1,36 +1,19 @@
 import * as z from 'zod';
 
-import type { CollectedFile } from '../agents/adapter.ts';
-import { commandWords } from '../agents/claude-code/file-gathering.ts';
-import {
-  HOME_SCRIPTS_PREFIX,
-  SCRIPT_EXTENSIONS,
-  TOOL_CONFIG_FILES,
-} from '../agents/claude-code/global-paths.ts';
-import { runnableInMarkdown } from '../agents/claude-code/runnable-markdown.ts';
-import { LOADER_VARIABLE } from '../env/loader-variables.ts';
+import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
+import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
+import { commandWords } from './file-gathering.ts';
+import { HOME_SCRIPTS_PREFIX, SCRIPT_EXTENSIONS, TOOL_CONFIG_FILES } from './global-paths.ts';
 import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
+import { runnableInMarkdown } from './runnable-markdown.ts';
 
-/**
- * Things in a setup that run programs on this PC (T34, T44), as Claude Code's docs describe
- * them: hooks, the status line, settings that run a command, loader environment variables,
- * MCP servers, and skill, command and subagent files with commands that run by themselves.
- * Pull shows the new or changed ones and asks before writing them.
+/*
+ * Things in a Claude Code setup that run programs on this PC (T34, T44), as Claude Code's
+ * docs describe them: hooks, the status line, settings that run a command, loader
+ * environment variables, MCP servers, and skill, command and subagent files with commands
+ * that run by themselves. Pull shows the new or changed ones and asks before writing them;
+ * it reaches this review through the restorer (T61).
  */
-export interface RunnableEntry {
-  /** The bundle file it lives in, e.g. `settings.json` or `.mcp.json`. */
-  readonly file: string;
-  /** What it is, e.g. `hook PreToolUse`, `status line`, `MCP server github`. */
-  readonly label: string;
-  /** What runs, e.g. `~/.claude/hooks/check.sh` or `npx gh-mcp` or a URL. */
-  readonly command: string;
-  /** What is compared with this PC; the whole entry, so a change anywhere in it shows. */
-  readonly identity: string;
-}
-
-export interface ReviewedEntry extends RunnableEntry {
-  readonly change: 'new' | 'changed';
-}
 
 const SETTINGS_FILES = new Set([
   'settings.json',

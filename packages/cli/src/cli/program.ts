@@ -33,6 +33,13 @@ answer stops the command with exit code 1 and names the flags to add. Push and p
 also exit with code 1 when a setup was skipped or refused without a "no" from you
 (a newer or older copy, over 5 MB, or skipped by --yes); the rest is done first.`;
 
+/** Flags that answer an agent's optional part, mapped to the part's id (T61). */
+function partsOf(options: { accountSkills?: boolean }): { parts?: ReadonlyMap<string, boolean> } {
+  return options.accountSkills === undefined
+    ? {}
+    : { parts: new Map([['account-skills', options.accountSkills]]) };
+}
+
 /** `--agent`, `--global`, `--project`: shared by the commands that work on saved setups. */
 function scopeOptions() {
   return [
@@ -153,7 +160,7 @@ export function createProgram({ handlers, output }: ProgramDeps) {
         ...scope(options),
         yes: options.yes === true,
         ...(options.memory !== undefined && { memory: options.memory }),
-        ...(options.accountSkills !== undefined && { accountSkills: options.accountSkills }),
+        ...partsOf(options),
       }),
     );
 
@@ -190,7 +197,7 @@ export function createProgram({ handlers, output }: ProgramDeps) {
         ...scope(options),
         yes: options.yes === true,
         ...(options.allowCommands && { allowCommands: true }),
-        ...(options.accountSkills !== undefined && { accountSkills: options.accountSkills }),
+        ...partsOf(options),
         ...(options.merge && { conflict: 'merge' as const }),
         ...(options.overwrite && { conflict: 'overwrite' as const }),
       }),
