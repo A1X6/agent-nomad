@@ -2,7 +2,7 @@
 
 **Scope:** the whole repo at `dev` `4c31cf8` (54 commits ahead of `main`), after the fixes T53 to T68.
 **Stack:** pnpm monorepo, TypeScript strict, Node 22.13 or newer. Packages: `contracts` (Zod schemas), `core` (encryption, bundle format, merge), `cli` (the `agentnomad` command, Commander and clack), `server` (Hono, Drizzle, Neon Postgres), `e2e`. Tests with Vitest; server tests on PGlite.
-**Coverage:** 243 of {{FILES}} files read in full, 33,614 lines. See `files.md` for one row per file.
+**Coverage:** 243 of 243 files read in full, 33,614 lines. See `files.md` for one row per file.
 **Checks run:** type check pass · lint pass · format check pass · tests pass (1,237 passed, 14 skipped, 50 files) · `pnpm audit --prod` pass (no known vulnerabilities) · `pnpm knip` pass (nothing unused) · migration check (`db:check`) pass.
 
 **How it was done:** six reviewers each read one part of the repo line by line and confirmed their findings at exact lines (several by running the real code). The orchestrator then re-opened the lines behind every Medium finding and the main Low ones, merged findings two reviewers reported twice, and did the cross-file passes.

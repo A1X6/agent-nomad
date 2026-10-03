@@ -328,7 +328,8 @@ Adapters are registered in one place, `createAppHandlers` in `packages/cli/src/a
 through `createAgentRegistry`. Push, pull, `list`, `status`, `delete` and `agents` only use
 the registry and these interfaces, so a new agent is a new folder plus one line there. See
 [ADDING-AN-AGENT.md](ADDING-AN-AGENT.md). A lint rule (`no-restricted-imports` in
-`eslint.config.js`) keeps `push/`, `pull/`, `cli/` and `env/` from importing any adapter's
+`eslint.config.js`) keeps every generic folder (`push/`, `pull/`, `cli/`, `env/`, `commands/` and the
+folders they build on, such as `api/`, `state/` and `ui/`) from importing any adapter's
 folder and an adapter's folder from importing another's (what adapters share is in
 `agents/shared/`), and `test/agent-boundary.test.ts` runs a second, made-up agent through push and pull (T61).
 
@@ -363,7 +364,8 @@ bundle cannot drop a file that runs by itself. The same holds in Claude Code's o
 script outside the synced folders is written only when the setup's hooks or status line run
 it, and never in Claude Code's own state (`knownState`: `chrome/`, `local/`, `state/`, …),
 which is refused like never-synced entries (T55). Refusals ignore case. On Windows, names with
-`:`, device names, trailing dots and 8.3 short names are refused. Two entries that differ
+`:`, device names, trailing dots and 8.3 short names (`PROGRA~1`; a name too long for the
+8.3 form, like `release-notes~3.md`, is allowed) are refused. Two entries that differ
 only in case or Unicode form are one file on Windows and macOS: only the first is written. An
 entry that cannot be written is skipped with a warning; the rest continue. `~/.claude.json`
 is only ever merged, with a backup: only `mcpServers` and the preference keys, never
@@ -563,7 +565,7 @@ not declared. **Releases:** pushing a tag `vX.Y.Z` on `main` runs
 `.github/workflows/release.yml`: build and test on every OS, install and run the packed
 package, wait for the owner's approval, publish the tested tarball through npm trusted
 publishing with provenance (no npm token exists), then check `npx agentnomad` on every OS. The release starts only for a commit
-whose CI run on `main` passed, and verifies on Node 22.13 and 24.
+with a successful CI run (on any branch) that is also on `main`, and verifies on Node 22.13 and 24.
 
 Deployment: Render builds `main` from `render.yaml` after CI, installing and compiling only
 the server and `contracts` (`--filter @agentnomad/server...`, `tsc --build packages/server`); database migrations
@@ -649,12 +651,13 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `ui/`: questions and messages
 
-| File                      | Responsible for                                                                           |
-| ------------------------- | ----------------------------------------------------------------------------------------- |
-| `prompter.ts`             | The `Prompter` (questions) and `Reporter` (messages, spinners) interfaces.                |
-| `clack-prompter.ts`       | Both on @clack/prompts; warnings and errors to stderr; plain spinners without a terminal. |
-| `no-terminal-prompter.ts` | The prompter for scripts: every question fails with `AnswerNeededError`.                  |
-| `format-size.ts`          | Sizes as `5 KB` or `1.2 MB`, for push and `list`.                                         |
+| File                      | Responsible for                                                                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompter.ts`             | The `Prompter` (questions) and `Reporter` (messages, spinners) interfaces.                                                                                                            |
+| `clack-prompter.ts`       | Both on @clack/prompts; warnings and errors to stderr; plain spinners without a terminal.                                                                                             |
+| `no-terminal-prompter.ts` | The prompter for scripts: every question fails with `AnswerNeededError`.                                                                                                              |
+| `format-size.ts`          | Sizes as `5 KB` or `1.2 MB`, for push and `list`.                                                                                                                                     |
+| `printable.ts`            | `printable` and `printableLine`: text from a bundle or the server shown with escape sequences, direction marks and (for review lines) line breaks escaped, never acted on (T44, T71). |
 
 ### `api/`: talking to the server
 
@@ -706,13 +709,14 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `env/`: environment variables in setups
 
-| File                | Responsible for                                                                                                                                                                                                 |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `env-references.ts` | Finding `${VAR}` references in the files the adapter names (`envReferences`), leaving out the agent's own variables.                                                                                            |
-| `env-section.ts`    | The encrypted `.agentnomad/env.json` section and choosing which values to save (opt-in).                                                                                                                        |
-| `env-restore.ts`    | On pull: adding saved values that are missing here (not in the environment nor already written); asking (plan) and writing (apply) are separate.                                                                |
-| `shell-profile.ts`  | Writing them, and reading back what is there: a marked block in the shell profile (sh, bash, zsh, fish), rewritten only when it changes, or Windows user variables through one PowerShell call for all of them. |
-| `env-command.ts`    | `agentnomad env`.                                                                                                                                                                                               |
+| File                  | Responsible for                                                                                                                                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env-references.ts`   | Finding `${VAR}` references in the files the adapter names (`envReferences`), leaving out the agent's own variables.                                                                                            |
+| `env-section.ts`      | The encrypted `.agentnomad/env.json` section and choosing which values to save (opt-in).                                                                                                                        |
+| `env-restore.ts`      | On pull: adding saved values that are missing here (not in the environment nor already written); asking (plan) and writing (apply) are separate.                                                                |
+| `shell-profile.ts`    | Writing them, and reading back what is there: a marked block in the shell profile (sh, bash, zsh, fish), rewritten only when it changes, or Windows user variables through one PowerShell call for all of them. |
+| `loader-variables.ts` | `LOADER_VARIABLE`: the variables that make a shell or runtime load or run code (`NODE_OPTIONS`, `LD_*`, ...); a saved value for one is treated like a hook (T44, T55).                                          |
+| `env-command.ts`      | `agentnomad env`.                                                                                                                                                                                               |
 
 ### `agents/`: the plug-in layer
 
@@ -797,12 +801,13 @@ Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 
 ## `packages/e2e/src`
 
-| File              | Responsible for                                                                                                    |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `local-server.ts` | The real API (`createApi`) on PGlite on a free local port, loaded from or dumped to a file; records every request. |
-| `pc.ts`           | A simulated PC (its own home, config folder and project) that runs the built CLI with no terminal.                 |
-| `steps.ts`        | The three end-to-end steps and what each checks.                                                                   |
-| `plaintext.ts`    | Searching recorded requests for readable secrets (as text and base64 at any alignment).                            |
+| File                | Responsible for                                                                                                                                       |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local-server.ts`   | The real API (`createApi`) on PGlite on a free local port, loaded from or dumped to a file; records every request.                                    |
+| `pc.ts`             | A simulated PC (its own home, config folder and project) that runs the built CLI with no terminal.                                                    |
+| `steps.ts`          | The three end-to-end steps and what each checks.                                                                                                      |
+| `plaintext.ts`      | Searching recorded requests for readable secrets (as text and base64 at any alignment).                                                               |
+| `push-env-value.ts` | `agentnomad push` with the question of which environment values to save answered, run in a child process of a PC (the e2e PCs have no terminal; T56). |
 
 ## Repository root
 

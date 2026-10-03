@@ -182,8 +182,9 @@ exist.
 
 - Your password never leaves your PC. A key derived from it (Argon2id) unlocks a random data
   key, which encrypts every setup with XChaCha20-Poly1305.
-- The server stores only ciphertext, a keyed hash of each project name, your username and
-  the device name of each login. Automated tests on every OS check that nothing readable
+- The server stores ciphertext, a keyed hash of each project name, your username, the device
+  name of each login, and a keyed pseudonym of your IP address for rate limits (see
+  [SECURITY.md](SECURITY.md)). Automated tests on every OS check that nothing readable
   leaves the PC.
 - Your login is kept in the OS keychain (Windows Credential Manager, macOS Keychain, Linux
   Secret Service), or in a file only you can read where there is none.

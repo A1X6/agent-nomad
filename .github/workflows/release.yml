@@ -17,8 +17,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # The tagged commit must have passed CI on main first (T48): a release never starts from a
-  # commit whose checks failed or are still running.
+  # The tagged commit must have a successful CI run, on any branch (T48): a release never
+  # starts from a commit whose checks failed or are still running. That the commit is on
+  # main is checked separately below.
   ci-passed:
     name: CI passed for this commit
     runs-on: ubuntu-latest
