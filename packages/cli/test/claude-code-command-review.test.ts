@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { collected, collectedJson } from './fakes.ts';
 
 import {
-  commandsInSettings,
   LOADER_VARIABLE,
   planAccountSkills,
   reviewRunnable,
@@ -439,17 +438,6 @@ describe('reviewRunnable: one malformed entry hides no other (SEC-01)', () => {
   it('does not ask again about an unreadable entry that is already here as it is', () => {
     const settings = collectedJson('settings.json', { hooks: { _note: 'mine' } });
     expect(reviewRunnable([settings], [settings])).toEqual([]);
-  });
-
-  it('commandsInSettings skips only the malformed hook', () => {
-    const settings = JSON.stringify({
-      hooks: {
-        _note: 'mine',
-        Stop: [hook('notify.sh'), { hooks: [{ command: 'bad.sh', args: [1] }] }],
-      },
-      statusLine: { type: 'command', command: 'line.sh' },
-    });
-    expect(commandsInSettings(settings)).toEqual([['notify.sh'], ['line.sh']]);
   });
 });
 

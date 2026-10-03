@@ -4,6 +4,7 @@ import {
   HOME_PLACEHOLDER,
   PathError,
   createPathResolver,
+  windowsNameProblem,
   type PathEnvironment,
 } from '../src/index.ts';
 
@@ -262,4 +263,29 @@ describe('environment checks', () => {
   ])('refuses home folder %j', (environment) => {
     expect(() => createPathResolver(environment)).toThrow(PathError);
   });
+});
+
+describe('windowsNameProblem: names Windows cannot write safely (T38)', () => {
+  it.each([
+    ['skills/a/notes:secret.md', 'a name with ":" cannot be written on Windows'],
+    ['skills/CON/SKILL.md', 'a name Windows keeps for devices'],
+    ['skills/a/nul.txt', 'a name Windows keeps for devices'],
+    ['skills/a/COM1.md', 'a name Windows keeps for devices'],
+    ['skills/a/COM¹.md', 'a name Windows keeps for devices'],
+    ['skills/lpt³', 'a name Windows keeps for devices'],
+    ['.agentnomad/home/SSH~1/run.sh', 'a Windows short name (like PROGRA~1)'],
+    ['skills/PROGRA~1/SKILL.md', 'a Windows short name (like PROGRA~1)'],
+    ['skills/a/file?.md', 'a name Windows does not allow'],
+    ['skills/a/trailing.', 'a name ending in a dot or space on Windows'],
+    ['skills/a/space ', 'a name ending in a dot or space on Windows'],
+  ])('%s', (path, reason) => {
+    expect(windowsNameProblem(path)).toBe(reason);
+  });
+
+  it.each(['skills/deploy/SKILL.md', 'skills/a/console.md', 'hooks/check.sh', 'CLAUDE.md'])(
+    'allows %s',
+    (path) => {
+      expect(windowsNameProblem(path)).toBeNull();
+    },
+  );
 });

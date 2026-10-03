@@ -2,6 +2,7 @@ import * as clack from '@clack/prompts';
 import { describe, expect, it } from 'vitest';
 
 import { unwrapAnswer } from '../src/ui/clack-prompter.ts';
+import { formatSize } from '../src/ui/format-size.ts';
 import { printable, printableLine } from '../src/ui/printable.ts';
 import { PromptCancelledError } from '../src/ui/prompter.ts';
 
@@ -33,5 +34,15 @@ describe('printableLine: a value stays on its one line of a list (SEC-03)', () =
   it('shows what printable shows, and keeps ordinary text', () => {
     expect(printableLine('x\r\u001b[2Ky\u202e')).toBe('x\\u{000d}\\u{001b}[2Ky\\u{202e}');
     expect(printableLine('fmt.sh ✓ é')).toBe('fmt.sh ✓ é');
+  });
+});
+
+describe('formatSize', () => {
+  it('sizes', () => {
+    expect([formatSize(900), formatSize(5120), formatSize(2.5 * 1024 * 1024)]).toEqual([
+      '900 B',
+      '5 KB',
+      '2.5 MB',
+    ]);
   });
 });

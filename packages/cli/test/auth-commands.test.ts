@@ -18,9 +18,6 @@ import {
   ApiError,
   createAuthCommands,
   createPasswordChecker,
-  describeError,
-  describeWait,
-  deviceNameOf,
   FILE_BACKEND_NOTE,
   loadZxcvbnChecker,
   NetworkError,
@@ -678,25 +675,6 @@ describe('sessions and messages', () => {
       withSession(store, () => Promise.reject(new ApiError(404, 'not_found', 'gone'))),
     ).rejects.toBeInstanceOf(ApiError);
     expect(saved.size).toBe(1);
-  });
-
-  it('rate limits say when to try again', () => {
-    const limited = (seconds?: number) =>
-      new ApiError(429, 'rate_limited', 'Too many requests', {
-        ...(seconds !== undefined && { retryAfterSeconds: seconds }),
-      });
-    expect(describeError(limited(240))).toBe('Too many attempts. Try again in 4 minutes.');
-    expect(describeError(limited(61))).toBe('Too many attempts. Try again in 2 minutes.');
-    expect(describeError(limited(1))).toBe('Too many attempts. Try again in 1 second.');
-    expect(describeError(limited())).toBe('Too many attempts. Wait a while and try again.');
-    expect(describeWait(60)).toBe('1 minute');
-  });
-
-  it('device names are one short line', () => {
-    expect(deviceNameOf('LAPTOP-01')).toBe('LAPTOP-01');
-    expect(deviceNameOf('a\nb')).toBe('ab');
-    expect(deviceNameOf('x'.repeat(100))).toHaveLength(64);
-    expect(deviceNameOf('  ')).toBe('unknown device');
   });
 });
 

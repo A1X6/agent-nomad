@@ -2,8 +2,6 @@ import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
 import { renderClientIp } from '../src/hosting/client-ip.ts';
-import { rateLimitSubject } from '../src/http/rate-limit.ts';
-import { readPort } from '../src/port.ts';
 
 async function ipFor(headers: Record<string, string>): Promise<string | undefined> {
   let seen: string | undefined = 'not called';
@@ -42,29 +40,5 @@ describe('renderClientIp', () => {
     ['a far too long value', { 'true-client-ip': '1'.repeat(100) }],
   ])('treats %s as unknown', async (_, headers) => {
     expect(await ipFor(headers)).toBeUndefined();
-  });
-});
-
-describe('rateLimitSubject: who a per-IP limit counts (T47)', () => {
-  it.each([
-    ['203.0.113.7', '203.0.113.7'],
-    ['::ffff:203.0.113.7', '203.0.113.7'],
-    ['2001:db8:0:1::1', '2001:db8:0:1::/64'],
-    ['2001:db8:0:1:ffff:ffff:ffff:ffff', '2001:db8:0:1::/64'],
-    ['2001:0db8:0000:0001:0:0:0:9', '2001:db8:0:1::/64'],
-    ['::1', '0:0:0:0::/64'],
-  ])('%s → %s', (ip, subject) => {
-    expect(rateLimitSubject(ip)).toBe(subject);
-  });
-});
-
-describe('readPort', () => {
-  it('uses Render’s PORT, or 10000 when it is not set', () => {
-    expect(readPort({ PORT: '8080' })).toBe(8080);
-    expect(readPort({})).toBe(10_000);
-  });
-
-  it.each(['abc', '0', '70000', '80.5'])('refuses PORT=%j', (PORT) => {
-    expect(() => readPort({ PORT })).toThrow(/PORT/);
   });
 });

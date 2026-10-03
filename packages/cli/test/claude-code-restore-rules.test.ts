@@ -1,0 +1,169 @@
+import { join, resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  globalDestination,
+  hookScripts,
+  projectDestination,
+  projectHookScripts,
+} from '../src/index.ts';
+
+// The rules read no file, so these folders need not exist.
+const home = resolve('/home/a');
+const base = join(home, '.claude');
+const project = resolve('/work/my-app');
+
+describe('restore rules: refuses what a collector never produces', () => {
+  it.each([
+    ['skills/synced/x/SKILL.md', 'never synced'],
+    ['.credentials.json', 'never synced'],
+    ['history.jsonl', 'never synced'],
+    ['projects/C--x/abc.jsonl', 'never synced'],
+    ['unknown.json', 'not part of a Claude Code setup'],
+    ['.agentnomad/home/.ssh/id_ed25519', 'a folder for keys and logins'],
+    ['.agentnomad/home/.bashrc', 'no hook or status line in this setup runs it'],
+    // Files that run by themselves, never shown in the pull review (T38, T43).
+    [
+      '.agentnomad/home/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/update.bat',
+      'a folder whose files run by themselves',
+    ],
+    [
+      '.agentnomad/home/Documents/PowerShell/Microsoft.PowerShell_profile.ps1',
+      'a folder whose files run by themselves',
+    ],
+    [
+      '.agentnomad/home/OneDrive/Documents/WindowsPowerShell/profile.ps1',
+      'a folder whose files run by themselves',
+    ],
+    ['.agentnomad/home/.config/fish/config.fish', 'a folder whose files run by themselves'],
+    ['.agentnomad/home/.config/fish/conf.d/a.fish', 'a folder whose files run by themselves'],
+    ['.agentnomad/home/Library/LaunchAgents/x.sh', 'a folder whose files run by themselves'],
+    ['.agentnomad/home/.SSH/id_ed25519', 'a folder for keys and logins'],
+    ['.agentnomad/other.json', 'unknown agentnomad entry'],
+    // Windows and macOS ignore case: another spelling of a refused folder is refused too (T43).
+    ['Plugins/cache/m/p/1.0.0/hooks/run.sh', 'never synced'],
+    ['Skills/Synced/x/run.sh', 'never synced'],
+    ['.AgentNomad/home/x.sh', 'unknown agentnomad entry'],
+    ['../outside.md', 'not a safe path'],
+  ])('global: %s', (path, reason) => {
+    expect(globalDestination(path, new Set())).toEqual({ kind: 'refused', reason });
+  });
+
+  it('global: a hook naming an autostart file does not make it restorable (T43)', () => {
+    const startup = 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/a.cmd';
+    const settings = JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: `~/${startup}` }] }] },
+    });
+    const context = { homedir: home, baseDir: base, platform: process.platform };
+    expect(hookScripts(settings, context)).toEqual([]);
+    expect(
+      globalDestination(`.agentnomad/home/${startup}`, new Set([`.agentnomad/home/${startup}`])),
+    ).toEqual({ kind: 'refused', reason: 'a folder whose files run by themselves' });
+  });
+
+  it('global: a home script is restored only when a hook or the status line runs it', () => {
+    const settings = JSON.stringify({
+      statusLine: { type: 'command', command: '~/scripts/statusline.sh' },
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'bash $HOME/tools/stop.sh' }] }] },
+    });
+    const scripts = new Set(
+      hookScripts(settings, { homedir: home, baseDir: base, platform: process.platform }).map(
+        (script) => script.bundlePath,
+      ),
+    );
+    expect(scripts).toEqual(
+      new Set(['.agentnomad/home/scripts/statusline.sh', '.agentnomad/home/tools/stop.sh']),
+    );
+    expect(globalDestination('.agentnomad/home/scripts/statusline.sh', scripts)).toEqual({
+      kind: 'home',
+      path: 'scripts/statusline.sh',
+    });
+    expect(globalDestination('.agentnomad/home/scripts/other.sh', scripts)).toEqual({
+      kind: 'refused',
+      reason: 'no hook or status line in this setup runs it',
+    });
+    // Known tool settings are not run, so they need no hook.
+    expect(
+      globalDestination('.agentnomad/home/.config/ccstatusline/settings.json', new Set()),
+    ).toEqual({ kind: 'home', path: '.config/ccstatusline/settings.json' });
+  });
+
+  it.each([
+    ['.git/config', 'never synced'],
+    ['.claude/agent-memory-local/a/MEMORY.md', 'never synced'],
+    ['.claude/worktrees/wt/CLAUDE.md', 'never synced'],
+    ['src/index.ts', 'not part of a Claude Code setup'],
+    ['.env', 'not part of a Claude Code setup'],
+    ['.GIT/hooks/pre-commit.sh', 'never synced'],
+    ['.agentnomad/x.sh', 'unknown agentnomad entry'],
+    ['.agentnomad/auto-memory/run.sh', 'auto memory holds only Markdown files'],
+    ['.agentnomad/auto-memory/.bashrc', 'auto memory holds only Markdown files'],
+  ])('project: %s', (path, reason) => {
+    expect(projectDestination(path)).toEqual({ kind: 'refused', reason });
+  });
+
+  // A forged bundle cannot replace a launcher or Claude Code itself in its folder (T55, SEC-03).
+  it.each([
+    ['chrome/chrome-native-host.bat', 'never synced'],
+    ['local/node_modules/@anthropic-ai/claude-code/cli.js', 'never synced'],
+    ['Chrome/chrome-native-host.bat', 'never synced'],
+    ['anything/else/run.ps1', 'no hook or status line in this setup runs it'],
+    ['run.sh', 'no hook or status line in this setup runs it'],
+  ])('global: a script outside the synced folders that no hook runs: %s', (path, reason) => {
+    expect(globalDestination(path, new Set())).toEqual({ kind: 'refused', reason });
+  });
+
+  it('global: a base-folder script is restored when a hook runs it, never in Claude Code state', () => {
+    const settings = JSON.stringify({
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              { type: 'command', command: '~/.claude/hooks/check.sh' },
+              { type: 'command', command: '~/.claude/chrome/chrome-native-host.bat' },
+              { type: 'command', command: 'node ~/.claude/local/node_modules/x/cli.js' },
+            ],
+          },
+        ],
+      },
+    });
+    const scripts = new Set(
+      hookScripts(settings, { homedir: home, baseDir: base, platform: process.platform }).map(
+        (script) => script.bundlePath,
+      ),
+    );
+    expect(scripts).toEqual(new Set(['hooks/check.sh']));
+    expect(globalDestination('hooks/check.sh', scripts)).toEqual({
+      kind: 'target',
+      path: 'hooks/check.sh',
+    });
+    // Even a set that names it (as an older bundle might) does not open Claude Code's state.
+    expect(
+      globalDestination(
+        'chrome/chrome-native-host.bat',
+        new Set(['chrome/chrome-native-host.bat']),
+      ),
+    ).toEqual({ kind: 'refused', reason: 'never synced' });
+  });
+});
+
+describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
+  it.each([
+    ['$CLAUDE_PROJECT_DIR/scripts/a.sh', ['scripts/a.sh']],
+    [`bash -c "bash -lc '$CLAUDE_PROJECT_DIR/scripts/a.sh arg; true'"`, ['scripts/a.sh']],
+    ['scripts\\a.sh', ['scripts/a.sh']],
+    ['~/a.sh', []],
+    ['$HOME/a.sh', []],
+    ['../outside/a.sh', []],
+  ])('reads %s', (word, expected) => {
+    const settings = JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: word }] }] },
+    });
+    expect(
+      projectHookScripts(settings, { projectDir: project, platform: process.platform }).map(
+        (script) => script.bundlePath,
+      ),
+    ).toEqual(expected);
+  });
+});
