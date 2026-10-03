@@ -507,7 +507,12 @@ exit code; they are warned about.
 CI runs `pnpm check` (typecheck, lint, format, tests) on macOS, Linux and Windows with
 Node 22.13 and 24, the real Linux keychain (GNOME Keyring), and the two cross-OS chains.
 On every OS and Node version it also builds the npm package, installs it globally, and runs
-the e2e steps with the installed `agentnomad` command. Actions are pinned by commit.
+the e2e steps with the installed `agentnomad` command. One job (Linux, Node 24) also runs
+`pnpm audit --prod` (known advisories in the packages users install) and
+`pnpm --filter @agentnomad/server db:check` (`drizzle-kit check`: the migrations agree with
+each other; offline, no database or secret). `.github/workflows/audit.yml` runs the same
+audit every Wednesday, so a new advisory is noticed without a push. Actions are pinned by
+commit.
 
 **The npm package.** `packages/cli/scripts/build-release.ts` bundles our own code (cli,
 core, contracts) into one readable file with esbuild and writes `packages/cli/release/`:
@@ -749,15 +754,16 @@ Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 
 ## Repository root
 
-| Path                                    | Responsible for                                                                                                            |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `.github/workflows/ci.yml`              | CI: checks on 3 OSes × 2 Node versions, Linux keychain, the npm package installed and run end to end, the cross-OS chains. |
-| `.github/workflows/release.yml`         | Release: verify on every OS, approval, publish to npm with provenance, check `npx` on every OS.                            |
-| `packages/cli/scripts/build-release.ts` | Builds the `agentnomad` npm package (esbuild bundle + manifest).                                                           |
-| `packages/cli/scripts/drift/`           | The weekly Claude Code drift check: `drift.ts` (comparison and report), `check-claude-code.ts` (fetches the sources).      |
-| `.github/workflows/drift-check.yml`     | Runs the drift check every Monday and files or updates the `drift` issue.                                                  |
-| `render.yaml`                           | The Render service (build, start, health check).                                                                           |
-| `pnpm-workspace.yaml`                   | Workspace packages and dependency overrides.                                                                               |
-| `tsconfig.base.json`, `tsconfig.json`   | Strict TypeScript settings and project references.                                                                         |
-| `eslint.config.js`, `vitest.config.ts`  | Lint rules and the test projects.                                                                                          |
-| `docs/`                                 | This document, the roadmap, the agent guide, decisions and the threat model.                                               |
+| Path                                    | Responsible for                                                                                                                                                                    |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.github/workflows/ci.yml`              | CI: checks on 3 OSes × 2 Node versions, Linux keychain, the npm package installed and run end to end, the cross-OS chains, the dependency audit and the migration check (one job). |
+| `.github/workflows/audit.yml`           | Runs `pnpm audit --prod` every Wednesday; a finding fails the run.                                                                                                                 |
+| `.github/workflows/release.yml`         | Release: verify on every OS, approval, publish to npm with provenance, check `npx` on every OS.                                                                                    |
+| `packages/cli/scripts/build-release.ts` | Builds the `agentnomad` npm package (esbuild bundle + manifest).                                                                                                                   |
+| `packages/cli/scripts/drift/`           | The weekly Claude Code drift check: `drift.ts` (comparison and report), `check-claude-code.ts` (fetches the sources).                                                              |
+| `.github/workflows/drift-check.yml`     | Runs the drift check every Monday and files or updates the `drift` issue.                                                                                                          |
+| `render.yaml`                           | The Render service (build, start, health check).                                                                                                                                   |
+| `pnpm-workspace.yaml`                   | Workspace packages and dependency overrides.                                                                                                                                       |
+| `tsconfig.base.json`, `tsconfig.json`   | Strict TypeScript settings and project references.                                                                                                                                 |
+| `eslint.config.js`, `vitest.config.ts`  | Lint rules and the test projects.                                                                                                                                                  |
+| `docs/`                                 | This document, the roadmap, the agent guide, decisions and the threat model.                                                                                                       |

@@ -53,6 +53,18 @@ jobs:
       - name: Typecheck, lint, format check and tests
         run: pnpm check
 
+      # T64: these two do not depend on the OS or Node version, so they run in one job only.
+      # Known security advisories in the packages users install (the weekly run is audit.yml).
+      - name: Dependency audit (production)
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+        run: pnpm audit --prod
+
+      # The migrations agree with each other and with the snapshots. Offline: no database and
+      # no secret. It loads schema.ts, which needs the contracts build that `pnpm check` made.
+      - name: Migration consistency check
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+        run: pnpm --filter @agentnomad/server db:check
+
       # T40: the npm package exactly as users get it: built, packed, installed globally, and
       # run as the `agentnomad` command, on every OS and both Node versions.
       - name: Build, pack and install the npm package
