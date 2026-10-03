@@ -185,12 +185,24 @@ refused. Allow only what your collector could have produced. This is what stops 
 or tampered bundle from writing credentials, state or files outside the setup. See
 `claude-code/restore-rules.ts`, including `windowsNameProblem` for Windows-unsafe names.
 
-**The restorer** implements `Restorer.restore(target, files, onConflict, context)`:
+**The restorer** also tells pull's plan step what to ask before anything is written, and
+never asks anything itself:
+
+- `reviewRunnable(files, current)`: what in the pulled files runs programs (hooks, MCP
+  servers, the scripts they run) and is new or changed against this PC. Pull lists these
+  and asks; this is the main safety step of pull, so list everything the agent runs.
+- `conflicts(files, current)`: each file here that differs, in the order `restore` meets
+  them, with the question (`overwriteAllowed`, and a `message` when the default
+  "`<path>` already exists here and is different." does not fit).
+- `isRedirectVariable(name)`: saved environment variables that send programs' requests
+  elsewhere (a proxy, another endpoint); pull gives them their own question.
+
+It implements `Restorer.restore(target, files, onConflict, context)`:
 
 1. For each file, ask the restore rules; report refused ones in `warnings`.
 2. Skip files that are identical to what is on disk.
-3. For a different existing file, call `onConflict(path, { overwriteAllowed })`: it asks the
-   user or answers from `--merge` / `--overwrite` / `--yes`. Use `createMergeStrategies`
+3. For a different existing file, call `onConflict(path, question)`: it answers from what
+   the plan asked (or `--merge` / `--overwrite` / `--yes`). Use `createMergeStrategies`
    and `selectMergeStrategy` from `@agentnomad/core` to plan merge (JSON by key; others
    side by side) and overwrite (with a timestamped backup).
 4. Write atomically (temporary file, then rename), keep a replaced file's permissions,
@@ -206,10 +218,17 @@ loop) into a shared `agents/shared/` module rather than copying them.
 
 - **`inspector.unknownEntries(target)`:** entries in the agent's folder that the data file
   does not know, so push can tell the user (see `claude-code/unknown-files.ts`).
-- **`inspector.notices('push' | 'pull')`:** anything to point out, such as
+- **`inspector.notices('push' | 'pull' | 'agents')`:** anything to point out, such as
   organization-managed settings (see `claude-code/managed-settings.ts`).
-- **`afterRestore(context)`:** follow-up after a pull, such as reinstalling extensions with
-  the agent's own commands. Respect `context.assumeYes` and `context.allowCommands`:
+- **`inspector.versionNotice(savedWith, here)`:** what pull says about the version a setup
+  was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text).
+- **`optionalParts`:** what push saves only after a yes, as data (an id, its scope, what
+  there is, the question); the collector gets the chosen ids in `options.include`.
+- **`memoryDescription`:** what push's memory question names.
+- **`planRestore(context)`:** the agent's own questions in pull's plan step, before anything
+  is written, such as reinstalling extensions with the agent's own commands. It returns how
+  to write the setup (usually the restorer's `restore`) and a follow-up that runs after
+  writing and gets no prompter. Respect `context.assumeYes` and `context.allowCommands`:
   without `allowCommands`, never install or run anything unasked.
 
 ## Step 7 · Put the adapter together
@@ -286,10 +305,9 @@ the fakes the existing tests use.
 - [ ] `pnpm test:e2e` passes.
 - [ ] Push and pull tried by hand on at least two operating systems (a temporary home
       folder is enough), including a pull onto a PC that already has a different setup.
-- [ ] Anything that runs programs is shown by pull before it is written. The review in
-      `pull/command-review.ts` understands Claude Code's formats today; if your agent's
-      setup can run programs (hooks, MCP servers), add its format there, or better, move
-      the review behind the adapter as the [roadmap](ROADMAP.md#v1x-more-agents) plans.
+- [ ] Anything that runs programs is shown by pull before it is written: your restorer's
+      `reviewRunnable` lists it (Claude Code's is `claude-code/command-review.ts`).
+- [ ] `pnpm lint` passes: `push/`, `pull/` and `cli/` must not import your folder.
 - [ ] README (supported agents), [ROADMAP.md](ROADMAP.md) and
       [ARCHITECTURE.md](ARCHITECTURE.md) (file reference) updated.
 - [ ] The [threat model](security/threat-model.md) still holds: no credentials collected,
