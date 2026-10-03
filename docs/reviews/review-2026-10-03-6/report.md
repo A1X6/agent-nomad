@@ -99,7 +99,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### BUG-02 · Low · The drift issue is edited and commented every week even when nothing changed
 
-- [ ] **Where:** `.github/workflows/drift-check.yml:118-141` (and `DRIFT_RUN_URL` at `:113`); `packages/cli/scripts/drift/drift.ts:193`
+- [x] **Where:** `.github/workflows/drift-check.yml:118-141` (and `DRIFT_RUN_URL` at `:113`); `packages/cli/scripts/drift/drift.ts:193`
 - **Problem:** The workflow says it updates the open issue "only when the report changes", and compares the new body with the old one. The body ends with the link to this week's run, so it always differs.
 - **Why it matters:** An open drift issue gets a new edit and a "report updated" comment every week, which is exactly the noise the comparison was written to prevent.
 - **Fix:** Compare the bodies without the run-link line, or keep the link out of the body and put it only in the comment. The drift test can check that two reports from the same input are equal.
@@ -164,7 +164,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### READ-01 · Low · Four doc and comment spots are behind the code
 
-- [ ] **Where:** `SECURITY.md:50-52`; `docs/security/threat-model.md:3`, `:120`, `:127`; `docs/ARCHITECTURE.md:380-391`; `packages/server/src/storage/blob-store.ts:19-20`
+- [x] **Where:** `SECURITY.md:50-52`; `docs/security/threat-model.md:3`, `:120`, `:127`; `docs/ARCHITECTURE.md:380-391`; `packages/server/src/storage/blob-store.ts:19-20`
 - **Problem:** SECURITY.md lists the rate limits without the download limit (600 per account per hour, T77). The threat model header says "updated through T74", and row 44 (the download limit) sits under the heading "review 4, about threat 13", where it does not belong. ARCHITECTURE.md repeats the "Claude Code is running" text twice, the second copy garbled. The blob-store comment lists the outcomes without `over-limit`.
 - **Why it matters:** These are the files users and contributors trust for what the server limits and why.
 - **Fix:** Add the limit to SECURITY.md; set the header to "updated through T79" and move row 44 under its own "review 5" heading; remove the duplicated paragraph; add `over-limit` to the comment.
