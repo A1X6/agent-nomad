@@ -225,8 +225,10 @@ sequenceDiagram
 
 1. Detect installed agents; choose agents and scopes (or take `--agent`, `--global`,
    `--project`).
-2. A project is named once per folder (remembered in local state); the home folder is never
-   offered as a project.
+2. A project is named once per folder (remembered in local state). The home folder and the
+   agent's own folder (`~/.claude`) are never a project, in push or pull: their `.claude/` is
+   the global setup. They are not offered, and `--project` there stops with a message to run
+   the command from the project's folder (`cli/project-folder.ts`).
 3. Choose whether to include memory (`--memory` / `--no-memory`).
 4. Show organization-managed settings and files the adapter does not know yet.
 5. The adapter **collects** the files; the user may add saved environment values. Links
@@ -344,7 +346,10 @@ only in case or Unicode form are one file on Windows and macOS: only the first i
 entry that cannot be written is skipped with a warning; the rest continue. `~/.claude.json`
 is only ever merged, with a backup: only `mcpServers` and the preference keys, never
 `projects` or account state. It is skipped while Claude Code is running (it rewrites the
-file while open) and read again once Claude Code is closed. Auto memory is Markdown only, and
+file while open) and read again once Claude Code is closed. Running means a `claude` program
+(also under a folder with a space), npm's Claude Code under node (seen by its command line;
+on Windows read through PowerShell, else `tasklist` names), or the Claude app, whose Code tab
+runs Claude Code and shares `~/.claude.json`. Auto memory is Markdown only, and
 a folder chosen by the project's `autoMemoryDirectory` is used only inside the home folder
 and outside refused folders (`auto-memory.ts`).
 
@@ -385,8 +390,10 @@ runs its `!`command`` lines where a synced one does not, so such skills are mark
 flag alone adds them only with `--allow-commands`.
 
 **After restore:** plugins are reinstalled with Claude Code's own `claude plugin
-marketplace add` and `claude plugin install`; a plugin built by running a command gets its
-own question; programs that hooks start and npm installed are offered with
+marketplace add` and `claude plugin install` (on Windows a `.cmd` launcher runs through
+`cmd.exe` with one verbatim line: an argument with a space, like a local marketplace folder,
+is quoted; one with `"&|<>^%!`, other white space or control characters is refused); a
+plugin built by running a command gets its own question; programs that hooks start and npm installed are offered with
 `npm install -g name@version`.
 
 **Keeping up with Claude Code:** files Claude Code adds that the data file does not know
@@ -445,11 +452,11 @@ its parameters. There are no CORS headers and no cookies.
 
 ## 9. What the CLI keeps on a PC
 
-| What                         | Where                                                                                                                                                             | Why                                                                                                                                                                                                                                                                                         |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session token and data key   | OS keychain: Windows Credential Manager, macOS Keychain, Linux Secret Service. Service `agentnomad`, account `<secret>@<server host>`                             | So later commands work without the password; one entry per server                                                                                                                                                                                                                           |
-| The same, without a keychain | `%APPDATA%\agentnomad\secrets.json` or `~/.config/agentnomad/secrets.json`, readable only by the user (600 in a 700 folder; on Windows an ACL for this user only) | Servers, WSL, SSH sessions; the CLI says when it is used. A login saved there while the keychain failed is moved into it once it works again                                                                                                                                                |
-| Local state                  | `state.json` in the same folder                                                                                                                                   | Which name each project folder was saved under, and the last revision this PC pushed or pulled of each setup (for conflicts, `status` and rollback checks), and the account those revisions belong to: a login or register as another account clears them and keeps the project names (T56) |
+| What                         | Where                                                                                                                                                             | Why                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session token and data key   | OS keychain: Windows Credential Manager, macOS Keychain, Linux Secret Service. Service `agentnomad`, account `<secret>@<server host>`                             | So later commands work without the password; one entry per server                                                                                                                                                                                                                                                                                                                                                                                                       |
+| The same, without a keychain | `%APPDATA%\agentnomad\secrets.json` or `~/.config/agentnomad/secrets.json`, readable only by the user (600 in a 700 folder; on Windows an ACL for this user only) | Servers, WSL, SSH sessions; the CLI says when it is used. A login saved there while the keychain failed is moved into it once it works again                                                                                                                                                                                                                                                                                                                            |
+| Local state                  | `state.json` in the same folder                                                                                                                                   | Which name each project folder was saved under, and the last revision this PC pushed or pulled of each setup (for conflicts, `status` and rollback checks), and the account those revisions belong to: a login or register as another account clears them and keeps the project names (T56). Only a missing file counts as empty; one that cannot be read stops the command. Two commands running at once are not serialized: the last write wins (rare, so not locked) |
 
 `AGENTNOMAD_API_URL` points the CLI at another server (https, or http for localhost).
 
@@ -576,6 +583,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | ------------------- | ------------------------------------------------------------------------------------------------------ |
 | `commands.ts`       | The option types for every command and the `CommandHandlers` interface.                                |
 | `program.ts`        | Every command, flag and help text (commander); parsing only.                                           |
+| `project-folder.ts` | The home folder and the agent's own folder are never a project (push and pull).                        |
 | `flags.ts`          | Validating `--agent`, `--project` and `--username` values.                                             |
 | `run.ts`            | Runs one invocation: exit codes, Ctrl+C, and the "needs an answer" message with the flags per command. |
 | `setup-outcomes.ts` | What happened to each setup in push and pull, and the one "Not saved / Not restored" error (exit 1).   |
@@ -665,7 +673,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `auto-memory.ts`                      | Finding a project's auto memory folder the way Claude Code does.                                                                   |
 | `restore-rules.ts`                    | Where each bundle entry may go, or why it is refused (including Windows name rules).                                               |
 | `restorer.ts`                         | Writing a setup: atomic writes, permissions, line endings, conflicts, `~/.claude.json` merge, the running-Claude check.            |
-| `running-claude.ts`                   | Is Claude Code running (process list)?                                                                                             |
+| `running-claude.ts`                   | Is Claude Code (or the Claude app) running (command lines)?                                                                        |
 | `plugins.ts`                          | Reading installed plugins and marketplaces into `.agentnomad/plugins.json`.                                                        |
 | `plugin-sync.ts`                      | Reinstalling what is missing with `claude plugin` commands.                                                                        |
 | `programs.ts`                         | Finding the programs hooks start and whether npm installed them.                                                                   |
