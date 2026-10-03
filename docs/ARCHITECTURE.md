@@ -377,18 +377,17 @@ which is refused like never-synced entries (T55). Refusals ignore case. On Windo
 only in case or Unicode form are one file on Windows and macOS: only the first is written. An
 entry that cannot be written is skipped with a warning; the rest continue. `~/.claude.json`
 is only ever merged, with a backup: only `mcpServers` and the preference keys, never
-`projects` or account state. It is skipped while Claude Code is running (a process whose program is `claude` or the
-Claude app, or an interpreter or launcher such as `node`, `bun`, `sh` or `env` running
-Claude Code's script, as `node /usr/local/bin/claude`; an argument naming them does not
-count; it
-rewrites the file while open): pull's plan step asks to close it ("I closed it, continue" checks again,
+`projects` or account state. It is skipped while Claude Code is running (it rewrites the file
+while open): pull's plan step asks to close it ("I closed it, continue" checks again,
 "Skip ~/.claude.json this time" leaves it with a warning; `--yes` never waits), and the
 restorer checks once more right before writing and leaves the file if it is open again. It is
 read again at that point, as Claude Code saves it while closing. Running means a `claude` program
 (also under a folder with a space; npm's package now ships it as a native `claude.exe`, checked
-with a real install on Windows), npm's Claude Code under node (its fallback, seen by its command
-line; on Windows read through PowerShell, else `tasklist` names), or the Claude app, whose Code tab
-runs Claude Code and shares `~/.claude.json`. Auto memory is Markdown only, and
+with a real install on Windows), an interpreter or launcher such as `node`, `bun`, `sh` or `env`
+running Claude Code's script (npm's fallback, as `node /usr/local/bin/claude`; an argument
+naming them does not count; command lines on Windows are read through PowerShell, else
+`tasklist` names), or the Claude app, whose Code tab runs Claude Code and shares
+`~/.claude.json`. Auto memory is Markdown only, and
 a folder chosen by the project's `autoMemoryDirectory` is used only inside the home folder
 and outside refused folders (`auto-memory.ts`).
 
