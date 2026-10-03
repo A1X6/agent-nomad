@@ -102,6 +102,19 @@ flowchart TD
 The server and the CLI never import each other; they only share `contracts`. So a change to
 the API shape is a change in one place, checked on both sides.
 
+**Strict on what is sent, tolerant on what is received (T57).** The server deploys from
+`main` within minutes; installed CLIs update when their users choose. So the server parses
+requests with strict schemas (an unknown field is refused) and is typed against strict
+answer schemas, while the CLI reads answers with `ClientAnswerSchemas` (`api/answers.ts`):
+the same field definitions, but an unknown field is dropped instead of refused, and any
+error code is accepted. A known code works as before; an unknown one becomes an `ApiError`
+with code `unknown` that shows the server's message. A missing or wrongly typed known field
+is still refused, and every bound stays (KDF settings, sizes, revisions). This only helps
+CLIs released after 1.0.3: 1.0.3 and older still refuse any new field or code, so the server must
+not send one until they are gone (`routes/bundles.ts` and `WRONG_PASSWORD_MESSAGE` work
+around them today). Every request carries the CLI version in `x-an-client`, which the
+server logs, so it can later tell old CLIs to update.
+
 ## 3. Keys and encryption
 
 ```mermaid
@@ -414,7 +427,8 @@ anything and again inside the save's transaction, with the user row locked); ove
 `413 payload_too_large` says which limit. The visitor's IP is Cloudflare's
 `CF-Connecting-IP` (`True-Client-IP` when that is missing). About one save in 50 also deletes
 files no setup points to that are over an hour old. Logs are one JSON line per request with
-a request id, never headers, bodies or query strings; a failed query logs its SQL text, never
+a request id and the CLI version from `x-an-client` (`invalid` when it does not look like a
+version; absent for 1.0.3 and older), never other headers, bodies or query strings; a failed query logs its SQL text, never
 its parameters. There are no CORS headers and no cookies.
 
 ## 9. What the CLI keeps on a PC
@@ -496,14 +510,15 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ## `packages/contracts/src`
 
-| File             | Responsible for                                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `index.ts`       | Re-exports everything.                                                                                                                            |
-| `primitives.ts`  | Shared building blocks: base64 of an exact length, SHA-256 hex, timestamps, short single-line text.                                               |
-| `bundle.ts`      | The plaintext bundle format: format version, agent id, scope, source OS, agent version, revision, files; safe relative paths; project name rules. |
-| `api/common.ts`  | Crypto byte sizes, the 5 MB bundle cap, route paths, custom header names, error codes and the error body.                                         |
-| `api/auth.ts`    | Usernames, Argon2id settings (defaults and the minimum a server may ask for), prelogin, register, login, session and account-delete bodies.       |
-| `api/bundles.ts` | Scope keys, bundle list query and response (cursor), upload and download headers.                                                                 |
+| File             | Responsible for                                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.ts`       | Re-exports everything.                                                                                                                                   |
+| `primitives.ts`  | Shared building blocks: base64 of an exact length, SHA-256 hex, timestamps, short single-line text.                                                      |
+| `bundle.ts`      | The plaintext bundle format: format version, agent id, scope, source OS, agent version, revision, files; safe relative paths; project name rules.        |
+| `api/common.ts`  | Crypto byte sizes, the 5 MB bundle cap, route paths, custom header names (`x-an-client` too), the client version format, error codes and the error body. |
+| `api/auth.ts`    | Usernames, Argon2id settings (defaults and the minimum a server may ask for), prelogin, register, login, session and account-delete bodies.              |
+| `api/bundles.ts` | Scope keys, bundle list query and response (cursor), upload and download headers.                                                                        |
+| `api/answers.ts` | `ClientAnswerSchemas`: the tolerant forms of every answer, built from the strict schemas' shapes; what the CLI parses answers with (T57).                |
 
 ## `packages/core/src`
 
@@ -553,13 +568,13 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `api/`: talking to the server
 
-| File                 | Responsible for                                                                                                                                                                               |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api-client.ts`      | The `ApiClient` interface (auth and bundle calls).                                                                                                                                            |
-| `http-api-client.ts` | The implementation on `fetch`: timeouts sized to transfer size, the wake-up check, contract validation of every answer, SHA-256 check of downloads, no retry for register and account delete. |
-| `transport.ts`       | One HTTP call with timeout and retries (network errors, timeouts, 502/503/504 only), capped body reads, redirects refused.                                                                    |
-| `api-errors.ts`      | `ApiError`, `NetworkError`, `OutcomeUnknownError`, `InvalidResponseError`, `NotLoggedInError`.                                                                                                |
-| `api-url.ts`         | The server address: `AGENTNOMAD_API_URL` or the hosted API; https only (http for localhost).                                                                                                  |
+| File                 | Responsible for                                                                                                                                                                                                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api-client.ts`      | The `ApiClient` interface (auth and bundle calls).                                                                                                                                                                                                                         |
+| `http-api-client.ts` | The implementation on `fetch`: timeouts sized to transfer size, the wake-up check, contract validation of every answer (unknown fields and error codes tolerated), the `x-an-client` version header, SHA-256 check of downloads, no retry for register and account delete. |
+| `transport.ts`       | One HTTP call with timeout and retries (network errors, timeouts, 502/503/504 only), capped body reads, redirects refused.                                                                                                                                                 |
+| `api-errors.ts`      | `ApiError`, `NetworkError`, `OutcomeUnknownError`, `InvalidResponseError`, `NotLoggedInError`.                                                                                                                                                                             |
+| `api-url.ts`         | The server address: `AGENTNOMAD_API_URL` or the hosted API; https only (http for localhost).                                                                                                                                                                               |
 
 ### `auth/`: accounts
 
@@ -637,36 +652,36 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ## `packages/server/src`
 
-| File                                                                           | Responsible for                                                                             |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `main.ts`                                                                      | Starts the Node web server and shuts down cleanly on Render's signals.                      |
-| `server.ts`                                                                    | Composition root: settings, Neon pool, keys, limiter, services, app.                        |
-| `index.ts`                                                                     | Re-exports for tests and the e2e server.                                                    |
-| `port.ts`                                                                      | The port from `PORT`.                                                                       |
-| `encoding.ts`                                                                  | Base64, hex and UTF-8 with web-standard APIs.                                               |
-| `db/env.ts`                                                                    | Reading and checking `DATABASE_URL` and `SERVER_SECRET`.                                    |
-| `db/schema.ts`                                                                 | The Drizzle tables and their constraints.                                                   |
-| `db/database.ts`                                                               | The driver-independent `Database` type (Neon in production, PGlite in tests).               |
-| `db/repositories.ts`                                                           | Repository interfaces and their errors.                                                     |
-| `db/user-repository.ts`, `db/session-repository.ts`, `db/bundle-repository.ts` | Accounts, sessions (token hashes) and bundle metadata in Postgres, with the revision check. |
-| `db/bundle-cursor.ts`                                                          | Opaque, tamper-checked list cursors.                                                        |
-| `storage/blob-store.ts`                                                        | The `BlobStore` interface: encrypted bytes under random ids (R2 later).                     |
-| `storage/postgres-blob-store.ts`                                               | The implementation in `bundle_blobs`.                                                       |
-| `auth/server-keys.ts`                                                          | Keys from `SERVER_SECRET`: auth-key hashes (constant-time check), fake salts, pseudonyms.   |
-| `auth/session-tokens.ts`                                                       | New 256-bit tokens and their hashes.                                                        |
-| `auth/auth-service.ts`                                                         | Prelogin, register, login, logout, account delete, session checks, lifetimes.               |
-| `bundles/bundle-service.ts`                                                    | Listing, downloading, saving (the safe upload order) and deleting setups.                   |
-| `rate-limit/rate-limiter.ts`                                                   | The rules and the `RateLimiter` interface.                                                  |
-| `rate-limit/postgres-rate-limiter.ts`                                          | Fixed-window counters in `rate_limits` on the database clock.                               |
-| `http/app.ts`                                                                  | The Hono app: request ids, security headers, routes, errors.                                |
-| `http/routes/auth.ts`, `http/routes/bundles.ts`, `http/routes/account.ts`      | The endpoints.                                                                              |
-| `http/session.ts`                                                              | `requireSession`: the bearer token, one identical 401 for every failure.                    |
-| `http/validate.ts`                                                             | Parsing bodies, queries, params and headers with the contracts.                             |
-| `http/small-body.ts`                                                           | Size limit for JSON requests.                                                               |
-| `http/rate-limit.ts`                                                           | Per-IP limits on routes.                                                                    |
-| `http/errors.ts`                                                               | The standard error body; 500 details only in logs.                                          |
-| `hosting/client-ip.ts`                                                         | The visitor's IP on Render (Cloudflare's header).                                           |
-| `logging/logger.ts`                                                            | JSON log lines with only safe fields.                                                       |
+| File                                                                           | Responsible for                                                                                      |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `main.ts`                                                                      | Starts the Node web server and shuts down cleanly on Render's signals.                               |
+| `server.ts`                                                                    | Composition root: settings, Neon pool, keys, limiter, services, app.                                 |
+| `index.ts`                                                                     | Re-exports for tests and the e2e server.                                                             |
+| `port.ts`                                                                      | The port from `PORT`.                                                                                |
+| `encoding.ts`                                                                  | Base64, hex and UTF-8 with web-standard APIs.                                                        |
+| `db/env.ts`                                                                    | Reading and checking `DATABASE_URL` and `SERVER_SECRET`.                                             |
+| `db/schema.ts`                                                                 | The Drizzle tables and their constraints.                                                            |
+| `db/database.ts`                                                               | The driver-independent `Database` type (Neon in production, PGlite in tests).                        |
+| `db/repositories.ts`                                                           | Repository interfaces and their errors.                                                              |
+| `db/user-repository.ts`, `db/session-repository.ts`, `db/bundle-repository.ts` | Accounts, sessions (token hashes) and bundle metadata in Postgres, with the revision check.          |
+| `db/bundle-cursor.ts`                                                          | Opaque, tamper-checked list cursors.                                                                 |
+| `storage/blob-store.ts`                                                        | The `BlobStore` interface: encrypted bytes under random ids (R2 later).                              |
+| `storage/postgres-blob-store.ts`                                               | The implementation in `bundle_blobs`.                                                                |
+| `auth/server-keys.ts`                                                          | Keys from `SERVER_SECRET`: auth-key hashes (constant-time check), fake salts, pseudonyms.            |
+| `auth/session-tokens.ts`                                                       | New 256-bit tokens and their hashes.                                                                 |
+| `auth/auth-service.ts`                                                         | Prelogin, register, login, logout, account delete, session checks, lifetimes.                        |
+| `bundles/bundle-service.ts`                                                    | Listing, downloading, saving (the safe upload order) and deleting setups.                            |
+| `rate-limit/rate-limiter.ts`                                                   | The rules and the `RateLimiter` interface.                                                           |
+| `rate-limit/postgres-rate-limiter.ts`                                          | Fixed-window counters in `rate_limits` on the database clock.                                        |
+| `http/app.ts`                                                                  | The Hono app: request ids, security headers, the request log (with the CLI version), routes, errors. |
+| `http/routes/auth.ts`, `http/routes/bundles.ts`, `http/routes/account.ts`      | The endpoints.                                                                                       |
+| `http/session.ts`                                                              | `requireSession`: the bearer token, one identical 401 for every failure.                             |
+| `http/validate.ts`                                                             | Parsing bodies, queries, params and headers with the contracts.                                      |
+| `http/small-body.ts`                                                           | Size limit for JSON requests.                                                                        |
+| `http/rate-limit.ts`                                                           | Per-IP limits on routes.                                                                             |
+| `http/errors.ts`                                                               | The standard error body; 500 details only in logs.                                                   |
+| `hosting/client-ip.ts`                                                         | The visitor's IP on Render (Cloudflare's header).                                                    |
+| `logging/logger.ts`                                                            | JSON log lines with only safe fields.                                                                |
 
 Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 
