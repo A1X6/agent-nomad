@@ -28,8 +28,7 @@ export const BLOCK_END = '# <<< agentnomad env <<<';
 /** `it's` → `'it'\''s'`: safe in sh, bash and zsh whatever the value holds. */
 export const quotePosix = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 /** fish single quotes only treat `\\` and `\'` specially. */
-export const quoteFish = (value: string) =>
-  `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+const quoteFish = (value: string) => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
 function unquotePosix(quoted: string): string {
   return [...quoted.matchAll(/'([^']*)'|\\(.)/g)].map((part) => part[1] ?? part[2] ?? '').join('');

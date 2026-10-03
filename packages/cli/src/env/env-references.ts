@@ -7,7 +7,7 @@ export interface ScannedFile {
 }
 
 /** Variables Claude Code sets itself for hooks and servers; never the user's secrets. */
-export const CLAUDE_OWN_VARIABLES = new Set([
+const CLAUDE_OWN_VARIABLES = new Set([
   'CLAUDE_PROJECT_DIR',
   'CLAUDE_PLUGIN_ROOT',
   'CLAUDE_PLUGIN_DATA',
@@ -25,7 +25,7 @@ export const SETTINGS_FILES: ReadonlySet<string> = new Set([
   '.claude/settings.local.json',
 ]);
 
-export interface EnvUsage {
+interface EnvUsage {
   readonly name: string;
   /** Where it is used, e.g. `MCP server github (.mcp.json)`; sorted, no repeats. */
   readonly usedBy: readonly string[];

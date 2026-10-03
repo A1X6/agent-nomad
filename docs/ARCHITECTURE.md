@@ -516,7 +516,13 @@ reports that never fail the build: `pnpm test:coverage` (Vitest with V8 coverage
 `packages/*/src`; a summary in the log, the full report as the `coverage` artifact; no
 threshold yet) and `pnpm knip --no-exit-code` (unused files, dependencies and exports, set
 up in `knip.json`; `includeEntryExports` is on, so an export only re-exported by an
-`index.ts` and used nowhere is still reported). `pnpm test` does not collect coverage.
+`index.ts` and used nowhere is still reported). T65 cleared its findings: a name used only in
+its own file is not exported, and the few exports kept for other code to use are tagged
+`@public` in their JSDoc (the adapter interface `AgentInspector`, the crypto interfaces
+`PasswordKdf` and `RandomSource`, and two wire types in `contracts`). Its only findings left
+are seven exports in `packages/cli/src/api/` and `auth/auth-commands.ts`, which were out of
+T65's reach; once they are fixed the step can drop `--no-exit-code` and fail the build.
+`pnpm test` does not collect coverage.
 Actions are pinned by commit.
 
 **The npm package.** `packages/cli/scripts/build-release.ts` bundles our own code (cli,
@@ -768,7 +774,7 @@ Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 | `packages/cli/scripts/drift/`           | The weekly Claude Code drift check: `drift.ts` (comparison and report), `check-claude-code.ts` (fetches the sources).                                                                                                 |
 | `.github/workflows/drift-check.yml`     | Runs the drift check every Monday and files or updates the `drift` issue.                                                                                                                                             |
 | `render.yaml`                           | The Render service (build, start, health check).                                                                                                                                                                      |
-| `knip.json`                             | The unused-code check (`pnpm knip`): workspace entry points.                                                                                                                                                          |
+| `knip.json`                             | The unused-code check (`pnpm knip`): workspace entry points (including the e2e push helper, which runs as a child process).                                                                                           |     |
 | `pnpm-workspace.yaml`                   | Workspace packages and dependency overrides.                                                                                                                                                                          |
 | `tsconfig.base.json`, `tsconfig.json`   | Strict TypeScript settings and project references.                                                                                                                                                                    |
 | `eslint.config.js`, `vitest.config.ts`  | Lint rules, the test projects and the coverage settings.                                                                                                                                                              |

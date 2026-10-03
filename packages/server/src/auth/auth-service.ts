@@ -13,7 +13,7 @@ import { hashSessionToken, newSessionToken } from './session-tokens.ts';
 /** A session ends this long after login, however often it is used. */
 export const SESSION_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 /** A session unused for this long ends early (a forgotten old PC). */
-export const SESSION_IDLE_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_IDLE_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000;
 /** `last_used_at` is refreshed at most this often, to avoid a write on every request. */
 const TOUCH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -25,22 +25,22 @@ export class InvalidCredentialsError extends Error {
   }
 }
 
-export interface PreloginResult {
+interface PreloginResult {
   readonly kdfSalt: Uint8Array;
   readonly kdfParams: KdfParams;
 }
 
-export interface IssuedSession {
+interface IssuedSession {
   /** Shown to the client once; only its hash is stored. */
   readonly token: string;
   readonly expiresAt: Date;
 }
 
-export interface LoginResult extends IssuedSession {
+interface LoginResult extends IssuedSession {
   readonly wrappedDataKey: Uint8Array;
 }
 
-export interface RegisterInput extends Omit<NewUser, 'authHash'> {
+interface RegisterInput extends Omit<NewUser, 'authHash'> {
   readonly authKey: Uint8Array;
   readonly deviceName: string;
 }

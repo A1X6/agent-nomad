@@ -60,10 +60,10 @@ export const extensionOf = (path: string) => /(\.[^./]+)$/.exec(path)?.[1]?.toLo
 export const isScript = (path: string) => SCRIPT_EXTENSIONS.has(extensionOf(path));
 
 /** Home folders never read for hook scripts, whatever a command names: keys and cloud logins. */
-export const SENSITIVE_HOME_DIRS: readonly string[] = DATA.sensitiveHomeDirs;
+const SENSITIVE_HOME_DIRS: readonly string[] = DATA.sensitiveHomeDirs;
 
 /** Home folders the OS or a shell runs files from by itself (T43). */
-export const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
+const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
 
 /**
  * Why a path from the home folder (`/`-separated) must never be read or written for a

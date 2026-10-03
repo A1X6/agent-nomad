@@ -14,7 +14,7 @@ import { runnableInMarkdown } from './runnable-markdown.ts';
  * an organization's) under a reserved bundle folder, and pull can add them back as normal
  * local skills on a PC that does not get them from its own claude.ai sync.
  */
-export const SYNCED_SKILLS_DIR = 'skills/synced';
+const SYNCED_SKILLS_DIR = 'skills/synced';
 /** The id of the optional part for saved claude.ai skills (T42, T61); also the flag name. */
 export const ACCOUNT_SKILLS_PART = 'account-skills';
 export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
@@ -31,7 +31,7 @@ const EntrySchema = z.looseObject({ name: z.string(), creatorType: z.string().op
 /** A skill folder name that is safe everywhere and not one Claude Code reserves. */
 const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const RESERVED_NAMES = new Set(['synced', 'anthropic-skills']);
-export const isUsableSkillName = (name: string) =>
+const isUsableSkillName = (name: string) =>
   SKILL_NAME.test(name) &&
   !RESERVED_NAMES.has(name.toLowerCase()) &&
   !name.toLowerCase().startsWith('anthropic-skills:');

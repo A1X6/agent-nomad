@@ -10,7 +10,7 @@ import type {
 import type { BlobStore } from '../storage/blob-store.ts';
 
 /** Nonce (24) + Poly1305 tag (16): anything shorter cannot be an encrypted bundle. */
-export const MIN_CIPHERTEXT_BYTES = 40;
+const MIN_CIPHERTEXT_BYTES = 40;
 
 /** The upload does not match what its headers claim (hash, size or name rules). */
 export class InvalidUploadError extends Error {
@@ -46,7 +46,7 @@ export class BundleNotFoundError extends Error {
   }
 }
 
-export interface BundleUploadInput {
+interface BundleUploadInput {
   readonly key: BundleKey;
   readonly expectedRevision: number;
   readonly ciphertext: Uint8Array;
@@ -57,13 +57,13 @@ export interface BundleUploadInput {
   readonly nameEnc: Uint8Array | null;
 }
 
-export type UploadResult =
+type UploadResult =
   /** Stored (`saved`) or already stored by an earlier try of the same upload (`unchanged`). */
   | { readonly outcome: 'stored'; readonly meta: BundleMeta }
   /** Someone saved a newer revision first; `currentRevision` is 0 if the setup is gone. */
   | { readonly outcome: 'conflict'; readonly currentRevision: number };
 
-export interface DownloadedBundle {
+interface DownloadedBundle {
   readonly meta: BundleMeta;
   readonly ciphertext: Uint8Array;
 }

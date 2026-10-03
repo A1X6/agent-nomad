@@ -3,7 +3,7 @@ import { AsyncEntry } from '@napi-rs/keyring';
 import { SECRET_NAMES, type SecretName, type SecretStore } from './secret-store.ts';
 
 /** Service name every agentnomad keychain entry is saved under. */
-export const KEYCHAIN_SERVICE = 'agentnomad';
+const KEYCHAIN_SERVICE = 'agentnomad';
 
 /** One keychain entry; the part of @napi-rs/keyring this store uses. */
 export interface KeychainEntry {

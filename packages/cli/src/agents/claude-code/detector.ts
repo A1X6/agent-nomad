@@ -8,7 +8,7 @@ import { runProgram } from '../../system/run-program.ts';
 import type { DetectedAgent, Detector } from '../adapter.ts';
 
 /** Environment variable that moves Claude Code's whole `~/.claude` folder elsewhere. */
-export const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
+const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
 
 /** How long `claude --version` may take; it normally answers in well under a second. */
 const VERSION_TIMEOUT_MS = 5_000;

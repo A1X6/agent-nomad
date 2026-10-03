@@ -40,7 +40,7 @@ const StateFileSchema = z.strictObject({
 });
 type StateFile = z.infer<typeof StateFileSchema>;
 
-export class LocalStateError extends Error {
+class LocalStateError extends Error {
   constructor(path: string, options?: ErrorOptions) {
     super(
       `agentnomad's local state file is damaged: ${path}. Delete it; you will be asked for project names again.`,
@@ -51,7 +51,7 @@ export class LocalStateError extends Error {
 }
 
 /** The state file is there but could not be read (permissions, a locked file). */
-export class LocalStateReadError extends Error {
+class LocalStateReadError extends Error {
   constructor(path: string, options?: ErrorOptions) {
     const code =
       options?.cause instanceof Error && 'code' in options.cause

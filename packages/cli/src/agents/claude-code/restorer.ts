@@ -43,7 +43,7 @@ import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
 
 /** What pull's plan step decided for this restore (T61). */
-export interface ClaudeRestoreContext extends RestoreContext {
+interface ClaudeRestoreContext extends RestoreContext {
   /**
    * Leave `~/.claude.json` as it is, with the "was running" warning: Claude Code was open
    * when the plan asked, and the user chose to skip it.

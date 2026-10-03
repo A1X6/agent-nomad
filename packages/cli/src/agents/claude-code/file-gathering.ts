@@ -39,7 +39,7 @@ const isMarkerCopy = (name: string) =>
   name.includes(BACKUP_MARKER) || name.includes(INCOMING_MARKER);
 
 /** A file larger than this is left out of a setup (T45): a setup is settings and text. */
-export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 /** Where links may lead when collecting (T45). */
 export interface GatherLimits {

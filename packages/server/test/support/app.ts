@@ -12,7 +12,7 @@ import { createPostgresRateLimiter } from '../../src/rate-limit/postgres-rate-li
 import { createPostgresBlobStore } from '../../src/storage/postgres-blob-store.ts';
 import { createTestDatabase, type TestDatabase } from './database.ts';
 
-export const TEST_SERVER_SECRET = new Uint8Array(32).fill(42);
+const TEST_SERVER_SECRET = new Uint8Array(32).fill(42);
 
 /** Tests pick the visitor's IP with this header (a real host sets its own). */
 export const TEST_IP_HEADER = 'x-test-client-ip';

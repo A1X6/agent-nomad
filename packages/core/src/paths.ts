@@ -49,7 +49,7 @@ export interface PathResolver {
   fromPortableText(text: string, options?: PortableTextOptions): string;
 }
 
-export interface PortableTextOptions {
+interface PortableTextOptions {
   /**
    * On Windows, write the home folder and the path after it with backslashes: batch files
    * read `C:/Users/a/bin` as a switch (T45). Other files keep forward slashes.
