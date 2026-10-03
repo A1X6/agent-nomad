@@ -10,6 +10,7 @@ import {
   managedSettingsDir,
   managedSettingsNotice,
   installPlugins,
+  parseRegSettings,
   type ManagedSettingsSystem,
 } from '../src/index.ts';
 
@@ -110,6 +111,34 @@ describe('finding managed settings', () => {
       restrictsMcpServers: false,
     });
     expect(managedSettingsNotice(found, 'push')).toBeNull();
+  });
+});
+
+describe('the Settings value in reg query output (QA-07)', () => {
+  /** What 'reg query <hive>\SOFTWARE\Policies\ClaudeCode /v Settings' prints. */
+  const regOutput = (line: string) =>
+    ['', 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\ClaudeCode', line, '', ''].join('\r\n');
+
+  it.each([
+    ['REG_SZ', '    Settings    REG_SZ    {"model":"opus"}', '{"model":"opus"}'],
+    [
+      'REG_EXPAND_SZ',
+      '    Settings    REG_EXPAND_SZ    {"env":{"A":"%HOME%"}}',
+      '{"env":{"A":"%HOME%"}}',
+    ],
+    [
+      'a value with spaces',
+      '    Settings    REG_SZ    { "permissions": { "deny": ["Bash(rm -rf)"] } }',
+      '{ "permissions": { "deny": ["Bash(rm -rf)"] } }',
+    ],
+  ])('reads a %s value', (_, line, value) => {
+    expect(parseRegSettings(regOutput(line))).toBe(value);
+  });
+
+  it('answers null when there is no text value, so no source without keys is listed', () => {
+    expect(parseRegSettings(regOutput('    Settings    REG_MULTI_SZ    a\\0b'))).toBeNull();
+    expect(parseRegSettings(regOutput('    Other    REG_SZ    {}'))).toBeNull();
+    expect(parseRegSettings('')).toBeNull();
   });
 });
 
