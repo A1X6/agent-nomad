@@ -152,15 +152,18 @@ Run `agentnomad <command> --help` for every option.
 ### From scripts and CI
 
 With no terminal, agentnomad never asks: a question the flags do not answer stops the
-command with exit code 1 and names the flags to add. Push and pull look for every such
-question before they change anything, so a script never stops halfway.
+command with exit code 1 and names the flags to add. Push and pull ask every question before
+they change anything, so a script never stops halfway.
 
 ```sh
 echo "$AGENTNOMAD_PASSWORD" | agentnomad login --username me --password-stdin
 agentnomad pull --global --merge --yes
 ```
 
-Exit codes: `0` done, `1` failed (or an answer was needed), `130` cancelled.
+Exit codes: `0` done, `1` failed (or an answer was needed), `130` cancelled. Push and pull
+also exit with `1` when a setup was skipped or refused without you answering no: a newer copy
+on the server, an older copy than this PC had, a setup over 5 MB, or a skip made by `--yes`.
+The other setups are still done first, and one message lists what was not.
 
 ## What is synced
 
