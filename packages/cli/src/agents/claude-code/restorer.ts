@@ -18,6 +18,7 @@ import type {
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
+import { writeTargetOf } from '../../env/shell-profile.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { commandsInSettings, commandWords, createFileGatherer } from './file-gathering.ts';
@@ -82,6 +83,22 @@ export function lineEndingsFor(
   return new TextEncoder().encode(crlf ? lf.replace(/\n/g, '\r\n') : lf);
 }
 
+/**
+ * Whether the file on disk already is the pulled one: equal as saved, or after the line-ending
+ * fix above. A script kept with the other line endings (a CRLF `.py` from Git's autocrlf, an
+ * LF `.cmd`) is then left alone instead of conflicting on every pull (T53).
+ */
+export function sameForRestore(
+  platform: NodeJS.Platform,
+  path: string,
+  existing: Uint8Array,
+  incoming: Uint8Array,
+): boolean {
+  return (
+    sameBytes(existing, incoming) || sameBytes(existing, lineEndingsFor(platform, path, incoming))
+  );
+}
+
 /** Hook and status line commands that will likely not run on `platform` (from another OS). */
 export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform): string[] {
   const foreign = platform === 'win32' ? POSIX_ONLY : WINDOWS_ONLY;
@@ -122,17 +139,21 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     }
   }
 
-  /** Writes to a temporary file and swaps it in, so a crash never leaves half a file. */
+  /**
+   * Writes to a temporary file and swaps it in, so a crash never leaves half a file. A linked
+   * file is written where it really is, so the link stays (T53).
+   */
   async function writeAtomically(nativePath: string, content: Uint8Array, mode: number | null) {
-    await mkdir(path.dirname(nativePath), { recursive: true });
+    const target = await writeTargetOf(nativePath);
+    await mkdir(path.dirname(target), { recursive: true });
     const temp = path.join(
-      path.dirname(nativePath),
-      `.${path.basename(nativePath)}.agentnomad-tmp-${randomBytes(4).toString('hex')}`,
+      path.dirname(target),
+      `.${path.basename(target)}.agentnomad-tmp-${randomBytes(4).toString('hex')}`,
     );
     try {
       await writeFile(temp, content, { flag: 'wx', ...(mode !== null && { mode }) });
       if (mode !== null && options.platform !== 'win32') await chmod(temp, mode);
-      await rename(temp, nativePath);
+      await rename(temp, target);
     } catch (error) {
       await rm(temp, { force: true });
       throw error;
@@ -215,6 +236,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
   async function mergeClaudeJson(
     file: CollectedFile,
     onConflict: ConflictResolver,
+    onClaudeRunning: () => Promise<ClaudeRunningAnswer>,
     report: MutableReport,
     assumeYes: boolean,
   ): Promise<void> {
@@ -246,7 +268,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
     }
     while (await options.isClaudeRunning()) {
       // --yes never waits for the user to close Claude Code: the file is skipped instead.
-      if (assumeYes || (await options.onClaudeRunning()) === 'skip') {
+      if (assumeYes || (await onClaudeRunning()) === 'skip') {
         report.skipped.push(file.path);
         report.warnings.push(
           `${claudeJsonFile} was left as it is because Claude Code was running; pull again later to add your MCP servers and preferences.`,
@@ -279,6 +301,21 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
   return {
     async restore(target, incoming, onConflict, context: RestoreContext = {}) {
       const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
+      // A question the user cancelled (Ctrl+C) or that cannot be asked without a terminal
+      // stops the whole restore; only a problem with the entry itself is skipped (T53).
+      let stopped: { readonly error: unknown } | undefined;
+      const stopping =
+        <A extends unknown[], R>(question: (...args: A) => Promise<R>) =>
+        async (...args: A): Promise<R> => {
+          try {
+            return await question(...args);
+          } catch (error) {
+            stopped = { error };
+            throw error;
+          }
+        };
+      const ask = stopping(onConflict);
+      const askClaudeRunning = stopping(options.onClaudeRunning);
       const projectScripts = projectHookScripts(
         incoming
           .filter((entry) =>
@@ -328,7 +365,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         }
         if (destination.kind === 'metadata') return;
         if (destination.kind === 'claude-json') {
-          await mergeClaudeJson(file, onConflict, report, context.assumeYes === true);
+          await mergeClaudeJson(file, ask, askClaudeRunning, report, context.assumeYes === true);
           return;
         }
 
@@ -350,10 +387,10 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         let writes: readonly PlannedWrite[];
         if (existing === null) {
           writes = [{ path: file.path, content }];
-        } else if (sameBytes(existing, content)) {
+        } else if (sameForRestore(options.platform, file.path, existing, file.content)) {
           return;
         } else {
-          const choice = await onConflict(file.path, { overwriteAllowed: true });
+          const choice = await ask(file.path, { overwriteAllowed: true });
           if (choice === 'skip') {
             report.skipped.push(file.path);
             return;
@@ -404,8 +441,11 @@ export function createClaudeCodeRestorer(options: RestorerOptions): Restorer {
         try {
           await restoreEntry(file);
         } catch (error) {
+          if (stopped !== undefined) throw stopped.error;
           report.skipped.push(file.path);
-          report.warnings.push(`Skipped "${file.path}": ${(error as Error).message}.`);
+          report.warnings.push(
+            `Skipped "${file.path}": ${error instanceof Error ? error.message : String(error)}.`,
+          );
         }
       }
 

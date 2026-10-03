@@ -10,6 +10,7 @@ import type {
   DetectedAgent,
   ScopeTarget,
 } from '../agents/adapter.ts';
+import { sameForRestore } from '../agents/claude-code/restorer.ts';
 import { agentVersionNotice } from '../agents/claude-code/version-stamp.ts';
 import type { ApiClient } from '../api/api-client.ts';
 import { NotLoggedInError } from '../api/api-errors.ts';
@@ -59,8 +60,6 @@ interface Prepared {
   readonly declined: boolean;
 }
 
-const sameBytes = (a: Uint8Array, b: Uint8Array) =>
-  a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index]);
 type ConflictAnswer = ConflictChoice | 'merge-all' | 'overwrite-all';
 
 const sourceOsOf = (platform: NodeJS.Platform): SourceOs =>
@@ -310,7 +309,10 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
       if (options.conflict === undefined) {
         const differs = files.find((file) => {
           const here = current.find((entry) => entry.path === file.path);
-          return here !== undefined && !sameBytes(here.content, file.content);
+          return (
+            here !== undefined &&
+            !sameForRestore(deps.platform, file.path, here.content, file.content)
+          );
         });
         if (differs) {
           throw new AnswerNeededError(`${differs.path} already exists here and is different.`);
