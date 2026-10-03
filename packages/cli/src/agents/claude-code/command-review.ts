@@ -2,9 +2,9 @@ import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
-import { MCP_FILES, SETTINGS_FILES } from '../../env/env-references.ts';
 import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
 import { commandWords, hookItems } from './settings-commands.ts';
 import { HOME_SCRIPTS_PREFIX, isScript, TOOL_CONFIG_FILES } from './global-paths.ts';
 import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';

@@ -2,6 +2,7 @@
  * What the Claude Code global collector takes from `~/.claude` (T25). The lists come from
  * the paths data file (T32); this module only gives them names and fast lookups.
  */
+import { inHomeFolder, isSensitiveHomePath } from '../shared/file-gathering.ts';
 import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
 
 /** Single files in the base folder. */
@@ -59,9 +60,6 @@ export const extensionOf = (path: string) => /(\.[^./]+)$/.exec(path)?.[1]?.toLo
 /** Has one of the script extensions above. */
 export const isScript = (path: string) => SCRIPT_EXTENSIONS.has(extensionOf(path));
 
-/** Home folders never read for hook scripts, whatever a command names: keys and cloud logins. */
-const SENSITIVE_HOME_DIRS: readonly string[] = DATA.sensitiveHomeDirs;
-
 /** Home folders the OS or a shell runs files from by itself (T43). */
 const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
 
@@ -72,20 +70,10 @@ const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
  */
 export function homePathProblem(relative: string): string | null {
   if (isSensitiveHomePath(relative)) return 'a folder for keys and logins';
-  if (AUTOSTART_HOME_DIRS.some((dir) => inFolder(relative, dir))) {
+  if (AUTOSTART_HOME_DIRS.some((dir) => inHomeFolder(relative, dir))) {
     return 'a folder whose files run by themselves';
   }
   return null;
-}
-
-/** A path from the home folder inside a folder for keys and logins (any case). */
-export function isSensitiveHomePath(relative: string): boolean {
-  return SENSITIVE_HOME_DIRS.some((dir) => inFolder(relative, dir));
-}
-
-function inFolder(relative: string, dir: string): boolean {
-  const [lower, folder] = [relative.toLowerCase(), dir.toLowerCase()];
-  return lower === folder || lower.startsWith(`${folder}/`) || lower.includes(`/${folder}/`);
 }
 
 /** Marketplaces and plugins to reinstall on pull (T29). */

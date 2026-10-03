@@ -144,19 +144,6 @@ const RAW = {
     '.lua',
   ],
 
-  /** Home folders never read for hook scripts, whatever a command names: keys and cloud logins. */
-  sensitiveHomeDirs: [
-    '.ssh',
-    '.gnupg',
-    '.aws',
-    '.azure',
-    '.kube',
-    '.docker',
-    '.config/gcloud',
-    '.config/gh',
-    '.password-store',
-  ],
-
   /**
    * Home folders the OS or a shell runs files from by itself (T43): never written, even when
    * a hook names a file there, since the file would keep running after the hook is removed.
@@ -246,7 +233,6 @@ const PathsDataSchema = z.strictObject({
   ),
   claudeJsonPreferenceKeys: names,
   scriptExtensions: z.array(z.string().regex(/^\.[a-z0-9]+$/)),
-  sensitiveHomeDirs: names,
   autostartHomeDirs: names,
   toolConfigFiles: z.record(z.string(), names),
   runtimeCommands: names,

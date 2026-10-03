@@ -44,7 +44,9 @@ export function createEnvCommand(deps: EnvCommandDeps): Pick<CommandHandlers, 'e
         if (!found.installed) continue;
         const options = { includeMemory: false };
         const global = await adapter.collector.collect({ kind: 'global' }, options);
-        scans.push(scanEnvReferences(global, `${adapter.displayName} global`));
+        scans.push(
+          scanEnvReferences(global, adapter.envReferences, `${adapter.displayName} global`),
+        );
         const refusal = projectFolderRefusal(deps.cwd, {
           homedir: deps.homedir,
           baseDir: found.baseDir,
@@ -56,7 +58,9 @@ export function createEnvCommand(deps: EnvCommandDeps): Pick<CommandHandlers, 'e
           { kind: 'project', projectDir: deps.cwd },
           options,
         );
-        scans.push(scanEnvReferences(project, `${adapter.displayName} this project`));
+        scans.push(
+          scanEnvReferences(project, adapter.envReferences, `${adapter.displayName} this project`),
+        );
       }
       const scan = mergeEnvScans(scans);
       if (scan.variables.length === 0) {

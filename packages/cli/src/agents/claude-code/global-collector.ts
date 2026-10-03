@@ -3,7 +3,12 @@ import { readFile } from 'node:fs/promises';
 import * as z from 'zod';
 
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
-import { createFileGatherer, type FileGatherer, jsonFile, uniqueByPath } from './file-gathering.ts';
+import {
+  createFileGatherer,
+  type FileGatherer,
+  jsonFile,
+  uniqueByPath,
+} from '../shared/file-gathering.ts';
 import { commandsInSettings, programOf } from './settings-commands.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
@@ -16,6 +21,7 @@ import {
   NEVER_SYNCED,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
+  SKIPPED_NAMES,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
 import { ClaudeJsonError } from './claude-json-merge.ts';
@@ -41,7 +47,7 @@ const isNeverSynced = (bundlePath: string) =>
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {
-  const { path } = createFileGatherer(options.platform);
+  const { path } = createFileGatherer(options.platform, { skippedNames: SKIPPED_NAMES });
   const { baseDir, homedir } = options;
 
   /** Script files that hooks and the status line run, if they are in the home folder. */
@@ -137,6 +143,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       // Links into folders for keys and logins are never followed, and huge files are left
       // out (T45); the user's own links elsewhere (a dotfiles repo) still come along.
       const files = createFileGatherer(options.platform, {
+        skippedNames: SKIPPED_NAMES,
         homedir,
         ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),
       });

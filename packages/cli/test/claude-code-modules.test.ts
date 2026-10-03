@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -12,25 +10,7 @@ import {
   type MutableReport,
 } from '../src/index.ts';
 
-const source = (name: string) =>
-  readFile(new URL(`../src/agents/claude-code/${name}`, import.meta.url), 'utf8');
-const imports = (text: string) =>
-  [...text.matchAll(/^import [^;]*? from '([^']+)';$/gms)].map((match) => match[1]);
-
-describe('settings parsing is its own module, with no file access (SOLID-05)', () => {
-  it('settings-commands.ts imports nothing from Node or the file walker', async () => {
-    const used = imports(await source('settings-commands.ts'));
-    expect(used.length).toBeGreaterThan(0);
-    expect(used.filter((from) => from?.startsWith('node:'))).toEqual([]);
-    expect(used).not.toContain('./file-gathering.ts');
-  });
-
-  it('the pure rule modules no longer import the file walker', async () => {
-    for (const name of ['restore-rules.ts', 'command-review.ts', 'auto-memory.ts']) {
-      expect(imports(await source(name))).not.toContain('./file-gathering.ts');
-    }
-  });
-
+describe('settings parsing is its own module (SOLID-05; imports checked by ESLint, ARCH-04)', () => {
   it('still reads hooks, the status line and programs', () => {
     const settings = JSON.stringify({
       hooks: { Stop: [{ hooks: [{ command: 'bash ~/.claude/hooks/done.sh' }] }] },

@@ -17,6 +17,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { stubRestorer } from './stub-restorer.ts';
 import {
   ApiError,
+  CLAUDE_ENV_REFERENCES,
   createAgentRegistry,
   createClaudeCodeAdapter,
   createLocalState,
@@ -89,6 +90,7 @@ function fakeAdapter(
         ),
     },
     restorer: stubRestorer(),
+    envReferences: CLAUDE_ENV_REFERENCES,
     inspector: {
       unknownEntries: () => Promise.resolve(options.unknown ?? []),
       notices: () => Promise.resolve(options.notices ?? []),

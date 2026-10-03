@@ -16,7 +16,7 @@ import type {
   AgentAdapter,
   CollectedFile,
   CollectOptions,
-  FileConflict,
+  ConflictToAsk,
   ScopeTarget,
 } from '../src/agents/adapter.ts';
 import type { ApiClient, BundleUpload } from '../src/api/api-client.ts';
@@ -193,6 +193,11 @@ function exampleAdapter(home: string, seen: Seen): AgentAdapter {
         );
       },
     },
+    envReferences: {
+      mcp: new Set(['mcp.json']),
+      settings: new Set(),
+      ownVariables: new Set(['EXAMPLE_HOME']),
+    },
     optionalParts: [
       {
         id: 'prompts',
@@ -217,7 +222,7 @@ function exampleAdapter(home: string, seen: Seen): AgentAdapter {
           })),
       isRedirectVariable: (name) => name === 'EXAMPLE_ENDPOINT',
       conflicts: (files, current) =>
-        files.flatMap((file): FileConflict[] => {
+        files.flatMap((file): ConflictToAsk[] => {
           const here = current.find((entry) => entry.path === file.path);
           return here !== undefined && !same(here.content, file.content)
             ? [{ path: file.path, question: { overwriteAllowed: true } }]
@@ -379,6 +384,44 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
     expect(await exists(b.base)).toBe(false);
     expect(seen.followUps).toEqual([]);
     expect(await t.state.revisionOf('example', 'global')).toBeNull();
+  });
+
+  it('push offers the values its MCP servers use, from the agent’s own files (ARCH-01)', async () => {
+    const server = fakeServer();
+    const a = machine('laptop');
+    await put(
+      join(a.base, 'mcp.json'),
+      JSON.stringify({
+        mcpServers: { docs: { env: { TOKEN: '${EXAMPLE_TOKEN}', DIR: '${EXAMPLE_HOME}' } } },
+      }),
+    );
+    const script = scripted([false, false, ['EXAMPLE_TOKEN']]);
+    const pushing = depsFor(a, server, script.prompter, newSeen());
+    await createPushCommand({
+      ...pushing.deps,
+      env: { EXAMPLE_TOKEN: 'token-1', EXAMPLE_HOME: '/opt/example' },
+    }).push({ global: true, yes: false });
+    expect(script.asked).toEqual([
+      'Include memory (what Example CLI remembers)?',
+      'Also save your prompts library (review)?',
+      'Save these values with your setup (encrypted; only you can read them)? Leave all unticked to save none.',
+    ]);
+
+    const b = machine('desktop');
+    const written: Record<string, string>[] = [];
+    const pulling = depsFor(b, server, createNoTerminalPrompter(), newSeen());
+    await createPullCommand({
+      ...pulling.deps,
+      envWriter: () => ({
+        where: 'test profile',
+        current: () => Promise.resolve(new Map<string, string>()),
+        write: (variables) => {
+          written.push({ ...variables });
+          return Promise.resolve({ backup: null });
+        },
+      }),
+    }).pull({ global: true, yes: true });
+    expect(written).toEqual([{ EXAMPLE_TOKEN: 'token-1' }]);
   });
 
   it('--yes skips its hooks and extensions and writes the rest', async () => {

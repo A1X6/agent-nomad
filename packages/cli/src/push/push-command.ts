@@ -303,7 +303,11 @@ export function createPushPlanner(deps: PushDeps) {
 
     const envSection = options.yes
       ? null
-      : await chooseEnvValues({ scan: scanEnvReferences(collected), env: deps.env, prompter });
+      : await chooseEnvValues({
+          scan: scanEnvReferences(collected, item.adapter.envReferences),
+          env: deps.env,
+          prompter,
+        });
     if (envSection) collected.push(envSectionFile(envSection));
 
     const resolver = createPathResolver({ os: sourceOsOf(deps.platform), homeDir: deps.homedir });

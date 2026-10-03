@@ -1,5 +1,6 @@
 import * as z from 'zod';
 
+import { parseJsonWith, valueOrNull } from '../system/json.ts';
 import type { Prompter } from '../ui/prompter.ts';
 import type { EnvScan } from './env-references.ts';
 
@@ -36,14 +37,8 @@ export const envSectionFile = (section: EnvSection) => ({
 });
 
 /** Reads a bundle's env section; `null` when absent or damaged. */
-export function parseEnvSection(content: Uint8Array): EnvSection | null {
-  try {
-    const parsed = EnvSectionSchema.safeParse(JSON.parse(new TextDecoder().decode(content)));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
+export const parseEnvSection = (content: Uint8Array): EnvSection | null =>
+  valueOrNull(parseJsonWith(EnvSectionSchema, content));
 
 export interface ChooseEnvValuesDeps {
   readonly scan: EnvScan;

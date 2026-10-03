@@ -3,7 +3,11 @@ import { posix, win32 } from 'node:path';
 import * as z from 'zod';
 
 import { parseJsonWith, type JsonResult } from '../../system/json.ts';
-import { findExecutable, type DetectorSystem, type ExecutableLookupSystem } from './detector.ts';
+import {
+  findExecutable,
+  type DetectorSystem,
+  type ExecutableLookupSystem,
+} from '../shared/detector-system.ts';
 
 /** A program a hook or the status line runs, and how to install it elsewhere if known. */
 export interface ProgramInfo {

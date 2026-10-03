@@ -2,10 +2,12 @@ import type { AgentAdapter, Collector, OptionalPart } from '../adapter.ts';
 import { agentVersionNotice } from '../notices.ts';
 import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
-import { claudeConfigDir, createClaudeCodeDetector, nodeDetectorSystem } from './detector.ts';
-import { createFileGatherer } from './file-gathering.ts';
+import { nodeDetectorSystem } from '../shared/detector-system.ts';
+import { createFileGatherer } from '../shared/file-gathering.ts';
+import { claudeConfigDir, createClaudeCodeDetector } from './detector.ts';
+import { CLAUDE_ENV_REFERENCES } from './env-files.ts';
 import { createClaudeCodeGlobalCollector } from './global-collector.ts';
-import { CLAUDE_JSON_BUNDLE_PATH } from './global-paths.ts';
+import { CLAUDE_JSON_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
 import {
   detectManagedSettings,
   managedSettingsNotice,
@@ -73,7 +75,10 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     id: ACCOUNT_SKILLS_PART,
     scope: 'global',
     async available() {
-      const synced = await readSyncedSkills(createFileGatherer(options.platform), baseDir);
+      const synced = await readSyncedSkills(
+        createFileGatherer(options.platform, { skippedNames: SKIPPED_NAMES }),
+        baseDir,
+      );
       return { names: synced.own.map((skill) => skill.name), problem: synced.problem };
     },
     question: (names) =>
@@ -89,6 +94,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     detector: createClaudeCodeDetector(system),
     collector,
     restorer,
+    envReferences: CLAUDE_ENV_REFERENCES,
     optionalParts: [accountSkills],
     inspector: {
       unknownEntries: (target) =>

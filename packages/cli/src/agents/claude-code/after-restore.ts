@@ -12,14 +12,10 @@ import {
   planAccountSkills,
   readSyncedSkills,
 } from './account-skills.ts';
-import {
-  claudeConfigDir,
-  findClaudeExecutable,
-  findExecutable,
-  type ExecutableLookupSystem,
-} from './detector.ts';
-import { createFileGatherer } from './file-gathering.ts';
-import { PLUGINS_BUNDLE_PATH, PROGRAMS_BUNDLE_PATH } from './global-paths.ts';
+import { findExecutable, type ExecutableLookupSystem } from '../shared/detector-system.ts';
+import { createFileGatherer } from '../shared/file-gathering.ts';
+import { claudeConfigDir, findClaudeExecutable } from './detector.ts';
+import { PLUGINS_BUNDLE_PATH, PROGRAMS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
 import { explainPluginFailure, type ManagedSettings } from './managed-settings.ts';
 import {
   askPluginSync,
@@ -168,7 +164,7 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
    */
   async function accountSkillsHere(files: readonly CollectedFile[], incoming: readonly string[]) {
     const baseDir = claudeConfigDir(deps.system);
-    const gatherer = createFileGatherer(deps.system.platform);
+    const gatherer = createFileGatherer(deps.system.platform, { skippedNames: SKIPPED_NAMES });
     const skillsDir = gatherer.path.join(baseDir, 'skills');
     const localNames = new Set([
       ...(await readdir(skillsDir, { withFileTypes: true }).catch(() => []))

@@ -443,7 +443,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-13 · Low · Two different exported types are both called `FileConflict`
 
-- [ ] **Where:** `packages/core/src/merge.ts:2-7` (`path`, `existing`, `incoming`); `packages/cli/src/agents/adapter.ts:84-88` (`path`, `question`)
+- [x] **Where:** `packages/core/src/merge.ts:2-7` (`path`, `existing`, `incoming`); `packages/cli/src/agents/adapter.ts:84-88` (`path`, `question`)
 - **Problem:** core's type is the input of a merge strategy; the CLI's is a question for pull's plan step. Both are exported from their package index under the same name.
 - **Why it matters:** A file that needs both (an adapter's restorer does) must alias one, and a reader seeing `FileConflict` cannot tell which one is meant.
 - **Fix:** Rename the CLI one to `ConflictToAsk` (or core's to `MergeInput`).
@@ -501,7 +501,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### ARCH-01 · Medium · The generic env scan only knows Claude Code's files
 
-- [ ] **Where:** `packages/cli/src/env/env-references.ts:9-26` (`CLAUDE_OWN_VARIABLES`, `MCP_FILES = {'.mcp.json', '.agentnomad/claude.json'}`, `SETTINGS_FILES = {'settings.json', '.claude/settings.json', '.claude/settings.local.json'}`) and `:61` (`fileLabel` → `~/.claude.json`); used for every agent by `packages/cli/src/push/push-command.ts:306` and `packages/cli/src/env/env-command.ts:46-47`; the Claude adapter imports these constants back from the generic folder at `packages/cli/src/agents/claude-code/command-review.ts:5`.
+- [x] **Where:** `packages/cli/src/env/env-references.ts:9-26` (`CLAUDE_OWN_VARIABLES`, `MCP_FILES = {'.mcp.json', '.agentnomad/claude.json'}`, `SETTINGS_FILES = {'settings.json', '.claude/settings.json', '.claude/settings.local.json'}`) and `:61` (`fileLabel` → `~/.claude.json`); used for every agent by `packages/cli/src/push/push-command.ts:306` and `packages/cli/src/env/env-command.ts:46-47`; the Claude adapter imports these constants back from the generic folder at `packages/cli/src/agents/claude-code/command-review.ts:5`.
 - **Problem:** `env/` is shared code that push and `env` run for any adapter, but which files hold `${VAR}` references, how the reserved `claude.json` entry is labelled, and which variable names the agent sets itself are Claude Code facts hard-coded there. There is no adapter hook for it, and `docs/ADDING-AN-AGENT.md` does not mention it. The T61 boundary lint rule covers `push/`, `pull/` and `cli/` only, so this is not caught.
 - **Why it matters:** the roadmap's next agents (Codex, Gemini CLI, OpenCode, Cursor) keep MCP servers and settings in other files. For them, push would offer no environment values to save and `agentnomad env` would report "no environment variables" while their MCP servers need some. The bug is silent. It also breaks the stated rule "a new agent is a new folder plus one line" (ARCHITECTURE §6).
 - **Fix:** move the file lists, own-variable names and labels into the adapter, for example an optional `envReferenceFiles: { mcp: Set<string>; settings: Set<string>; ownVariables: Set<string>; label?(path): string }` on `AgentAdapter` (or a `scanEnv(files)` on the collector). Have `scanEnvReferences` take it as a parameter, and move `MCP_FILES`/`SETTINGS_FILES` into `agents/claude-code/` so `command-review.ts` imports them from its own folder. Add `env/` to the `no-restricted-imports` files, and add a case to `test/agent-boundary.test.ts` that saves an env value for the fake agent.
@@ -510,7 +510,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### ARCH-02 · Low · The agent guide tells new adapters to import from the Claude Code adapter's folder
 
-- [ ] **Where:** `docs/ADDING-AN-AGENT.md:101-111`, `:137-143`, `:186`, `:241`; the helpers live in `packages/cli/src/agents/claude-code/detector.ts` (`findExecutable`, `nodeDetectorSystem`, `DetectorSystem`) and `claude-code/file-gathering.ts` (`createFileGatherer`, `uniqueByPath`)
+- [x] **Where:** `docs/ADDING-AN-AGENT.md:101-111`, `:137-143`, `:186`, `:241`; the helpers live in `packages/cli/src/agents/claude-code/detector.ts` (`findExecutable`, `nodeDetectorSystem`, `DetectorSystem`) and `claude-code/file-gathering.ts` (`createFileGatherer`, `uniqueByPath`)
 - **Problem:** The guide's sample code for the example adapter imports `../claude-code/detector.ts` and `../claude-code/file-gathering.ts`. These helpers are agent-independent, but they sit inside one adapter's folder, so the second adapter would depend on the first. The lint rule in `eslint.config.js:27-41` only guards `push/`, `pull/` and `cli/`.
 - **Why it matters:** A change made for Claude Code in those files (for example to how links are followed or how the version is read) silently changes every other adapter, and the boundary T61 built for commands does not exist between adapters.
 - **Fix:** Move the generic helpers to `packages/cli/src/agents/shared/` (or `system/`, next to `files.ts` and `run-program.ts`), re-export them from the old paths if needed, and update the guide. Optionally extend the lint rule so `agents/<a>/` cannot import `agents/<b>/`.
@@ -528,7 +528,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### ARCH-04 · Low · Module-boundary rules are checked by a regex over source text, not by the lint rule the project uses for boundaries
 
-- [ ] **Where:** `packages/cli/test/claude-code-modules.test.ts:15-32`
+- [x] **Where:** `packages/cli/test/claude-code-modules.test.ts:15-32`
 - **Problem:** `imports()` matches only `import … from '…';`. An `export … from`, a dynamic `import()`, or a double-quoted specifier gets past the check. The project already enforces boundaries with ESLint `no-restricted-imports` (`eslint.config.js`, T61), which handles all of these forms.
 - **Why it matters:** The SOLID-05 guarantee ("settings parsing has no file access") can be broken in a way this test does not see. Boundary rules also end up in two places that work differently.
 - **Fix:** Add a `files: ['packages/cli/src/agents/claude-code/{settings-commands,restore-rules,command-review,auto-memory}.ts']` block to `eslint.config.js` with `no-restricted-imports` patterns `node:*` (for settings-commands) and `./file-gathering.ts`. Then drop the regex tests and keep the `~/.claude.json` merge tests.
