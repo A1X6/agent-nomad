@@ -322,7 +322,9 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         const destination = destinationOf(file.path);
         if (destination.kind === 'refused') {
           report.skipped.push(file.path);
-          report.warnings.push(`Refused "${printableLine(file.path)}": ${destination.reason}.`);
+          report.warnings.push(
+            `Refused "${printableLine(file.path)}": ${printableLine(destination.reason)}.`,
+          );
           return;
         }
         if (destination.kind === 'metadata') return;
@@ -408,7 +410,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           if (stopped !== undefined) throw stopped.error;
           report.skipped.push(file.path);
           report.warnings.push(
-            `Skipped "${printableLine(file.path)}": ${error instanceof Error ? error.message : String(error)}.`,
+            // A file error quotes the path as it is: its message is kept on one line too.
+            `Skipped "${printableLine(file.path)}": ${printableLine(error instanceof Error ? error.message : String(error))}.`,
           );
         }
       }

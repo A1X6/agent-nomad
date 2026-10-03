@@ -1104,6 +1104,34 @@ describe('restorer: a path with a line break stays on one warning line (review 6
     );
     expect(report.warnings[0]).not.toContain('\n');
   });
+
+  it('keeps the error of a failed entry on one line too', async () => {
+    // A file error quotes the path as it is (ENOENT … open '…a\nb').
+    await writeTestFile(join(home, '.claude.json'), '{}');
+    const report = await restorer({
+      isClaudeRunning: () => Promise.reject(new Error("open 'a\n✔ Restored settings.json'")),
+    }).restore(
+      { kind: 'global' },
+      [collected('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
+      answer('merge').resolve,
+    );
+    expect(report.warnings).toEqual([
+      'Skipped ".agentnomad/claude.json": open \'a\\u{000a}✔ Restored settings.json\'.',
+    ]);
+  });
+
+  it.runIf(posix)('keeps a real write error on one line', async () => {
+    // A file where the entry needs a folder: the write fails and its error quotes the path.
+    await writeTestFile(join(base, 'skills', 'deploy'), 'a file, not a folder');
+    const report = await restorer().restore(
+      { kind: 'global' },
+      [collected('skills/deploy/a\nb.md', 'x')],
+      answer('skip').resolve,
+    );
+    expect(report.warnings).toHaveLength(1);
+    expect(report.warnings[0]).toMatch(/^Skipped "skills\/deploy\/a\\u\{000a\}b\.md": /);
+    expect(report.warnings[0]).not.toContain('\n');
+  });
 });
 
 describe('restorer: hooks for another OS, by what they run (review 6 UX-02)', () => {
