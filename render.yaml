@@ -12,8 +12,10 @@ services:
     # Deploy only after GitHub CI passes on the commit.
     autoDeployTrigger: checksPass
     # Runs the pnpm version pinned in package.json through Corepack. `corepack enable` would
-    # try to write a shim into /usr/bin, which is read-only on Render.
-    buildCommand: corepack pnpm install --frozen-lockfile && corepack pnpm build
+    # try to write a shim into /usr/bin, which is read-only on Render. Only the server and what
+    # it depends on (contracts) are installed and compiled (PERF-03); the root dev tools, such
+    # as TypeScript, are installed too.
+    buildCommand: corepack pnpm install --frozen-lockfile --filter @agentnomad/server... && corepack pnpm exec tsc --build packages/server
     startCommand: node packages/server/dist/src/main.js
     healthCheckPath: /health
     # Only changes that affect the server trigger a deploy.

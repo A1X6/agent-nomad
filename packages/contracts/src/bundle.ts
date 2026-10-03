@@ -41,6 +41,8 @@ export const ProjectNameSchema = z
   .refine((name) => !hasControlCharacter(name), 'Project name must not contain control characters')
   // The name is stored NFC-normalised, which can make it longer (T45): the stored form must
   // fit too, so it can always be read back and its encrypted form stays within the API limit.
+  // The 100-unit rule already bounds it at 300 bytes (one unit is at most 3 bytes of UTF-8);
+  // the byte check stays as a guard.
   .refine((name) => {
     const stored = name.normalize('NFC');
     return stored.length <= 100 && utf8Length(stored) <= 400;

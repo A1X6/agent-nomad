@@ -53,12 +53,11 @@ describe('plaintext leak check: compressed, hex, escaped', () => {
   });
 
   it.each([
-    ['hex', Buffer.from(secret).toString('hex')],
-    ['JSON-escaped', JSON.stringify(`a\n${secret}"`)],
-    ['URL-encoded', encodeURIComponent(secret)],
-  ])('finds it %s', (_, body) => {
-    const tricky = body === JSON.stringify(`a\n${secret}"`) ? `a\n${secret}"` : secret;
-    expect(plaintextLeaks([request(body)], [tricky])).toEqual([tricky]);
+    ['hex', Buffer.from(secret).toString('hex'), secret],
+    ['JSON-escaped', JSON.stringify(`a\n${secret}"`), `a\n${secret}"`],
+    ['URL-encoded', encodeURIComponent(secret), secret],
+  ])('finds it %s', (_, body, wanted) => {
+    expect(plaintextLeaks([request(body)], [wanted])).toEqual([wanted]);
   });
 
   it('leaves out the one header a secret may travel in, and only that one', () => {
