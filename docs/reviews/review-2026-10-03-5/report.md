@@ -68,7 +68,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### BUG-01 · Medium · Hooks in exec form (`command` + `args`) lose their scripts: push skips them, pull refuses them
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/settings-commands.ts:66-75` (`commandsInSettings` keeps `hook.command` only and drops `hook.args`). Every caller inherits this: `hook-scripts.ts:49` and `:95` (scripts push collects and pull allows), `global-collector.ts:59` and `:78`, `restorer.ts:121-126` (`hooksForOtherOs`), `unknown-files.ts:45` (`hookScriptNames`).
+- [x] **Where:** `packages/cli/src/agents/claude-code/settings-commands.ts:66-75` (`commandsInSettings` keeps `hook.command` only and drops `hook.args`). Every caller inherits this: `hook-scripts.ts:49` and `:95` (scripts push collects and pull allows), `global-collector.ts:59` and `:78`, `restorer.ts:121-126` (`hooksForOtherOs`), `unknown-files.ts:45` (`hookScriptNames`).
 - **Problem:** Claude Code runs a hook in exec form when `args` is set: `command` is the executable and each `args` element is one argument, with no shell. The hooks reference recommends this form whenever a path holds a placeholder. `command-review.ts:111` already treats `command + args` as what runs. The collector, the allow list and the other-OS warning only look at `command`. A probe showed it:
   - `{"command":"node","args":["/home/a/.claude/hooks/check.js"]}` → `hookScripts` returns `[]`.
   - The same hook in shell form returns `["hooks/check.js"]`.
@@ -83,7 +83,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### BUG-02 · Low · The program locator only recognises npm packages whose name equals the command
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/programs.ts:77-92`. Tests cover only the same-name case: `packages/cli/test/claude-code-global-collector.test.ts:473-510`.
+- [x] **Where:** `packages/cli/src/agents/claude-code/programs.ts:77-92`. Tests cover only the same-name case: `packages/cli/test/claude-code-global-collector.test.ts:473-510`.
 - **Problem:** The lookup reads `node_modules/<command>/package.json` beside the launcher. A scoped package (`@scope/tool` providing `tool`) or a package whose bin name differs (`@mermaid-js/mermaid-cli` → `mmdc`, `typescript` → `tsc`) is never found, so it is saved with `npm: null`. The scoped branch at `:89` (`name.split('/').pop() === command`) cannot match for a real scoped install, because that install is never at `node_modules/<command>`.
 - **Why it matters:** Pull then only says "Install it for them to work" (`after-restore.ts:121-125`). It never offers the `npm install -g name@version` that the feature exists for.
 - **Fix:**
@@ -95,7 +95,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### BUG-03 · Low · Temp files left by an interrupted atomic write are pushed as setup files
 
-- [ ] **Where:** `packages/cli/src/agents/shared/file-gathering.ts:66-67` and `:160` (`isMarkerCopy` skips the backup and incoming markers only). The marker is a bare literal in two places: `packages/cli/src/system/files.ts:53` (`.agentnomad-tmp-`) and `packages/cli/src/agents/claude-code/unknown-files.ts:63`.
+- [x] **Where:** `packages/cli/src/agents/shared/file-gathering.ts:66-67` and `:160` (`isMarkerCopy` skips the backup and incoming markers only). The marker is a bare literal in two places: `packages/cli/src/system/files.ts:53` (`.agentnomad-tmp-`) and `packages/cli/src/agents/claude-code/unknown-files.ts:63`.
 - **Problem:** `writeFileAtomically` writes `.<name>.agentnomad-tmp-<hex>` next to the target. If the process dies before the rename, that file stays in, for example, `skills/x/`. `walk` collects it and push saves it to every PC. Only `unknown-files` knows the marker, and only for top-level names.
 - **Why it matters:** Half-written copies spread to other PCs, which is clutter and can be a broken file.
 - **Fix:** Export one `TEMP_MARKER` (in `system/files.ts`, or in core next to `BACKUP_MARKER`). Skip it in `isMarkerCopy` and use it in `unknown-files.ts`.
@@ -133,7 +133,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### SEC-01 · Medium · The pull review misses a changed script when the command names it inside a quoted compound command or next to shell punctuation
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/command-review.ts:238-255` (`scriptsRun`; whole-word match at `:248`); words from `settings-commands.ts:81-88` (`commandWords`). The same splitting in `hook-scripts.ts:50` and `:96` decides what push collects.
+- [x] **Where:** `packages/cli/src/agents/claude-code/command-review.ts:238-255` (`scriptsRun`; whole-word match at `:248`); words from `settings-commands.ts:81-88` (`commandWords`). The same splitting in `hook-scripts.ts:50` and `:96` decides what push collects.
 - **Problem:** A script counts as "run" only when one shell word equals its path or ends with `/<path>`. A probe ran an unchanged hook here, with `skills/x/run.sh` changed in the incoming setup:
 
   | Hook command                                | What the review returns      |
@@ -156,7 +156,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### SEC-02 · Medium · A ` ```! ` block nested in an open plain fence is never reported (T69's SEC-02 fix is incomplete)
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/runnable-markdown.ts:21-25` (any fence line opens a block, at any indentation) and `:28-47` (inside a plain block, only inline `` !`…` `` placeholders are scanned; a ` ```! ` opener is neither a close nor reported).
+- [x] **Where:** `packages/cli/src/agents/claude-code/runnable-markdown.ts:21-25` (any fence line opens a block, at any indentation) and `:28-47` (inside a plain block, only inline `` !`…` `` placeholders are scanned; a ` ```! ` opener is neither a close nor reported).
 - **Problem:** Once a plain fence is open, every ` ```! ` block until its close is invisible to the review. A probe ran `runnableInMarkdown` on three files:
 
   | Markdown                                                  | Result          |
@@ -212,7 +212,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### UX-01 · Low · "Added … as local skills" is said even when the restorer wrote none of a skill's files
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/after-restore.ts:244-254`
+- [x] **Where:** `packages/cli/src/agents/claude-code/after-restore.ts:244-254`
 - **Problem:** `added` comes from the plan (`now.toAdd`), not from `report.written`. Files the restorer refuses or skips are only warned about, and the success line still names every skill. Examples: a Windows-invalid name such as `con.md` or `a:b.md` from a macOS bundle, or a write error.
 - **Why it matters:** The user is told a skill was added when it is missing or partial.
 - **Fix:** Build the success list from skill names that have at least one written file. Name the others ("not added: …") next to the warnings.
@@ -221,7 +221,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### UX-02 · Low · Unrelated processes count as "Claude Code is running"
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/running-claude.ts:80-84`
+- [x] **Where:** `packages/cli/src/agents/claude-code/running-claude.ts:80-84`
 - **Problem:** Both patterns match anywhere in a command line, not only on the program being run. A probe returned `true` for both of these:
   - `/usr/bin/vim /home/a/projects/claude` (an editor open on a folder named `claude`)
   - `npm install -g @anthropic-ai/claude-code`
@@ -263,7 +263,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DEAD-01 · Low · `FileGatherer.relativeInside` has no caller outside its own file
 
-- [ ] **Where:** `packages/cli/src/agents/shared/file-gathering.ts:50-51` (interface) and `:177` (returned). It is used only inside the file, through the closure at `:102` and `:107`. `hook-scripts.ts:46` calls `bundlePathInside` directly. A repo-wide search of src and tests found no other use. knip does not report interface members.
+- [x] **Where:** `packages/cli/src/agents/shared/file-gathering.ts:50-51` (interface) and `:177` (returned). It is used only inside the file, through the closure at `:102` and `:107`. `hook-scripts.ts:46` calls `bundlePathInside` directly. A repo-wide search of src and tests found no other use. knip does not report interface members.
 - **Fix:** Drop it from the interface and the returned object.
 - **Effort:** S
 - **Confidence:** high
@@ -299,7 +299,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DUP-01 · Low · Path rules and "inside a folder" checks are written many times, with different case rules
 
-- [ ] **Where:**
+- [x] **Where:**
   - `platform === 'win32' ? win32 : posix` is repeated in `auto-memory.ts:34`, `hook-scripts.ts:42` and `:91`, `managed-settings.ts:82`, `plugin-sync.ts:72`, `plugins.ts:163` and `:192`, `programs.ts:73`, `unknown-files.ts:40` and `:79`, and `file-gathering.ts:88`. The shared helper `pathsOf` already exists at `shared/detector-system.ts:40-41`.
   - `createFileGatherer` is built only to get its `path` at `restorer.ts:135-136`, `global-collector.ts:50` and `project-collector.ts:38`.
   - `readSyncedSkills` takes a whole `FileGatherer` but uses only `.path` (`account-skills.ts:53-58`).
@@ -315,7 +315,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DUP-02 · Low · `detector.ts` still parses JSON by hand
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/detector.ts:60-64`
+- [x] **Where:** `packages/cli/src/agents/claude-code/detector.ts:60-64`
 - **Problem:** It runs `try { Schema.safeParse(JSON.parse(text)) } catch`, which is exactly `parseJsonWith` from `system/json.ts` (T69 DUP-04). Every other reader in this folder uses that helper. The two exceptions keep the raw parse on purpose to wrap the cause in `ClaudeJsonError`: `claude-json-merge.ts:101-103` and `:122-124`, and `global-collector.ts:118-124`.
 - **Fix:** `valueOrNull(parseJsonWith(PackageVersionSchema, manifest))`.
 - **Effort:** S
@@ -556,7 +556,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### ARCH-01 · Low · The reserved bundle folder `.agentnomad` is defined twice: by the generic layer and by the Claude Code adapter
 
-- [ ] **Where:** `packages/cli/src/env/env-section.ts:11` (`'.agentnomad/env.json'` literal) and `packages/cli/src/agents/claude-code/global-paths.ts:48` (`RESERVED_DIR`). `restore-rules.ts:91` and `:124` import the env path to recognise it.
+- [x] **Where:** `packages/cli/src/env/env-section.ts:11` (`'.agentnomad/env.json'` literal) and `packages/cli/src/agents/claude-code/global-paths.ts:48` (`RESERVED_DIR`). `restore-rules.ts:91` and `:124` import the env path to recognise it.
 - **Problem:** Reserved entries are part of the bundle format for every agent (docs/ARCHITECTURE.md §4, "Reserved entries"), but the folder name is an adapter constant. A second adapter would define it a third time.
 - **Fix:** Move `RESERVED_DIR` to the bundle format (`contracts`) or to `agents/shared`, and build `ENV_BUNDLE_PATH` and the Claude paths from it.
 - **Effort:** S
@@ -593,7 +593,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### QA-01 · Low · Two pull-review rules have no test
 
-- [ ] **Where:** rules at `packages/cli/src/agents/claude-code/command-review.ts:161-167` (`enableAllProjectMcpServers: true`) and `:180` (an `mcpServers` block that is not an object → `MCP servers (unreadable)`); the tests that should hold them: `packages/cli/test/claude-code-command-review.test.ts:222-292` and `:363-423`.
+- [x] **Where:** rules at `packages/cli/src/agents/claude-code/command-review.ts:161-167` (`enableAllProjectMcpServers: true`) and `:180` (an `mcpServers` block that is not an object → `MCP servers (unreadable)`); the tests that should hold them: `packages/cli/test/claude-code-command-review.test.ts:222-292` and `:363-423`.
 - **Problem:** `grep -rn enableAllProjectMcpServers packages/cli/test` and `grep -rn "MCP servers (unreadable)" packages/cli/test` both find nothing. Every other loosening setting (`permissions.defaultMode`, `permissions.allow`, `additionalDirectories`, `sandbox`) and the per-server unreadable case (`:397-406`) are tested; these two are not. The second one is part of T69's SEC-01 fix.
 - **Why it matters:** `enableAllProjectMcpServers` makes every project MCP server start without asking. If the check were removed or the key renamed, pull would write it without showing it and no test would fail. The same goes for a whole `mcpServers` block that hides a server behind a non-object value.
 - **Fix:** in the T55 block add `expect(labels([json('settings.json', { enableAllProjectMcpServers: true })])).toEqual(['new setting enableAllProjectMcpServers'])` and a `false` case that lists nothing; in the SEC-01 block add `reviewRunnable([json('.mcp.json', { mcpServers: ['npx x'] })], [])` → `['MCP servers (unreadable): ["npx x"]']`.

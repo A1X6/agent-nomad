@@ -27,6 +27,23 @@ describe('running Claude Code', () => {
     ['grep claude notes.txt', false],
     ['/home/a/claude/bin/tool', false],
     ['/home/a/claude-code-notes/run.sh', false],
+    // Only the program counts, not an argument (UX-02).
+    ['/usr/bin/vim /home/a/projects/claude', false],
+    ['npm install -g @anthropic-ai/claude-code', false],
+    ['code /home/u/claude', false],
+    ['node /usr/local/bin/agentnomad pull', false],
+    // An interpreter or launcher running Claude Code's script: npm links bin/claude to a
+    // script with a node shebang, so ps shows `node /usr/local/bin/claude` (UX-02).
+    ['node /usr/local/bin/claude', true],
+    ['node /usr/local/bin/claude --resume', true],
+    ['/usr/bin/env node /opt/homebrew/bin/claude', true],
+    ['/usr/bin/env -S NODE_OPTIONS=--x node --no-warnings /opt/homebrew/bin/claude', true],
+    ['env claude --resume', true],
+    ['/usr/bin/env node /usr/local/bin/agentnomad', false],
+    ['bun /home/u/.bun/bin/claude', true],
+    ['/bin/sh /usr/local/bin/claude', true],
+    ['node --no-warnings /home/u/.npm-global/bin/claude.js', true],
+    ['"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\a\\AppData\\Roaming\\npm\\claude.cmd', true],
   ])('%j is Claude Code: %s', (line, expected) => {
     expect(isClaudeProcess(line)).toBe(expected);
   });

@@ -5,7 +5,7 @@ import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts'
 import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
-import { commandWords, hookItems } from './settings-commands.ts';
+import { commandsInSettings, commandWords, hookItems, pathWords } from './settings-commands.ts';
 import { HOME_SCRIPTS_PREFIX, isScript, TOOL_CONFIG_FILES } from './global-paths.ts';
 import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
@@ -233,12 +233,12 @@ const isProgram = (file: CollectedFile) =>
  * folder, e.g. `…/.claude/hooks/check.sh` runs `hooks/check.sh`. Commands come from the
  * incoming setup and from this PC's own (T44: a hook already here runs a changed script
  * too), and scripts next to a run script count as well (a helper it loads). A named file
- * counts whatever its name when it can run as a program (T55: `skills/tool/bin/run`).
+ * counts whatever its name when it can run as a program (T55: `skills/tool/bin/run`). A path
+ * counts wherever a command names it: inside a quoted command line, or next to shell
+ * punctuation (SEC-01).
  */
-function scriptsRun(incoming: readonly CollectedFile[], commands: readonly string[]) {
-  const words = commands.flatMap((command) =>
-    commandWords(command).map((word) => word.replace(/\\/g, '/')),
-  );
+function scriptsRun(incoming: readonly CollectedFile[], runs: readonly (readonly string[])[]) {
+  const words = runs.flatMap((run) => pathWords(run).map(slashes));
   const relativeOf = (path: string) =>
     path.startsWith(HOME_SCRIPTS_PREFIX) ? path.slice(HOME_SCRIPTS_PREFIX.length) : path;
   const run = new Set(
@@ -290,9 +290,14 @@ export function reviewRunnable(
     if (existing && sameBytes(existing.content, file.content)) return null;
     return existing ? ('changed' as const) : ('new' as const);
   };
+  // What every entry shows, and the words hooks and the status line really run with: an
+  // exec-form hook's `args` element may hold spaces (BUG-01).
+  const settingsRuns = [...incoming, ...current]
+    .filter((file) => SETTINGS_FILES.has(file.path))
+    .flatMap((file) => commandsInSettings(new TextDecoder().decode(file.content)));
   const scripts: ReviewedEntry[] = scriptsRun(incoming, [
-    ...entries.map((item) => item.command),
-    ...here.map((item) => item.command),
+    ...[...entries, ...here].map((item) => commandWords(item.command)),
+    ...settingsRuns,
   ]).flatMap((file) => {
     const change = newOrChanged(file);
     if (change === null) return [];

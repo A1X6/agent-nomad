@@ -13,6 +13,7 @@ import {
   createClaudeCodeGlobalCollector,
   createClaudeCodeRestorer,
   createFileGatherer,
+  pathsOf,
   globalDestination,
   planAccountSkills,
   readSyncedSkills,
@@ -98,10 +99,7 @@ async function syncedSetup(): Promise<void> {
 describe('claude.ai skills (T42): reading and saving', () => {
   it("finds only the user's own synced skills; every synced name is known", async () => {
     await syncedSetup();
-    const found = await readSyncedSkills(
-      createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES }),
-      base,
-    );
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
     expect(found.problem).toBeNull();
     expect(found.own.map((skill) => skill.name)).toEqual(['my-skill']);
     expect([...found.allNames].sort()).toEqual(['my-skill', 'pdf', 'synced', 'team-skill']);
@@ -110,7 +108,7 @@ describe('claude.ai skills (T42): reading and saving', () => {
   it('saves them under the reserved folder, never as skills/synced', async () => {
     await syncedSetup();
     const files = createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES });
-    const collected = await collectAccountSkills(files, await readSyncedSkills(files, base));
+    const collected = await collectAccountSkills(files, await readSyncedSkills(files.path, base));
     expect(collected.map((file) => file.path).sort()).toEqual([
       `${ACCOUNT_SKILLS_PREFIX}my-skill/SKILL.md`,
       `${ACCOUNT_SKILLS_PREFIX}my-skill/reference/notes.md`,
@@ -126,10 +124,7 @@ describe('claude.ai skills (T42): reading and saving', () => {
     );
     await put(synced('my-skill', 'SKILL.md'), 'x');
     await put(synced('brand-new', 'SKILL.md'), 'y');
-    const found = await readSyncedSkills(
-      createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES }),
-      base,
-    );
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
     expect(found.problem).toBeNull();
     expect(found.own.map((skill) => skill.name)).toEqual(['my-skill']);
     expect([...found.allNames].sort()).toEqual(['brand-new', 'my-skill']);
@@ -138,10 +133,7 @@ describe('claude.ai skills (T42): reading and saving', () => {
   it('a missing or unknown manifest saves nothing and says why', async () => {
     await put(synced('my-skill', 'SKILL.md'), 'x');
     await put(synced('manifest.json'), '{"version": 2, "entries": []}');
-    const found = await readSyncedSkills(
-      createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES }),
-      base,
-    );
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
     expect(found.own).toEqual([]);
     expect(found.problem).toContain('in a format agentnomad does not know');
   });
@@ -290,6 +282,18 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     const allowed = run(files, { accountSkills: true, allowCommands: true });
     await allowed.done;
     expect(await skillFile('runner')).toContain('git status');
+  });
+
+  it('names only the skills it wrote as added (UX-01)', async () => {
+    // A file where the skill's folder would go: none of its files can be written.
+    await put(join(base, 'skills', 'broken'), 'not a folder');
+    const t = run([saved('mine', 'Plain.'), saved('broken', 'Plain.')], { accountSkills: true });
+    await t.done;
+    expect(await skillFile('mine')).toContain('Plain.');
+    const shown = t.lines.join('\n');
+    expect(shown).toContain('Skipped "skills/broken/SKILL.md"');
+    expect(shown).toContain('Not added: broken.');
+    expect(t.lines.at(-1)).toContain('Added mine as local skills.');
   });
 
   it('skips a skill this PC already gets from claude.ai, and never touches a local one', async () => {

@@ -1,10 +1,12 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
-import { posix, win32, type PlatformPath } from 'node:path';
+import type { PlatformPath } from 'node:path';
 
 import { BACKUP_MARKER, INCOMING_MARKER } from '@agentnomad/core';
 import { BundlePathSchema } from '@agentnomad/contracts';
 
+import { TEMP_MARKER } from '../../system/files.ts';
 import type { CollectedFile } from '../adapter.ts';
+import { pathsOf } from './detector-system.ts';
 
 /*
  * Reading an agent's files for a bundle, for any adapter (ARCH-02): nothing here is
@@ -47,8 +49,6 @@ export function bundlePathInside(path: PlatformPath, folder: string, file: strin
 export interface FileGatherer {
   /** Path rules of the PC being collected. */
   readonly path: PlatformPath;
-  /** Path from `folder` in forward slashes, or `null` when `file` is outside it. */
-  relativeInside(folder: string, file: string): string | null;
   /** The file as a bundle entry, or `null` when it is not a file. */
   readIfFile(nativePath: string, bundlePath: string): Promise<CollectedFile | null>;
   /**
@@ -63,8 +63,9 @@ export interface FileGatherer {
   ): Promise<CollectedFile[]>;
 }
 
+/** agentnomad's backup and incoming copies, and temporary files an interrupted write left. */
 const isMarkerCopy = (name: string) =>
-  name.includes(BACKUP_MARKER) || name.includes(INCOMING_MARKER);
+  name.includes(BACKUP_MARKER) || name.includes(INCOMING_MARKER) || name.includes(TEMP_MARKER);
 
 /** A file larger than this is left out of a setup (T45): a setup is settings and text. */
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -85,7 +86,7 @@ export interface GatherLimits {
 }
 
 export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimits): FileGatherer {
-  const path = platform === 'win32' ? win32 : posix;
+  const path = pathsOf(platform);
 
   const relativeInside = (folder: string, file: string) => bundlePathInside(path, folder, file);
 
@@ -174,7 +175,7 @@ export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimi
     return files;
   }
 
-  return { path, relativeInside, readIfFile, walk };
+  return { path, readIfFile, walk };
 }
 
 /** One entry per path (the last wins), sorted by path. */

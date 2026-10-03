@@ -3,7 +3,7 @@
  * from the paths data file (T32).
  */
 import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
-import { RESERVED_DIR } from './global-paths.ts';
+import { RESERVED_DIR } from '../adapter.ts';
 
 /** Files in the project root. `CLAUDE.local.md` is personal and usually gitignored. */
 export const PROJECT_ROOT_FILES: readonly string[] = DATA.project.rootFiles;

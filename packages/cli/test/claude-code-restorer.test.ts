@@ -926,6 +926,47 @@ describe('restorer: per-OS fixes', () => {
     expect(hooksForOtherOs(json('bash ~/x.sh'), 'win32')).toHaveLength(1);
     expect(hooksForOtherOs(json('ccstatusline'), 'win32')).toEqual([]);
   });
+
+  it('flags a hook in exec form by its args (BUG-01)', () => {
+    const hook = (command: string, args: string[]) =>
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command, args }] }] } });
+    expect(hooksForOtherOs(hook('pwsh.exe', ['-File', 'C:/hooks/x.ps1']), 'linux')).toEqual([
+      'pwsh.exe -File C:/hooks/x.ps1',
+    ]);
+    expect(hooksForOtherOs(hook('node', ['~/hooks/x.js']), 'linux')).toEqual([]);
+  });
+});
+
+describe('restorer: hooks in exec form and compound commands (BUG-01, SEC-01)', () => {
+  it('restores the scripts they run', async () => {
+    const settings = JSON.stringify({
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              { type: 'command', command: 'node', args: ['~/.claude/hooks/check.js', '--fast'] },
+              { type: 'command', command: 'bash -c "~/tools/stop.sh; true"' },
+              { type: 'command', command: '~/tools/notify.sh;' },
+            ],
+          },
+        ],
+      },
+    });
+    const report = await restorer().restorer.restore(
+      { kind: 'global' },
+      [
+        file('settings.json', settings),
+        file('hooks/check.js', 'check'),
+        file('.agentnomad/home/tools/stop.sh', 'stop'),
+        file('.agentnomad/home/tools/notify.sh', 'notify'),
+      ],
+      answer('skip').resolve,
+    );
+    expect(report.skipped).toEqual([]);
+    expect(await read(join(base, 'hooks', 'check.js'))).toBe('check');
+    expect(await read(join(home, 'tools', 'stop.sh'))).toBe('stop');
+    expect(await read(join(home, 'tools', 'notify.sh'))).toBe('notify');
+  });
 });
 
 describe('restorer: project scripts', () => {
@@ -1047,6 +1088,7 @@ describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
 
   it.each([
     ['$CLAUDE_PROJECT_DIR/scripts/a.sh', ['scripts/a.sh']],
+    [`bash -c "bash -lc '$CLAUDE_PROJECT_DIR/scripts/a.sh arg; true'"`, ['scripts/a.sh']],
     ['scripts\\a.sh', ['scripts/a.sh']],
     ['~/a.sh', []],
     ['$HOME/a.sh', []],

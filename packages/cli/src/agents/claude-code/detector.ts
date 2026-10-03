@@ -1,5 +1,6 @@
 import * as z from 'zod';
 
+import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import type { DetectedAgent, Detector } from '../adapter.ts';
 import {
   envValue,
@@ -19,7 +20,7 @@ const SHIM_EXTENSIONS = new Set(['.cmd', '.bat', '.ps1']);
 export function claudeConfigDir(
   system: Pick<DetectorSystem, 'platform' | 'homedir' | 'env'>,
 ): string {
-  const path = pathsOf(system);
+  const path = pathsOf(system.platform);
   const configured = envValue(system, CLAUDE_CONFIG_DIR_ENV)?.trim();
   if (configured) return path.resolve(configured);
   return path.join(system.homedir, '.claude');
@@ -45,7 +46,7 @@ const PackageVersionSchema = z.object({ version: z.string() });
  * that needs a shell; its version is read from the package it launches instead.
  */
 async function versionOf(system: DetectorSystem, executable: string): Promise<string | null> {
-  const path = pathsOf(system);
+  const path = pathsOf(system.platform);
   if (system.platform === 'win32' && SHIM_EXTENSIONS.has(path.extname(executable).toLowerCase())) {
     const manifest = await system.readText(
       path.join(
@@ -57,12 +58,8 @@ async function versionOf(system: DetectorSystem, executable: string): Promise<st
       ),
     );
     if (manifest === null) return null;
-    try {
-      const parsed = PackageVersionSchema.safeParse(JSON.parse(manifest));
-      return parsed.success ? parseVersion(parsed.data.version) : null;
-    } catch {
-      return null;
-    }
+    const parsed = valueOrNull(parseJsonWith(PackageVersionSchema, manifest));
+    return parsed === null ? null : parseVersion(parsed.version);
   }
   const output = await system.runVersion(executable);
   return output === null ? null : parseVersion(output);

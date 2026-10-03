@@ -1,4 +1,6 @@
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
+import { pathsOf } from '../shared/detector-system.ts';
+import { underFolder } from '../shared/bundle-paths.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import {
   createFileGatherer,
@@ -28,14 +30,14 @@ export interface ProjectCollectorOptions {
 
 /** True when `bundlePath` is a never-synced project entry or inside one. */
 const isNeverSynced = (bundlePath: string) =>
-  PROJECT_NEVER_SYNCED.some((entry) => bundlePath === entry || bundlePath.startsWith(`${entry}/`));
+  PROJECT_NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry));
 
 /**
  * A Claude Code project collector (T26). Bundle paths are relative to the project folder;
  * opt-in auto memory goes under `.agentnomad/auto-memory/`.
  */
 export function createClaudeCodeProjectCollector(options: ProjectCollectorOptions): Collector {
-  const { path } = createFileGatherer(options.platform, { skippedNames: SKIPPED_NAMES });
+  const path = pathsOf(options.platform);
 
   /** The script files the project's hooks run, when they are inside the project. */
   async function projectHookScriptFiles(

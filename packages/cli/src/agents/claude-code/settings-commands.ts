@@ -60,18 +60,31 @@ export function parseSettings(settingsJson: string): Record<string, unknown> | n
 }
 
 /**
- * Commands in a `settings.json` that run files: every hook, and the status line. A hook that
- * cannot be read is left out on its own (SEC-01).
+ * The words a command's program gets (BUG-01). In exec form (`args` set) Claude Code starts
+ * `command` with each `args` element as one word, exactly as written and with no shell; in
+ * shell form the shell splits `command`.
  */
-export function commandsInSettings(settingsJson: string): string[] {
+function runWords(command: string, args: readonly string[] | undefined): string[] {
+  return args === undefined ? commandWords(command) : [command, ...args];
+}
+
+/**
+ * Commands in a `settings.json` that run files, as the words each one's program gets: every
+ * hook, and the status line. A hook that cannot be read is left out on its own (SEC-01).
+ */
+export function commandsInSettings(settingsJson: string): string[][] {
   const settings = parseSettings(settingsJson);
   if (settings === null) return [];
-  const commands = hookItems(settings['hooks']).map((item) =>
-    'hook' in item ? item.hook.command : undefined,
+  const commands = hookItems(settings['hooks']).flatMap((item) =>
+    'hook' in item && item.hook.command !== undefined
+      ? [runWords(item.hook.command, item.hook.args)]
+      : [],
   );
   const statusLine = HookCommandSchema.safeParse(settings['statusLine']);
-  commands.push(statusLine.success ? statusLine.data.command : undefined);
-  return commands.filter((command): command is string => command !== undefined);
+  if (statusLine.success && statusLine.data.command !== undefined) {
+    commands.push(commandWords(statusLine.data.command));
+  }
+  return commands;
 }
 
 /**
@@ -87,16 +100,42 @@ export function commandWords(command: string): string[] {
   );
 }
 
+/** Shell operators, which end a word without a space: `a.sh;`, `a.sh&&b`, `$(cat a.sh)`. */
+const SHELL_OPERATORS = /[;&|()<>`]+/;
+/** Everything that can end a word: white space, quotes and shell operators. */
+const WORD_ENDS = /[\s"';&|()<>`]+/;
+
+/**
+ * Every word of a command that can name a script (SEC-01): each word; the words of a
+ * command line a word carries (`bash -c "a.sh; true"`, `pwsh -Command "& 'a.ps1' -Flag"`,
+ * `cmd /c "a.cmd && b"`), again inside those, at any depth; and the parts of all of them
+ * between white space, quotes and shell operators. The whole words stay in, so a quoted
+ * path with spaces is found too. Extra words only make the review show more, never less.
+ */
+export function pathWords(words: readonly string[]): string[] {
+  const found = new Set<string>();
+  const add = (word: string) => {
+    if (word === '' || found.has(word)) return;
+    found.add(word);
+    for (const part of word.split(WORD_ENDS)) found.add(part);
+    for (const part of word.split(SHELL_OPERATORS)) add(part);
+    // Each pass removes a pair of quotes or splits the word, so this ends.
+    if (/[\s"']/.test(word)) commandWords(word).forEach(add);
+  };
+  words.forEach(add);
+  found.delete('');
+  return [...found];
+}
+
 /** `ccstatusline@2.2.22` → `ccstatusline`; `@scope/tool@1` → `@scope/tool`. */
 const withoutVersion = (spec: string) => spec.replace(/(?<=.)@[^/]*$/, '');
 
 /**
- * The program a command starts, e.g. `ccstatusline`, or `ccstatusline` for
+ * The program a command's words start, e.g. `ccstatusline`, or `ccstatusline` for
  * `npx -y ccstatusline@latest` (`runner`: nothing to install). `null` for a script path,
  * a shell or a runtime.
  */
-export function programOf(command: string): { name: string; runner: boolean } | null {
-  const words = commandWords(command);
+export function programOf(words: readonly string[]): { name: string; runner: boolean } | null {
   let index = 0;
   while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? '')) index += 1;
   const first = words[index];

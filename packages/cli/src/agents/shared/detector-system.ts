@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { access, readFile, stat } from 'node:fs/promises';
+import { access, readFile, realpath, stat } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 
 import { runProgram } from '../../system/run-program.ts';
@@ -23,6 +23,8 @@ export interface DetectorSystem {
   isExecutable(path: string): Promise<boolean>;
   /** `null` when the file cannot be read. */
   readText(path: string): Promise<string | null>;
+  /** The path with every link resolved; `null` when it does not exist. */
+  realPath(path: string): Promise<string | null>;
   /** Runs `file --version` without a shell; stdout, or `null` on error or timeout. */
   runVersion(file: string): Promise<string | null>;
 }
@@ -37,8 +39,7 @@ export type ExecutableLookupSystem = Pick<
 >;
 
 /** Path rules of the PC being inspected (not of the one running the tests). */
-export const pathsOf = (system: Pick<DetectorSystem, 'platform'>) =>
-  system.platform === 'win32' ? win32 : posix;
+export const pathsOf = (platform: NodeJS.Platform) => (platform === 'win32' ? win32 : posix);
 
 /** Environment lookup that ignores case on Windows, where `Path` and `PATH` are the same. */
 export function envValue(
@@ -59,7 +60,7 @@ export async function findExecutable(
   command: string,
 ): Promise<string | null> {
   const windows = system.platform === 'win32';
-  const path = pathsOf(system);
+  const path = pathsOf(system.platform);
   const folders = (envValue(system, 'PATH') ?? '')
     .split(path.delimiter)
     .map((folder) => folder.trim().replace(/^"(.*)"$/, '$1'))
@@ -112,6 +113,13 @@ export function nodeDetectorSystem(
     async readText(path) {
       try {
         return await readFile(path, 'utf8');
+      } catch {
+        return null;
+      }
+    },
+    async realPath(path) {
+      try {
+        return await realpath(path);
       } catch {
         return null;
       }

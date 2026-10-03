@@ -12,8 +12,10 @@ export function runnableInMarkdown(text: string): string[] {
     found.push('hooks in its frontmatter');
   }
   // The open code block and its fence: as in CommonMark, only a fence of the same character,
-  // at least as long and with nothing after it, closes it (SEC-02).
-  let open: { readonly kind: 'plain' | 'command'; readonly fence: string } | null = null;
+  // at least as long and with nothing after it, closes it (SEC-02). `outer`: the plain block
+  // a command block was opened inside, open again once the command block closes.
+  type Open = { readonly kind: 'plain' | 'command'; readonly fence: string; readonly outer?: Open };
+  let open: Open | null = null;
   const block: string[] = [];
   for (const line of text.split(/\r?\n/)) {
     // At any indentation: a fence inside a list item is indented with the item, and the
@@ -25,6 +27,13 @@ export function runnableInMarkdown(text: string): string[] {
       open = { kind: after === '!' ? 'command' : 'plain', fence: marks };
       continue;
     }
+    // The docs do not say whether Claude Code skips a ` ```! ` block inside another block, so
+    // it opens a command block there too, as placeholders inside a block count (below): an
+    // indented fence that CommonMark reads as code must not hide the block after it.
+    if (open?.kind === 'plain' && fence && after === '!') {
+      open = { kind: 'command', fence: marks, outer: open };
+      continue;
+    }
     if (
       open !== null &&
       after === '' &&
@@ -33,7 +42,7 @@ export function runnableInMarkdown(text: string): string[] {
     ) {
       if (open.kind === 'command') found.push(`! block: ${block.join('; ')}`);
       block.length = 0;
-      open = null;
+      open = open.outer ?? null;
       continue;
     }
     if (open?.kind === 'command') {

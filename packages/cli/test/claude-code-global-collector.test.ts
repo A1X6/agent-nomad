@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   ClaudeJsonError,
   commandsInSettings,
+  commandWords,
   createProgramLocator,
   programOf,
   type DetectorSystem,
@@ -158,6 +159,12 @@ describe('global collector: what is taken', () => {
     ).toEqual([]);
   });
 
+  it('skips a temporary file an interrupted write left (BUG-03)', async () => {
+    await put(join(base, 'skills', 'x', 'SKILL.md'));
+    await put(join(base, 'skills', 'x', '.SKILL.md.agentnomad-tmp-0a1b2c3d'));
+    expect(paths(await collect())).toEqual(['skills/x/SKILL.md']);
+  });
+
   it('takes subagent memory only when asked', async () => {
     await realisticSetup();
     expect(paths(await collect(false))).not.toContain('agent-memory/reviewer/MEMORY.md');
@@ -252,6 +259,43 @@ describe('global collector: hook and status line scripts', () => {
     expect(text(files, '.agentnomad/home/scripts/status.py')).toBe('print(1)');
   });
 
+  it('takes the script of a hook in exec form, even with spaces in an argument (BUG-01)', async () => {
+    const script = join(base, 'hooks', 'my checks', 'check.js');
+    await put(script, 'check');
+    const files = await withSettings({
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: 'node', args: [script, '--fast'] }] }],
+      },
+    });
+    expect(text(files, 'hooks/my checks/check.js')).toBe('check');
+  });
+
+  it('takes a script named inside a quoted command line or next to a ; (SEC-01)', async () => {
+    await put(join(base, 'hooks', 'a.sh'));
+    await put(join(base, 'hooks', 'b.sh'));
+    await put(join(base, 'hooks', 'c.sh'));
+    const files = await withSettings({
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              { type: 'command', command: `bash -c "${join(base, 'hooks', 'a.sh')}; true"` },
+              { type: 'command', command: `${join(base, 'hooks', 'b.sh')};` },
+              // A command line inside a command line.
+              {
+                type: 'command',
+                command: `bash -c "bash -lc '${join(base, 'hooks', 'c.sh')} arg; true'"`,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(paths(files)).toEqual(
+      expect.arrayContaining(['hooks/a.sh', 'hooks/b.sh', 'hooks/c.sh']),
+    );
+  });
+
   it('understands ~ and $HOME in commands', async () => {
     await put(join(home, 'bin', 'a.sh'));
     await put(join(home, 'bin', 'b.sh'));
@@ -320,7 +364,7 @@ describe('global collector: hook and status line scripts', () => {
           statusLine: { type: 'command', command: 'c' },
         }),
       ),
-    ).toEqual(['a', 'b', 'c']);
+    ).toEqual([['a'], ['b'], ['c']]);
     expect(commandsInSettings('not json')).toEqual([]);
   });
 });
@@ -447,7 +491,7 @@ describe('global collector: programs the status line and hooks need', () => {
     ['echo done', null],
     ['printf hi', null],
   ])('reads the program of %j', (command, expected) => {
-    expect(programOf(command)).toEqual(expected);
+    expect(programOf(commandWords(command))).toEqual(expected);
   });
 });
 
@@ -457,12 +501,14 @@ describe('program locator', () => {
     path: string;
     executables: string[];
     files: Record<string, string>;
-  }): ExecutableLookupSystem & Pick<DetectorSystem, 'readText'> => ({
+    links?: Record<string, string>;
+  }): ExecutableLookupSystem & Pick<DetectorSystem, 'readText' | 'realPath'> => ({
     platform: pc.platform,
     homedir: pc.platform === 'win32' ? 'C:\\Users\\a' : '/home/a',
     env: { PATH: pc.path, PATHEXT: '.EXE;.CMD' },
     isExecutable: (path) => Promise.resolve(pc.executables.includes(path)),
     readText: (path) => Promise.resolve(pc.files[path] ?? null),
+    realPath: (path) => Promise.resolve(pc.links?.[path] ?? path),
   });
   const manifest = JSON.stringify({
     name: 'ccstatusline',
@@ -495,6 +541,54 @@ describe('program locator', () => {
       }),
     );
     expect((await find('ccstatusline'))?.npm?.version).toBe('2.2.22');
+  });
+
+  const mermaid = JSON.stringify({
+    name: '@mermaid-js/mermaid-cli',
+    version: '11.4.2',
+    bin: { mmdc: 'src/cli.js' },
+  });
+
+  it('finds a scoped package whose bin name differs on macOS and Linux, by the link (BUG-02)', async () => {
+    const find = createProgramLocator(
+      system({
+        platform: 'linux',
+        path: '/usr/local/bin',
+        executables: ['/usr/local/bin/mmdc'],
+        links: {
+          '/usr/local/bin/mmdc': '/usr/local/lib/node_modules/@mermaid-js/mermaid-cli/src/cli.js',
+        },
+        files: { '/usr/local/lib/node_modules/@mermaid-js/mermaid-cli/package.json': mermaid },
+      }),
+    );
+    expect(await find('mmdc')).toEqual({
+      command: 'mmdc',
+      npm: { package: '@mermaid-js/mermaid-cli', version: '11.4.2' },
+    });
+  });
+
+  it('finds a scoped package whose bin name differs on Windows, by the .cmd launcher (BUG-02)', async () => {
+    const shim = [
+      '@ECHO off',
+      'SETLOCAL',
+      'CALL :find_dp0',
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@mermaid-js\\mermaid-cli\\src\\cli.js" %*',
+    ].join('\r\n');
+    const find = createProgramLocator(
+      system({
+        platform: 'win32',
+        path: 'C:\\nvm4w\\nodejs',
+        executables: ['C:\\nvm4w\\nodejs\\mmdc.cmd'],
+        files: {
+          'C:\\nvm4w\\nodejs\\mmdc.cmd': shim,
+          'C:\\nvm4w\\nodejs\\node_modules\\@mermaid-js\\mermaid-cli\\package.json': mermaid,
+        },
+      }),
+    );
+    expect((await find('mmdc'))?.npm).toEqual({
+      package: '@mermaid-js/mermaid-cli',
+      version: '11.4.2',
+    });
   });
 
   it('a program from elsewhere has no npm details; a missing one is null', async () => {

@@ -9,6 +9,8 @@ import {
   jsonFile,
   uniqueByPath,
 } from '../shared/file-gathering.ts';
+import { pathsOf } from '../shared/detector-system.ts';
+import { underFolder } from '../shared/bundle-paths.ts';
 import { commandsInSettings, programOf } from './settings-commands.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
@@ -43,11 +45,11 @@ export interface GlobalCollectorOptions {
 
 /** True when `bundlePath` is a never-synced entry or inside one. */
 const isNeverSynced = (bundlePath: string) =>
-  NEVER_SYNCED.some((entry) => bundlePath === entry || bundlePath.startsWith(`${entry}/`));
+  NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry));
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {
-  const { path } = createFileGatherer(options.platform, { skippedNames: SKIPPED_NAMES });
+  const path = pathsOf(options.platform);
   const { baseDir, homedir } = options;
 
   /** Script files that hooks and the status line run, if they are in the home folder. */
@@ -75,8 +77,8 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
     const found: CollectedFile[] = [];
     // `null`: left out, as pull would refuse it.
     const programsFound = new Map<string, ProgramInfo | null>();
-    for (const command of commandsInSettings(settingsJson)) {
-      const program = programOf(command);
+    for (const words of commandsInSettings(settingsJson)) {
+      const program = programOf(words);
       if (program === null) continue;
       for (const relative of TOOL_CONFIG_FILES[program.name] ?? []) {
         const file = await files.readIfFile(
@@ -181,7 +183,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
 
       // Opt-in (T42): a copy of the user's own claude.ai skills, never skills/synced itself.
       if (collectOptions.include?.has(ACCOUNT_SKILLS_PART) === true) {
-        found.push(...(await collectAccountSkills(files, await readSyncedSkills(files, baseDir))));
+        found.push(...(await collectAccountSkills(files, await readSyncedSkills(path, baseDir))));
       }
 
       // A hook may name a file already in a synced folder.

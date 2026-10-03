@@ -2,6 +2,7 @@
  * What the Claude Code global collector takes from `~/.claude` (T25). The lists come from
  * the paths data file (T32); this module only gives them names and fast lookups.
  */
+import { RESERVED_DIR } from '../adapter.ts';
 import { inHomeFolder, isSensitiveHomePath } from '../shared/file-gathering.ts';
 import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
 
@@ -44,8 +45,6 @@ export const CLAUDE_JSON_PREFERENCE_KEYS: readonly string[] = DATA.claudeJsonPre
 /** User-scope MCP servers, also kept in `~/.claude.json`. */
 export const CLAUDE_JSON_MCP_KEY = 'mcpServers';
 
-/** Reserved bundle folder for files that do not live in the base folder. */
-export const RESERVED_DIR = '.agentnomad';
 /** The selected `~/.claude.json` keys. */
 export const CLAUDE_JSON_BUNDLE_PATH = `${RESERVED_DIR}/claude.json`;
 /** Hook and status line scripts elsewhere in the home folder, by path from home. */

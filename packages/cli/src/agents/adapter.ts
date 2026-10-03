@@ -20,6 +20,13 @@ export interface Detector {
   detect(): Promise<DetectedAgent>;
 }
 
+/**
+ * The bundle folder for reserved entries, which are not plain files of the agent's folder
+ * (`.agentnomad/env.json`, an agent's own metadata): part of the bundle format for every
+ * agent, so the generic code and each adapter build their paths from this one name (ARCH-01).
+ */
+export const RESERVED_DIR = '.agentnomad';
+
 /** A file read from disk, ready to go into a bundle. */
 export interface CollectedFile {
   /** Bundle path: relative to the base folder (global) or project root (project). */

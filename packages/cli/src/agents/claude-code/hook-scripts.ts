@@ -1,7 +1,7 @@
-import { posix, win32 } from 'node:path';
-
+import { underFolder } from '../shared/bundle-paths.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 import { bundlePathInside } from '../shared/file-gathering.ts';
-import { commandsInSettings, commandWords } from './settings-commands.ts';
+import { commandsInSettings, pathWords } from './settings-commands.ts';
 import {
   GLOBAL_REFUSED,
   HOME_SCRIPTS_PREFIX,
@@ -25,10 +25,7 @@ export interface HookScript {
 }
 
 /** Compared without case, as pull refuses them (Windows and macOS ignore it). */
-const under = (path: string, folder: string) => {
-  const [lower, entry] = [path.toLowerCase(), folder.toLowerCase()];
-  return lower === entry || lower.startsWith(`${entry}/`);
-};
+const under = (path: string, folder: string) => underFolder(path, folder, { ignoreCase: true });
 
 /**
  * The scripts that the hooks and status line in a global `settings.json` run (T25), as push
@@ -39,15 +36,15 @@ const under = (path: string, folder: string) => {
  * bundle cannot place other files that run by themselves (a Startup folder, a shell profile).
  */
 export function hookScripts(settingsJson: string, context: HookScriptContext): HookScript[] {
-  const path = context.platform === 'win32' ? win32 : posix;
+  const path = pathsOf(context.platform);
   const home = /^(~|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?=[\\/]|$)/i;
   const config = /^(\$CLAUDE_CONFIG_DIR|\$\{CLAUDE_CONFIG_DIR\}|%CLAUDE_CONFIG_DIR%)(?=[\\/]|$)/i;
 
   const relativeInside = (folder: string, file: string) => bundlePathInside(path, folder, file);
 
   const found = new Map<string, HookScript>();
-  for (const command of commandsInSettings(settingsJson)) {
-    for (const word of commandWords(command)) {
+  for (const words of commandsInSettings(settingsJson)) {
+    for (const word of pathWords(words)) {
       const expanded = word
         .replace(home, () => context.homedir)
         .replace(config, () => context.baseDir);
@@ -88,12 +85,12 @@ export function projectHookScripts(
   settingsJson: string,
   context: ProjectHookScriptContext,
 ): HookScript[] {
-  const path = context.platform === 'win32' ? win32 : posix;
+  const path = pathsOf(context.platform);
   const project =
     /^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\}|%CLAUDE_PROJECT_DIR%)(?=[\\/]|$)/i;
   const found = new Map<string, HookScript>();
-  for (const command of commandsInSettings(settingsJson)) {
-    for (const word of commandWords(command)) {
+  for (const words of commandsInSettings(settingsJson)) {
+    for (const word of pathWords(words)) {
       // Backslashes are separators on every OS: the bundle may come from Windows.
       const expanded = word.replace(project, () => context.projectDir).replace(/\\/g, '/');
       // The home folder, other variables and another OS's absolute paths are not in the project.

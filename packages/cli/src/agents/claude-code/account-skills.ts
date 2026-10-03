@@ -1,11 +1,11 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
+import type { PlatformPath } from 'node:path';
 
 import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
-import type { CollectedFile } from '../adapter.ts';
+import { RESERVED_DIR, type CollectedFile } from '../adapter.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
-import { RESERVED_DIR } from './global-paths.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 
 /**
@@ -50,11 +50,7 @@ const isDirectory = async (path: string) =>
   (await stat(path).catch(() => null))?.isDirectory() ?? false;
 
 /** What `~/.claude/skills/synced/` holds on this PC. Never throws; unreadable parts are skipped. */
-export async function readSyncedSkills(
-  files: FileGatherer,
-  baseDir: string,
-): Promise<SyncedSkills> {
-  const { path } = files;
+export async function readSyncedSkills(path: PlatformPath, baseDir: string): Promise<SyncedSkills> {
   const root = path.join(baseDir, ...SYNCED_SKILLS_DIR.split('/'));
   const own = new Map<string, string>();
   const allNames = new Set<string>();
