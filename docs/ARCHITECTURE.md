@@ -561,19 +561,19 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ## `packages/core/src`
 
-| File                   | Responsible for                                                                                                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `index.ts`             | Re-exports everything.                                                                                                                                            |
-| `crypto.ts`            | The crypto interfaces (`PasswordKdf`, `Aead`, `KeyedHash`, `Digest`, `RandomSource`, `CryptoService`) and `DecryptionError`.                                      |
-| `sodium-crypto.ts`     | The implementation on libsodium: Argon2id, splitting the master key, XChaCha20-Poly1305, keyed BLAKE2b, SHA-256.                                                  |
-| `envelopes.ts`         | Wrapping the data key; sealing and opening bundles bound to format version, agent and scope key.                                                                  |
-| `project-names.ts`     | Scope keys (keyed hash of a project name) and encrypted project names.                                                                                            |
-| `bundle-codec.ts`      | The `BundleCodec` interface (bundle ↔ bytes) and `BundleFormatError`.                                                                                             |
-| `gzip-bundle-codec.ts` | JSON + gzip, with the 64 MB decompression cap and a schema check.                                                                                                 |
-| `paths.ts`             | The `PathResolver` interface, `{{HOME}}`, `PathError`, and `sourceOsOf` (a platform as a bundle source OS).                                                       |
-| `path-resolver.ts`     | Portable paths: bundle path ↔ native path per OS, home folder ↔ `{{HOME}}` in file contents, Windows name rules.                                                  |
-| `merge.ts`             | The `MergeStrategy` interface: plans writes for one conflicting file, never touches disk.                                                                         |
-| `merge-strategies.ts`  | JSON merge by key, text "keep yours, add theirs next to it", overwrite with a timestamped backup; picking one per file; `backupStamp`, the one backup time stamp. |
+| File                   | Responsible for                                                                                                                                                                                                                                                                                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.ts`             | Re-exports everything.                                                                                                                                                                                                                                                                                                                       |
+| `crypto.ts`            | The crypto interfaces (`PasswordKdf`, `Aead`, `KeyedHash`, `Digest`, `RandomSource`, `CryptoService`) and `DecryptionError`.                                                                                                                                                                                                                 |
+| `sodium-crypto.ts`     | The implementation on libsodium: Argon2id (the password bytes are wiped once used), splitting the master key, XChaCha20-Poly1305, keyed BLAKE2b, SHA-256.                                                                                                                                                                                    |
+| `envelopes.ts`         | Wrapping the data key; sealing and opening bundles bound to format version, agent and scope key.                                                                                                                                                                                                                                             |
+| `project-names.ts`     | Scope keys (keyed hash of a project name) and encrypted project names.                                                                                                                                                                                                                                                                       |
+| `bundle-codec.ts`      | The `BundleCodec` interface (bundle ↔ bytes) and `BundleFormatError`.                                                                                                                                                                                                                                                                        |
+| `gzip-bundle-codec.ts` | JSON + gzip, with the 64 MB decompression cap and a schema check.                                                                                                                                                                                                                                                                            |
+| `paths.ts`             | The `PathResolver` interface, `{{HOME}}`, `PathError`, and `sourceOsOf` (a platform as a bundle source OS).                                                                                                                                                                                                                                  |
+| `path-resolver.ts`     | Portable paths: bundle path ↔ native path per OS, home folder ↔ `{{HOME}}` in file contents, Windows name rules.                                                                                                                                                                                                                             |
+| `merge.ts`             | The `MergeStrategy` interface: plans writes for one conflicting file, never touches disk.                                                                                                                                                                                                                                                    |
+| `merge-strategies.ts`  | JSON merge by key, text "keep yours, add theirs next to it", overwrite with a timestamped backup; `selectMergeStrategy` picks one per file from the `MergeChoices` a restorer passes (the first of its merges that applies, else side by side), so a new format is one more strategy in that list; `backupStamp`, the one backup time stamp. |
 
 ## `packages/cli/src`
 
@@ -620,11 +620,11 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `auth/`: accounts
 
-| File                 | Responsible for                                                                                                           |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `auth-commands.ts`   | `register`, `login`, `logout`, `account delete`, with the flags for scripts.                                              |
-| `local-session.ts`   | Saving, reading and clearing the session token and data key; `withSession` turns an expired session into a clear message. |
-| `password-policy.ts` | 12–256 characters and a zxcvbn-ts score of 4, username used as a hint.                                                    |
+| File                 | Responsible for                                                                                                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth-commands.ts`   | `register`, `login`, `logout`, `account delete`, with the flags for scripts. `withDerivedKeys` wipes both password keys on every path; the data key is wiped the same way. |
+| `local-session.ts`   | Saving, reading and clearing the session token and data key; `withSession` turns an expired session into a clear message.                                                  |
+| `password-policy.ts` | 12–256 characters and a zxcvbn-ts score of 4, username used as a hint.                                                                                                     |
 
 ### `secrets/`, `config/`, `state/`: what stays on the PC
 
@@ -676,29 +676,31 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `agents/claude-code/`: the Claude Code adapter
 
-| File                                  | Responsible for                                                                                                                               |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude-code-adapter.ts`              | Assembles the adapter from the parts below.                                                                                                   |
-| `claude-code-paths.data.ts`           | **The data file:** every list of what to sync, skip or refuse, schema-checked.                                                                |
-| `global-paths.ts`, `project-paths.ts` | Named views of the data file for the global and project collectors.                                                                           |
-| `detector.ts`                         | Finding `claude` and its version; the base folder (`CLAUDE_CONFIG_DIR`).                                                                      |
-| `file-gathering.ts`                   | Reading files and folders into bundle entries; parsing settings and command lines.                                                            |
-| `global-collector.ts`                 | Collecting the global setup, `~/.claude.json` keys, hook scripts, tool settings, programs, plugins.                                           |
-| `project-collector.ts`                | Collecting a project's setup and, when chosen, its auto memory.                                                                               |
-| `hook-scripts.ts`                     | Which scripts the hooks and status line run: what push collects and pull allows back.                                                         |
-| `account-skills.ts`                   | claude.ai skills (T42): reading `skills/synced/` (only `creatorType: user`), saving a copy, and what pull may add as local skills.            |
-| `auto-memory.ts`                      | Finding a project's auto memory folder the way Claude Code does.                                                                              |
-| `restore-rules.ts`                    | Where each bundle entry may go, or why it is refused (including Windows name rules).                                                          |
-| `restorer.ts`                         | Writing a setup: atomic writes, permissions, line endings, conflicts, `~/.claude.json` merge, the running-Claude check; what pull asks first. |
-| `command-review.ts`                   | Finding hooks, status line, MCP servers and the scripts they run, and which are new or changed on this PC.                                    |
-| `reviewed-settings.ts`                | The settings keys and `env` names the review watches (command, loosening and redirect settings); the drift watch list.                        |
-| `running-claude.ts`                   | Is Claude Code (or the Claude app) running (command lines)?                                                                                   |
-| `plugins.ts`                          | Reading installed plugins and marketplaces into `.agentnomad/plugins.json`.                                                                   |
-| `plugin-sync.ts`                      | Reinstalling what is missing with `claude plugin` commands: the questions, then the installs.                                                 |
-| `programs.ts`                         | Finding the programs hooks start and whether npm installed them.                                                                              |
-| `after-restore.ts`                    | Pull's follow-up: plugins, missing programs and claude.ai skills; asked in the plan step, installed after writing.                            |
-| `managed-settings.ts`                 | Detecting organization-managed settings per OS (never synced) and explaining what they block.                                                 |
-| `unknown-files.ts`                    | Reporting files in Claude Code's folder that the data file does not know.                                                                     |
+| File                                  | Responsible for                                                                                                                                                      |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code-adapter.ts`              | Assembles the adapter from the parts below.                                                                                                                          |
+| `claude-code-paths.data.ts`           | **The data file:** every list of what to sync, skip or refuse, schema-checked.                                                                                       |
+| `global-paths.ts`, `project-paths.ts` | Named views of the data file for the global and project collectors.                                                                                                  |
+| `detector.ts`                         | Finding `claude` and its version; the base folder (`CLAUDE_CONFIG_DIR`). `findExecutable` takes only `ExecutableLookupSystem` (platform, home, env, `isExecutable`). |
+| `file-gathering.ts`                   | Reading files and folders into bundle entries.                                                                                                                       |
+| `settings-commands.ts`                | Parsing settings and command lines: the commands a `settings.json` runs, their words and program. No file access.                                                    |
+| `global-collector.ts`                 | Collecting the global setup, `~/.claude.json` keys, hook scripts, tool settings, programs, plugins.                                                                  |
+| `project-collector.ts`                | Collecting a project's setup and, when chosen, its auto memory.                                                                                                      |
+| `hook-scripts.ts`                     | Which scripts the hooks and status line run: what push collects and pull allows back.                                                                                |
+| `account-skills.ts`                   | claude.ai skills (T42): reading `skills/synced/` (only `creatorType: user`), saving a copy, and what pull may add as local skills.                                   |
+| `auto-memory.ts`                      | Finding a project's auto memory folder the way Claude Code does.                                                                                                     |
+| `restore-rules.ts`                    | Where each bundle entry may go, or why it is refused (including Windows name rules).                                                                                 |
+| `restorer.ts`                         | Writing a setup: atomic writes, permissions, line endings, conflicts; what pull asks first.                                                                          |
+| `claude-json-merge.ts`                | The `~/.claude.json` merge: only MCP servers and preferences, a backup first, never while Claude Code runs.                                                          |
+| `command-review.ts`                   | Finding hooks, status line, MCP servers and the scripts they run, and which are new or changed on this PC.                                                           |
+| `reviewed-settings.ts`                | The settings keys and `env` names the review watches (command, loosening and redirect settings); the drift watch list.                                               |
+| `running-claude.ts`                   | Is Claude Code (or the Claude app) running (command lines)?                                                                                                          |
+| `plugins.ts`                          | Reading installed plugins and marketplaces into `.agentnomad/plugins.json`.                                                                                          |
+| `plugin-sync.ts`                      | Reinstalling what is missing with `claude plugin` commands: the questions, then the installs.                                                                        |
+| `programs.ts`                         | Finding the programs hooks start and whether npm installed them.                                                                                                     |
+| `after-restore.ts`                    | Pull's follow-up: plugins, missing programs and claude.ai skills; asked in the plan step, installed after writing.                                                   |
+| `managed-settings.ts`                 | Detecting organization-managed settings per OS (never synced) and explaining what they block.                                                                        |
+| `unknown-files.ts`                    | Reporting files in Claude Code's folder that the data file does not know.                                                                                            |
 
 ## `packages/server/src`
 
