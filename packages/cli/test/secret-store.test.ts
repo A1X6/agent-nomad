@@ -255,9 +255,11 @@ describe('createSecretStore', () => {
 
 /**
  * The real OS keychain: Windows Credential Manager and macOS Keychain in CI. Linux CI has
- * no Secret Service, so there this checks that the fallback is chosen instead.
+ * no Secret Service, so there this checks that the fallback is chosen instead. It writes to
+ * this PC's keychain, so it runs only when AGENTNOMAD_TEST_REAL_KEYCHAIN=1, which CI sets on
+ * every OS (BP-02).
  */
-describe('real OS keychain', () => {
+describe.runIf(process.env['AGENTNOMAD_TEST_REAL_KEYCHAIN'] === '1')('real OS keychain', () => {
   const server = `test-${randomBytes(6).toString('hex')}.invalid`;
   const service = 'agentnomad-test';
 

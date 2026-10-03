@@ -29,6 +29,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         # Lowest supported Node (package.json engines) and the current LTS.
         node: ['22.13', '24']
+    # The real OS keychain test writes to the keychain, so it runs only where this is set (BP-02).
+    env:
+      AGENTNOMAD_TEST_REAL_KEYCHAIN: '1'
 
     steps:
       # Actions are pinned to exact commits; the comment shows the release.
