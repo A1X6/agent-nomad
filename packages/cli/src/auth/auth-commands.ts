@@ -16,12 +16,18 @@ import {
 } from '@agentnomad/core';
 
 import type { ApiClient } from '../api/api-client.ts';
-import { ApiError } from '../api/api-errors.ts';
+import { ApiError, NetworkError } from '../api/api-errors.ts';
 import type { CommandHandlers, CredentialOptions } from '../cli/commands.ts';
+import { describeError } from '../cli/error-messages.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
-import { clearLocalSession, hasLocalSession, saveLocalSession } from './local-session.ts';
+import {
+  clearLocalSession,
+  hasLocalSession,
+  saveLocalSession,
+  type LocalSession,
+} from './local-session.ts';
 import type { PasswordChecker } from './password-policy.ts';
 
 export const NO_RECOVERY_WARNING =
@@ -129,11 +135,15 @@ export function createAuthCommands(
   }
 
   /**
-   * One PC holds one login. When one exists, offers to log out first, so two accounts'
-   * keys never mix. Returns false when the user keeps the current login.
+   * One PC holds one login. When one exists, asks whether to replace it, so two accounts'
+   * keys never mix: `replace` (the old login ends once the new one works, UX-01), `free`
+   * (no login here) or `keep` (the user keeps the current login).
    */
-  async function readyForNewLogin(secrets: SecretStore, yes: boolean): Promise<boolean> {
-    if (!(await hasLocalSession(secrets))) return true;
+  async function readyForNewLogin(
+    secrets: SecretStore,
+    yes: boolean,
+  ): Promise<'free' | 'replace' | 'keep'> {
+    if (!(await hasLocalSession(secrets))) return 'free';
     const replace =
       yes ||
       (await prompter.confirm(
@@ -142,10 +152,22 @@ export function createAuthCommands(
       ));
     if (!replace) {
       reporter.info('Nothing changed.');
-      return false;
+      return 'keep';
     }
-    await logOut(secrets);
-    return true;
+    return 'replace';
+  }
+
+  /**
+   * Saves a new login that already works (session and data key in hand). Only now is the
+   * login it replaces ended, so a typo, a refusal or Ctrl+C before this keeps it (UX-01).
+   */
+  async function saveNewLogin(
+    secrets: SecretStore,
+    slot: 'free' | 'replace',
+    session: LocalSession,
+  ): Promise<void> {
+    if (slot === 'replace') await logOut(secrets);
+    await saveLocalSession(secrets, session);
   }
 
   function finish(secrets: SecretStore, message: string): void {
@@ -160,8 +182,12 @@ export function createAuthCommands(
     } catch (error) {
       // unauthorized = the session had already ended on the server: nothing to do there.
       if (!(error instanceof ApiError && error.code === 'unauthorized')) {
+        const why =
+          error instanceof NetworkError
+            ? 'Could not reach the server'
+            : `The server did not end the session (${describeError(error).replace(/\.$/, '')})`;
         reporter.warn(
-          'Could not reach the server, so only this PC was logged out. ' +
+          `${why}, so only this PC was logged out. ` +
             'The session on the server ends by itself after 30 days unused.',
         );
       }
@@ -173,7 +199,8 @@ export function createAuthCommands(
   return {
     async register(options) {
       const secrets = await deps.secrets();
-      if (!(await readyForNewLogin(secrets, options.yes))) return;
+      const slot = await readyForNewLogin(secrets, options.yes);
+      if (slot === 'keep') return;
 
       const username = await usernameFrom(options, 'Choose a username');
 
@@ -207,7 +234,7 @@ export function createAuthCommands(
             wrappedDataKey: toBase64(wrapDataKey(crypto, dataKey, keys.passwordKey)),
             deviceName: deps.deviceName,
           });
-          await saveLocalSession(secrets, {
+          await saveNewLogin(secrets, slot, {
             sessionToken: session.sessionToken,
             dataKey: toBase64(dataKey),
           });
@@ -221,7 +248,8 @@ export function createAuthCommands(
 
     async login(options) {
       const secrets = await deps.secrets();
-      if (!(await readyForNewLogin(secrets, options.yes))) return;
+      const slot = await readyForNewLogin(secrets, options.yes);
+      if (slot === 'keep') return;
 
       const username = await usernameFrom(options, 'Username');
       const password = await passwordFrom(options, 'Password', notEmpty);
@@ -257,7 +285,7 @@ export function createAuthCommands(
             );
           }
           try {
-            await saveLocalSession(secrets, {
+            await saveNewLogin(secrets, slot, {
               sessionToken: answer.sessionToken,
               dataKey: toBase64(dataKey),
             });

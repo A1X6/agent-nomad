@@ -8,6 +8,15 @@ export type SetupOutcome =
   | { readonly setup: string; readonly result: 'done' | 'declined' }
   | { readonly setup: string; readonly result: 'not-done'; readonly reason: string };
 
+/**
+ * How messages name a setup: `global setup` or `project "<name>"`, after the agent's display
+ * name when one is given (`Claude Code global setup`).
+ */
+export function setupLabel(displayName: string | null, projectName: string | null): string {
+  const what = projectName === null ? 'global setup' : `project "${projectName}"`;
+  return displayName === null ? what : `${displayName} ${what}`;
+}
+
 /** Some setups were not saved or restored; the others were (BUG-03). Exit code 1. */
 export class SetupsNotDoneError extends Error {
   readonly notDone: readonly { readonly setup: string; readonly reason: string }[];

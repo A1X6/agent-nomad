@@ -33,7 +33,7 @@ import { ApiError } from '../api/api-errors.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PushOptions } from '../cli/commands.ts';
 import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
-import { finishSetups, type SetupOutcome } from '../cli/setup-outcomes.ts';
+import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { scanEnvReferences } from '../env/env-references.ts';
 import { chooseEnvValues, envSectionFile } from '../env/env-section.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
@@ -107,7 +107,7 @@ export interface PushPlan {
 }
 
 const describe = (item: PushItem) =>
-  `${item.adapter.displayName} ${item.scope.kind === 'global' ? 'global setup' : `project "${item.scope.name}"`}`;
+  setupLabel(item.adapter.displayName, item.scope.kind === 'global' ? null : item.scope.name);
 
 /**
  * Push's plan step (T59): asks every question (agents, scopes, project name, memory, the

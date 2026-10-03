@@ -28,14 +28,15 @@ import {
   envSectionFile,
   globalDestination,
   parseEnvSection,
+  planEnvRestore,
   projectDestination,
   quotePosix,
   readBlock,
   realPowerShell,
-  restoreEnvValues,
   scanEnvReferences,
   shellProfileFor,
   upsertBlock,
+  writeEnvValues,
   type AgentAdapter,
   type Choice,
   type CollectedFile,
@@ -389,6 +390,15 @@ describe('writing the profile', () => {
 });
 
 describe('restoring values on pull', () => {
+  /** Pull's two steps in a row: ask (plan), then write what was chosen (apply). */
+  async function restoreEnvValues(
+    deps: Parameters<typeof planEnvRestore>[0] & { writer: EnvWriter },
+  ) {
+    const plan = await planEnvRestore(deps);
+    if (plan.toAdd.length > 0) await writeEnvValues(deps, plan.toAdd);
+    return { added: plan.toAdd, alreadySet: plan.alreadySet, declined: plan.declined };
+  }
+
   function recordingWriter() {
     const written: Record<string, string>[] = [];
     const writer: EnvWriter = {
@@ -614,7 +624,7 @@ describe('agentnomad env', () => {
     restorer: stubRestorer(),
   });
 
-  async function run(env: Record<string, string>) {
+  async function run(env: Record<string, string>, cwd = '/work/app') {
     const lines: string[] = [];
     await createEnvCommand({
       registry: () => ({
@@ -636,7 +646,9 @@ describe('agentnomad env', () => {
         warn: (m) => lines.push(m),
       },
       env,
-      cwd: '/work/app',
+      cwd,
+      homedir: '/h',
+      platform: 'linux',
     }).env();
     return lines;
   }
@@ -651,6 +663,16 @@ describe('agentnomad env', () => {
     ]);
     expect(lines[1]).toContain('2 missing here');
     expect(lines.join('\n')).not.toContain('ghp_secret');
+  });
+
+  it('in the home folder or the agent’s own folder, lists the global setup only (UX-03)', async () => {
+    for (const cwd of ['/h', '/h/.claude']) {
+      const lines = await run({ GITHUB_TOKEN: 'ghp_secret' }, cwd);
+      expect(lines[0]?.split('\n')).toEqual([
+        'Environment variables your setups use:',
+        '  ✓ GITHUB_TOKEN  set here        MCP server github (~/.claude.json), Claude Code global',
+      ]);
+    }
   });
 
   it('says so when everything is set', async () => {

@@ -164,7 +164,14 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       platform: app.platform,
     }),
     ...createAgentsCommand({ registry, reporter: app.reporter }),
-    ...createEnvCommand({ registry, reporter: app.reporter, env: app.env, cwd: app.cwd }),
+    ...createEnvCommand({
+      registry,
+      reporter: app.reporter,
+      env: app.env,
+      cwd: app.cwd,
+      homedir: app.homedir,
+      platform: app.platform,
+    }),
     ...createAuthCommands({
       prompter: app.prompter,
       reporter: app.reporter,

@@ -93,7 +93,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### BUG-04 · Low · JSON merge turns an out-of-range number into `null`
 
-- [ ] **Where:** `packages/core/src/merge-strategies.ts:41-46` (`hasUnsafeInteger`), used at `:57` and `:118`
+- [x] **Where:** `packages/core/src/merge-strategies.ts:41-46` (`hasUnsafeInteger`), used at `:57` and `:118`
 - **Problem:** T45 keeps a JSON file side by side when it holds "a number a merge would change". The check only looks for integers outside the safe range. A number too large for a double (`1e400`) parses to `Infinity`; `Number.isInteger(Infinity)` is false, so the file is merged, and `JSON.stringify(Infinity)` writes `null`. Confirmed: `{"limit":1e400}` comes back as `{"limit":null}`.
 - **Why it matters:** A pull with `--merge` silently changes a value in the user's settings file. Rare (such numbers are unusual in config), which is why it is Low.
 - **Fix:** Treat any non-finite number as unsafe too: `typeof value === 'number' && (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value)))`, and add the case next to the T45 test in `merge-strategies.test.ts:109-114`.
@@ -127,7 +127,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### SEC-03 · Low · Review lists print commands from a bundle with their line breaks
 
-- [ ] **Where:** `packages/cli/src/pull/pull-command.ts:336-343` (each `entry.command` joined into the review message); `packages/cli/src/ui/printable.ts:8` keeps `\n` (0x0a) and tab.
+- [x] **Where:** `packages/cli/src/pull/pull-command.ts:336-343` (each `entry.command` joined into the review message); `packages/cli/src/ui/printable.ts:8` keeps `\n` (0x0a) and tab.
 - **Problem:** `printable` (T44) stops escape sequences so a bundle cannot redraw the review list. A hook or MCP command from a pulled bundle can still hold newlines, though, and they are printed as real line breaks. A command like `curl … | sh\n  ~ statusLine: ccstatusline  (changed)` then adds lines that look like extra, harmless review entries. `command-review.ts:77-79` does not flatten the command.
 - **Why it matters:** it is the same goal T44 protects ("make a review list look harmless"). It cannot hide the real command, which is still printed first, so the risk is low.
 - **Fix:** show the single-line fields of a review entry (`label`, `command`) with line breaks escaped. For example, add `printableLine(text)` that also maps `\n`, `\r` and tab to `\u{…}`, and use it for `entry.label` and `entry.command`.
@@ -178,7 +178,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### UX-01 · Low · Login and register drop the current login before the new credentials are checked
 
-- [ ] **Where:** `packages/cli/src/auth/auth-commands.ts:135-149` (`readyForNewLogin` calls `logOut`), run first at `:176` (register) and `:224` (login), before the username, password, prelogin and login at `:226-268`.
+- [x] **Where:** `packages/cli/src/auth/auth-commands.ts:135-149` (`readyForNewLogin` calls `logOut`), run first at `:176` (register) and `:224` (login), before the username, password, prelogin and login at `:226-268`.
 - **Problem:** after "You are already logged in on this PC. Log out and continue?" (or `--yes`), the working session is ended on the server and removed from the PC immediately. A mistyped password, a taken username, a "no" at the no-recovery warning (`:181-184`, which then says only "No account was created."), Ctrl+C at the password prompt, or a bad `--password-stdin` all leave the user logged out of the account they had.
 - **Why it matters:** a typo costs a working login, and getting it back needs the old account's password. A script with `login --yes` that fails leaves the PC with no login at all, and every later push or pull fails.
 - **Fix:** gather and check the new credentials first: ask the username and password, then prelogin and login (or register). Only when the new session and data key are in hand, log out the old session and save the new one. If that order is kept on purpose, say in the question that the current login ends even if the new one fails.
@@ -187,7 +187,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### UX-02 · Low · Logout says "Could not reach the server" for every failure
 
-- [ ] **Where:** `packages/cli/src/auth/auth-commands.ts:157-171`
+- [x] **Where:** `packages/cli/src/auth/auth-commands.ts:157-171`
 - **Problem:** every error from `api.auth.logout()` other than `unauthorized` shows "Could not reach the server, so only this PC was logged out." That includes a 429 `rate_limited`, a 500 `internal_error` and an `InvalidResponseError` (a wrong server or a proxy page), where the server was reached.
 - **Why it matters:** the message points the user at their network when the cause is a rate limit or a server fault. It also hides the server's own message and the Retry-After that `describeError` (`cli/error-messages.ts:14-24`) would show.
 - **Fix:** keep the network wording for `NetworkError`. For other errors, warn "The server did not end the session (`describeError(error)`), so only this PC was logged out. …".
@@ -196,7 +196,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### UX-03 · Low · `agentnomad env` in the home folder lists the global setup twice
 
-- [ ] **Where:** `packages/cli/src/env/env-command.ts:38-48`; compare the refusal push and pull apply at `packages/cli/src/push/push-command.ts:160-172` and `packages/cli/src/pull/pull-command.ts:162-170`.
+- [x] **Where:** `packages/cli/src/env/env-command.ts:38-48`; compare the refusal push and pull apply at `packages/cli/src/push/push-command.ts:160-172` and `packages/cli/src/pull/pull-command.ts:162-170`.
 - **Problem:** `env` always collects the current folder as a project. In the home folder (where a new terminal starts), the project collector reads `~/.claude/settings.json` as `.claude/settings.json` and walks `~/.claude/skills`, `agents`, … a second time (`agents/claude-code/project-collector.ts:84-109`). Every variable is then listed as used by both "Claude Code global" and "Claude Code this project". BUG-05 (T60) made the home folder and the agent's folder never a project in push and pull, but `env` was not included.
 - **Why it matters:** the output is misleading (the home folder is not a project) and the global folders are read twice.
 - **Fix:** skip the project scan when `projectFolderRefusal(cwd, { homedir, baseDir: found.baseDir, … })` is not null. `EnvCommandDeps` then needs `homedir` and `platform`.
@@ -205,7 +205,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### UX-04 · Low · `delete --agent <id>` with nothing saved for that agent shows an empty checklist
 
-- [ ] **Where:** `packages/cli/src/commands/setup-commands.ts:150-167`
+- [x] **Where:** `packages/cli/src/commands/setup-commands.ts:150-167`
 - **Problem:** the "nothing saved" check looks at all setups (`setups.length === 0`), not at the ones that match the flags. With `--agent X` and no `--global`/`--project`, when X has no saved setup but another agent does, `chosen` is empty and the user gets "Which saved setups to delete…" with no options. With `--global`/`--project`, the same situation gives the clear "No saved setup matches. Run `agentnomad list` to see them." (`:155-157`). Without a terminal it fails as "needs an answer" with a flag hint, though no flag can answer it.
 - **Why it matters:** the same mistake gives different answers depending on the flags. One of those answers is a question with nothing to choose.
 - **Fix:** after `matching`, if `chosen.length === 0` throw the same "No saved setup matches" error, whatever flags were given.
@@ -226,7 +226,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DEAD-02 · Low · `restoreEnvValues` is only used by tests, and its helper's comment is stale
 
-- [ ] **Where:** `packages/cli/src/env/env-restore.ts:45-56` (`restoreEnvValues`), `:27-32` (comment: "Shared by the restore and pull's no-terminal pre-check"); only callers are in `packages/cli/test/env-secrets.test.ts:409-578`. Production pull calls `planEnvRestore` and `writeEnvValues` directly (`pull/pull-command.ts:450, 531`).
+- [x] **Where:** `packages/cli/src/env/env-restore.ts:45-56` (`restoreEnvValues`), `:27-32` (comment: "Shared by the restore and pull's no-terminal pre-check"); only callers are in `packages/cli/test/env-secrets.test.ts:409-578`. Production pull calls `planEnvRestore` and `writeEnvValues` directly (`pull/pull-command.ts:450, 531`).
 - **Problem:** T59 split the restore into plan and apply. The combined function stays only so the tests can call it, and the no-terminal pre-check named in the comment was removed by T59. knip does not flag it because the test project counts as a user.
 - **Why it matters:** a reader thinks there are two production paths for env restore and looks for a pre-check that no longer exists.
 - **Fix:** move the tests to `planEnvRestore` + `writeEnvValues` (or a small helper in the test file), delete `restoreEnvValues`, and change the comment on `splitEnvValues` to "used by `planEnvRestore`".
@@ -288,7 +288,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DUP-05 · Low · The "Claude Code global setup / project "x"" label is built in four places
 
-- [ ] **Where:** `packages/cli/src/push/push-command.ts:109-110`, `packages/cli/src/pull/pull-command.ts:109-110`, `packages/cli/src/commands/setup-commands.ts:41-42`, `packages/cli/src/pull/saved-setups.ts:126`
+- [x] **Where:** `packages/cli/src/push/push-command.ts:109-110`, `packages/cli/src/pull/pull-command.ts:109-110`, `packages/cli/src/commands/setup-commands.ts:41-42`, `packages/cli/src/pull/saved-setups.ts:126`
 - **Problem:** the same rule (`global setup` or `project "<name>"`, sometimes with the agent's display name in front) is written four times, from three input shapes (`PushItem.scope`, `SavedSetup.projectName`, twice).
 - **Why it matters:** the wording appears in user messages and in the "Not saved / Not restored" list. A change (quoting, a new scope kind) has to be made four times to keep the messages the same.
 - **Fix:** one `setupLabel(displayName: string | null, projectName: string | null)` in `cli/setup-outcomes.ts` (or `ui/`), used by all four.
@@ -337,7 +337,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-02 · Low · A doc comment sits on the wrong declaration in `saved-setups.ts`
 
-- [ ] **Where:** `packages/cli/src/pull/saved-setups.ts:54-56` and `:85`
+- [x] **Where:** `packages/cli/src/pull/saved-setups.ts:54-56` and `:85`
 - **Problem:** the comment "Every saved setup of the account (all pages), names decrypted; unreadable names are left out." is stacked on top of the `MAX_PAGES` comment and constant. `listSavedSetups` at `:85`, which it describes, has no doc of its own. Editor hovers show the wrong text for both.
 - **Why it matters:** `listSavedSetups` quietly drops setups whose name does not decrypt. That is the one thing a caller needs to know, and it is missing where they look.
 - **Fix:** move the line onto `listSavedSetups`.
