@@ -20,6 +20,18 @@ export async function writeTargetOf(path: string): Promise<string> {
 }
 
 /**
+ * `''` when nothing is at `path`, else the first free `-2`, `-3`, …: a backup or copy made
+ * in the same second as another gets a number and never replaces it (T45, review 6 BUG-01).
+ */
+export async function freeSuffix(path: string): Promise<string> {
+  const taken = async (candidate: string) => (await lstat(candidate).catch(() => null)) !== null;
+  if (!(await taken(path))) return '';
+  for (let number = 2; ; number += 1) {
+    if (!(await taken(`${path}-${String(number)}`))) return `-${String(number)}`;
+  }
+}
+
+/**
  * In the name of a temporary file of an atomic write (`.<name>.agentnomad-tmp-<hex>`): one an
  * interrupted write left behind is never collected nor reported (BUG-03).
  */

@@ -20,7 +20,8 @@ import type {
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
-import { writeFileAtomically } from '../../system/files.ts';
+import { freeSuffix, writeFileAtomically } from '../../system/files.ts';
+import { printableLine } from '../../ui/printable.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
@@ -30,8 +31,9 @@ import {
   createClaudeJsonMerge,
   type MutableReport,
 } from './claude-json-merge.ts';
-import { commandsInSettings, pathWords } from './settings-commands.ts';
+import { pathWords, settingsCommands } from './settings-commands.ts';
 import { CLAUDE_JSON_BUNDLE_PATH, extensionOf } from './global-paths.ts';
+import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
 import {
   globalDestination,
   projectDestination,
@@ -83,9 +85,13 @@ export interface RestorerOptions {
 const LF_SCRIPTS = new Set(['.sh', '.bash', '.zsh', '.fish', '.py', '.rb', '.pl', '.lua']);
 const CRLF_SCRIPTS = new Set(['.bat', '.cmd']);
 
-/** Commands that only run on one side. */
-const WINDOWS_ONLY = /(\.ps1|\.psm1|\.bat|\.cmd)$|^(powershell|pwsh|cmd)(\.exe)?$/i;
-const POSIX_ONLY = /(\.sh|\.bash|\.zsh|\.fish)$|^(bash|sh|zsh|fish)$/i;
+/** Commands that only run on one side: their program, or a script they run. */
+const ONLY_ON = {
+  windows: { programs: /^(powershell|pwsh|cmd)(\.exe)?$/i, scripts: /\.(ps1|psm1|bat|cmd)$/i },
+  posix: { programs: /^(bash|sh|zsh|fish)$/i, scripts: /\.(sh|bash|zsh|fish)$/i },
+};
+/** `NAME=value` words a shell command may start with, before its program. */
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /** Line endings of scripts for this OS; every other file stays byte-for-byte. */
 export function lineEndingsFor(
@@ -117,12 +123,22 @@ export function sameForRestore(
   );
 }
 
-/** Hook and status line commands that will likely not run on `platform` (from another OS). */
+/**
+ * Hook and status line commands that will likely not run on `platform` (from another OS), as
+ * written. Only the program and the scripts a command runs count (review 6 UX-02): a shell
+ * name in an argument's text (`echo "use bash here"`) is not one.
+ */
 export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform): string[] {
-  const foreign = platform === 'win32' ? POSIX_ONLY : WINDOWS_ONLY;
-  return commandsInSettings(settingsJson)
-    .filter((words) => pathWords(words).some((word) => foreign.test(word)))
-    .map((words) => words.join(' '));
+  const foreign = platform === 'win32' ? ONLY_ON.posix : ONLY_ON.windows;
+  return settingsCommands(settingsJson)
+    .filter(({ words }) => {
+      const program = words.find((word) => !ASSIGNMENT.test(word)) ?? '';
+      return (
+        foreign.programs.test(program.split(/[\\/]/).pop() ?? '') ||
+        pathWords(words).some((word) => foreign.scripts.test(word))
+      );
+    })
+    .map(({ text }) => text);
 }
 
 /**
@@ -151,15 +167,6 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     if (info === null) return null;
     if (!info.isFile()) return 'folder';
     return new Uint8Array(await readFile(nativePath));
-  }
-
-  /** `''` when nothing is at `nativePath`, else the first free `-2`, `-3`, … (T45). */
-  async function freeSuffix(nativePath: string): Promise<string> {
-    const taken = async (candidate: string) => (await stat(candidate).catch(() => null)) !== null;
-    if (!(await taken(nativePath))) return '';
-    for (let number = 2; ; number += 1) {
-      if (!(await taken(`${nativePath}-${String(number)}`))) return `-${String(number)}`;
-    }
   }
 
   /**
@@ -269,9 +276,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       const projectScripts = new Set(
         target.kind === 'project'
           ? incoming
-              .filter((entry) =>
-                ['.claude/settings.json', '.claude/settings.local.json'].includes(entry.path),
-              )
+              .filter((entry) => PROJECT_SETTINGS_FILES.includes(entry.path))
               .flatMap((entry) =>
                 projectHookScripts(new TextDecoder().decode(entry.content), {
                   projectDir: target.projectDir,
@@ -306,7 +311,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
             location.kind === 'shared'
               ? 'Auto memory was not restored: autoMemoryDirectory in your user settings is shared by every project.'
               : location.kind === 'refused'
-                ? `Auto memory was not restored to ${location.dir}, the folder autoMemoryDirectory names: ${location.reason}.`
+                ? `Auto memory was not restored to ${printableLine(location.dir)}, the folder autoMemoryDirectory names: ${location.reason}.`
                 : 'Auto memory was not restored: this project path is too long to find its memory folder.',
           );
           return null;
@@ -317,7 +322,9 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         const destination = destinationOf(file.path);
         if (destination.kind === 'refused') {
           report.skipped.push(file.path);
-          report.warnings.push(`Refused "${file.path}": ${destination.reason}.`);
+          report.warnings.push(
+            `Refused "${printableLine(file.path)}": ${printableLine(destination.reason)}.`,
+          );
           return;
         }
         if (destination.kind === 'metadata') return;
@@ -336,7 +343,9 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         const existing = await readExisting(nativePath);
         if (existing === 'folder') {
           report.skipped.push(file.path);
-          report.warnings.push(`Skipped "${file.path}": a folder with that name exists.`);
+          report.warnings.push(
+            `Skipped "${printableLine(file.path)}": a folder with that name exists.`,
+          );
           return;
         }
         const existingMode = existing === null ? null : (await stat(nativePath)).mode & 0o777;
@@ -388,7 +397,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           if (first !== undefined) {
             report.skipped.push(file.path);
             report.warnings.push(
-              `Skipped "${file.path}": on this PC it is the same file as "${first}".`,
+              `Skipped "${printableLine(file.path)}": on this PC it is the same file as "${printableLine(first)}".`,
             );
             continue;
           }
@@ -401,16 +410,14 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           if (stopped !== undefined) throw stopped.error;
           report.skipped.push(file.path);
           report.warnings.push(
-            `Skipped "${file.path}": ${error instanceof Error ? error.message : String(error)}.`,
+            // A file error quotes the path as it is: its message is kept on one line too.
+            `Skipped "${printableLine(file.path)}": ${printableLine(error instanceof Error ? error.message : String(error))}.`,
           );
         }
       }
 
       if (context.sourceOs !== undefined && context.sourceOs !== os) {
-        const settingsPaths =
-          target.kind === 'global'
-            ? ['settings.json']
-            : ['.claude/settings.json', '.claude/settings.local.json'];
+        const settingsPaths = target.kind === 'global' ? ['settings.json'] : PROJECT_SETTINGS_FILES;
         for (const file of incoming.filter((entry) => settingsPaths.includes(entry.path))) {
           for (const command of hooksForOtherOs(
             new TextDecoder().decode(file.content),

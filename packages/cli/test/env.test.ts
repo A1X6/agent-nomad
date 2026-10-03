@@ -285,6 +285,22 @@ describe('writing the profile', () => {
     expect(await readFile(profile, 'utf8')).toContain("export TOKEN='abc'");
   });
 
+  it('two writes in the same second keep both backups (review 6 BUG-01)', async () => {
+    const profile = join(dir, '.bashrc');
+    await writeFile(profile, 'alias ll="ls -l"\n');
+    const writer = createShellProfileWriter(
+      { path: profile, kind: 'posix', label: '~/.bashrc' },
+      () => new Date('2026-09-25T12:00:00Z'),
+    );
+    const first = await writer.write({ TOKEN: 'abc' });
+    const second = await writer.write({ TOKEN: 'new' });
+    expect(first.backup).toBe(`${profile}.agentnomad-backup-20260925T120000Z`);
+    expect(second.backup).toBe(`${profile}.agentnomad-backup-20260925T120000Z-2`);
+    // The first backup still holds the profile as it was before agentnomad touched it.
+    expect(await readFile(first.backup ?? '', 'utf8')).toBe('alias ll="ls -l"\n');
+    expect(await readFile(second.backup ?? '', 'utf8')).toContain("export TOKEN='abc'");
+  });
+
   it.runIf(posix)('a new shell really gets the value (second machine)', async () => {
     const profile = join(dir, '.bashrc');
     const value = `ghp_it's $HOME "x" \\ y`;

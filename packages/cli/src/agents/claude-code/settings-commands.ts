@@ -69,22 +69,49 @@ function runWords(command: string, args: readonly string[] | undefined): string[
 }
 
 /**
- * Commands in a `settings.json` that run files, as the words each one's program gets: every
- * hook, and the status line. A hook that cannot be read is left out on its own (SEC-01).
+ * A hook's command as shown (review 6 SEC-01): in exec form each `args` element quoted, so
+ * `tool "a b; c"` (one word, no shell) never prints like the shell command `tool a b; c`.
  */
-export function commandsInSettings(settingsJson: string): string[][] {
+export function commandText(command: string, args: readonly string[] | undefined): string {
+  return args === undefined
+    ? command
+    : [command, ...args.map((arg) => JSON.stringify(arg))].join(' ');
+}
+
+/** A command a `settings.json` runs: as shown, and the words its program gets. */
+interface SettingsCommand {
+  readonly text: string;
+  readonly words: string[];
+}
+
+/**
+ * Commands in a `settings.json` that run files: every hook, and the status line. A hook that
+ * cannot be read is left out on its own (SEC-01).
+ */
+export function settingsCommands(settingsJson: string): SettingsCommand[] {
   const settings = parseSettings(settingsJson);
   if (settings === null) return [];
   const commands = hookItems(settings['hooks']).flatMap((item) =>
     'hook' in item && item.hook.command !== undefined
-      ? [runWords(item.hook.command, item.hook.args)]
+      ? [
+          {
+            text: commandText(item.hook.command, item.hook.args),
+            words: runWords(item.hook.command, item.hook.args),
+          },
+        ]
       : [],
   );
   const statusLine = HookCommandSchema.safeParse(settings['statusLine']);
   if (statusLine.success && statusLine.data.command !== undefined) {
-    commands.push(commandWords(statusLine.data.command));
+    const command = statusLine.data.command;
+    commands.push({ text: command, words: commandWords(command) });
   }
   return commands;
+}
+
+/** The commands of `settingsCommands`, as the words each one's program gets. */
+export function commandsInSettings(settingsJson: string): string[][] {
+  return settingsCommands(settingsJson).map((command) => command.words);
 }
 
 /**

@@ -3,7 +3,7 @@ import { posix } from 'node:path';
 
 import { BACKUP_MARKER, backupStamp } from '@agentnomad/core';
 
-import { isMissing, writeFileAtomically, writeTargetOf } from '../system/files.ts';
+import { freeSuffix, isMissing, writeFileAtomically, writeTargetOf } from '../system/files.ts';
 import { runProgram } from '../system/run-program.ts';
 
 /** Adds variables where new terminals (and the programs they start) will see them. */
@@ -151,8 +151,11 @@ export function createShellProfileWriter(
       await mkdir(posix.dirname(target), { recursive: true });
       let backup: string | null = null;
       if (existing !== null) {
-        backup = `${target}${BACKUP_MARKER}${backupStamp(now())}`;
-        await writeFile(backup, existing, { mode });
+        // Two writes in one second (global and project values) keep both backups (BUG-01);
+        // `wx` never replaces a file that appeared meanwhile.
+        const name = `${target}${BACKUP_MARKER}${backupStamp(now())}`;
+        backup = name + (await freeSuffix(name));
+        await writeFile(backup, existing, { mode, flag: 'wx' });
       }
       await writeFileAtomically(target, updated, { mode });
       return { backup };

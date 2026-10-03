@@ -5,7 +5,13 @@ import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts'
 import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
-import { commandsInSettings, commandWords, hookItems, pathWords } from './settings-commands.ts';
+import {
+  commandsInSettings,
+  commandText,
+  commandWords,
+  hookItems,
+  pathWords,
+} from './settings-commands.ts';
 import { HOME_SCRIPTS_PREFIX, isScript, TOOL_CONFIG_FILES } from './global-paths.ts';
 import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
@@ -108,8 +114,15 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
     }
     const { event, hook } = item;
     if (hook.command !== undefined) {
-      const command = [hook.command, ...(hook.args ?? [])].join(' ');
-      entries.push(entry(file.path, `hook ${event}`, command));
+      const command = commandText(hook.command, hook.args);
+      // Exec form is compared by its words (review 6 SEC-01): moving a text between one
+      // argument (data) and a shell command line (run) is a change, even when they read alike.
+      // The prefixes keep the two apart even for a shell command that is that JSON text.
+      const identity =
+        hook.args === undefined
+          ? `shell ${slashes(command)}`
+          : `exec ${stable({ command: slashes(hook.command), args: hook.args.map(slashes) })}`;
+      entries.push(entry(file.path, `hook ${event}`, command, identity));
     } else if (hook.type === 'http' && hook.url !== undefined) {
       // Sends what the hook sees (tool input, prompts) to that address.
       entries.push(entry(file.path, `hook ${event} (sends data to)`, hook.url));
