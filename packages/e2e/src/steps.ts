@@ -32,7 +32,8 @@ const ENV_VALUE = 'e2e-token-value-5b1d';
  */
 const PRESET_ENV: Readonly<Record<string, string>> =
   process.platform === 'win32' ? { [ENV_NAME]: ENV_VALUE } : {};
-const PUSH_ENV_VALUE = fileURLToPath(new URL('push-env-value.ts', import.meta.url));
+/** Built by `tsc --build`, like the CLI: Node 22 cannot run the TypeScript source. */
+const PUSH_ENV_VALUE = fileURLToPath(new URL('../dist/src/push-env-value.js', import.meta.url));
 /** A skill from the user's claude.ai account, as Claude Code syncs it (T42). */
 const ACCOUNT_SKILL =
   '---\nname: my-account-skill\ndescription: From claude.ai\n---\nWrite release notes.\n';

@@ -3,7 +3,7 @@
  * CLI asks that only in a terminal, and the e2e PCs have none, so this runs the same handlers
  * in a child process of the PC (its environment, folders and keychain rule; see pc.ts).
  *
- * Usage: node push-env-value.ts <NAME,…> <push options as JSON>
+ * Usage (built): node dist/src/push-env-value.js <NAME,…> <push options as JSON>
  */
 import { homedir, hostname } from 'node:os';
 
