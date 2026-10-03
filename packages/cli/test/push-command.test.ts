@@ -11,7 +11,7 @@ import {
   type BundleCodec,
   type CryptoService,
 } from '@agentnomad/core';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import {
   fakeBundleServer,
@@ -524,7 +524,7 @@ describe('agentnomad push', () => {
     expect(server.puts).toHaveLength(1);
 
     // The apply step's deps have no prompter at all: it cannot ask.
-    expect('prompter' in desktop.applyDeps).toBe(false);
+    expectTypeOf<PushApplyDeps>().not.toHaveProperty('prompter');
     const outcomes = await createPushApplier(desktop.applyDeps).apply(plan, keys);
     expect(outcomes).toEqual([{ setup: 'Claude Code global setup', result: 'done' }]);
     expect((await received(server, { kind: 'global' })).revision).toBe(2);

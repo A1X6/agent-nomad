@@ -80,7 +80,7 @@ describe('createProgramCli: the command line (every OS)', () => {
 
   it.each([
     ['a tab', 'a\tb'],
-    ['a non-breaking space', 'a b'],
+    ['a non-breaking space', 'a\u00a0b'],
     ['a line break', 'a\r\nb'],
     ['a quote', 'a"b'],
     ['an ampersand', 'a&calc'],

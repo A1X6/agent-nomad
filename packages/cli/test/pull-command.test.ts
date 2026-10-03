@@ -8,7 +8,7 @@ import {
   scopeKeyFor,
   type CryptoService,
 } from '@agentnomad/core';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
   fakeApi,
@@ -517,7 +517,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(await t.state.revisionOf('claude-code', 'global')).toBeNull();
 
     // The apply step's deps have no prompter at all: it cannot ask.
-    expect('prompter' in t.applyDeps).toBe(false);
+    expectTypeOf<PullApplyDeps>().not.toHaveProperty('prompter');
     if (plan === null) throw new Error('nothing planned');
     const outcomes = await createPullApplier(t.applyDeps).apply(plan);
     expect(outcomes).toEqual([{ setup: 'Claude Code global setup', result: 'done' }]);

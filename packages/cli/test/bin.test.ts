@@ -22,6 +22,9 @@ afterAll(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
+// Windows needs SystemRoot to start Node.
+const systemRoot = process.env['SystemRoot'];
+
 /** Runs the real `agentnomad` entry file with plain Node (type stripping, no build). */
 function agentnomad(...args: string[]) {
   return spawnSync(
@@ -42,7 +45,7 @@ function agentnomad(...args: string[]) {
         HOME: home,
         USERPROFILE: home,
         APPDATA: home,
-        ...(process.env.SystemRoot !== undefined && { SystemRoot: process.env.SystemRoot }),
+        ...(systemRoot !== undefined && { SystemRoot: systemRoot }),
       },
     },
   );

@@ -745,7 +745,7 @@ describe('restorer: a cancelled question stops the restore (T53)', () => {
     );
     await expect(restore).rejects.toBeInstanceOf(Cancelled);
     expect(questions).toEqual(['rules/a.md']);
-    expect(await readdir(join(base, 'rules'))).toEqual(['a.md', 'b.md']);
+    expect((await readdir(join(base, 'rules'))).sort()).toEqual(['a.md', 'b.md']);
     expect(await read(join(base, 'rules', 'a.md'))).toBe('mine a');
   });
 });
@@ -827,7 +827,7 @@ describe('restorer: per-OS fixes', () => {
       expect(report.written).toEqual([]);
       expect(report.backups).toEqual([]);
     }
-    expect(await readdir(join(base, 'hooks'))).toEqual(['check.py', 'run.cmd']);
+    expect((await readdir(join(base, 'hooks'))).sort()).toEqual(['check.py', 'run.cmd']);
     expect(await read(join(base, 'hooks', 'check.py'))).toBe(py);
     expect(await read(join(base, 'hooks', 'run.cmd'))).toBe(cmd);
   });
@@ -853,7 +853,7 @@ describe('restorer: per-OS fixes', () => {
     const second = await restorer().restorer.restore({ kind: 'global' }, incoming, resolve);
     expect(questions).toEqual([]);
     expect(second.written).toEqual([]);
-    expect(await readdir(join(base, 'hooks'))).toEqual(['check.py', 'run.cmd']);
+    expect((await readdir(join(base, 'hooks'))).sort()).toEqual(['check.py', 'run.cmd']);
   });
 
   it('sameForRestore: equal before or after the line-ending fix, never otherwise (T53)', () => {
