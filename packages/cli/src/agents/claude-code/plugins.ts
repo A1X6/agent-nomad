@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises';
-import { posix, win32 } from 'node:path';
 
 import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull, type JsonResult } from '../../system/json.ts';
 import { samePath } from '../../system/paths.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 
 /**
  * Plugins are reinstalled, never copied (T29): push saves which marketplaces and plugins
@@ -160,7 +160,7 @@ export async function readInstalledPlugins(
   baseDir: string,
   platform: NodeJS.Platform,
 ): Promise<Readonly<Record<string, readonly PluginInstall[]>> | null> {
-  const path = platform === 'win32' ? win32 : posix;
+  const path = pathsOf(platform);
   const installed = await readJson(
     path.join(baseDir, 'plugins', 'installed_plugins.json'),
     InstalledPluginsSchema,
@@ -189,7 +189,7 @@ export interface PluginManifestInput {
 export async function readPluginManifest(
   input: PluginManifestInput,
 ): Promise<PluginManifest | null> {
-  const path = input.platform === 'win32' ? win32 : posix;
+  const path = pathsOf(input.platform);
   const pluginsDir = path.join(input.baseDir, 'plugins');
   const installed = await readInstalledPlugins(input.baseDir, input.platform);
   if (installed === null) return null;

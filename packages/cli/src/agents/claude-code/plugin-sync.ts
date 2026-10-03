@@ -1,11 +1,12 @@
 import { readFile } from 'node:fs/promises';
-import { posix, win32 } from 'node:path';
+import { win32 } from 'node:path';
 
 import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { runProgram } from '../../system/run-program.ts';
 import type { Prompter, Reporter } from '../../ui/prompter.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 import {
   installedIn,
   readInstalledPlugins,
@@ -69,7 +70,7 @@ export async function readCurrentPlugins(
   platform: NodeJS.Platform,
   projectDir?: string,
 ): Promise<CurrentPlugins> {
-  const path = platform === 'win32' ? win32 : posix;
+  const path = pathsOf(platform);
   const knownText = await readFile(
     path.join(baseDir, 'plugins', 'known_marketplaces.json'),
     'utf8',

@@ -1,10 +1,11 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { posix, win32 } from 'node:path';
+import { win32 } from 'node:path';
 
 import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { runProgram } from '../../system/run-program.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 
 /**
  * Settings an organization enforces on this PC (T31). They belong to the PC, not the user:
@@ -79,7 +80,7 @@ function keysOf(text: string | null): string[] {
 export async function detectManagedSettings(
   system: ManagedSettingsSystem,
 ): Promise<ManagedSettings> {
-  const path = system.platform === 'win32' ? win32 : posix;
+  const path = pathsOf(system.platform);
   const dir = managedSettingsDir(system.platform, system.env);
   const sources: ManagedSource[] = [];
   const keys = new Set<string>();

@@ -27,6 +27,9 @@ describe('running Claude Code', () => {
     ['grep claude notes.txt', false],
     ['/home/a/claude/bin/tool', false],
     ['/home/a/claude-code-notes/run.sh', false],
+    // Only the program counts, not an argument (UX-02).
+    ['/usr/bin/vim /home/a/projects/claude', false],
+    ['npm install -g @anthropic-ai/claude-code', false],
   ])('%j is Claude Code: %s', (line, expected) => {
     expect(isClaudeProcess(line)).toBe(expected);
   });

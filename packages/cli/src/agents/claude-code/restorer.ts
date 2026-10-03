@@ -21,7 +21,7 @@ import type {
   ScopeTarget,
 } from '../adapter.ts';
 import { writeFileAtomically } from '../../system/files.ts';
-import { createFileGatherer } from '../shared/file-gathering.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { reviewRunnable } from './command-review.ts';
@@ -30,8 +30,8 @@ import {
   createClaudeJsonMerge,
   type MutableReport,
 } from './claude-json-merge.ts';
-import { commandsInSettings, commandWords } from './settings-commands.ts';
-import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, SKIPPED_NAMES } from './global-paths.ts';
+import { commandsInSettings, pathWords } from './settings-commands.ts';
+import { CLAUDE_JSON_BUNDLE_PATH, extensionOf } from './global-paths.ts';
 import {
   globalDestination,
   projectDestination,
@@ -120,9 +120,9 @@ export function sameForRestore(
 /** Hook and status line commands that will likely not run on `platform` (from another OS). */
 export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform): string[] {
   const foreign = platform === 'win32' ? POSIX_ONLY : WINDOWS_ONLY;
-  return commandsInSettings(settingsJson).filter((command) =>
-    commandWords(command).some((word) => foreign.test(word)),
-  );
+  return commandsInSettings(settingsJson)
+    .filter((words) => pathWords(words).some((word) => foreign.test(word)))
+    .map((words) => words.join(' '));
 }
 
 /**
@@ -132,8 +132,7 @@ export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform)
  * It never asks: every answer comes from pull's plan step (T61).
  */
 export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRestorer {
-  const files = createFileGatherer(options.platform, { skippedNames: SKIPPED_NAMES });
-  const { path } = files;
+  const path = pathsOf(options.platform);
   const os = sourceOsOf(options.platform);
   const resolver = createPathResolver({ os, homeDir: options.homedir });
   const strategies = createMergeStrategies(options.now ? { now: options.now } : {});

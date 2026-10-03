@@ -19,6 +19,12 @@ export async function writeTargetOf(path: string): Promise<string> {
   return link?.isSymbolicLink() ? realpath(path) : path;
 }
 
+/**
+ * In the name of a temporary file of an atomic write (`.<name>.agentnomad-tmp-<hex>`): one an
+ * interrupted write left behind is never collected nor reported (BUG-03).
+ */
+export const TEMP_MARKER = '.agentnomad-tmp-';
+
 export interface AtomicWriteOptions {
   /** Mode of the new file; on macOS and Linux also set with `chmod`, so the umask cannot change it. */
   readonly mode?: number;
@@ -47,11 +53,7 @@ export async function writeFileAtomically(
     recursive: true,
     ...(options.dirMode !== undefined && { mode: options.dirMode }),
   });
-  // Named so the agents' scans recognise a leftover one (`unknown-files.ts`).
-  const temp = join(
-    folder,
-    `.${basename(target)}.agentnomad-tmp-${randomBytes(4).toString('hex')}`,
-  );
+  const temp = join(folder, `.${basename(target)}${TEMP_MARKER}${randomBytes(4).toString('hex')}`);
   const { mode } = options;
   try {
     await writeFile(temp, content, { flag: 'wx', ...(mode !== undefined && { mode }) });

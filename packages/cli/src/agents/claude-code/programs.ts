@@ -1,10 +1,11 @@
-import { posix, win32 } from 'node:path';
+import type { PlatformPath } from 'node:path';
 
 import * as z from 'zod';
 
 import { parseJsonWith, type JsonResult } from '../../system/json.ts';
 import {
   findExecutable,
+  pathsOf,
   type DetectorSystem,
   type ExecutableLookupSystem,
 } from '../shared/detector-system.ts';
@@ -63,19 +64,53 @@ const NpmManifestSchema = z.object({
 });
 
 /**
- * Finds a command like the shell does, then checks whether npm installed it globally:
- * npm puts the launcher in its prefix (Windows) or prefix/bin (macOS, Linux), next to
- * `node_modules/<name>` or `lib/node_modules/<name>`.
+ * The package folder a file inside `node_modules` belongs to, e.g.
+ * `…/node_modules/@scope/tool/dist/cli.js` → `…/node_modules/@scope/tool`; `null` outside one.
+ */
+function packageFolderOf(path: PlatformPath, file: string): string | null {
+  const parts = path.normalize(file).split(path.sep);
+  const at = parts.lastIndexOf('node_modules');
+  if (at === -1) return null;
+  const name = parts.slice(at + 1, parts[at + 1]?.startsWith('@') === true ? at + 3 : at + 2);
+  return NPM_PACKAGE_NAME.test(name.join('/'))
+    ? [...parts.slice(0, at + 1), ...name].join(path.sep)
+    : null;
+}
+
+/** What npm's `.cmd` launcher runs: `"%dp0%\node_modules\typescript\bin\tsc" %*`. */
+const SHIM_TARGET = /%~?dp0%?\\(node_modules\\[^"%*\r\n]+)/i;
+
+/**
+ * Finds a command like the shell does, then checks whether npm installed it globally (BUG-02):
+ * the package the launcher runs, whatever its name (`tsc` from `typescript`, `mmdc` from
+ * `@mermaid-js/mermaid-cli`). npm links the launcher into the package on macOS and Linux,
+ * and writes a `.cmd` launcher that names it on Windows. Else a package of the command's own
+ * name next to the launcher: `node_modules/<name>` (Windows) or `lib/node_modules/<name>`.
  */
 export function createProgramLocator(
-  system: ExecutableLookupSystem & Pick<DetectorSystem, 'readText'>,
+  system: ExecutableLookupSystem & Pick<DetectorSystem, 'readText' | 'realPath'>,
 ): ProgramLocator {
-  const path = system.platform === 'win32' ? win32 : posix;
+  const path = pathsOf(system.platform);
+
+  async function packageRun(executable: string): Promise<string | null> {
+    if (system.platform !== 'win32') {
+      const real = await system.realPath(executable);
+      return real === null ? null : packageFolderOf(path, real);
+    }
+    if (path.extname(executable).toLowerCase() !== '.cmd') return null;
+    const target = SHIM_TARGET.exec((await system.readText(executable)) ?? '')?.[1];
+    return target === undefined
+      ? null
+      : packageFolderOf(path, path.join(path.dirname(executable), target));
+  }
+
   return async (command) => {
     const executable = await findExecutable(system, command);
     if (executable === null) return null;
     const folder = path.dirname(executable);
+    const run = await packageRun(executable);
     const manifests = [
+      ...(run === null ? [] : [path.join(run, 'package.json')]),
       path.join(folder, 'node_modules', command, 'package.json'),
       path.join(folder, '..', 'lib', 'node_modules', command, 'package.json'),
     ];

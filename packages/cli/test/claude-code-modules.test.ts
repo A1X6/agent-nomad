@@ -17,10 +17,10 @@ describe('settings parsing is its own module (SOLID-05; imports checked by ESLin
       statusLine: { command: 'npx -y ccstatusline@latest' },
     });
     expect(commandsInSettings(settings)).toEqual([
-      'bash ~/.claude/hooks/done.sh',
-      'npx -y ccstatusline@latest',
+      ['bash', '~/.claude/hooks/done.sh'],
+      ['npx', '-y', 'ccstatusline@latest'],
     ]);
-    expect(programOf('npx -y ccstatusline@latest')).toEqual({
+    expect(programOf(['npx', '-y', 'ccstatusline@latest'])).toEqual({
       name: 'ccstatusline',
       runner: true,
     });

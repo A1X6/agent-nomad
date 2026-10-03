@@ -8,6 +8,7 @@ import { BundlePathSchema } from '@agentnomad/contracts';
 import { windowsNameProblem } from '@agentnomad/core';
 
 import { ENV_BUNDLE_PATH } from '../../env/env-section.ts';
+import { RESERVED_DIR } from '../adapter.ts';
 
 import {
   CLAUDE_JSON_BUNDLE_PATH,
@@ -18,12 +19,12 @@ import {
   HOME_SCRIPTS_PREFIX,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
-  RESERVED_DIR,
   homePathProblem,
   extensionOf,
   isScript,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
+import { underFolder } from '../shared/bundle-paths.ts';
 import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
@@ -50,10 +51,9 @@ export type RestoreDestination =
   | { readonly kind: 'metadata' }
   | { readonly kind: 'refused'; readonly reason: string };
 
-const under = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`);
 /** For refusals: Windows and macOS ignore case, so `Plugins/…` is `plugins/…` there (T43). */
 const underAnyCase = (path: string, folder: string) =>
-  under(path.toLowerCase(), folder.toLowerCase());
+  underFolder(path, folder, { ignoreCase: true });
 
 const refused = (reason: string): RestoreDestination => ({ kind: 'refused', reason });
 

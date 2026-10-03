@@ -72,15 +72,31 @@ export function systemProcessLister(
 }
 
 /**
+ * The folders before a program at the start of an unquoted command line (`ps` prints no
+ * quotes): a space goes on with the path (`/Users/John Smith/…`) unless an argument starts
+ * after it (`-x`, `/x`, `"x`, `C:\x`).
+ */
+const LEADING_FOLDERS = String.raw`(?:[^\s"]|\s(?![-/"]|[A-Za-z]:[\\/]))*[\\/]`;
+
+/** A command line whose program (the first word, quoted or not) is `name`. */
+const startsWithProgram = (name: string) =>
+  new RegExp(String.raw`^(?:"(?:[^"]*[\\/])?${name}"|(?:${LEADING_FOLDERS})?${name})(?:\s|$)`, 'i');
+
+const CLAUDE_PROGRAM = startsWithProgram(String.raw`claude(?:\.exe)?`);
+const NODE_PROGRAM = startsWithProgram(String.raw`node(?:\.exe)?`);
+
+/**
  * True for a Claude Code process: the `claude` program (`claude.exe`, `/usr/local/bin/claude
  * --resume`, also under a folder with a space in its name) or the npm package running under
  * node. The Claude app (`Claude.exe`, `Claude.app/…/Claude`) counts too: its Code tab runs
- * Claude Code, which shares `~/.claude.json` (BUG-13). Not this CLI or unrelated names.
+ * Claude Code, which shares `~/.claude.json` (BUG-13). Only the program counts (UX-02): not an
+ * editor open on a `claude` folder, `npm install -g @anthropic-ai/claude-code`, this CLI or
+ * unrelated names.
  */
 export function isClaudeProcess(line: string): boolean {
   const trimmed = line.trim();
-  if (/@anthropic-ai[\\/]claude-code/i.test(trimmed)) return true;
-  return /(?:^|[\\/])claude(?:\.exe)?(?:["\s]|$)/i.test(trimmed);
+  if (CLAUDE_PROGRAM.test(trimmed)) return true;
+  return NODE_PROGRAM.test(trimmed) && /@anthropic-ai[\\/]claude-code/i.test(trimmed);
 }
 
 /**

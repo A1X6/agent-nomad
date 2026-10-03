@@ -12,10 +12,9 @@ import {
   planAccountSkills,
   readSyncedSkills,
 } from './account-skills.ts';
-import { findExecutable, type ExecutableLookupSystem } from '../shared/detector-system.ts';
-import { createFileGatherer } from '../shared/file-gathering.ts';
+import { findExecutable, pathsOf, type ExecutableLookupSystem } from '../shared/detector-system.ts';
 import { claudeConfigDir, findClaudeExecutable } from './detector.ts';
-import { PLUGINS_BUNDLE_PATH, PROGRAMS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
+import { PLUGINS_BUNDLE_PATH, PROGRAMS_BUNDLE_PATH } from './global-paths.ts';
 import { explainPluginFailure, type ManagedSettings } from './managed-settings.ts';
 import {
   askPluginSync,
@@ -164,15 +163,15 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
    */
   async function accountSkillsHere(files: readonly CollectedFile[], incoming: readonly string[]) {
     const baseDir = claudeConfigDir(deps.system);
-    const gatherer = createFileGatherer(deps.system.platform, { skippedNames: SKIPPED_NAMES });
-    const skillsDir = gatherer.path.join(baseDir, 'skills');
+    const path = pathsOf(deps.system.platform);
+    const skillsDir = path.join(baseDir, 'skills');
     const localNames = new Set([
       ...(await readdir(skillsDir, { withFileTypes: true }).catch(() => []))
         .filter((entry) => entry.isDirectory() && entry.name !== 'synced')
         .map((entry) => entry.name.toLowerCase()),
       ...incoming.map((name) => name.toLowerCase()),
     ]);
-    const synced = await readSyncedSkills(gatherer, baseDir);
+    const synced = await readSyncedSkills(path, baseDir);
     return planAccountSkills(files, { syncedNames: synced.allNames, localNames });
   }
 
@@ -249,8 +248,14 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
         Promise.resolve('skip'),
       );
       for (const warning of report.warnings) reporter.warn(warning);
+      // Named from what was written (UX-01): the restorer may refuse or skip a skill's files.
+      const written = new Set(report.written.map((path) => path.split('/')[1] ?? ''));
+      const missing = added.filter((name) => !written.has(name));
+      if (missing.length > 0) reporter.warn(`Not added: ${missing.join(', ')}.`);
+      const done = added.filter((name) => written.has(name));
+      if (done.length === 0) return;
       reporter.success(
-        `Added ${added.join(', ')} as local skills. If this PC later signs in to the claude.ai account they came from, they sync there too, and your local copy keeps the short name.`,
+        `Added ${done.join(', ')} as local skills. If this PC later signs in to the claude.ai account they came from, they sync there too, and your local copy keeps the short name.`,
       );
     };
   }

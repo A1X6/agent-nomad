@@ -33,6 +33,7 @@ function fakeSystem(pc: FakePc) {
     isDirectory: (path) => Promise.resolve((pc.folders ?? []).includes(path)),
     isExecutable: (path) => Promise.resolve((pc.executables ?? []).includes(path)),
     readText: (path) => Promise.resolve(pc.files?.[path] ?? null),
+    realPath: (path) => Promise.resolve(path),
     runVersion: (file) => {
       ran.push(file);
       return Promise.resolve(pc.versions?.[file] ?? null);

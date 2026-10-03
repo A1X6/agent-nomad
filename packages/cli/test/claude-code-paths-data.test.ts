@@ -82,6 +82,23 @@ describe('unknown-file check (T32 done-when)', () => {
     ]);
   });
 
+  it('does not report a folder whose script a hook in exec form runs (BUG-01)', async () => {
+    await put(join(base, 'hooks', 'check.js'));
+    await writeFile(
+      join(base, 'settings.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: 'command', command: 'node', args: ['~/.claude/hooks/check.js'] }] },
+          ],
+        },
+      }),
+    );
+    expect(
+      await findUnknownEntries({ kind: 'global' }, { ...input(), homedir: dirname(base) }),
+    ).toEqual([]);
+  });
+
   it('does not report skills/synced/, secrets, state or known copies', async () => {
     await put(join(base, 'skills', 'synced', 'x', 'SKILL.md'));
     await put(join(base, '.credentials.json'));
