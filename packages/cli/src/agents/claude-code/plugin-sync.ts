@@ -252,15 +252,28 @@ const startProgram: StartProgram = (file, args, options) =>
 
 /** Windows launchers npm creates; they need `cmd.exe` to run. */
 const SHIMS = new Set(['.cmd', '.bat']);
-/** What cmd.exe acts on in an argument; spaces too, since the arguments are joined unquoted. */
-const CMD_UNSAFE = /["&|<>^%!\s\p{Cc}]/u;
+/**
+ * What cmd.exe acts on in an argument, and any white space but a plain space. A space is
+ * fine: such an argument is quoted, as a local marketplace folder like `C:\My Plugins` needs.
+ */
+const CMD_UNSAFE = /["&|<>^%!\p{Cc}]|[^\S ]/u;
+
+/**
+ * One argument on the cmd.exe line: as it is, or in quotes when it holds a space. Inside the
+ * quotes only a backslash right before the closing quote means something (to the program's
+ * argument parser), so trailing backslashes are doubled.
+ */
+const cmdArgument = (arg: string) =>
+  arg.includes(' ') ? `"${arg.replace(/(\\+)$/, '$1$1')}"` : arg;
+
 /** What cmd.exe still acts on inside the quotes around the launcher's path. */
 const CMD_UNSAFE_PATH = /["%!\p{Cc}]/u;
 
 /**
  * The real `claude` (or `npm`) command. Arguments come from a validated manifest. On Windows a
  * `.cmd` launcher runs through `cmd.exe` with one command line passed as written (Node would
- * escape the quotes in it), so arguments cmd.exe would read differently are refused.
+ * escape the quotes in it): an argument with a space is quoted, and arguments cmd.exe would
+ * read differently are refused.
  */
 export function createClaudeCli(
   claudePath: string,
@@ -288,7 +301,7 @@ export function createClaudeCli(
         });
       }
       // `/s`: cmd.exe drops the outer quotes and runs the rest exactly as written.
-      const line = `"${[`"${claudePath}"`, ...args].join(' ')}"`;
+      const line = `"${[`"${claudePath}"`, ...args.map(cmdArgument)].join(' ')}"`;
       return start('cmd.exe', ['/d', '/s', '/c', line], { ...common, verbatim: true });
     },
   };

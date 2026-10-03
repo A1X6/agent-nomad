@@ -533,7 +533,7 @@ describe('restorer: ~/.claude.json', () => {
     const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve);
     expect(await read(join(home, '.claude.json'))).toBe('{}');
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
-    expect(report.warnings[0]).toContain('Claude Code was running');
+    expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
   });
 
   it('with --yes skips it while Claude Code runs, without asking', async () => {
@@ -545,7 +545,7 @@ describe('restorer: ~/.claude.json', () => {
     expect(asked).toEqual([]);
     expect(await read(join(home, '.claude.json'))).toBe('{}');
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
-    expect(report.warnings[0]).toContain('Claude Code was running');
+    expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
   });
 
   it('restores only the servers and preferences, never projects or account state (T43)', async () => {
@@ -952,9 +952,24 @@ describe('running Claude Code', () => {
     ['/Users/a/.local/bin/claude', true],
     ['node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js', true],
     ['"C:\\Users\\a\\.local\\bin\\claude.exe" --continue', true],
+    // A folder with a space in its name (BUG-13).
+    ['/Users/John Smith/.local/bin/claude --resume', true],
+    ['/Users/John Smith/.local/bin/claude', true],
+    ['"C:\\Users\\John Smith\\.local\\bin\\claude.exe" --continue', true],
+    // npm's Claude Code on Windows, seen by its command line (BUG-08).
+    [
+      '"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\a\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js',
+      true,
+    ],
+    // The Claude app: its Code tab runs Claude Code, which shares ~/.claude.json (BUG-13).
+    ['C:\\Users\\a\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe', true],
+    ['/Applications/Claude.app/Contents/MacOS/Claude', true],
     ['agentnomad pull', false],
     ['claude-helper', false],
     ['/usr/bin/vim claude.md', false],
+    ['grep claude notes.txt', false],
+    ['/home/a/claude/bin/tool', false],
+    ['/home/a/claude-code-notes/run.sh', false],
   ])('%j is Claude Code: %s', (line, expected) => {
     expect(isClaudeProcess(line)).toBe(expected);
   });

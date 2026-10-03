@@ -8,7 +8,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { nodeManagedSettingsSystem } from '../src/agents/claude-code/managed-settings.ts';
 import { createClaudeCli, type StartProgram } from '../src/agents/claude-code/plugin-sync.ts';
-import { systemProcessLister } from '../src/agents/claude-code/running-claude.ts';
+import {
+  createClaudeRunningCheck,
+  systemProcessLister,
+  type RunForOutput,
+} from '../src/agents/claude-code/running-claude.ts';
 import { realPowerShell } from '../src/env/shell-profile.ts';
 import { aclPrincipals, principalsToRemove, windowsOwnerOnly } from '../src/secrets/file-store.ts';
 
@@ -72,8 +76,8 @@ describe('createClaudeCli: the command line (every OS)', () => {
   });
 
   it.each([
-    ['a space', 'my plugin'],
     ['a tab', 'a\tb'],
+    ['a non-breaking space', 'a b'],
     ['a line break', 'a\r\nb'],
     ['a quote', 'a"b'],
     ['an ampersand', 'a&calc'],
@@ -91,11 +95,86 @@ describe('createClaudeCli: the command line (every OS)', () => {
     expect(calls).toEqual([]);
   });
 
+  it('quotes an argument with spaces for a .cmd launcher, e.g. a local marketplace folder', async () => {
+    const { calls, start } = fakeStart();
+    const cli = createClaudeCli('C:\\nodejs\\claude.cmd', windowsPc, { start });
+    await cli.run(['plugin', 'marketplace', 'add', 'C:\\My Plugins', 'C:\\My Plugins\\'], 'C:\\');
+    expect(calls).toEqual([
+      {
+        file: 'cmd.exe',
+        // A trailing backslash is doubled so it does not escape the closing quote.
+        args: [
+          '/d',
+          '/s',
+          '/c',
+          '""C:\\nodejs\\claude.cmd" plugin marketplace add "C:\\My Plugins" "C:\\My Plugins\\\\""',
+        ],
+        verbatim: true,
+      },
+    ]);
+  });
+
   it('refuses a .cmd launcher whose path cmd.exe would change (%, !, ")', async () => {
     const { calls, start } = fakeStart();
     const cli = createClaudeCli('C:\\100%\\npm.cmd', windowsPc, { start });
     expect((await cli.run(['--version'], 'C:\\')).exitCode).toBe(1);
     expect(calls).toEqual([]);
+  });
+});
+
+describe('systemProcessLister: which program it runs (every OS)', () => {
+  /** Answers each program with a scripted output (`null`: it failed), recording the calls. */
+  function fakeRun(outputs: Record<string, string | null>) {
+    const calls: { file: string; env: Readonly<Record<string, string | undefined>> }[] = [];
+    const run: RunForOutput = (file, _args, options) => {
+      calls.push({ file, env: options.env });
+      return Promise.resolve(outputs[file] ?? null);
+    };
+    return { calls, run };
+  }
+  const base64 = (text: string) => Buffer.from(text, 'utf8').toString('base64');
+  const npmClaude =
+    '"C:\\Program Files\\nodejs\\node.exe" C:\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js';
+
+  it('Windows: reads command lines through PowerShell, with the injected environment (BUG-08)', async () => {
+    const { calls, run } = fakeRun({
+      'powershell.exe': base64(`System Idle Process\n${npmClaude}\nC:\\Windows\\explorer.exe\n`),
+    });
+    const env = { SystemRoot: 'C:\\Windows', AGENTNOMAD_T60: 'injected' };
+    const list = await systemProcessLister({ platform: 'win32', env }, { run })();
+    expect(list).toEqual(['System Idle Process', npmClaude, 'C:\\Windows\\explorer.exe']);
+    expect(calls).toEqual([{ file: 'powershell.exe', env }]);
+    expect(await createClaudeRunningCheck(() => Promise.resolve(list))()).toBe(true);
+  });
+
+  it('Windows: falls back to program names when PowerShell fails', async () => {
+    const { calls, run } = fakeRun({
+      tasklist:
+        '"explorer.exe","1","Console","1","1 K"\r\n"claude.exe","2","Console","1","1 K"\r\n',
+    });
+    const list = await systemProcessLister({ platform: 'win32', env: {} }, { run })();
+    expect(list).toEqual(['explorer.exe', 'claude.exe']);
+    expect(calls.map((call) => call.file)).toEqual(['powershell.exe', 'tasklist']);
+  });
+
+  it('Windows: an answer that is not base64 also falls back', async () => {
+    const { run } = fakeRun({ 'powershell.exe': 'Get-CimInstance : Access denied', tasklist: '' });
+    expect(await systemProcessLister({ platform: 'win32', env: {} }, { run })()).toEqual([]);
+  });
+
+  it('elsewhere: `ps`, chosen from the injected platform, not from the PC running it', async () => {
+    const { calls, run } = fakeRun({ ps: '/sbin/init\n/Users/John Smith/.local/bin/claude\n' });
+    const env = { PATH: '/usr/bin' };
+    const list = await systemProcessLister({ platform: 'darwin', env }, { run })();
+    expect(list).toEqual(['/sbin/init', '/Users/John Smith/.local/bin/claude']);
+    expect(calls).toEqual([{ file: 'ps', env }]);
+  });
+
+  it('nothing readable answers null, which never blocks a pull', async () => {
+    const { run } = fakeRun({});
+    const list = systemProcessLister({ platform: 'win32', env: {} }, { run });
+    expect(await list()).toBeNull();
+    expect(await createClaudeRunningCheck(list)()).toBe(false);
   });
 });
 
@@ -122,6 +201,28 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
       expect(run.stderr).toBe('');
       expect(run.exitCode).toBe(0);
       expect(run.stdout.trim()).toBe('ARGS:install -g @scope/pkg@1.0.0');
+    },
+  );
+
+  it.runIf(win32)(
+    'createClaudeCli passes a path with spaces through a real npm-style .cmd launcher intact',
+    async () => {
+      // Like npm's launcher for Claude Code: node runs the script with every argument (%*).
+      await writeFile(
+        join(dir, 'print-args.js'),
+        'process.stdout.write(JSON.stringify(process.argv.slice(2)));\n',
+      );
+      const launcher = join(dir, 'claude.cmd');
+      await writeFile(launcher, `@echo off\r\n"${process.execPath}" "%~dp0print-args.js" %*\r\n`);
+      const folder = join(dir, 'My Plugins');
+      const args = ['plugin', 'marketplace', 'add', folder, `${folder}\\`, 'two  spaces'];
+      const run = await createClaudeCli(launcher, { platform: 'win32', env: process.env }).run(
+        args,
+        dir,
+      );
+      expect(run.stderr).toBe('');
+      expect(run.exitCode).toBe(0);
+      expect(JSON.parse(run.stdout)).toEqual(args);
     },
   );
 
@@ -219,11 +320,14 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
     await expect(windowsOwnerOnly(process.env)(file)).rejects.toThrow(/whoami\.exe failed/);
   });
 
-  it('systemProcessLister lists running processes, this test runner included', async () => {
-    const list = await systemProcessLister(process.platform, 25_000)();
+  it('systemProcessLister lists command lines, this test runner included (BUG-08)', async () => {
+    const list = await systemProcessLister(
+      { platform: process.platform, env: process.env },
+      { timeoutMs: 25_000 },
+    )();
     expect(list).not.toBeNull();
-    expect(list?.length).toBeGreaterThan(0);
-    expect(list?.some((line) => /node/i.test(line))).toBe(true);
+    // A command line, not only `node.exe`: npm's Claude Code is seen the same way.
+    expect(list?.some((line) => /vitest/i.test(line))).toBe(true);
   });
 
   it.runIf(win32)(

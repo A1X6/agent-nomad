@@ -2,7 +2,12 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createClaudeRunningCheck, projectDirName, shellProfileFor } from '@agentnomad/cli';
+import {
+  createClaudeRunningCheck,
+  projectDirName,
+  shellProfileFor,
+  systemProcessLister,
+} from '@agentnomad/cli';
 import { expect } from 'vitest';
 
 import type { LocalServer } from './local-server.ts';
@@ -58,7 +63,9 @@ const MCP_JSON = {
  * Where Claude Code itself runs (a developer's PC, never CI), pull --yes leaves
  * `~/.claude.json` alone by design, so its MCP servers are only checked elsewhere.
  */
-const claudeRunningHere = await createClaudeRunningCheck()();
+const claudeRunningHere = await createClaudeRunningCheck(
+  systemProcessLister({ platform: process.platform, env: process.env }),
+)();
 
 /**
  * T38: nothing readable left the PC. Every request the server received (URL, headers,

@@ -1,4 +1,4 @@
-import { basename, posix, win32 } from 'node:path';
+import { basename } from 'node:path';
 
 import {
   BUNDLE_FORMAT_VERSION,
@@ -17,12 +17,19 @@ import {
   type CryptoService,
 } from '@agentnomad/core';
 
-import type { AgentAdapter, AgentRegistry, CollectedFile, ScopeTarget } from '../agents/adapter.ts';
+import type {
+  AgentAdapter,
+  AgentRegistry,
+  CollectedFile,
+  DetectedAgent,
+  ScopeTarget,
+} from '../agents/adapter.ts';
 import { unknownEntriesNotice } from '../agents/claude-code/unknown-files.ts';
 import type { ApiClient } from '../api/api-client.ts';
 import { ApiError } from '../api/api-errors.ts';
 import { withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PushOptions } from '../cli/commands.ts';
+import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
 import { finishSetups, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { scanEnvReferences } from '../env/env-references.ts';
 import { chooseEnvValues, envSectionFile } from '../env/env-section.ts';
@@ -67,6 +74,19 @@ export interface PushKeys {
 }
 
 type ScopeChoice = 'global' | 'project' | 'both';
+
+/** An agent chosen for this push, with what its detector found. */
+interface ChosenAgent {
+  readonly adapter: AgentAdapter;
+  readonly version: string | null;
+  readonly baseDir: string | null;
+}
+
+const chosenAgent = (entry: { adapter: AgentAdapter; found: DetectedAgent }): ChosenAgent => ({
+  adapter: entry.adapter,
+  version: entry.found.version,
+  baseDir: entry.found.baseDir,
+});
 
 /** One save: an agent and a scope. */
 interface PushItem {
@@ -117,15 +137,8 @@ const describe = (item: PushItem) =>
  */
 export function createPushPlanner(deps: PushDeps) {
   const { prompter, reporter } = deps;
-  const path = deps.platform === 'win32' ? win32 : posix;
-  const samePath = (a: string, b: string) =>
-    deps.platform === 'win32'
-      ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
-      : path.resolve(a) === path.resolve(b);
 
-  async function chooseAgents(
-    options: PushOptions,
-  ): Promise<{ adapter: AgentAdapter; version: string | null }[]> {
+  async function chooseAgents(options: PushOptions): Promise<ChosenAgent[]> {
     const registry = deps.registry();
     const detected = await Promise.all(
       registry.list().map(async (adapter) => ({ adapter, found: await adapter.detector.detect() })),
@@ -140,12 +153,12 @@ export function createPushPlanner(deps: PushDeps) {
           );
         if (!match.found.installed)
           throw new Error(`${match.adapter.displayName} is not installed on this PC.`);
-        return { adapter: match.adapter, version: match.found.version };
+        return chosenAgent(match);
       });
     }
     if (installed.length === 0) return [];
     if (installed.length === 1 || options.yes) {
-      return installed.map((entry) => ({ adapter: entry.adapter, version: entry.found.version }));
+      return installed.map(chosenAgent);
     }
     const chosen = await prompter.multiselect(
       'Which agents?',
@@ -156,18 +169,26 @@ export function createPushPlanner(deps: PushDeps) {
       })),
       { required: true, initial: installed.map((entry) => entry.adapter.id) },
     );
-    return installed
-      .filter((entry) => chosen.includes(entry.adapter.id))
-      .map((entry) => ({ adapter: entry.adapter, version: entry.found.version }));
+    return installed.filter((entry) => chosen.includes(entry.adapter.id)).map(chosenAgent);
   }
 
-  async function chooseScope(adapter: AgentAdapter, options: PushOptions): Promise<ScopeChoice> {
-    const inHome = samePath(deps.cwd, deps.homedir);
+  async function chooseScope(agent: ChosenAgent, options: PushOptions): Promise<ScopeChoice> {
+    const { adapter } = agent;
+    // The home folder and the agent's own folder are never a project: their `.claude/` is the
+    // global setup (BUG-05).
+    const refusal = projectFolderRefusal(deps.cwd, {
+      homedir: deps.homedir,
+      baseDir: agent.baseDir,
+      agentName: adapter.displayName,
+      platform: deps.platform,
+    });
+    if (options.project !== undefined && refusal !== null) {
+      throw new ProjectFolderError(deps.cwd, refusal);
+    }
     if (options.global && options.project !== undefined) return 'both';
     if (options.global) return 'global';
     if (options.project !== undefined) return 'project';
-    // The home folder is never offered as a project: it would sweep up the whole user folder.
-    if (inHome || options.yes) return 'global';
+    if (refusal !== null || options.yes) return 'global';
     return prompter.select(`${adapter.displayName}: what to save?`, [
       { value: 'global', label: 'Global setup', hint: 'your settings, skills, agents, commands…' },
       { value: 'project', label: 'This project', hint: deps.cwd },
@@ -197,13 +218,14 @@ export function createPushPlanner(deps: PushDeps) {
 
   /** Each chosen agent with its scopes: one item per setup to save. */
   async function chooseItems(
-    agents: readonly { adapter: AgentAdapter; version: string | null }[],
+    agents: readonly ChosenAgent[],
     options: PushOptions,
   ): Promise<PushItem[]> {
     const items: PushItem[] = [];
     let name: string | null = null;
-    for (const { adapter, version } of agents) {
-      const choice = await chooseScope(adapter, options);
+    for (const agent of agents) {
+      const { adapter, version } = agent;
+      const choice = await chooseScope(agent, options);
       if (choice !== 'project')
         items.push({ adapter, version, scope: { kind: 'global' }, target: { kind: 'global' } });
       if (choice !== 'global') {

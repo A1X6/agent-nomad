@@ -19,6 +19,7 @@ import {
   createPullCommand,
   createPullPlanner,
   createNoTerminalPrompter,
+  ProjectFolderError,
   PromptCancelledError,
   SetupsNotDoneError,
   listAllBundles,
@@ -198,6 +199,8 @@ function pullOn(
     secrets?: SecretStore;
     writer?: EnvWriter;
     prompter?: Prompter;
+    /** The folder pull runs in; the project folder by default. */
+    cwd?: string;
   } = {},
 ) {
   const script = scripted(answers);
@@ -223,7 +226,7 @@ function pullOn(
         write: () => Promise.resolve({ backup: null }),
       },
     env: {},
-    cwd: machine.project,
+    cwd: options.cwd ?? machine.project,
     homedir: machine.home,
     platform: process.platform,
   };
@@ -303,6 +306,45 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(t.lines).toContain(
       'warn: Skipped settings.json, hooks/check.sh: they hold those commands or are run by them. The rest is restored.',
     );
+  });
+
+  it.each([
+    ['the home folder', (b: ReturnType<typeof pc>) => b.home],
+    ["Claude Code's own folder", (b: ReturnType<typeof pc>) => b.base],
+  ])('refuses to restore a project into %s, writing nothing (BUG-05)', async (_, folder) => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    await mkdir(b.base, { recursive: true });
+    const t = pullOn(b, server, [], { cwd: folder(b) });
+    const pull = t.pull({ global: false, yes: true, project: 'my-app' });
+    await expect(pull).rejects.toThrow(ProjectFolderError);
+    await expect(pull).rejects.toThrow("Run the command again from the project's folder.");
+    await expect(readFile(join(folder(b), 'CLAUDE.md'))).rejects.toThrow();
+    expect(await t.state.projectNameFor(folder(b))).toBeNull();
+  });
+
+  it('in the home folder, never offers a project and restores the global setup (BUG-05)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, [true], { cwd: b.home });
+    await t.pull(none);
+    expect(t.asked).toEqual(['Allow them?']);
+    expect(await read(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
+    await expect(readFile(join(b.home, 'CLAUDE.md'))).rejects.toThrow();
+  });
+
+  it('in the home folder with only projects saved, refuses (BUG-05)', async () => {
+    const server = fakeServer();
+    const a = pc('laptop');
+    await mkdir(a.base, { recursive: true });
+    await put(join(a.project, 'CLAUDE.md'), 'Project rules.');
+    await pushFrom(a, server, ['project', 'my-app', false])(none);
+    expect(server.stored.size).toBe(1);
+    const b = pc('desktop');
+    const t = pullOn(b, server, [], { cwd: b.home });
+    await expect(t.pull(none)).rejects.toThrow(ProjectFolderError);
+    expect(t.asked).toEqual([]);
+    await expect(readFile(join(b.home, 'CLAUDE.md'))).rejects.toThrow();
   });
 
   it('shows a changed script even when the hook command is the same (T38)', async () => {

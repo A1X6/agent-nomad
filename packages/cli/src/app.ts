@@ -113,10 +113,13 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
         homedir: app.homedir,
         platform: app.platform,
         onClaudeRunning: () =>
-          app.prompter.select('Claude Code is running and rewrites ~/.claude.json while open.', [
-            { value: 'retry', label: 'I closed Claude Code, continue' },
-            { value: 'skip', label: 'Skip ~/.claude.json this time' },
-          ]),
+          app.prompter.select(
+            'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.',
+            [
+              { value: 'retry', label: 'I closed it, continue' },
+              { value: 'skip', label: 'Skip ~/.claude.json this time' },
+            ],
+          ),
       }),
     ]),
   );
