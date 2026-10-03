@@ -23,7 +23,7 @@ export class UsernameTakenError extends Error {
   }
 }
 
-/** A list cursor that was not produced by this server (or was changed). */
+/** A list cursor that is not well-formed. */
 export class InvalidCursorError extends Error {
   constructor() {
     super('Invalid cursor');
@@ -35,8 +35,6 @@ export class InvalidCursorError extends Error {
 export interface UserRepository {
   findByUsername(username: Username): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
-  /** Throws UsernameTakenError when the username is taken. */
-  create(user: NewUser): Promise<UserRecord>;
   /**
    * Creates the user and their first session in one transaction, so a failed session
    * leaves no account behind. Throws UsernameTakenError when the username is taken.
@@ -145,7 +143,7 @@ export interface BundlePage {
 export interface BundleRepository {
   /**
    * Metadata only, newest first, one page at a time. Throws InvalidCursorError for a cursor
-   * this server did not produce.
+   * that is not well-formed.
    */
   list(
     userId: string,

@@ -50,7 +50,7 @@ export function encodeBundleCursor(cursor: BundleCursor): string {
   return Buffer.from(JSON.stringify([cursor.updatedAt, cursor.id])).toString('base64url');
 }
 
-/** Throws InvalidCursorError for anything this server did not produce. */
+/** Throws InvalidCursorError for a cursor that is not well-formed. */
 export function decodeBundleCursor(encoded: string): BundleCursor {
   let json: unknown;
   try {

@@ -6,7 +6,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 
 import type { Database } from '../../src/db/database.ts';
 
-const migrationsFolder = fileURLToPath(new URL('../../drizzle', import.meta.url));
+export const migrationsFolder = fileURLToPath(new URL('../../drizzle', import.meta.url));
 
 export interface TestDatabase {
   readonly db: Database;

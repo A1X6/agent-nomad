@@ -55,8 +55,6 @@ export function createUserRepository(db: Database): UserRepository {
       return row ? toUserRecord(row) : null;
     },
 
-    create: (user) => insertUser(db, user),
-
     createWithSession(user, session) {
       // Any error (a taken name included) rolls back both inserts.
       return db.transaction(async (tx) => {

@@ -21,9 +21,12 @@ export interface BlobRef {
  */
 export interface BlobStore {
   /** Stores the bytes under a new random id and returns where they are. */
-  put(userId: string, bytes: Uint8Array): Promise<BlobRef>;
-  /** `null` when no such file exists for that user. */
-  get(ref: BlobRef): Promise<Uint8Array | null>;
+  put(userId: string, bytes: Uint8Array<ArrayBuffer>): Promise<BlobRef>;
+  /**
+   * `null` when no such file exists for that user. Backed by a plain ArrayBuffer, so it can
+   * be a response body as it is.
+   */
+  get(ref: BlobRef): Promise<Uint8Array<ArrayBuffer> | null>;
   /**
    * Does nothing when the file is already gone. Throws BlobInUseError for a file a setup
    * still points to, so a bug can never delete the current copy.

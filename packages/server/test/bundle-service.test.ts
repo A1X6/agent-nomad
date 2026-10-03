@@ -9,12 +9,10 @@ import {
 } from '../src/bundles/bundle-service.ts';
 import { createBundleRepository } from '../src/db/bundle-repository.ts';
 import type { BundleRepository } from '../src/db/repositories.ts';
-import { createUserRepository } from '../src/db/user-repository.ts';
 import type { BlobStore } from '../src/storage/blob-store.ts';
 import { createPostgresBlobStore } from '../src/storage/postgres-blob-store.ts';
 import { createTestDatabase, type TestDatabase } from './support/database.ts';
-
-const bytes = (length: number, fill: number) => new Uint8Array(length).fill(fill);
+import { bytes, createUser } from './support/fixtures.ts';
 const sha256 = (data: Uint8Array) => new Uint8Array(createHash('sha256').update(data).digest());
 
 let database: TestDatabase;
@@ -41,19 +39,7 @@ describe('BundleService cleanup', () => {
       blobs: flaky,
       logError: (message) => logged.push(message),
     });
-    const user = await createUserRepository(database.db).create({
-      username: 'ahmed',
-      kdfSalt: bytes(16, 1),
-      kdfParams: {
-        algorithm: 'argon2id',
-        version: 19,
-        memoryKiB: 65536,
-        passes: 3,
-        parallelism: 1,
-      },
-      authHash: 'x',
-      wrappedDataKey: bytes(72, 1),
-    });
+    const user = await createUser(database.db);
     const upload = (expectedRevision: number, fill: number) =>
       service.upload({
         key: { userId: user.id, agent: 'claude-code', scopeKey: 'global' },
@@ -81,21 +67,6 @@ describe('BundleService upload', () => {
     formatVersion: 1,
     nameEnc: null,
   });
-  const createUser = () =>
-    createUserRepository(database.db).create({
-      username: 'ahmed',
-      kdfSalt: bytes(16, 1),
-      kdfParams: {
-        algorithm: 'argon2id',
-        version: 19,
-        memoryKiB: 65536,
-        passes: 3,
-        parallelism: 1,
-      },
-      authHash: 'x',
-      wrappedDataKey: bytes(72, 1),
-    });
-
   it('reads the usage and the current setup at the same time (DB-01)', async () => {
     const real = createBundleRepository(database.db);
     const events: string[] = [];
@@ -119,7 +90,7 @@ describe('BundleService upload', () => {
       blobs: createPostgresBlobStore(database.db),
       logError: () => undefined,
     });
-    const user = await createUser();
+    const user = await createUser(database.db);
 
     await service.upload(input(user.id));
 
@@ -149,7 +120,7 @@ describe('BundleService upload', () => {
         blobs: createPostgresBlobStore(database.db),
         logError: () => undefined,
       });
-      const user = await createUser();
+      const user = await createUser(database.db);
       const refused = service.upload(input(user.id));
       await expect(refused).rejects.toBeInstanceOf(StorageLimitError);
       await expect(refused).rejects.toThrow(message);
