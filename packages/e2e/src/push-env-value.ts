@@ -21,9 +21,7 @@ const prompter: Prompter = {
   password: refuse,
   confirm: refuse,
   multiselect: <T extends string>(message: string) =>
-    message.startsWith('Save these values')
-      ? Promise.resolve(names as T[])
-      : (refuse(message) as Promise<T[]>),
+    message.startsWith('Save these values') ? Promise.resolve(names as T[]) : refuse(message),
 };
 const print = (stream: NodeJS.WriteStream) => (message: string) => stream.write(`${message}\n`);
 const reporter: Reporter = {
