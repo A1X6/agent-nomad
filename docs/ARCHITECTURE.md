@@ -221,6 +221,12 @@ sequenceDiagram
 
 `logout` ends the session on the server and always forgets it on the PC, even offline.
 
+When login succeeds on the server but the data key does not unwrap with this password, the
+new session is never saved on the PC: login sends `POST /auth/logout` once with that session's
+own token from the login answer (not the keychain), then shows "Logged in, but your data key
+could not be unlocked with this password." Best effort (T66): a failed or timed-out logout is
+not retried and never replaces that error; the session then ends by itself on the server.
+
 ### Push
 
 1. Detect installed agents; choose agents and scopes (or take `--agent`, `--global`,
@@ -622,7 +628,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 | File                 | Responsible for                                                                                                                                                                                                                                                            |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api-client.ts`      | The `ApiClient` interface (auth and bundle calls).                                                                                                                                                                                                                         |
+| `api-client.ts`      | The `ApiClient` interface (auth and bundle calls); `logout(token)` ends a given session in one attempt (T66).                                                                                                                                                              |
 | `http-api-client.ts` | The implementation on `fetch`: timeouts sized to transfer size, the wake-up check, contract validation of every answer (unknown fields and error codes tolerated), the `x-an-client` version header, SHA-256 check of downloads, no retry for register and account delete. |
 | `transport.ts`       | One HTTP call with timeout and retries (network errors, timeouts, 502/503/504 only), capped body reads, redirects refused.                                                                                                                                                 |
 | `api-errors.ts`      | `ApiError`, `NetworkError`, `OutcomeUnknownError`, `InvalidResponseError`, `NotLoggedInError`.                                                                                                                                                                             |
