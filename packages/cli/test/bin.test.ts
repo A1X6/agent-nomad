@@ -6,10 +6,6 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { unwrapAnswer } from '../src/ui/clack-prompter.ts';
-import { PromptCancelledError } from '../src/ui/prompter.ts';
-import * as clack from '@clack/prompts';
-
 const cliRoot = fileURLToPath(new URL('..', import.meta.url));
 
 // A temp home and an empty PATH: the child never sees this PC's ~/.claude or its `claude` (QA-01).
@@ -63,13 +59,6 @@ describe('the agentnomad executable', () => {
     const result = agentnomad('nope');
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("unknown command 'nope'");
-  });
-});
-
-describe('clack answers', () => {
-  it('passes answers through and turns a cancel into PromptCancelledError', () => {
-    expect(unwrapAnswer('claude-code')).toBe('claude-code');
-    expect(() => unwrapAnswer(clack.CANCEL_SYMBOL)).toThrow(PromptCancelledError);
   });
 });
 

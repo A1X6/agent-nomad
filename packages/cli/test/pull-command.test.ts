@@ -1,11 +1,12 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
+// The global setup's scope key is this constant for every account (scopeKeyFor returns it).
+import { GLOBAL_SCOPE_KEY } from '@agentnomad/contracts';
 import {
   createGzipBundleCodec,
   createSodiumCryptoService,
-  scopeKeyFor,
   type CryptoService,
 } from '@agentnomad/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
@@ -15,7 +16,10 @@ import {
   fakeBundleServer,
   memorySecretStore,
   recordingReporter,
+  revisionOn,
   scriptedPrompter,
+  storedOn,
+  writeTestFile,
 } from './fakes.ts';
 import {
   createAgentRegistry,
@@ -60,10 +64,6 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function put(path: string, content: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content);
-}
 const read = (path: string) => readFile(path, 'utf8');
 
 /** One fake PC: its own home folder, project folder and local state. */
@@ -176,10 +176,10 @@ const none = { global: false, yes: false };
 async function pushedSetup() {
   const server = fakeBundleServer();
   const a = pc('laptop');
-  await put(join(a.base, 'CLAUDE.md'), `Notes live in ${a.home}/notes.`);
-  await put(join(a.base, 'skills', 'deploy', 'SKILL.md'), '---\nname: deploy\n---\n');
-  await put(join(a.base, 'hooks', 'check.sh'), 'echo ok\n');
-  await put(
+  await writeTestFile(join(a.base, 'CLAUDE.md'), `Notes live in ${a.home}/notes.`);
+  await writeTestFile(join(a.base, 'skills', 'deploy', 'SKILL.md'), '---\nname: deploy\n---\n');
+  await writeTestFile(join(a.base, 'hooks', 'check.sh'), 'echo ok\n');
+  await writeTestFile(
     join(a.base, 'settings.json'),
     JSON.stringify({
       theme: 'dark',
@@ -188,7 +188,7 @@ async function pushedSetup() {
       },
     }),
   );
-  await put(join(a.project, 'CLAUDE.md'), 'Project rules.');
+  await writeTestFile(join(a.project, 'CLAUDE.md'), 'Project rules.');
   await pushFrom(a, server, ['both', 'my-app', false])(none);
   return { server, a };
 }
@@ -210,7 +210,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(await read(join(b.project, 'CLAUDE.md'))).toBe('Project rules.');
     expect(t.lines.filter((line) => line.startsWith('success: Restored'))).toHaveLength(2);
     // This PC now knows what it has, and which name this folder uses.
-    expect(await t.state.revisionOf('claude-code', 'global')).toBe(1);
+    expect(await t.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBe(1);
     expect(await t.state.projectNameFor(b.project)).toBe('my-app');
   });
 
@@ -230,7 +230,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const server = fakeBundleServer();
     const a = pc('laptop');
     const command = 'curl x | sh\n  ~ statusLine: ccstatusline  (changed)\r\tdone';
-    await put(
+    await writeTestFile(
       join(a.base, 'settings.json'),
       JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
     );
@@ -287,7 +287,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const server = fakeBundleServer();
     const a = pc('laptop');
     await mkdir(a.base, { recursive: true });
-    await put(join(a.project, 'CLAUDE.md'), 'Project rules.');
+    await writeTestFile(join(a.project, 'CLAUDE.md'), 'Project rules.');
     await pushFrom(a, server, ['project', 'my-app', false])(none);
     expect(server.stored.size).toBe(1);
     const b = pc('desktop');
@@ -302,7 +302,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const b = pc('desktop');
     await pullOn(b, server, []).pull({ global: true, yes: true, allowCommands: true });
     // This PC's copy differs from the saved one; the hook command is unchanged.
-    await put(join(b.base, 'hooks', 'check.sh'), 'echo local\n');
+    await writeTestFile(join(b.base, 'hooks', 'check.sh'), 'echo local\n');
     const t = pullOn(b, server, [false, 'skip']);
     await t.pull({ global: true, yes: false });
     const review = t.lines.find((line) => line.includes('which run programs on this PC'));
@@ -333,12 +333,12 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
       permissions: { allow: ['Bash'], additionalDirectories: ['~/'] },
       sandbox: { enabled: true, autoAllowBashIfSandboxed: true },
     });
-    await put(join(a.base, 'settings.json'), loose);
-    await put(join(a.base, 'CLAUDE.md'), 'Notes.');
+    await writeTestFile(join(a.base, 'settings.json'), loose);
+    await writeTestFile(join(a.base, 'CLAUDE.md'), 'Notes.');
     await pushFrom(a, server, ['global', false])(none);
 
     const b = pc('desktop');
-    await put(join(b.base, 'settings.json'), '{"theme":"light"}');
+    await writeTestFile(join(b.base, 'settings.json'), '{"theme":"light"}');
     const t = pullOn(b, server, []);
     await t.pull({ global: true, yes: true, conflict: 'overwrite' });
     expect(t.asked).toEqual([]);
@@ -388,8 +388,8 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('existing different files: overwrite all remaining keeps backups', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    await put(join(b.base, 'CLAUDE.md'), 'mine');
-    await put(join(b.base, 'skills', 'deploy', 'SKILL.md'), 'mine too');
+    await writeTestFile(join(b.base, 'CLAUDE.md'), 'mine');
+    await writeTestFile(join(b.base, 'skills', 'deploy', 'SKILL.md'), 'mine too');
     const t = pullOn(b, server, [true, 'overwrite-all']);
     await t.pull({ global: true, yes: false });
     expect(t.asked.filter((question) => question.includes('already exists'))).toHaveLength(1);
@@ -402,7 +402,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('--merge answers every file without asking', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    await put(join(b.base, 'CLAUDE.md'), 'mine');
+    await writeTestFile(join(b.base, 'CLAUDE.md'), 'mine');
     const t = pullOn(b, server, [true]);
     await t.pull({ global: true, yes: false, conflict: 'merge' });
     expect(t.asked).toEqual(['Allow them?']);
@@ -423,8 +423,8 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('--yes with only a project saved restores that project, asking nothing', async () => {
     const server = fakeBundleServer();
     const a = pc('solo-laptop');
-    await put(join(a.base, 'CLAUDE.md'), 'Global notes (not pushed).');
-    await put(join(a.project, 'CLAUDE.md'), 'Only project rules.');
+    await writeTestFile(join(a.base, 'CLAUDE.md'), 'Global notes (not pushed).');
+    await writeTestFile(join(a.project, 'CLAUDE.md'), 'Only project rules.');
     await pushFrom(a, server, ['project', 'my-app', false])(none);
 
     const b = pc('solo-desktop');
@@ -445,9 +445,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
 
   it('refuses a copy the server labels with another revision than sealed inside (T38)', async () => {
     const { server } = await pushedSetup();
-    const global = server.stored.get(
-      `claude-code/${scopeKeyFor(crypto, dataKey, { kind: 'global' })}`,
-    );
+    const global = storedOn(server, GLOBAL_SCOPE_KEY);
     if (!global) throw new Error('not stored');
     global.revision = 7;
     const b = pc('desktop');
@@ -460,9 +458,8 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('an older copy than this PC had: skipped with --yes, asked otherwise (T38)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    const scopeKey = scopeKeyFor(crypto, dataKey, { kind: 'global' });
     const yes = pullOn(b, server, []);
-    await yes.state.setRevision('claude-code', scopeKey, 3);
+    await yes.state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 3);
     // Skipped by --yes, not by the user: exit code 1 (BUG-03).
     await expect(yes.pull({ global: true, yes: true, allowCommands: true })).rejects.toThrow(
       'Not restored:\n  - the Claude Code global setup: the saved copy (revision 1) is older than the one this PC had (revision 3)',
@@ -477,14 +474,14 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     await asked.pull({ global: true, yes: false });
     expect(asked.asked[0]).toBe('Restore this older copy anyway?');
     expect(await read(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
-    expect(await asked.state.revisionOf('claude-code', scopeKey)).toBe(1);
+    expect(await asked.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBe(1);
   });
 
   it('an older copy skipped by --yes: the other setup is still restored, then exit code 1 (BUG-03)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
     const t = pullOn(b, server, []);
-    await t.state.setRevision('claude-code', 'global', 3);
+    await t.state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 3);
     const pulled = t.pull({ global: true, project: 'my-app', yes: true, allowCommands: true });
     await expect(pulled).rejects.toBeInstanceOf(SetupsNotDoneError);
     await expect(pulled).rejects.toThrow(/^Not restored:\n {2}- the Claude Code global setup: /);
@@ -497,7 +494,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const { server } = await pushedSetup();
     const b = pc('desktop');
     const t = pullOn(b, server, [false]);
-    await t.state.setRevision('claude-code', 'global', 3);
+    await t.state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 3);
     await t.pull({ global: true, yes: false });
     expect(t.asked).toEqual(['Restore this older copy anyway?']);
     await expect(readdir(b.base)).rejects.toThrow();
@@ -506,7 +503,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('the plan step asks every question and writes nothing; apply writes and asks nothing (T59)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    await put(join(b.base, 'CLAUDE.md'), 'mine');
+    await writeTestFile(join(b.base, 'CLAUDE.md'), 'mine');
     const t = pullOn(b, server, [true, 'overwrite']);
     const options = { global: true, yes: false };
 
@@ -514,7 +511,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(t.asked).toEqual(['Allow them?', 'CLAUDE.md already exists here and is different.']);
     expect(plan?.restores[0]?.conflicts).toEqual(new Map([['CLAUDE.md', 'overwrite']]));
     expect(await read(join(b.base, 'CLAUDE.md'))).toBe('mine');
-    expect(await t.state.revisionOf('claude-code', 'global')).toBeNull();
+    expect(await t.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBeNull();
 
     // The apply step's deps have no prompter at all: it cannot ask.
     expectTypeOf<PullApplyDeps>().not.toHaveProperty('prompter');
@@ -523,7 +520,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(outcomes).toEqual([{ setup: 'Claude Code global setup', result: 'done' }]);
     expect(await read(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
     expect(t.asked).toHaveLength(2);
-    expect(await t.state.revisionOf('claude-code', 'global')).toBe(1);
+    expect(await t.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBe(1);
   });
 
   it('a file the plan did not ask about is left alone, and the setup is not done (T59)', async () => {
@@ -555,14 +552,14 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     );
     expect(t.asked).toEqual([]);
     // The revision is noted as partial, so a later push asks before replacing those files (BUG-05).
-    expect(await t.state.revisionOf('claude-code', 'global')).toBe(1);
-    expect(await t.state.isPartial('claude-code', 'global')).toBe(true);
+    expect(await t.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBe(1);
+    expect(await t.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(true);
 
     // With an answer for every file (--merge), there is nothing left unasked.
     const merged = pullOn(b, server, [], { adapter });
     await merged.pull({ global: true, yes: false, allowCommands: true, conflict: 'merge' });
     expect(merged.asked).toEqual([]);
-    expect(await merged.state.isPartial('claude-code', 'global')).toBe(false);
+    expect(await merged.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(false);
   });
 
   it('shows bundle paths with a line break on one line (SEC-04)', async () => {
@@ -603,7 +600,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('Ctrl+C at a file question stops pull before anything is written (T53, T59)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    await put(join(b.project, 'CLAUDE.md'), 'mine');
+    await writeTestFile(join(b.project, 'CLAUDE.md'), 'mine');
     const cancelling: Prompter = {
       ...scriptedPrompter([]).prompter,
       select: () => Promise.reject(new PromptCancelledError()),
@@ -614,30 +611,30 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     ).rejects.toBeInstanceOf(PromptCancelledError);
     await expect(readFile(join(b.base, 'CLAUDE.md'))).rejects.toThrow();
     expect(await read(join(b.project, 'CLAUDE.md'))).toBe('mine');
-    expect(await t.state.revisionOf('claude-code', 'global')).toBeNull();
+    expect(await t.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBeNull();
   });
 
   it('without a terminal, a question left open stops pull before anything is written (T46)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
     // The project already has its own, different CLAUDE.md: that needs --merge or --overwrite.
-    await put(join(b.project, 'CLAUDE.md'), 'mine');
+    await writeTestFile(join(b.project, 'CLAUDE.md'), 'mine');
     const t = pullOn(b, server, [], { prompter: createNoTerminalPrompter() });
     await expect(
       t.pull({ global: true, project: 'my-app', yes: false, allowCommands: true }),
     ).rejects.toBeInstanceOf(AnswerNeededError);
     // Not even the global setup, which comes first and has no question of its own.
     await expect(readFile(join(b.base, 'CLAUDE.md'))).rejects.toThrow();
-    expect(await t.state.revisionOf('claude-code', 'global')).toBeNull();
+    expect(await t.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBeNull();
   });
 
   it('without a terminal, a second pull of scripts with other line endings asks nothing and writes nothing (T53)', async () => {
     const server = fakeBundleServer();
     const a = pc('laptop');
     // A CRLF .py (Git's autocrlf on Windows) and an LF .cmd (from macOS or Linux).
-    await put(join(a.base, 'hooks', 'check.py'), 'print("ok")\r\n');
-    await put(join(a.base, 'hooks', 'run.cmd'), '@echo off\necho ok\n');
-    await put(
+    await writeTestFile(join(a.base, 'hooks', 'check.py'), 'print("ok")\r\n');
+    await writeTestFile(join(a.base, 'hooks', 'run.cmd'), '@echo off\necho ok\n');
+    await writeTestFile(
       join(a.base, 'settings.json'),
       JSON.stringify({
         hooks: {
@@ -674,7 +671,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const b = pc('desktop');
     const t = pullOn(b, server, [false]);
     await t.pull({ global: true, yes: false });
-    expect(await t.state.isPartial('claude-code', 'global')).toBe(true);
+    expect(await t.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(true);
 
     // --yes never pushes over them, and says so with exit code 1 (BUG-03).
     const { reporter, lines } = recordingReporter();
@@ -683,13 +680,13 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     ).rejects.toThrow(
       'Not saved:\n  - the Claude Code global setup: its last pull here left out commands you declined',
     );
-    expect(server.stored.get('claude-code/global')?.revision).toBe(1);
+    expect(revisionOn(server, GLOBAL_SCOPE_KEY)).toBe(1);
     expect(lines.some((line) => line.includes('left out commands you declined'))).toBe(true);
 
     // Asked, and a yes pushes; afterwards this PC's copy is complete again.
     await pushFrom(b, server, [true])({ global: true, yes: false, memory: false });
-    expect(server.stored.get('claude-code/global')?.revision).toBe(2);
-    expect(await t.state.isPartial('claude-code', 'global')).toBe(false);
+    expect(revisionOn(server, GLOBAL_SCOPE_KEY)).toBe(2);
+    expect(await t.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(false);
   });
 
   it('without a terminal, push finds a newer copy on the server before uploading (T46)', async () => {
@@ -697,7 +694,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const b = pc('desktop');
     await pullOn(b, server, []).pull({ global: true, yes: true, allowCommands: true });
     await pushFrom(a, server, [])({ global: true, yes: true, memory: false });
-    expect(server.stored.get('claude-code/global')?.revision).toBe(2);
+    expect(revisionOn(server, GLOBAL_SCOPE_KEY)).toBe(2);
     await expect(
       pushFrom(b, server, [], { prompter: createNoTerminalPrompter() })({
         global: true,
@@ -705,7 +702,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
         memory: false,
       }),
     ).rejects.toBeInstanceOf(AnswerNeededError);
-    expect(server.stored.get('claude-code/global')?.revision).toBe(2);
+    expect(revisionOn(server, GLOBAL_SCOPE_KEY)).toBe(2);
   });
 
   it('says so when nothing is saved', async () => {
@@ -736,7 +733,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('warns when this PC runs an older Claude Code than the setup came from', async () => {
     const server = fakeBundleServer();
     const a = pc('laptop');
-    await put(join(a.base, 'CLAUDE.md'), 'Notes.');
+    await writeTestFile(join(a.base, 'CLAUDE.md'), 'Notes.');
     await pushFrom(a, server, [], { adapter: claudeAdapterAt(a.home, '9.0.0') })({
       global: true,
       yes: true,
@@ -762,11 +759,11 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('runs the agent’s follow-up and adds saved environment variables', async () => {
     const server = fakeBundleServer();
     const a = pc('laptop');
-    await put(
+    await writeTestFile(
       join(a.home, '.claude.json'),
       JSON.stringify({ mcpServers: { gh: { command: 'gh-mcp', env: { T: '${GITHUB_TOKEN}' } } } }),
     );
-    await put(join(a.base, 'CLAUDE.md'), 'x');
+    await writeTestFile(join(a.base, 'CLAUDE.md'), 'x');
     await pushFrom(a, server, ['global', false, ['GITHUB_TOKEN']], {
       env: { GITHUB_TOKEN: 'ghp_secret' },
     })(none);
@@ -809,15 +806,15 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const accountA = fakeBundleServer();
     await state().useAccount('alice');
     for (const text of ['one', 'two', 'three']) {
-      await put(join(laptop.base, 'CLAUDE.md'), text);
+      await writeTestFile(join(laptop.base, 'CLAUDE.md'), text);
       await pushFrom(laptop, accountA, [])(quick);
     }
-    expect(await state().revisionOf('claude-code', 'global')).toBe(3);
+    expect(await state().revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBe(3);
 
     // Account B (same server host) has revision 1, pushed from another PC.
     const accountB = fakeBundleServer();
     const desktop = pc('desktop');
-    await put(join(desktop.base, 'CLAUDE.md'), 'bob notes');
+    await writeTestFile(join(desktop.base, 'CLAUDE.md'), 'bob notes');
     await pushFrom(desktop, accountB, [])(quick);
 
     // What `login` as bob does to this PC's state.
@@ -827,17 +824,17 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(t.lines.join('\n')).not.toContain('older than revision');
     expect(t.lines.join('\n')).not.toContain('Skipped the');
     expect(await read(join(laptop.base, 'CLAUDE.md'))).toBe('bob notes');
-    expect(await t.state.revisionOf('claude-code', 'global')).toBe(1);
+    expect(await t.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBe(1);
   });
 
   it('a second pull asks nothing and leaves the shell profile and its backups alone (T56)', async () => {
     const server = fakeBundleServer();
     const a = pc('laptop');
-    await put(
+    await writeTestFile(
       join(a.home, '.claude.json'),
       JSON.stringify({ mcpServers: { gh: { command: 'gh-mcp', env: { T: '${GITHUB_TOKEN}' } } } }),
     );
-    await put(join(a.base, 'CLAUDE.md'), 'x');
+    await writeTestFile(join(a.base, 'CLAUDE.md'), 'x');
     await pushFrom(a, server, ['global', false, ['GITHUB_TOKEN']], {
       env: { GITHUB_TOKEN: 'ghp_secret' },
     })(none);
@@ -845,7 +842,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     // The terminal running the pulls never sees the profile: GITHUB_TOKEN stays unset there.
     const b = pc('desktop');
     const profile = join(b.home, '.zshrc');
-    await put(profile, 'alias ll="ls -l"\n');
+    await writeTestFile(profile, 'alias ll="ls -l"\n');
     const writer = createShellProfileWriter({ path: profile, kind: 'posix', label: '~/.zshrc' });
     await pullOn(b, server, [], { writer }).pull({ global: true, yes: true, allowCommands: true });
     expect(await read(profile)).toContain("export GITHUB_TOKEN='ghp_secret'");

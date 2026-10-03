@@ -30,7 +30,6 @@ import {
   SessionExpiredError,
   withSession,
   createLocalState,
-  type ApiClient,
   type LocalState,
   type PasswordChecker,
   type SecretName,
@@ -48,15 +47,13 @@ beforeAll(async () => {
   zxcvbn = await loadZxcvbnChecker();
 });
 
-/** Real crypto with the cheapest allowed Argon2id settings, so tests stay fast. */
+/** The cheapest Argon2id settings the server allows, so tests stay fast. */
+const FAST_KDF_PARAMS: KdfParams = { ...DEFAULT_KDF_PARAMS, memoryKiB: 19_456, passes: 2 };
+
+/** Real crypto with FAST_KDF_PARAMS. */
 const fastCrypto = (): CryptoService => ({
   ...realCrypto,
-  deriveKeys: (password, salt) =>
-    realCrypto.deriveKeys(password, salt, {
-      ...DEFAULT_KDF_PARAMS,
-      memoryKiB: 19_456,
-      passes: 2,
-    } satisfies KdfParams),
+  deriveKeys: (password, salt) => realCrypto.deriveKeys(password, salt, FAST_KDF_PARAMS),
 });
 
 /** A memory SecretStore and the map behind it. */
@@ -83,7 +80,7 @@ function fakeServer() {
   /** The token each logout was given; `undefined` = the stored one. */
   const logoutTokens: (string | undefined)[] = [];
 
-  const api: ApiClient = {
+  const api = fakeApi({
     auth: {
       prelogin: ({ username }) => {
         calls.push('prelogin');
@@ -127,13 +124,7 @@ function fakeServer() {
         return Promise.resolve();
       },
     },
-    bundles: {
-      list: () => Promise.reject(new Error('not used')),
-      get: () => Promise.reject(new Error('not used')),
-      put: () => Promise.reject(new Error('not used')),
-      delete: () => Promise.reject(new Error('not used')),
-    },
-  };
+  });
   return {
     api,
     users,
@@ -924,13 +915,7 @@ describe('agentnomad account delete, logged in with a local state', () => {
         prelogin: () =>
           Promise.resolve({
             kdfSalt: Buffer.alloc(16, 1).toString('base64'),
-            kdfParams: {
-              algorithm: 'argon2id',
-              version: 19,
-              memoryKiB: 19_456,
-              passes: 2,
-              parallelism: 1,
-            },
+            kdfParams: FAST_KDF_PARAMS,
           }),
         deleteAccount: (request) => {
           sent.push(request.authKey);
@@ -984,7 +969,7 @@ describe('agentnomad account delete, logged in with a local state', () => {
 
   it('a wrong password deletes nothing and keeps the login', async () => {
     const t = account(['ahmed', 'wrong'], () =>
-      Promise.reject(new ApiError(401, 'unauthorized', 'Wrong password')),
+      Promise.reject(new ApiError(401, 'unauthorized', WRONG_PASSWORD_MESSAGE)),
     );
     await expect(t.run({ yes: false, passwordStdin: false })).rejects.toThrow(
       'Wrong username or password. Nothing was deleted.',

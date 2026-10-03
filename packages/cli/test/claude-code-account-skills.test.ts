@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { recordingReporter, scriptedPrompter } from './fakes.ts';
+import { collected, recordingReporter, scriptedPrompter, writeTestFile } from './fakes.ts';
 
 import {
   ACCOUNT_SKILLS_PREFIX,
@@ -25,7 +25,7 @@ import {
 let root: string;
 let home: string;
 let base: string;
-const ACCOUNT = '7c844940_79950eec';
+const ACCOUNT = '00000000-0000-4000-8000-000000000000_11111111-1111-4111-8111-111111111111';
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'agentnomad-account-skills-'));
@@ -37,19 +37,14 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function put(path: string, content: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content);
-}
-
 const synced = (...parts: string[]) => join(base, 'skills', 'synced', ACCOUNT, ...parts);
 
 /** A synced folder as Claude Code 2.1.283 writes it: the user's skill, Anthropic's, an organization's. */
 async function syncedSetup(): Promise<void> {
-  await put(join(base, 'skills', 'synced', `.bucket-${ACCOUNT}`), '');
-  await put(synced('.last-complete-round'), '1');
-  await put(synced('.staging', 'tmp'), 'partial');
-  await put(
+  await writeTestFile(join(base, 'skills', 'synced', `.bucket-${ACCOUNT}`), '');
+  await writeTestFile(synced('.last-complete-round'), '1');
+  await writeTestFile(synced('.staging', 'tmp'), 'partial');
+  await writeTestFile(
     synced('manifest.json'),
     JSON.stringify({
       lastUpdated: 1,
@@ -89,11 +84,11 @@ async function syncedSetup(): Promise<void> {
       ],
     }),
   );
-  await put(synced('my-skill', 'SKILL.md'), '---\nname: my-skill\n---\nDo my thing.\n');
-  await put(synced('my-skill', 'reference', 'notes.md'), 'Notes.\n');
-  await put(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic PDF skill.\n');
-  await put(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nOrg only.\n');
-  await put(synced('synced', 'SKILL.md'), 'reserved name');
+  await writeTestFile(synced('my-skill', 'SKILL.md'), '---\nname: my-skill\n---\nDo my thing.\n');
+  await writeTestFile(synced('my-skill', 'reference', 'notes.md'), 'Notes.\n');
+  await writeTestFile(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic PDF skill.\n');
+  await writeTestFile(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nOrg only.\n');
+  await writeTestFile(synced('synced', 'SKILL.md'), 'reserved name');
 }
 
 describe('claude.ai skills (T42): reading and saving', () => {
@@ -116,14 +111,14 @@ describe('claude.ai skills (T42): reading and saving', () => {
   });
 
   it('an entry without creatorType (as on a newly synced skill) is skipped, not the whole list', async () => {
-    await put(
+    await writeTestFile(
       synced('manifest.json'),
       JSON.stringify({
         skills: [{ name: 'my-skill', creatorType: 'user' }, { name: 'brand-new' }, 'not an object'],
       }),
     );
-    await put(synced('my-skill', 'SKILL.md'), 'x');
-    await put(synced('brand-new', 'SKILL.md'), 'y');
+    await writeTestFile(synced('my-skill', 'SKILL.md'), 'x');
+    await writeTestFile(synced('brand-new', 'SKILL.md'), 'y');
     const found = await readSyncedSkills(pathsOf(process.platform), base);
     expect(found.problem).toBeNull();
     expect(found.own.map((skill) => skill.name)).toEqual(['my-skill']);
@@ -131,8 +126,8 @@ describe('claude.ai skills (T42): reading and saving', () => {
   });
 
   it('a missing or unknown manifest saves nothing and says why', async () => {
-    await put(synced('my-skill', 'SKILL.md'), 'x');
-    await put(synced('manifest.json'), '{"version": 2, "entries": []}');
+    await writeTestFile(synced('my-skill', 'SKILL.md'), 'x');
+    await writeTestFile(synced('manifest.json'), '{"version": 2, "entries": []}');
     const found = await readSyncedSkills(pathsOf(process.platform), base);
     expect(found.own).toEqual([]);
     expect(found.problem).toContain('in a format agentnomad does not know');
@@ -140,7 +135,7 @@ describe('claude.ai skills (T42): reading and saving', () => {
 
   it('the global collector adds them only when asked', async () => {
     await syncedSetup();
-    await put(join(base, 'CLAUDE.md'), 'Notes');
+    await writeTestFile(join(base, 'CLAUDE.md'), 'Notes');
     const collector = createClaudeCodeGlobalCollector({
       baseDir: base,
       homedir: home,
@@ -170,11 +165,8 @@ describe('claude.ai skills (T42): reading and saving', () => {
   });
 });
 
-const saved = (name: string, body: string): CollectedFile => ({
-  path: `${ACCOUNT_SKILLS_PREFIX}${name}/SKILL.md`,
-  content: new TextEncoder().encode(`---\nname: ${name}\n---\n${body}\n`),
-  executable: false,
-});
+const saved = (name: string, body: string) =>
+  collected(`${ACCOUNT_SKILLS_PREFIX}${name}/SKILL.md`, `---\nname: ${name}\n---\n${body}\n`);
 
 describe('claude.ai skills (T42): what pull may add', () => {
   it('skips a skill this PC already syncs or a local name, marks ones that run commands', () => {
@@ -286,7 +278,7 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('names only the skills it wrote as added (UX-01)', async () => {
     // A file where the skill's folder would go: none of its files can be written.
-    await put(join(base, 'skills', 'broken'), 'not a folder');
+    await writeTestFile(join(base, 'skills', 'broken'), 'not a folder');
     const t = run([saved('mine', 'Plain.'), saved('broken', 'Plain.')], { accountSkills: true });
     await t.done;
     expect(await skillFile('mine')).toContain('Plain.');
@@ -298,7 +290,7 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('skips a skill this PC already gets from claude.ai, and never touches a local one', async () => {
     await syncedSetup();
-    await put(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
+    await writeTestFile(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
     const t = run([saved('my-skill', 'From the other PC.'), saved('local-one', 'Theirs.')], {
       accountSkills: true,
     });

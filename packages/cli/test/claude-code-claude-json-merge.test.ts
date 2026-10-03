@@ -1,38 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
+import { collectedJson } from './fakes.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_QUESTION,
-  commandsInSettings,
   createClaudeJsonMerge,
-  programOf,
-  type CollectedFile,
   type MutableReport,
 } from '../src/index.ts';
 
-describe('settings parsing is its own module (SOLID-05; imports checked by ESLint, ARCH-04)', () => {
-  it('still reads hooks, the status line and programs', () => {
-    const settings = JSON.stringify({
-      hooks: { Stop: [{ hooks: [{ command: 'bash ~/.claude/hooks/done.sh' }] }] },
-      statusLine: { command: 'npx -y ccstatusline@latest' },
-    });
-    expect(commandsInSettings(settings)).toEqual([
-      ['bash', '~/.claude/hooks/done.sh'],
-      ['npx', '-y', 'ccstatusline@latest'],
-    ]);
-    expect(programOf(['npx', '-y', 'ccstatusline@latest'])).toEqual({
-      name: 'ccstatusline',
-      runner: true,
-    });
-  });
-});
-
 describe('the ~/.claude.json merge stands alone (SOLID-05)', () => {
-  const pulled = (value: unknown): CollectedFile => ({
-    path: CLAUDE_JSON_BUNDLE_PATH,
-    content: new TextEncoder().encode(JSON.stringify(value)),
-    executable: false,
-  });
+  const pulled = (value: unknown) => collectedJson(CLAUDE_JSON_BUNDLE_PATH, value);
   const emptyReport = (): MutableReport => ({
     written: [],
     skipped: [],

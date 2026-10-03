@@ -15,10 +15,12 @@ import {
 import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import {
+  collected,
   fakeBundleServer,
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
+  storedOn,
 } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
@@ -61,12 +63,6 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-const text = (path: string, content: string, executable = false): CollectedFile => ({
-  path,
-  content: new TextEncoder().encode(content),
-  executable,
-});
-
 function fakeAdapter(
   options: {
     global?: CollectedFile[];
@@ -87,8 +83,8 @@ function fakeAdapter(
       collect: (target) =>
         Promise.resolve(
           target.kind === 'global'
-            ? (options.global ?? [text('CLAUDE.md', `Scripts in ${HOME}/scripts`)])
-            : (options.project ?? [text('CLAUDE.md', 'project rules')]),
+            ? (options.global ?? [collected('CLAUDE.md', `Scripts in ${HOME}/scripts`)])
+            : (options.project ?? [collected('CLAUDE.md', 'project rules')]),
         ),
     },
     restorer: stubRestorer(),
@@ -149,7 +145,7 @@ async function received(
   scope: { kind: 'global' } | { kind: 'project'; name: string },
 ) {
   const scopeKey = scopeKeyFor(crypto, dataKey, scope);
-  const entry = server.stored.get(`claude-code/${scopeKey}`);
+  const entry = storedOn(server, scopeKey);
   if (!entry) throw new Error('nothing stored');
   const plain = openBundle(crypto, entry.upload.ciphertext, dataKey, {
     formatVersion: 1,
@@ -197,7 +193,7 @@ describe('agentnomad push', () => {
 
   it('never sends a readable byte of the setup', async () => {
     const t = setup(['global', false], {
-      adapter: fakeAdapter({ global: [text('CLAUDE.md', 'SECRET-PLAN-XYZ')] }),
+      adapter: fakeAdapter({ global: [collected('CLAUDE.md', 'SECRET-PLAN-XYZ')] }),
     });
     await t.command.push(noFlags);
     const sent = t.server.puts
@@ -433,7 +429,7 @@ describe('agentnomad push', () => {
   it('shows unknown-file and managed-settings notices, and offers env values', async () => {
     const adapter = fakeAdapter({
       global: [
-        text(
+        collected(
           '.mcp.json',
           JSON.stringify({ mcpServers: { gh: { env: { T: '${GITHUB_TOKEN}' } } } }),
         ),

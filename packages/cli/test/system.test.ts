@@ -181,7 +181,6 @@ describe('systemProcessLister: which program it runs (every OS)', () => {
   });
 });
 
-// Real programs start slowly while the whole suite runs in parallel.
 describe('icacls output, parsed (every OS)', () => {
   it('aclPrincipals reads every principal of an icacls listing (a GitHub runner, every OS)', () => {
     const file = 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\agentnomad system-v3MTv6\\secret.json';
@@ -215,6 +214,7 @@ describe('icacls output, parsed (every OS)', () => {
   });
 });
 
+// Real programs start slowly while the whole suite runs in parallel.
 describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
   let dir: string;
 
@@ -335,16 +335,14 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
     expect(list?.some((line) => /vitest/i.test(line))).toBe(true);
   });
 
-  it.runIf(win32)(
-    'readRegistry reads the policy key, or answers null when it is absent',
-    async () => {
-      const system = nodeManagedSettingsSystem(process.env, dir, 'win32');
-      for (const hive of ['HKLM', 'HKCU'] as const) {
-        const value = await system.readRegistry(hive);
-        expect(value === null || typeof value === 'string').toBe(true);
-      }
-    },
-  );
+  // No ClaudeCode policy key exists on the CI runners (or a developer PC without a
+  // managed Claude Code), so the real `reg query` must find no value in either hive.
+  // What a value present is read as is tested on parseRegSettings (managed-settings.test.ts).
+  it.runIf(win32)('readRegistry answers null when the policy key is absent', async () => {
+    const system = nodeManagedSettingsSystem(process.env, dir, 'win32');
+    expect(await system.readRegistry('HKLM')).toBeNull();
+    expect(await system.readRegistry('HKCU')).toBeNull();
+  });
 
   it.runIf(posix)('readRegistry answers null where there is no registry', async () => {
     const system = nodeManagedSettingsSystem(process.env, dir, process.platform);

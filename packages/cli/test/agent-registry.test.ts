@@ -1,14 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
+import { recordingReporter } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
   createAgentRegistry,
   createAgentsCommand,
-  createClaudeCodeAdapter,
   describeAgent,
   type AgentAdapter,
   type DetectedAgent,
@@ -47,18 +43,14 @@ describe('agent registry', () => {
 
 describe('agentnomad agents', () => {
   it('shows each agent with its version and folder, and a count', async () => {
-    const lines: string[] = [];
+    const { reporter, lines } = recordingReporter({ levels: false });
     const command = createAgentsCommand({
       registry: () =>
         createAgentRegistry([
           fakeAdapter('claude-code', 'Claude Code', installed),
           fakeAdapter('codex', 'Codex', missing),
         ]),
-      reporter: {
-        info: (m) => lines.push(m),
-        success: (m) => lines.push(m),
-        warn: (m) => lines.push(m),
-      },
+      reporter,
     });
     await command.agents();
     expect(lines).toEqual([
@@ -71,68 +63,5 @@ describe('agentnomad agents', () => {
     expect(describeAgent('Claude Code', { ...installed, version: null })).toBe(
       '✓ Claude Code  version unknown  /home/a/.claude',
     );
-  });
-});
-
-describe('Claude Code adapter', () => {
-  let home: string;
-  beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), 'agentnomad-adapter-'));
-  });
-  afterEach(async () => {
-    await rm(home, { recursive: true, force: true });
-  });
-
-  const adapter = (env: Record<string, string> = { PATH: '' }) =>
-    createClaudeCodeAdapter({
-      env,
-      homedir: home,
-      platform: process.platform,
-      isClaudeRunning: () => Promise.resolve(false),
-    });
-
-  it('is registered as claude-code / Claude Code', () => {
-    expect(adapter()).toMatchObject({ id: 'claude-code', displayName: 'Claude Code' });
-  });
-
-  it('detects, collects global and project setups, and restores them', async () => {
-    await mkdir(join(home, '.claude'), { recursive: true });
-    await writeFile(join(home, '.claude', 'CLAUDE.md'), 'global rules');
-    const project = join(home, 'app');
-    await mkdir(project);
-    await writeFile(join(project, 'CLAUDE.md'), 'project rules');
-
-    const claude = adapter();
-    expect(await claude.detector.detect()).toEqual({
-      installed: true,
-      baseDir: join(home, '.claude'),
-      version: null,
-    });
-    const global = await claude.collector.collect({ kind: 'global' }, { includeMemory: false });
-    const local = await claude.collector.collect(
-      { kind: 'project', projectDir: project },
-      { includeMemory: false },
-    );
-    expect(global.map((file) => file.path)).toEqual(['CLAUDE.md']);
-    expect(local.map((file) => file.path)).toEqual(['CLAUDE.md']);
-    expect(new TextDecoder().decode(local[0]?.content)).toBe('project rules');
-
-    const other = join(home, 'other-app');
-    const report = await claude.restorer.restore(
-      { kind: 'project', projectDir: other },
-      local,
-      () => Promise.resolve('skip'),
-    );
-    expect(report.written).toEqual(['CLAUDE.md']);
-  });
-
-  it('uses CLAUDE_CONFIG_DIR for every part', async () => {
-    const custom = join(home, 'work-claude');
-    await mkdir(custom);
-    await writeFile(join(custom, 'CLAUDE.md'), 'custom');
-    const claude = adapter({ PATH: '', CLAUDE_CONFIG_DIR: custom });
-    expect((await claude.detector.detect()).baseDir).toBe(custom);
-    const files = await claude.collector.collect({ kind: 'global' }, { includeMemory: false });
-    expect(new TextDecoder().decode(files[0]?.content)).toBe('custom');
   });
 });

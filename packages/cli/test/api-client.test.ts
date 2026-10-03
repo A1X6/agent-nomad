@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 
-import { API_HEADERS, DEFAULT_KDF_PARAMS, type BundleParams } from '@agentnomad/contracts';
+import {
+  API_HEADERS,
+  DEFAULT_KDF_PARAMS,
+  PutBundleRequestHeadersSchema,
+  type BundleParams,
+  type PutBundleRequestHeaders,
+} from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
 
@@ -254,6 +260,12 @@ describe('ApiClient: bundles', () => {
     expect(headers[API_HEADERS.contentSha256]).toBe(bundle.contentSha256);
     expect(headers[API_HEADERS.nameEnc]).toBe('bmFtZQ==');
     expect(call?.init.body).toEqual(bundle.ciphertext);
+    // What the client sent is what the server's schema accepts (QA-05).
+    const accepted: PutBundleRequestHeaders = PutBundleRequestHeadersSchema.parse(headers);
+    expect(accepted).toMatchObject({
+      [API_HEADERS.expectedRevision]: 0,
+      [API_HEADERS.contentSha256]: bundle.contentSha256,
+    });
   });
 
   it('refuses to upload when the hash does not match the bytes', async () => {

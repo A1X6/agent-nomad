@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { writeTestFile } from './fakes.ts';
 import {
   agentVersionNotice,
   CLAUDE_CODE_PATHS,
@@ -27,11 +28,6 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function put(path: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, 'x');
-}
-
 const input = () => ({ baseDir: base, platform: process.platform });
 
 describe('paths data file', () => {
@@ -54,10 +50,10 @@ describe('paths data file', () => {
 
 describe('unknown-file check (T32 done-when)', () => {
   it('reports an unlisted file or folder, never skipping it silently', async () => {
-    await put(join(base, 'settings.json'));
-    await put(join(base, 'skills', 'mine', 'SKILL.md'));
-    await put(join(base, 'hooks', 'a.sh'));
-    await put(join(base, 'new-feature.json'));
+    await writeTestFile(join(base, 'settings.json'));
+    await writeTestFile(join(base, 'skills', 'mine', 'SKILL.md'));
+    await writeTestFile(join(base, 'hooks', 'a.sh'));
+    await writeTestFile(join(base, 'new-feature.json'));
     expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([
       'hooks/',
       'new-feature.json',
@@ -66,9 +62,9 @@ describe('unknown-file check (T32 done-when)', () => {
 
   it('does not report a folder whose script a hook or the status line runs (T49)', async () => {
     const home = dirname(base);
-    await put(join(base, 'hooks', 'check.sh'));
-    await put(join(base, 'bin', 'status.sh'));
-    await put(join(base, 'tools', 'unused.sh'));
+    await writeTestFile(join(base, 'hooks', 'check.sh'));
+    await writeTestFile(join(base, 'bin', 'status.sh'));
+    await writeTestFile(join(base, 'tools', 'unused.sh'));
     await writeFile(
       join(base, 'settings.json'),
       JSON.stringify({
@@ -83,7 +79,7 @@ describe('unknown-file check (T32 done-when)', () => {
   });
 
   it('does not report a folder whose script a hook in exec form runs (BUG-01)', async () => {
-    await put(join(base, 'hooks', 'check.js'));
+    await writeTestFile(join(base, 'hooks', 'check.js'));
     await writeFile(
       join(base, 'settings.json'),
       JSON.stringify({
@@ -100,24 +96,24 @@ describe('unknown-file check (T32 done-when)', () => {
   });
 
   it('does not report skills/synced/, secrets, state or known copies', async () => {
-    await put(join(base, 'skills', 'synced', 'x', 'SKILL.md'));
-    await put(join(base, '.credentials.json'));
-    await put(join(base, 'projects', 'C--x', 'a.jsonl'));
-    await put(join(base, 'state', 'x'));
-    await put(join(base, 'chrome', 'x'));
-    await put(join(base, 'settings.json.bak'));
-    await put(join(base, 'CLAUDE.md.agentnomad-backup-20260925T120000Z'));
-    await put(join(base, '.claude.json'));
+    await writeTestFile(join(base, 'skills', 'synced', 'x', 'SKILL.md'));
+    await writeTestFile(join(base, '.credentials.json'));
+    await writeTestFile(join(base, 'projects', 'C--x', 'a.jsonl'));
+    await writeTestFile(join(base, 'state', 'x'));
+    await writeTestFile(join(base, 'chrome', 'x'));
+    await writeTestFile(join(base, 'settings.json.bak'));
+    await writeTestFile(join(base, 'CLAUDE.md.agentnomad-backup-20260925T120000Z'));
+    await writeTestFile(join(base, '.claude.json'));
     expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([]);
   });
 
   it('checks a project’s .claude folder', async () => {
-    await put(join(project, '.claude', 'settings.json'));
-    await put(join(project, '.claude', 'worktrees', 'wt', 'x'));
-    await put(join(project, '.claude', 'agent-memory-local', 'x'));
-    await put(join(project, '.claude', 'hooks', 'lint.sh'));
-    await put(join(project, '.claude', 'brand-new.json'));
-    await put(join(project, 'src', 'index.ts'));
+    await writeTestFile(join(project, '.claude', 'settings.json'));
+    await writeTestFile(join(project, '.claude', 'worktrees', 'wt', 'x'));
+    await writeTestFile(join(project, '.claude', 'agent-memory-local', 'x'));
+    await writeTestFile(join(project, '.claude', 'hooks', 'lint.sh'));
+    await writeTestFile(join(project, '.claude', 'brand-new.json'));
+    await writeTestFile(join(project, 'src', 'index.ts'));
     expect(await findUnknownEntries({ kind: 'project', projectDir: project }, input())).toEqual([
       '.claude/brand-new.json',
     ]);

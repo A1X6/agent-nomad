@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -15,6 +16,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { collectedJson } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
   isRedirectVariable,
@@ -47,13 +49,8 @@ import {
 } from '../src/index.ts';
 
 const posix = process.platform !== 'win32';
-const file = (path: string, value: unknown): CollectedFile => ({
-  path,
-  content: new TextEncoder().encode(JSON.stringify(value)),
-  executable: false,
-});
 
-const mcpJson = file('.mcp.json', {
+const mcpJson = collectedJson('.mcp.json', {
   mcpServers: {
     github: { command: 'npx', args: ['gh-mcp'], env: { GITHUB_TOKEN: '${GITHUB_TOKEN}' } },
     api: {
@@ -77,14 +74,14 @@ describe('finding ${VAR} references', () => {
   it('reads ~/.claude.json servers and settings, and knows variables settings set', () => {
     const scan = scanEnvReferences(
       [
-        file('.agentnomad/claude.json', {
+        collectedJson('.agentnomad/claude.json', {
           mcpServers: { notion: { env: { NOTION_KEY: '${NOTION_KEY}' } } },
         }),
-        file('settings.json', {
+        collectedJson('settings.json', {
           env: { COMPANY_PROXY: 'http://proxy' },
           apiKeyHelper: 'echo ${HELPER_TOKEN}',
         }),
-        file('CLAUDE.md', { note: '${NOT_SCANNED}' }),
+        collectedJson('CLAUDE.md', { note: '${NOT_SCANNED}' }),
       ],
       CLAUDE_ENV_REFERENCES,
       'global',
@@ -220,15 +217,39 @@ describe('writing the profile', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  const bashrc = (path: string) =>
+    createShellProfileWriter({ path, kind: 'posix', label: '~/.bashrc' });
+
   it('never replaces a profile it cannot read (T46)', async () => {
     const profile = join(dir, '.bashrc');
     await mkdir(profile);
-    await expect(
-      createShellProfileWriter({ path: profile, kind: 'posix', label: '~/.bashrc' }).write({
-        TOKEN: 'abc',
-      }),
-    ).rejects.toThrow();
+    // The read's error, not the later rename onto a folder (EPERM on Windows); nothing written.
+    await expect(bashrc(profile).write({ TOKEN: 'abc' })).rejects.toMatchObject({
+      code: 'EISDIR',
+    });
+    expect(await readdir(dir)).toEqual(['.bashrc']);
   });
+
+  // Without the guard, a profile the user may not read would be replaced (rename needs only
+  // the folder's permission). Root reads any file, so the case cannot be set up as root.
+  it.runIf(posix && process.getuid?.() !== 0)(
+    'never replaces a profile it may not read (T46)',
+    async () => {
+      const PROFILE = 'alias ll="ls -l"';
+      const profile = join(dir, '.bashrc');
+      await writeFile(profile, PROFILE);
+      await chmod(profile, 0);
+      try {
+        await expect(bashrc(profile).write({ TOKEN: 'abc' })).rejects.toMatchObject({
+          code: 'EACCES',
+        });
+      } finally {
+        await chmod(profile, 0o600);
+      }
+      expect(await readFile(profile, 'utf8')).toBe(PROFILE);
+      expect(await readdir(dir)).toEqual(['.bashrc']);
+    },
+  );
 
   it.runIf(posix)('writes through a linked profile, keeping the link (T46)', async () => {
     const real = join(dir, 'dotfiles', 'bashrc');
@@ -642,7 +663,7 @@ describe('agentnomad env', () => {
         list: () => [
           adapter(
             [
-              file('.agentnomad/claude.json', {
+              collectedJson('.agentnomad/claude.json', {
                 mcpServers: { github: { env: { T: '${GITHUB_TOKEN}' } } },
               }),
             ],
@@ -693,7 +714,7 @@ describe('agentnomad env', () => {
 
   it('marks variables the settings set', () => {
     const scan = scanEnvReferences(
-      [file('settings.json', { env: { X: '1' }, apiKeyHelper: '${X}' })],
+      [collectedJson('settings.json', { env: { X: '1' }, apiKeyHelper: '${X}' })],
       CLAUDE_ENV_REFERENCES,
     );
     expect(describeEnv(scan, {})[0]).toContain('set in settings');

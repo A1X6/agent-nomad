@@ -90,7 +90,8 @@ When testing by hand, use a temporary home folder (set `HOME` and, on Windows,
   in `packages/cli/test/secret-store.test.ts`, runs only with `AGENTNOMAD_TEST_REAL_KEYCHAIN=1`,
   which CI sets on every OS.
 - Shared test fakes (secret store, scripted prompter, recording reporter, bundle server, a
-  typed partial API client) live in `packages/cli/test/fakes.ts`: use them instead of a new copy.
+  typed partial API client, collected-file builders and `writeTestFile`) live in
+  `packages/cli/test/fakes.ts`: use them instead of a new copy.
 - Anything that touches paths runs on macOS, Linux and Windows in CI; write it so it passes
   on all three (use `path.join`, never assume `/`).
 - A change to push, pull or the bundle belongs in the end-to-end steps too

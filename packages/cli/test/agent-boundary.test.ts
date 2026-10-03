@@ -29,6 +29,7 @@ import {
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
+  writeTestFile,
 } from './fakes.ts';
 
 /*
@@ -52,10 +53,6 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function put(path: string, content: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content);
-}
 const exists = (path: string) =>
   stat(path).then(
     () => true,
@@ -239,21 +236,22 @@ const newSeen = (): Seen => ({ collected: [], followUps: [] });
 async function pushed() {
   const server = fakeBundleServer('2026-10-03T12:00:00Z').api;
   const a = machine('laptop');
-  await put(join(a.base, 'settings.toml'), 'theme = "dark"\n');
-  await put(join(a.base, 'hooks', 'check.sh'), 'echo ok\n');
-  await put(join(a.base, 'extensions.json'), '["lint"]');
-  await put(join(a.base, 'prompts', 'review.md'), 'Review this.');
-  const seen = newSeen();
-  const push = createPushCommand(depsFor(a, server, scriptedPrompter([]).prompter, seen).deps).push;
+  await writeTestFile(join(a.base, 'settings.toml'), 'theme = "dark"\n');
+  await writeTestFile(join(a.base, 'hooks', 'check.sh'), 'echo ok\n');
+  await writeTestFile(join(a.base, 'extensions.json'), '["lint"]');
+  await writeTestFile(join(a.base, 'prompts', 'review.md'), 'Review this.');
+  const push = createPushCommand(
+    depsFor(a, server, scriptedPrompter([]).prompter, newSeen()).deps,
+  ).push;
   await push({ global: true, yes: true, parts: new Map([['prompts', true]]) });
-  return { server, seen };
+  return server;
 }
 
 describe('a second agent goes through push and pull from its adapter alone (T61)', () => {
   it('push asks the agent’s own questions and collects its optional part', async () => {
     const server = fakeBundleServer('2026-10-03T12:00:00Z').api;
     const a = machine('laptop');
-    await put(join(a.base, 'settings.toml'), 'theme = "dark"\n');
+    await writeTestFile(join(a.base, 'settings.toml'), 'theme = "dark"\n');
     const seen = newSeen();
     const script = scriptedPrompter([false, true]);
     await createPushCommand(depsFor(a, server, script.prompter, seen).deps).push({
@@ -268,9 +266,9 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
   });
 
   it('pull restores it, asks every question before writing, and follows up without a prompter', async () => {
-    const { server } = await pushed();
+    const server = await pushed();
     const b = machine('desktop');
-    await put(join(b.base, 'settings.toml'), 'theme = "light"\n');
+    await writeTestFile(join(b.base, 'settings.toml'), 'theme = "light"\n');
     const seen = newSeen();
     const script = scriptedPrompter([true, 'overwrite', true]);
     const t = depsFor(b, server, script.prompter, seen);
@@ -291,7 +289,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
   });
 
   it('without a terminal, the agent’s open question stops pull before anything is written', async () => {
-    const { server } = await pushed();
+    const server = await pushed();
     const b = machine('desktop');
     const seen = newSeen();
     const t = depsFor(b, server, createNoTerminalPrompter(), seen);
@@ -311,7 +309,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
   it('push offers the values its MCP servers use, from the agent’s own files (ARCH-01)', async () => {
     const server = fakeBundleServer('2026-10-03T12:00:00Z').api;
     const a = machine('laptop');
-    await put(
+    await writeTestFile(
       join(a.base, 'mcp.json'),
       JSON.stringify({
         mcpServers: { docs: { env: { TOKEN: '${EXAMPLE_TOKEN}', DIR: '${EXAMPLE_HOME}' } } },
@@ -347,7 +345,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
   });
 
   it('--yes skips its hooks and extensions and writes the rest', async () => {
-    const { server } = await pushed();
+    const server = await pushed();
     const b = machine('desktop');
     const seen = newSeen();
     const t = depsFor(b, server, createNoTerminalPrompter(), seen);
