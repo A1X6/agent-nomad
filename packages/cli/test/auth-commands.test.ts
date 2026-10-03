@@ -518,7 +518,10 @@ describe('from a script (--username, --password-stdin, --yes)', () => {
 
   it('a weak piped password stops register with the reason, creating nothing', async () => {
     const t = setup([], { stdin: 'password123456' });
-    await expect(t.commands.register(flags())).rejects.toThrow();
+    // zxcvbn's reason, as the CLI shows it.
+    await expect(t.commands.register(flags())).rejects.toThrow(
+      'This is similar to a commonly used password',
+    );
     expect(t.server.calls).toEqual([]);
     expect(t.secrets.saved.size).toBe(0);
   });
@@ -530,7 +533,9 @@ describe('from a script (--username, --password-stdin, --yes)', () => {
 
   it('an invalid --username is refused like a typed one', async () => {
     const t = setup([], { stdin: STRONG });
-    await expect(t.commands.login(flags({ username: 'Ahmed Ali' }))).rejects.toThrow();
+    await expect(t.commands.login(flags({ username: 'Ahmed Ali' }))).rejects.toThrow(
+      'Username must be 3–32 lowercase letters',
+    );
     expect(t.server.calls).toEqual([]);
   });
 
