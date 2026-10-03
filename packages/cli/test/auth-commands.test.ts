@@ -5,6 +5,10 @@ import {
   type RegisterRequest,
 } from '@agentnomad/contracts';
 import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -20,7 +24,9 @@ import {
   NO_RECOVERY_WARNING,
   SessionExpiredError,
   withSession,
+  createLocalState,
   type ApiClient,
+  type LocalState,
   type PasswordChecker,
   type Prompter,
   type Reporter,
@@ -180,6 +186,7 @@ function setup(
     secrets?: ReturnType<typeof memorySecrets>;
     /** What `--password-stdin` reads. */
     stdin?: string;
+    localState?: LocalState;
   } = {},
 ) {
   const server = options.server ?? fakeServer();
@@ -201,6 +208,7 @@ function setup(
     crypto: () => Promise.resolve(fastCrypto()),
     passwordChecker: () => Promise.resolve(zxcvbn),
     deviceName: 'laptop',
+    ...(options.localState !== undefined && { localState: () => options.localState as LocalState }),
     ...(options.stdin !== undefined && {
       readPasswordStdin: () => Promise.resolve(options.stdin ?? ''),
     }),
@@ -321,6 +329,43 @@ describe('login', () => {
     );
     expect(otherPc.lines.at(-1)).toBe('success: Logged in as "ahmed".');
     expect(server.calls.slice(-2)).toEqual(['prelogin', 'login']);
+  });
+
+  it('another account on this PC starts with no remembered revisions (T56)', async () => {
+    const server = fakeServer();
+    await setup(registerAnswers('alice'), { server }).commands.register(ASK);
+    await setup(registerAnswers('bob'), { server }).commands.register(ASK);
+    const dir = await mkdtemp(join(tmpdir(), 'agentnomad-auth-'));
+    try {
+      const state = createLocalState({
+        path: join(dir, 'state.json'),
+        server: 's',
+        platform: process.platform,
+      });
+      const secrets = memorySecrets();
+      const pc = (answers: (string | boolean)[]) =>
+        setup(answers, { server, secrets, localState: state }).commands;
+
+      await pc(['alice', STRONG]).login(ASK);
+      await state.setRevision('claude-code', 'global', 7);
+      await state.rememberProject(dir, 'my-app');
+      await pc([]).logout();
+      await pc(['alice', STRONG]).login(ASK);
+      expect(await state.revisionOf('claude-code', 'global')).toBe(7);
+
+      await pc([]).logout();
+      await pc(['bob', STRONG]).login(ASK);
+      expect(await state.revisionOf('claude-code', 'global')).toBeNull();
+      expect(await state.projectNameFor(dir)).toBe('my-app');
+
+      // Registering a new account is a change of account too.
+      await state.setRevision('claude-code', 'global', 2);
+      await pc([]).logout();
+      await pc(registerAnswers('carol')).register(ASK);
+      expect(await state.knownRevisions()).toEqual({});
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('a wrong password saves nothing', async () => {

@@ -2,17 +2,27 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 
-import { ProjectNameSchema } from '@agentnomad/contracts';
+import { ProjectNameSchema, UsernameSchema } from '@agentnomad/contracts';
 import * as z from 'zod';
 
 /** Suffix of the note that a pull left out declined commands (T46). */
 const PARTIAL = '#partial';
 
+/**
+ * Key in the projects map that names the account the revisions belong to (T56). Kept in that
+ * map so older versions, which refuse unknown keys, still read the file; it never matches a
+ * project folder, which is always an absolute path.
+ */
+const ACCOUNT = '#account';
+
 /** File name of the local state inside the agentnomad config folder. */
 export const STATE_FILE = 'state.json';
 
 const ServerStateSchema = z.strictObject({
-  /** Project folder on this PC → the name it is saved under (T33 folder map). */
+  /**
+   * Project folder on this PC → the name it is saved under (T33 folder map), and `#account`
+   * → the username the revisions belong to (T56).
+   */
   projects: z.record(z.string(), ProjectNameSchema),
   /**
    * `<agent>/<scopeKey>` → the revision this PC last pushed or pulled. A pull that left out
@@ -59,6 +69,11 @@ export interface LocalState {
   isPartial(agent: string, scopeKey: string): Promise<boolean>;
   /** Every revision this PC knows, by `<agent>/<scopeKey>` (T35 status). */
   knownRevisions(): Promise<Readonly<Record<string, number>>>;
+  /**
+   * After a login or register (T56): the revisions belong to this account. Another account,
+   * or none remembered, starts with no revisions; project names are kept.
+   */
+  useAccount(username: string): Promise<void>;
   /** Forgets one setup (after it was deleted on the server). */
   forgetRevision(agent: string, scopeKey: string): Promise<void>;
   /** Forgets everything about this server (after the account was deleted). */
@@ -148,6 +163,13 @@ export function createLocalState(options: LocalStateOptions): LocalState {
       return Object.fromEntries(
         Object.entries((await server())?.revisions ?? {}).filter(([key]) => !key.endsWith(PARTIAL)),
       );
+    },
+    async useAccount(username) {
+      if ((await server())?.projects[ACCOUNT] === username) return;
+      await update((state) => {
+        state.revisions = {};
+        state.projects[ACCOUNT] = UsernameSchema.parse(username);
+      });
     },
     async forgetRevision(agent, scopeKey) {
       const key = `${agent}/${scopeKey}`;

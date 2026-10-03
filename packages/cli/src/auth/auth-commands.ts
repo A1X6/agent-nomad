@@ -36,7 +36,10 @@ export interface AuthCommandDeps {
   readonly passwordChecker: () => Promise<PasswordChecker>;
   /** Shown in the server's session list, e.g. the PC's host name. */
   readonly deviceName: string;
-  /** This PC's remembered revisions and project names; cleared by account delete. */
+  /**
+   * This PC's remembered revisions and project names; cleared by account delete, and the
+   * revisions by a login or register as another account (T56).
+   */
   readonly localState?: () => LocalState;
   /** `--password-stdin` (T36): the first line of standard input. */
   readonly readPasswordStdin?: () => Promise<string>;
@@ -198,6 +201,7 @@ export function createAuthCommands(
         keys.passwordKey.fill(0);
         dataKey.fill(0);
       }
+      await deps.localState?.().useAccount(username);
       finish(secrets, `Account "${username}" created. You are logged in on this PC.`);
     },
 
@@ -244,6 +248,7 @@ export function createAuthCommands(
       } finally {
         keys.passwordKey.fill(0);
       }
+      await deps.localState?.().useAccount(username);
       finish(secrets, `Logged in as "${username}".`);
     },
 

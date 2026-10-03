@@ -234,7 +234,7 @@ export function createWindowsEnvWriter(run: PowerShellRunner): EnvWriter {
     if (names.length === 0) return new Map();
     // Names in, values out as base64 UTF-8 JSON, so no console code page can change them.
     const output = await run(
-      "$found = @{}; foreach ($name in ($env:AGENTNOMAD_ENV_NAMES -split \"`n\")) { $value = [Environment]::GetEnvironmentVariable($name, 'User'); if ($null -ne $value) { $found[$name] = $value } }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $found -Compress)))",
+      '$found = @{}; foreach ($name in ($env:AGENTNOMAD_ENV_NAMES -split "`n")) { $value = [Environment]::GetEnvironmentVariable($name, \'User\'); if ($null -ne $value) { $found[$name] = $value } }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $found -Compress)))',
       { AGENTNOMAD_ENV_NAMES: names.join('\n') },
     );
     const parsed: unknown = JSON.parse(Buffer.from(output.trim(), 'base64').toString('utf8'));
