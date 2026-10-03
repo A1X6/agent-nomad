@@ -418,6 +418,31 @@ describe('ApiClient: requests that are never retried', () => {
     expect(await client.auth.register(registerRequest)).toEqual(SESSION);
   });
 
+  it('logout with a given token: sends that token, not the stored one (T66)', async () => {
+    const given = 'b'.repeat(43);
+    let storeRead = false;
+    const { client, apiCalls } = fakeServer([empty(204)], {
+      getSessionToken: () => {
+        storeRead = true;
+        return Promise.resolve(TOKEN);
+      },
+    });
+    await expect(client.auth.logout(given)).resolves.toBeUndefined();
+    expect(apiCalls()).toHaveLength(1);
+    expect(apiCalls()[0]?.url.pathname).toBe('/auth/logout');
+    expect(new Headers(apiCalls()[0]?.init.headers).get('authorization')).toBe(`Bearer ${given}`);
+    expect(storeRead).toBe(false);
+  });
+
+  it('logout with a given token: sent once, a timeout or 503 is not retried (T66)', async () => {
+    for (const step of [timedOut, () => Promise.resolve(empty(503))]) {
+      const { client, apiCalls, waits } = fakeServer([step]);
+      await expect(client.auth.logout('b'.repeat(43))).rejects.toBeInstanceOf(NetworkError);
+      expect(apiCalls()).toHaveLength(1);
+      expect(waits).toEqual([]);
+    }
+  });
+
   it('account delete: a timeout is "result unknown", sent once', async () => {
     const { client, apiCalls } = fakeServer([timedOut]);
     const error = await client.auth.deleteAccount({ authKey: AUTH_KEY }).catch((e: unknown) => e);

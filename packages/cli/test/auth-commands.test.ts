@@ -141,6 +141,8 @@ function fakeServer() {
   };
   const unauthorized = () => new ApiError(401, 'unauthorized', 'Wrong username or password');
   let logoutFailure: Error | undefined;
+  /** The token each logout was given; `undefined` = the stored one. */
+  const logoutTokens: (string | undefined)[] = [];
 
   const api: ApiClient = {
     auth: {
@@ -166,10 +168,12 @@ function fakeServer() {
         if (user?.authKey !== request.authKey) return Promise.reject(unauthorized());
         return Promise.resolve({ ...newSession(), wrappedDataKey: user.wrappedDataKey });
       },
-      logout: () => {
+      logout: (sessionToken?: string) => {
         calls.push('logout');
+        logoutTokens.push(sessionToken);
         if (logoutFailure) return Promise.reject(logoutFailure);
-        if (currentToken === null || !sessions.delete(currentToken)) {
+        const token = sessionToken ?? currentToken;
+        if (token === null || !sessions.delete(token)) {
           return Promise.reject(new ApiError(401, 'unauthorized', 'Session expired'));
         }
         return Promise.resolve();
@@ -196,6 +200,7 @@ function fakeServer() {
     users,
     sessions,
     calls,
+    logoutTokens,
     useToken: (token: string | null) => (currentToken = token),
     failLogout: (error: Error) => (logoutFailure = error),
   };
@@ -397,6 +402,75 @@ describe('login', () => {
     const t = setup(['ahmed', 'plum-garage-violin-99'], { server });
     await expect(t.commands.login(ASK)).rejects.toThrow('Wrong username or password');
     expect(t.secrets.saved.size).toBe(0);
+  });
+});
+
+describe('login: a data key that does not unlock (T66)', () => {
+  const UNLOCK_ERROR = 'Logged in, but your data key could not be unlocked with this password.';
+
+  /** "ahmed" registered, then his saved data key damaged, so login succeeds but unlocking fails. */
+  async function lockedAccount() {
+    const server = fakeServer();
+    await setup(registerAnswers(), { server }).commands.register(ASK);
+    const user = server.users.get('ahmed');
+    if (user === undefined) throw new Error('not registered');
+    const wrapped = Buffer.from(user.wrappedDataKey, 'base64');
+    wrapped[30] = (wrapped[30] ?? 0) ^ 1;
+    server.users.set('ahmed', { ...user, wrappedDataKey: wrapped.toString('base64') });
+    server.calls.length = 0;
+    return server;
+  }
+
+  it('ends the new session on the server with its own token, then gives the same error', async () => {
+    const server = await lockedAccount();
+    const sessionsBefore = new Set(server.sessions);
+    const keys = secretTrackingCrypto();
+    const t = setup(['ahmed', STRONG], { server, crypto: keys.crypto });
+
+    const error = await t.commands.login(ASK).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(UNLOCK_ERROR);
+    expect(server.calls).toEqual(['prelogin', 'login', 'logout']);
+    // The token from the login answer, never one read from this PC's secret store.
+    const [token] = server.logoutTokens;
+    expect(server.logoutTokens).toHaveLength(1);
+    expect(token).toBeDefined();
+    expect(sessionsBefore.has(token ?? '')).toBe(false);
+    expect([...server.sessions]).toEqual([...sessionsBefore]);
+    expect(t.secrets.saved.size).toBe(0);
+    expect(keys.handedOut).toHaveLength(2);
+    expect(keys.allWiped()).toBe(true);
+  });
+
+  it('still gives the same error when that logout fails or times out', async () => {
+    const failures = [
+      new NetworkError('timeout', 'The server took too long to answer.'),
+      new NetworkError('unreachable', 'fetch failed'),
+      new ApiError(500, 'internal_error', 'Something went wrong'),
+    ];
+    for (const failure of failures) {
+      const server = await lockedAccount();
+      server.failLogout(failure);
+      const keys = secretTrackingCrypto();
+      const t = setup(['ahmed', STRONG], { server, crypto: keys.crypto });
+
+      const error = await t.commands.login(ASK).catch((e: unknown) => e);
+      expect((error as Error).message).toBe(UNLOCK_ERROR);
+      expect((error as Error).cause).not.toBe(failure);
+      expect(server.calls).toEqual(['prelogin', 'login', 'logout']);
+      expect(t.secrets.saved.size).toBe(0);
+      expect(keys.allWiped()).toBe(true);
+      expect(t.lines.filter((line) => line.startsWith('warn:'))).toEqual([]);
+    }
+  });
+
+  it('a normal login never logs out', async () => {
+    const server = fakeServer();
+    await setup(registerAnswers(), { server }).commands.register(ASK);
+    const t = setup(['ahmed', STRONG], { server });
+    await t.commands.login(ASK);
+    expect(server.calls).toEqual(['register', 'prelogin', 'login']);
+    expect(server.logoutTokens).toEqual([]);
   });
 });
 
