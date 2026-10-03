@@ -426,7 +426,7 @@ Each account keeps at most 100 setups and 50 MB of encrypted bytes (checked befo
 anything and again inside the save's transaction, with the user row locked); over it,
 `413 payload_too_large` says which limit. The visitor's IP is Cloudflare's
 `CF-Connecting-IP` (`True-Client-IP` when that is missing). About one save in 50 also deletes
-files no setup points to that are over an hour old. Logs are one JSON line per request with
+files no setup points to that are over an hour old, and about one rate-limited request in 100 prunes old counters and every user's expired sessions. Register writes the account and its first session in one transaction. Logs are one JSON line per request with
 a request id and the CLI version from `x-an-client` (`invalid` when it does not look like a
 version; absent for 1.0.3 and older), never other headers, bodies or query strings; a failed query logs its SQL text, never
 its parameters. There are no CORS headers and no cookies.
@@ -654,8 +654,8 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 | File                                                                           | Responsible for                                                                                      |
 | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `main.ts`                                                                      | Starts the Node web server and shuts down cleanly on Render's signals.                               |
-| `server.ts`                                                                    | Composition root: settings, Neon pool, keys, limiter, services, app.                                 |
+| `main.ts`                                                                      | Starts the Node web server, logs a crash as one line, and shuts down cleanly on Render's signals.    |
+| `server.ts`                                                                    | Composition root: settings, Neon pool (its errors logged), keys, limiter, services, app.             |
 | `index.ts`                                                                     | Re-exports for tests and the e2e server.                                                             |
 | `port.ts`                                                                      | The port from `PORT`.                                                                                |
 | `encoding.ts`                                                                  | Base64, hex and UTF-8 with web-standard APIs.                                                        |
@@ -664,7 +664,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `db/database.ts`                                                               | The driver-independent `Database` type (Neon in production, PGlite in tests).                        |
 | `db/repositories.ts`                                                           | Repository interfaces and their errors.                                                              |
 | `db/user-repository.ts`, `db/session-repository.ts`, `db/bundle-repository.ts` | Accounts, sessions (token hashes) and bundle metadata in Postgres, with the revision check.          |
-| `db/bundle-cursor.ts`                                                          | Opaque, tamper-checked list cursors.                                                                 |
+| `db/bundle-cursor.ts`                                                          | Opaque list cursors, format-checked (a real date and time, a UUID); queries stay scoped to the user. |
 | `storage/blob-store.ts`                                                        | The `BlobStore` interface: encrypted bytes under random ids (R2 later).                              |
 | `storage/postgres-blob-store.ts`                                               | The implementation in `bundle_blobs`.                                                                |
 | `auth/server-keys.ts`                                                          | Keys from `SERVER_SECRET`: auth-key hashes (constant-time check), fake salts, pseudonyms.            |
@@ -682,6 +682,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `http/errors.ts`                                                               | The standard error body; 500 details only in logs.                                                   |
 | `hosting/client-ip.ts`                                                         | The visitor's IP on Render (Cloudflare's header).                                                    |
 | `logging/logger.ts`                                                            | JSON log lines with only safe fields.                                                                |
+| `logging/crash.ts`                                                             | An uncaught error or unhandled rejection: one log line, then exit 1.                                 |
 
 Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 

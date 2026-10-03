@@ -260,7 +260,12 @@ describe('GET /bundles', () => {
     expect(new Set(seen).size).toBe(5);
   });
 
-  it.each(['?cursor=bad-cursor', '?limit=0', '?limit=101'])(
+  // A well-formed cursor with an impossible time is refused like any bad cursor (BUG-07).
+  const impossibleTime = Buffer.from(
+    JSON.stringify(['2026-13-45 99:99:99+00', '00000000-0000-4000-8000-000000000000']),
+  ).toString('base64url');
+
+  it.each(['?cursor=bad-cursor', `?cursor=${impossibleTime}`, '?limit=0', '?limit=101'])(
     'refuses %s with 400',
     async (query) => {
       const token = await register();

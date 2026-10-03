@@ -1,7 +1,12 @@
 import { GLOBAL_SCOPE_KEY, USER_STORAGE_LIMITS } from '@agentnomad/contracts';
 
-import { overLimit } from '../db/bundle-repository.ts';
-import type { BundleKey, BundleMeta, BundlePage, BundleRepository } from '../db/repositories.ts';
+import type {
+  BundleKey,
+  BundleMeta,
+  BundlePage,
+  BundleRepository,
+  StorageLimit,
+} from '../db/repositories.ts';
 import type { BlobStore } from '../storage/blob-store.ts';
 
 /** Nonce (24) + Poly1305 tag (16): anything shorter cannot be an encrypted bundle. */
@@ -21,6 +26,16 @@ export class StorageLimitError extends Error {
     super(message);
     this.name = 'StorageLimitError';
   }
+}
+
+/**
+ * Why a save is refused by the storage limits, in words the CLI shows as they are. Installed
+ * CLIs print this text, so it must not change.
+ */
+export function overLimit(limit: StorageLimit): string {
+  return limit === 'setups'
+    ? `An account keeps at most ${String(USER_STORAGE_LIMITS.maxSetups)} saved setups. Delete some with \`agentnomad delete\` first.`
+    : `An account keeps at most ${String(USER_STORAGE_LIMITS.maxBytes / 1024 / 1024)} MB of saved setups. Delete some with \`agentnomad delete\` or make this one smaller.`;
 }
 
 /** No saved setup for that agent and scope. */
@@ -146,8 +161,7 @@ export function createBundleService(deps: BundleServiceDeps): BundleService {
       // 0. Over the account's limits already: refuse before storing anything (T47). The
       // same check runs again inside the save, where it cannot be raced.
       const { userId } = input.key;
-      const used = await bundles.usage(userId);
-      const current = await bundles.get(input.key);
+      const [used, current] = await Promise.all([bundles.usage(userId), bundles.get(input.key)]);
       if (!current && used.setups >= USER_STORAGE_LIMITS.maxSetups) {
         throw new StorageLimitError(overLimit('setups'));
       }
@@ -190,7 +204,7 @@ export function createBundleService(deps: BundleServiceDeps): BundleService {
           return { outcome: 'conflict', currentRevision: result.currentRevision };
         case 'over-limit':
           await deleteQuietly(userId, uploaded.blobId);
-          throw new StorageLimitError(result.reason);
+          throw new StorageLimitError(overLimit(result.limit));
       }
     },
 

@@ -10,6 +10,7 @@ const rule: RateLimitRule = { name: 'test', limit: 3, windowSeconds: 60 };
 let database: TestDatabase;
 let limiter: RateLimiter;
 let prune = false;
+let alsoPruned = 0;
 
 beforeEach(async () => {
   database = await createTestDatabase();
@@ -17,8 +18,13 @@ beforeEach(async () => {
     db: database.db,
     keys: await createServerKeys(new Uint8Array(32).fill(1)),
     shouldPrune: () => prune,
+    alsoPrune: () => {
+      alsoPruned++;
+      return Promise.resolve();
+    },
   });
   prune = false;
+  alsoPruned = 0;
 });
 
 afterEach(async () => {
@@ -55,14 +61,6 @@ describe('PostgresRateLimiter', () => {
     expect((await limiter.hit(rule, '203.0.113.7')).allowed).toBe(true);
   });
 
-  it('check reports the state without counting', async () => {
-    await hits(2);
-    expect((await limiter.check(rule, '203.0.113.7')).allowed).toBe(true);
-    expect((await limiter.check(rule, '203.0.113.7')).allowed).toBe(true);
-    await hits(1);
-    expect((await limiter.check(rule, '203.0.113.7')).allowed).toBe(false);
-  });
-
   it('reset forgets the count', async () => {
     await hits(4);
     await limiter.reset(rule, '203.0.113.7');
@@ -89,5 +87,17 @@ describe('PostgresRateLimiter', () => {
     await hits(1, 'new');
     const { rows } = await database.client.query('select key from rate_limits');
     expect(rows).toHaveLength(1);
+  });
+
+  it('runs the other housekeeping only with a prune (DB-02)', async () => {
+    await hits(2);
+    expect(alsoPruned).toBe(0);
+    prune = true;
+    await hits(1);
+    expect(alsoPruned).toBe(1);
+  });
+
+  it('has no check method any more, only hit and reset (DEAD-02)', () => {
+    expect(Object.keys(limiter).sort()).toEqual(['hit', 'reset']);
   });
 });

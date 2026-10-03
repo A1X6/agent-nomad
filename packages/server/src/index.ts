@@ -11,6 +11,7 @@ export * from './db/user-repository.ts';
 export * from './http/app.ts';
 export * from './http/errors.ts';
 export * from './http/rate-limit.ts';
+export * from './logging/crash.ts';
 export * from './logging/logger.ts';
 export * from './rate-limit/postgres-rate-limiter.ts';
 export * from './rate-limit/rate-limiter.ts';

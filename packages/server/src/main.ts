@@ -5,11 +5,13 @@
 import { serve } from '@hono/node-server';
 
 import { renderClientIp } from './hosting/client-ip.ts';
+import { exitOnCrash } from './logging/crash.ts';
 import { createJsonLogger, describeError } from './logging/logger.ts';
 import { readPort } from './port.ts';
 import { createServerFromEnv } from './server.ts';
 
 const logger = createJsonLogger();
+exitOnCrash(process, logger, (code) => process.exit(code));
 
 try {
   const port = readPort(process.env);

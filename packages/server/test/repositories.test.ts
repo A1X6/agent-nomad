@@ -19,6 +19,7 @@ import {
   type SessionRepository,
   type UserRepository,
 } from '../src/index.ts';
+import { encodeBundleCursor } from '../src/db/bundle-cursor.ts';
 import { createTestDatabase, type TestDatabase } from './support/database.ts';
 
 const kdfParams: KdfParams = {
@@ -98,6 +99,42 @@ describe('UserRepository', () => {
   });
 });
 
+describe('UserRepository.createWithSession (DB-03)', () => {
+  const firstSession = (deviceName = 'laptop') => ({
+    tokenHash: 'first-token',
+    deviceName,
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+
+  it('writes the user and the first session together', async () => {
+    const { user, session } = await userRepo.createWithSession(newUser('ahmed'), firstSession());
+    expect(await userRepo.findByUsername('ahmed')).toEqual(user);
+    expect(await sessionRepo.findByTokenHash('first-token')).toEqual(session);
+    expect(session.userId).toBe(user.id);
+  });
+
+  it('keeps no account when the session cannot be written', async () => {
+    await database.client.query(
+      `alter table sessions add constraint test_refuse check (device_name <> 'refused')`,
+    );
+    await expect(
+      userRepo.createWithSession(newUser('ahmed'), firstSession('refused')),
+    ).rejects.toThrow();
+    expect(await userRepo.findByUsername('ahmed')).toBeNull();
+    // So trying again works, instead of answering "username taken".
+    await userRepo.createWithSession(newUser('ahmed'), firstSession());
+    expect(await userRepo.findByUsername('ahmed')).not.toBeNull();
+  });
+
+  it('throws UsernameTakenError for a taken username and writes no session', async () => {
+    await userRepo.create(newUser('ahmed'));
+    await expect(
+      userRepo.createWithSession(newUser('ahmed'), firstSession()),
+    ).rejects.toBeInstanceOf(UsernameTakenError);
+    expect(await sessionRepo.findByTokenHash('first-token')).toBeNull();
+  });
+});
+
 describe('SessionRepository', () => {
   it('finds a live session by its token hash and forgets it after delete', async () => {
     const user = await userRepo.create(newUser('ahmed'));
@@ -136,6 +173,27 @@ describe('SessionRepository', () => {
 
     const left = await database.db.select({ tokenHash: sessions.tokenHash }).from(sessions);
     expect(left.map((row) => row.tokenHash).sort()).toEqual(['live', 'other-expired']);
+  });
+
+  it("deletes every user's expired sessions, and nothing else (DB-02)", async () => {
+    const one = await userRepo.create(newUser('one'));
+    const two = await userRepo.create(newUser('two'));
+    const make = (userId: string, tokenHash: string, expiresInMs: number) =>
+      sessionRepo.create({
+        userId,
+        tokenHash,
+        deviceName: 'laptop',
+        expiresAt: new Date(Date.now() + expiresInMs),
+      });
+    await make(one.id, 'one-live', 60_000);
+    await make(one.id, 'one-expired', -1000);
+    await make(two.id, 'two-expired', -1000);
+    await make(two.id, 'two-live', 60_000);
+
+    await sessionRepo.deleteExpired();
+
+    const left = await database.db.select({ tokenHash: sessions.tokenHash }).from(sessions);
+    expect(left.map((row) => row.tokenHash).sort()).toEqual(['one-live', 'two-live']);
   });
 
   it('ignores an expired session', async () => {
@@ -326,7 +384,7 @@ describe('storage limits per account (T47)', () => {
       await bundleRepo.putMeta(
         write({ userId: user.id, scopeKey: scopeKey(999) }, 0, one.blobId, 1),
       ),
-    ).toMatchObject({ outcome: 'over-limit' });
+    ).toEqual({ outcome: 'over-limit', limit: 'setups' });
     // A new revision of an existing setup still saves.
     const update = await blobs.put(user.id, bytes(40, 2));
     expect(
@@ -356,11 +414,9 @@ describe('storage limits per account (T47)', () => {
       );
     }
     const extra = await blobs.put(user.id, bytes(40));
-    expect(
-      await bundleRepo.putMeta(big({ scopeKey: scopeKey(999) }, 0, extra.blobId, 40)),
-    ).toMatchObject({
-      outcome: 'over-limit',
-    });
+    expect(await bundleRepo.putMeta(big({ scopeKey: scopeKey(999) }, 0, extra.blobId, 40))).toEqual(
+      { outcome: 'over-limit', limit: 'bytes' },
+    );
     // The same size again, or smaller: always saved, so nobody gets stuck at the limit.
     const same = await blobs.put(user.id, bytes(40));
     expect(
@@ -452,6 +508,37 @@ describe('BundleRepository.list', () => {
       await expect(bundleRepo.list(user.id, { limit: 3, cursor })).rejects.toBeInstanceOf(
         InvalidCursorError,
       );
+    },
+  );
+
+  // Well-formed, but not a real moment: Postgres would fail the timestamptz cast (BUG-07).
+  it.each([
+    '2026-13-45 99:99:99+00',
+    '2026-02-30 10:00:00+00',
+    '2027-02-29 10:00:00+00',
+    '2026-09-25 24:00:00+00',
+    '2026-09-25 10:60:00+00',
+    '2026-09-25 10:00:60+00',
+    '0000-01-01 10:00:00+00',
+    '2026-09-25 10:00:00+16',
+    '2026-09-25 10:00:00+05:60',
+  ])('throws InvalidCursorError for the impossible time %j', async (updatedAt) => {
+    const user = await userRepo.create(newUser('ahmed'));
+    const cursor = encodeBundleCursor({ updatedAt, id: '00000000-0000-4000-8000-000000000000' });
+    await expect(bundleRepo.list(user.id, { limit: 3, cursor })).rejects.toBeInstanceOf(
+      InvalidCursorError,
+    );
+  });
+
+  it.each(['2028-02-29 23:59:59.999999+00', '2026-09-25 00:00:00-03:30', '2026-12-31 10:00:00+14'])(
+    'accepts the real time %j',
+    async (updatedAt) => {
+      const user = await userRepo.create(newUser('ahmed'));
+      const cursor = encodeBundleCursor({ updatedAt, id: '00000000-0000-4000-8000-000000000000' });
+      expect(await bundleRepo.list(user.id, { limit: 3, cursor })).toEqual({
+        items: [],
+        nextCursor: null,
+      });
     },
   );
 });
