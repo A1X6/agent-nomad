@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { recordingReporter, scriptedPrompter } from './fakes.ts';
+import { collectedJson, recordingReporter, scriptedPrompter } from './fakes.ts';
 
 import {
   createClaudeCodeAfterRestore,
@@ -40,12 +40,6 @@ function afterRestore(deps: {
   };
 }
 
-const json = (path: string, value: unknown): CollectedFile => ({
-  path,
-  content: new TextEncoder().encode(JSON.stringify(value)),
-  executable: false,
-});
-
 /** Only what after-restore reads (SOLID-06): no full detector system to fake. */
 function system(executables: string[]): ExecutableLookupSystem {
   return {
@@ -82,7 +76,7 @@ function recordingCli() {
   return { cli, runs };
 }
 
-const programs = json('.agentnomad/programs.json', {
+const programs = collectedJson('.agentnomad/programs.json', {
   programs: [
     { command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } },
     { command: 'terminal-notifier', npm: null },
@@ -142,7 +136,7 @@ describe('after a Claude Code restore', () => {
     'refuses a programs file that could smuggle arguments: %s',
     async (pkg) => {
       const { cli, runs } = recordingCli();
-      const bad = json('.agentnomad/programs.json', {
+      const bad = collectedJson('.agentnomad/programs.json', {
         programs: [{ command: 'x', npm: { package: pkg, version: '1.0.0' } }],
       });
       await afterRestore({ system: system(['/usr/bin/npm']), cli })(context([bad]).ctx);
@@ -152,7 +146,7 @@ describe('after a Claude Code restore', () => {
 
   it('reinstalls saved plugins with the claude command', async () => {
     const { cli, runs } = recordingCli();
-    const plugins = json('.agentnomad/plugins.json', {
+    const plugins = collectedJson('.agentnomad/plugins.json', {
       marketplaces: [{ name: 'brag', add: 'latent-spaces/brag' }],
       plugins: [{ id: 'brag@brag', scope: 'user', commandSource: false }],
       skipped: [],
@@ -167,7 +161,7 @@ describe('after a Claude Code restore', () => {
 
   it('asks in the plan step and installs only in the follow-up (T61)', async () => {
     const { cli, runs } = recordingCli();
-    const plugins = json('.agentnomad/plugins.json', {
+    const plugins = collectedJson('.agentnomad/plugins.json', {
       marketplaces: [],
       plugins: [{ id: 'build@market', scope: 'user', commandSource: true }],
       skipped: [],
@@ -193,7 +187,7 @@ describe('after a Claude Code restore', () => {
   });
 
   it('explains a plugin blocked by the injected managed settings, never this PC’s (SOLID-01)', async () => {
-    const plugins = json('.agentnomad/plugins.json', {
+    const plugins = collectedJson('.agentnomad/plugins.json', {
       marketplaces: [],
       plugins: [{ id: 'brag@brag', scope: 'user', commandSource: false }],
       skipped: [],
@@ -216,7 +210,7 @@ describe('after a Claude Code restore', () => {
   });
 
   it('says so when Claude Code is not installed, instead of failing', async () => {
-    const plugins = json('.agentnomad/plugins.json', {
+    const plugins = collectedJson('.agentnomad/plugins.json', {
       marketplaces: [],
       plugins: [{ id: 'brag@brag', scope: 'user', commandSource: false }],
       skipped: [],
@@ -230,7 +224,7 @@ describe('after a Claude Code restore', () => {
 describe('pull says when saved plugins or programs cannot be read (BUG-01)', () => {
   it('offers the other plugins and names an entry it refuses', async () => {
     const { cli, runs } = recordingCli();
-    const plugins = json('.agentnomad/plugins.json', {
+    const plugins = collectedJson('.agentnomad/plugins.json', {
       marketplaces: [
         { name: 'brag', add: 'latent-spaces/brag' },
         { name: 'odd', add: 'https://host/my%20market.json' },
@@ -271,7 +265,7 @@ describe('pull says when saved plugins or programs cannot be read (BUG-01)', () 
 
   it('offers the other programs and names one it refuses', async () => {
     const { cli, runs } = recordingCli();
-    const saved = json('.agentnomad/programs.json', {
+    const saved = collectedJson('.agentnomad/programs.json', {
       programs: [
         { command: '_tool', npm: null },
         { command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } },

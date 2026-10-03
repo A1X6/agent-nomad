@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, sep } from 'node:path';
+import { join, sep } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -21,6 +21,8 @@ import {
   type PluginManifest,
 } from '../src/index.ts';
 
+import { recordingReporter, scriptedPrompter, writeTestFile } from './fakes.ts';
+
 let root: string;
 let base: string;
 beforeEach(async () => {
@@ -31,10 +33,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function put(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(value));
-}
+const putJson = (path: string, value: unknown) => writeTestFile(path, JSON.stringify(value));
 
 const project = () => join(root, 'work', 'app');
 
@@ -43,7 +42,7 @@ async function realisticPlugins(): Promise<void> {
   const install = (scope: string, extra: object = {}) => [
     { scope, installPath: 'x', version: '1.0.0', installedAt: '2026-09-21T00:00:00Z', ...extra },
   ];
-  await put(join(base, 'plugins', 'installed_plugins.json'), {
+  await putJson(join(base, 'plugins', 'installed_plugins.json'), {
     version: 2,
     plugins: {
       'brag@brag': install('user'),
@@ -67,8 +66,8 @@ async function realisticPlugins(): Promise<void> {
       installLocation: join(base, 'plugins', 'marketplaces', 'company'),
     },
   };
-  await put(join(base, 'plugins', 'known_marketplaces.json'), marketplaces);
-  await put(
+  await putJson(join(base, 'plugins', 'known_marketplaces.json'), marketplaces);
+  await putJson(
     join(base, 'plugins', 'marketplaces', 'company', '.claude-plugin', 'marketplace.json'),
     {
       name: 'company',
@@ -163,19 +162,6 @@ describe('plugin list on push', () => {
   ])('marketplace %j is added as %j', (source, expected) => {
     expect(marketplaceAddArgument(source)).toBe(expected);
   });
-
-  it('refuses a manifest that could smuggle options or shell characters', () => {
-    const bad = (add: string) =>
-      PluginManifestSchema.safeParse({
-        marketplaces: [{ name: 'm', add }],
-        plugins: [],
-        skipped: [],
-      }).success;
-    expect(bad('--scope')).toBe(false);
-    expect(bad('a/b & calc')).toBe(false);
-    expect(bad('a/b"')).toBe(false);
-    expect(bad('a/b')).toBe(true);
-  });
 });
 
 describe('plugin ids in the manifest (T44)', () => {
@@ -204,7 +190,7 @@ describe('plugin ids in the manifest (T44)', () => {
 });
 
 describe('marketplace sources: only the forms push writes (T44)', () => {
-  const manifest = (add: string) =>
+  const addAccepted = (add: string) =>
     PluginManifestSchema.safeParse({ marketplaces: [{ name: 'm', add }], plugins: [], skipped: [] })
       .success;
   it.each([
@@ -213,7 +199,7 @@ describe('marketplace sources: only the forms push writes (T44)', () => {
     'https://example.com/marketplace.json',
     'git@github.com:owner/repo.git#main',
   ])('accepts %s', (add) => {
-    expect(manifest(add)).toBe(true);
+    expect(addAccepted(add)).toBe(true);
   });
   it.each([
     '/home/me/marketplace',
@@ -221,13 +207,16 @@ describe('marketplace sources: only the forms push writes (T44)', () => {
     './local',
     'http://example.com/m.json',
     '--help',
+    '--scope',
     'owner/repo; rm -rf ~',
+    'owner/repo & calc',
+    'owner/repo"',
   ])('refuses %s', (add) => {
-    expect(manifest(add)).toBe(false);
+    expect(addAccepted(add)).toBe(false);
   });
 });
 
-const manifest: PluginManifest = {
+const savedManifest: PluginManifest = {
   marketplaces: [
     { name: 'brag', add: 'latent-spaces/brag' },
     { name: 'company', add: 'https://gitlab.example.com/team/plugins.git' },
@@ -270,25 +259,15 @@ function run(options: {
   assumeYes?: boolean;
   allowCommands?: boolean;
 }) {
-  const answers = [...(options.answers ?? [true, true])];
-  const asked: string[] = [];
-  const lines: string[] = [];
+  const { prompter, asked } = scriptedPrompter(options.answers ?? [true, true]);
+  const { reporter, lines } = recordingReporter({ levels: false });
   const { claude, runs } = fakeClaude(options.failures);
   const deps: AskPluginSyncDeps & InstallPluginsDeps = {
-    manifest,
+    manifest: savedManifest,
     current: options.current ?? { marketplaces: new Set(), installed: new Set() },
     claude,
-    prompter: {
-      confirm: (question) => {
-        asked.push(question);
-        return Promise.resolve(answers.shift() ?? false);
-      },
-    },
-    reporter: {
-      info: (m) => lines.push(m),
-      success: (m) => lines.push(m),
-      warn: (m) => lines.push(m),
-    },
+    prompter,
+    reporter,
     cwd: '/work/app',
     ...(options.assumeYes !== undefined && { assumeYes: options.assumeYes }),
     ...(options.allowCommands !== undefined && { allowCommands: options.allowCommands }),
@@ -377,14 +356,14 @@ describe('plugin reinstall on pull', () => {
 
   it('plans only what is missing', () => {
     expect(
-      planPluginSync(manifest, {
+      planPluginSync(savedManifest, {
         marketplaces: new Set(['brag']),
         installed: new Set(['brag@brag|user']),
       }),
     ).toEqual({
       marketplaces: [{ name: 'company', add: 'https://gitlab.example.com/team/plugins.git' }],
-      plugins: manifest.plugins.slice(1),
-      alreadyInstalled: [manifest.plugins[0]],
+      plugins: savedManifest.plugins.slice(1),
+      alreadyInstalled: [savedManifest.plugins[0]],
     });
   });
 
@@ -400,7 +379,7 @@ describe('plugin reinstall on pull', () => {
 
 describe('push saves only what pull accepts (BUG-01)', () => {
   it('leaves out, with why, a marketplace URL or plugin name pull would refuse', async () => {
-    await put(join(base, 'plugins', 'installed_plugins.json'), {
+    await putJson(join(base, 'plugins', 'installed_plugins.json'), {
       plugins: {
         'ok@plain': [{ scope: 'user' }],
         'tool@encoded': [{ scope: 'user' }],
@@ -408,29 +387,29 @@ describe('push saves only what pull accepts (BUG-01)', () => {
         '.x@plain': [{ scope: 'user' }],
       },
     });
-    await put(join(base, 'plugins', 'known_marketplaces.json'), {
+    await putJson(join(base, 'plugins', 'known_marketplaces.json'), {
       plain: { source: { source: 'url', url: 'https://host/market.json' } },
       encoded: { source: { source: 'url', url: 'https://host/my%20market.json' } },
       query: { source: { source: 'url', url: 'https://host/m.json?a=1&b=2' } },
     });
-    const manifest = await readPluginManifest({
+    const saved = await readPluginManifest({
       baseDir: base,
       platform: process.platform,
       scope: { kind: 'global' },
     });
-    expect(manifest?.plugins.map((plugin) => plugin.id)).toEqual(['ok@plain']);
-    expect(manifest?.skipped).toEqual([
+    expect(saved?.plugins.map((plugin) => plugin.id)).toEqual(['ok@plain']);
+    expect(saved?.skipped).toEqual([
       { what: 'tool@encoded', reason: 'its marketplace address has characters pull refuses' },
       { what: 'tool@query', reason: 'its marketplace address has characters pull refuses' },
       { what: '.x@plain', reason: 'unexpected plugin name' },
     ]);
-    expect(PluginManifestSchema.safeParse(manifest).success).toBe(true);
+    expect(PluginManifestSchema.safeParse(saved).success).toBe(true);
   });
 });
 
 describe('one reader of installed_plugins.json (BUG-03)', () => {
   it('counts a project install whose path is written another way as installed', async () => {
-    await put(join(base, 'plugins', 'installed_plugins.json'), {
+    await putJson(join(base, 'plugins', 'installed_plugins.json'), {
       plugins: { 'lint@company': [{ scope: 'project', projectPath: `${project()}${sep}` }] },
     });
     const current = await readCurrentPlugins(base, process.platform, project());
@@ -444,7 +423,7 @@ describe('one reader of installed_plugins.json (BUG-03)', () => {
   });
 
   it.runIf(process.platform === 'win32')('ignores the case of a Windows path', async () => {
-    await put(join(base, 'plugins', 'installed_plugins.json'), {
+    await putJson(join(base, 'plugins', 'installed_plugins.json'), {
       plugins: { 'lint@company': [{ scope: 'project', projectPath: project().toUpperCase() }] },
     });
     const current = await readCurrentPlugins(base, 'win32', project());

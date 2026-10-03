@@ -1,9 +1,10 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { writeTestFile } from './fakes.ts';
 import {
   ClaudeJsonError,
   commandsInSettings,
@@ -30,11 +31,6 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-async function put(path: string, content = 'x'): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content);
-}
-
 function collector(customConfigDir = false, baseDir = base) {
   return createClaudeCodeGlobalCollector({
     baseDir,
@@ -54,20 +50,20 @@ const text = (files: readonly CollectedFile[], path: string) =>
 /** A ~/.claude with every kind of file a real one has. */
 async function realisticSetup(): Promise<void> {
   for (const file of ['settings.json', 'CLAUDE.md', 'keybindings.json'])
-    await put(join(base, file));
-  await put(join(base, 'rules', 'style.md'));
-  await put(join(base, 'skills', 'deploy', 'SKILL.md'));
-  await put(join(base, 'skills', 'deploy', 'scripts', 'run.sh'));
-  await put(join(base, 'commands', 'review.md'));
-  await put(join(base, 'agents', 'reviewer.md'));
-  await put(join(base, 'workflows', 'ship.md'));
-  await put(join(base, 'output-styles', 'terse.md'));
-  await put(join(base, 'themes', 'dark.json'));
+    await writeTestFile(join(base, file));
+  await writeTestFile(join(base, 'rules', 'style.md'));
+  await writeTestFile(join(base, 'skills', 'deploy', 'SKILL.md'));
+  await writeTestFile(join(base, 'skills', 'deploy', 'scripts', 'run.sh'));
+  await writeTestFile(join(base, 'commands', 'review.md'));
+  await writeTestFile(join(base, 'agents', 'reviewer.md'));
+  await writeTestFile(join(base, 'workflows', 'ship.md'));
+  await writeTestFile(join(base, 'output-styles', 'terse.md'));
+  await writeTestFile(join(base, 'themes', 'dark.json'));
   // Never synced:
-  await put(join(base, '.credentials.json'), '{"token":"SECRET"}');
-  await put(join(base, 'history.jsonl'), 'SECRET prompt');
-  await put(join(base, 'projects', 'C--work-app', 'abc.jsonl'), 'SECRET transcript');
-  await put(join(base, 'projects', 'C--work-app', 'memory', 'MEMORY.md'));
+  await writeTestFile(join(base, '.credentials.json'), '{"token":"SECRET"}');
+  await writeTestFile(join(base, 'history.jsonl'), 'SECRET prompt');
+  await writeTestFile(join(base, 'projects', 'C--work-app', 'abc.jsonl'), 'SECRET transcript');
+  await writeTestFile(join(base, 'projects', 'C--work-app', 'memory', 'MEMORY.md'));
   for (const dir of [
     'file-history',
     'plans',
@@ -82,19 +78,19 @@ async function realisticSetup(): Promise<void> {
     'plugins',
     '.trash',
   ]) {
-    await put(join(base, dir, 'state.json'));
+    await writeTestFile(join(base, dir, 'state.json'));
   }
-  await put(join(base, 'settings.local.json'));
-  await put(join(base, 'skills', 'synced', 'from-claude-ai', 'SKILL.md'));
-  await put(join(base, 'unknown-new-thing.json'));
+  await writeTestFile(join(base, 'settings.local.json'));
+  await writeTestFile(join(base, 'skills', 'synced', 'from-claude-ai', 'SKILL.md'));
+  await writeTestFile(join(base, 'unknown-new-thing.json'));
   // Clutter inside a synced folder:
-  await put(join(base, 'skills', 'deploy', '.git', 'HEAD'));
-  await put(join(base, 'skills', 'deploy', 'node_modules', 'x', 'index.js'));
-  await put(join(base, 'skills', 'deploy', '.DS_Store'));
-  await put(join(base, 'rules', 'style.md.agentnomad-backup-20260925T120000Z'));
-  await put(join(base, 'rules', 'style.md.agentnomad-incoming-20260925T120000Z'));
+  await writeTestFile(join(base, 'skills', 'deploy', '.git', 'HEAD'));
+  await writeTestFile(join(base, 'skills', 'deploy', 'node_modules', 'x', 'index.js'));
+  await writeTestFile(join(base, 'skills', 'deploy', '.DS_Store'));
+  await writeTestFile(join(base, 'rules', 'style.md.agentnomad-backup-20260925T120000Z'));
+  await writeTestFile(join(base, 'rules', 'style.md.agentnomad-incoming-20260925T120000Z'));
   // Opt-in memory:
-  await put(join(base, 'agent-memory', 'reviewer', 'MEMORY.md'));
+  await writeTestFile(join(base, 'agent-memory', 'reviewer', 'MEMORY.md'));
 }
 
 describe('global collector: what is taken', () => {
@@ -128,9 +124,9 @@ describe('global collector: what is taken', () => {
   });
 
   it('never takes skills/synced/, even through a link or a hook', async () => {
-    await put(join(base, 'skills', 'synced', 'a', 'SKILL.md'));
-    await put(join(base, 'skills', 'synced', 'a', 'helper.sh'));
-    await put(
+    await writeTestFile(join(base, 'skills', 'synced', 'a', 'SKILL.md'));
+    await writeTestFile(join(base, 'skills', 'synced', 'a', 'helper.sh'));
+    await writeTestFile(
       join(base, 'settings.json'),
       JSON.stringify({
         hooks: {
@@ -160,8 +156,8 @@ describe('global collector: what is taken', () => {
   });
 
   it('skips a temporary file an interrupted write left (BUG-03)', async () => {
-    await put(join(base, 'skills', 'x', 'SKILL.md'));
-    await put(join(base, 'skills', 'x', '.SKILL.md.agentnomad-tmp-0a1b2c3d'));
+    await writeTestFile(join(base, 'skills', 'x', 'SKILL.md'));
+    await writeTestFile(join(base, 'skills', 'x', '.SKILL.md.agentnomad-tmp-0a1b2c3d'));
     expect(paths(await collect())).toEqual(['skills/x/SKILL.md']);
   });
 
@@ -172,7 +168,7 @@ describe('global collector: what is taken', () => {
   });
 
   it('keeps the bytes and marks executable scripts on macOS and Linux', async () => {
-    await put(join(base, 'skills', 's', 'run.sh'), '#!/bin/sh\necho hi\n');
+    await writeTestFile(join(base, 'skills', 's', 'run.sh'), '#!/bin/sh\necho hi\n');
     if (posix) await chmod(join(base, 'skills', 's', 'run.sh'), 0o755);
     const files = await collect();
     expect(text(files, 'skills/s/run.sh')).toBe('#!/bin/sh\necho hi\n');
@@ -204,7 +200,7 @@ describe('global collector: ~/.claude.json', () => {
   };
 
   it('keeps only MCP servers and preference keys', async () => {
-    await put(join(home, '.claude.json'), JSON.stringify(claudeJson));
+    await writeTestFile(join(home, '.claude.json'), JSON.stringify(claudeJson));
     const files = await collect();
     expect(JSON.parse(text(files, '.agentnomad/claude.json'))).toEqual({
       mcpServers: claudeJson.mcpServers,
@@ -215,14 +211,17 @@ describe('global collector: ~/.claude.json', () => {
   });
 
   it('adds nothing when there are no servers or preferences', async () => {
-    await put(join(home, '.claude.json'), JSON.stringify({ numStartups: 3, mcpServers: {} }));
+    await writeTestFile(
+      join(home, '.claude.json'),
+      JSON.stringify({ numStartups: 3, mcpServers: {} }),
+    );
     expect(await collect()).toEqual([]);
   });
 
   it('reads it from CLAUDE_CONFIG_DIR when that is set', async () => {
     const custom = join(home, 'work-claude');
-    await put(join(custom, '.claude.json'), JSON.stringify({ diffTool: 'auto' }));
-    await put(join(home, '.claude.json'), JSON.stringify({ diffTool: 'terminal' }));
+    await writeTestFile(join(custom, '.claude.json'), JSON.stringify({ diffTool: 'auto' }));
+    await writeTestFile(join(home, '.claude.json'), JSON.stringify({ diffTool: 'terminal' }));
     const files = await collector(true, custom).collect(
       { kind: 'global' },
       { includeMemory: false },
@@ -231,14 +230,14 @@ describe('global collector: ~/.claude.json', () => {
   });
 
   it('stops with a clear message when the file is half-written', async () => {
-    await put(join(home, '.claude.json'), '{"mcpServers": {');
+    await writeTestFile(join(home, '.claude.json'), '{"mcpServers": {');
     await expect(collect()).rejects.toBeInstanceOf(ClaudeJsonError);
   });
 });
 
 describe('global collector: hook and status line scripts', () => {
   async function withSettings(settings: object): Promise<readonly CollectedFile[]> {
-    await put(join(base, 'settings.json'), JSON.stringify(settings));
+    await writeTestFile(join(base, 'settings.json'), JSON.stringify(settings));
     return collect();
   }
   const hook = (command: string) => ({
@@ -246,13 +245,13 @@ describe('global collector: hook and status line scripts', () => {
   });
 
   it('takes a script inside ~/.claude by its path there', async () => {
-    await put(join(base, 'hooks', 'check.sh'), 'echo check');
+    await writeTestFile(join(base, 'hooks', 'check.sh'), 'echo check');
     const files = await withSettings(hook(`bash "${join(base, 'hooks', 'check.sh')}"`));
     expect(text(files, 'hooks/check.sh')).toBe('echo check');
   });
 
   it('takes a script elsewhere in home under .agentnomad/home/', async () => {
-    await put(join(home, 'scripts', 'status.py'), 'print(1)');
+    await writeTestFile(join(home, 'scripts', 'status.py'), 'print(1)');
     const files = await withSettings({
       statusLine: { type: 'command', command: `python3 ${join(home, 'scripts', 'status.py')}` },
     });
@@ -261,7 +260,7 @@ describe('global collector: hook and status line scripts', () => {
 
   it('takes the script of a hook in exec form, even with spaces in an argument (BUG-01)', async () => {
     const script = join(base, 'hooks', 'my checks', 'check.js');
-    await put(script, 'check');
+    await writeTestFile(script, 'check');
     const files = await withSettings({
       hooks: {
         Stop: [{ hooks: [{ type: 'command', command: 'node', args: [script, '--fast'] }] }],
@@ -271,9 +270,9 @@ describe('global collector: hook and status line scripts', () => {
   });
 
   it('takes a script named inside a quoted command line or next to a ; (SEC-01)', async () => {
-    await put(join(base, 'hooks', 'a.sh'));
-    await put(join(base, 'hooks', 'b.sh'));
-    await put(join(base, 'hooks', 'c.sh'));
+    await writeTestFile(join(base, 'hooks', 'a.sh'));
+    await writeTestFile(join(base, 'hooks', 'b.sh'));
+    await writeTestFile(join(base, 'hooks', 'c.sh'));
     const files = await withSettings({
       hooks: {
         Stop: [
@@ -297,8 +296,8 @@ describe('global collector: hook and status line scripts', () => {
   });
 
   it('understands ~ and $HOME in commands', async () => {
-    await put(join(home, 'bin', 'a.sh'));
-    await put(join(home, 'bin', 'b.sh'));
+    await writeTestFile(join(home, 'bin', 'a.sh'));
+    await writeTestFile(join(home, 'bin', 'b.sh'));
     const files = paths(
       await withSettings({
         hooks: {
@@ -319,9 +318,9 @@ describe('global collector: hook and status line scripts', () => {
   });
 
   it('never takes keys or logins a command mentions', async () => {
-    await put(join(home, '.ssh', 'deploy.sh'), 'SECRET');
-    await put(join(home, '.ssh', 'id_ed25519'), 'SECRET');
-    await put(join(home, '.aws', 'login.py'), 'SECRET');
+    await writeTestFile(join(home, '.ssh', 'deploy.sh'), 'SECRET');
+    await writeTestFile(join(home, '.ssh', 'id_ed25519'), 'SECRET');
+    await writeTestFile(join(home, '.aws', 'login.py'), 'SECRET');
     const files = await withSettings(
       hook(`ssh -i ~/.ssh/id_ed25519 host && ~/.ssh/deploy.sh && python ~/.aws/login.py`),
     );
@@ -331,7 +330,7 @@ describe('global collector: hook and status line scripts', () => {
   it('ignores programs on PATH, missing files and files outside home', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'agentnomad-outside-'));
     try {
-      await put(join(outside, 'tool.sh'));
+      await writeTestFile(join(outside, 'tool.sh'));
       const files = await withSettings({
         statusLine: { type: 'command', command: 'ccstatusline' },
         hooks: {
@@ -372,7 +371,7 @@ describe('global collector: hook and status line scripts', () => {
 describe.runIf(posix)('global collector: links', () => {
   it('follows a linked skills folder once and survives a link loop', async () => {
     const dotfiles = join(home, 'dotfiles', 'my-skill');
-    await put(join(dotfiles, 'SKILL.md'), 'linked');
+    await writeTestFile(join(dotfiles, 'SKILL.md'), 'linked');
     await mkdir(join(base, 'skills'));
     await symlink(dotfiles, join(base, 'skills', 'my-skill'));
     await symlink(join(base, 'skills'), join(base, 'skills', 'loop'));
@@ -384,7 +383,7 @@ describe.runIf(posix)('global collector: links', () => {
 
 describe('global collector: a link into a folder for keys (T45)', () => {
   it('is never followed, and push is told why', async () => {
-    await put(join(home, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
+    await writeTestFile(join(home, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
     await mkdir(join(base, 'skills'), { recursive: true });
     await symlink(
       join(home, '.ssh'),
@@ -403,7 +402,10 @@ describe('global collector: a link into a folder for keys (T45)', () => {
 
 describe('global collector: programs the status line and hooks need', () => {
   const statusLine = (command: string) =>
-    put(join(base, 'settings.json'), JSON.stringify({ statusLine: { type: 'command', command } }));
+    writeTestFile(
+      join(base, 'settings.json'),
+      JSON.stringify({ statusLine: { type: 'command', command } }),
+    );
   const npmInfo = (command: string) =>
     Promise.resolve({ command, npm: { package: command, version: '2.2.22' } });
 
@@ -419,7 +421,7 @@ describe('global collector: programs the status line and hooks need', () => {
 
   it('takes ccstatusline settings and records the npm package and version', async () => {
     await statusLine('ccstatusline');
-    await put(join(home, '.config', 'ccstatusline', 'settings.json'), '{"lines":[]}');
+    await writeTestFile(join(home, '.config', 'ccstatusline', 'settings.json'), '{"lines":[]}');
     const files = await collectWith(npmInfo);
     expect(text(files, '.agentnomad/home/.config/ccstatusline/settings.json')).toBe('{"lines":[]}');
     expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
@@ -429,14 +431,14 @@ describe('global collector: programs the status line and hooks need', () => {
 
   it('npx needs no install record, but the tool settings still come along', async () => {
     await statusLine('npx -y ccstatusline@latest');
-    await put(join(home, '.config', 'ccstatusline', 'settings.json'), '{}');
+    await writeTestFile(join(home, '.config', 'ccstatusline', 'settings.json'), '{}');
     const files = paths(await collectWith(npmInfo));
     expect(files).toContain('.agentnomad/home/.config/ccstatusline/settings.json');
     expect(files).not.toContain('.agentnomad/programs.json');
   });
 
   it('records a program that is not from npm without install details', async () => {
-    await put(
+    await writeTestFile(
       join(base, 'settings.json'),
       JSON.stringify({
         hooks: {
@@ -451,7 +453,7 @@ describe('global collector: programs the status line and hooks need', () => {
   });
 
   it('leaves out, and says so, a program pull would refuse (BUG-01)', async () => {
-    await put(
+    await writeTestFile(
       join(base, 'settings.json'),
       JSON.stringify({
         hooks: {

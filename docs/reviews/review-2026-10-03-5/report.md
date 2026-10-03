@@ -201,7 +201,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### SEC-06 · Low · A test fixture uses fragments of the maintainer's real claude.ai synced-skills folder name
 
-- [ ] **Where:** `packages/cli/test/claude-code-account-skills.test.ts:27` (`const ACCOUNT = '7c844940_79950eec'`)
+- [x] **Where:** `packages/cli/test/claude-code-account-skills.test.ts:27` (`const ACCOUNT = '7c844940_79950eec'`)
 - **Problem:** the two 8-hex parts are the first 8 characters of the two IDs in the real synced-skills folder on the maintainer's PC (`~/.claude/skills/synced/7c844940-…_79950eec-…`, the same IDs appear in this floor's skill paths). The repository is public.
 - **Why it matters:** low. They are not secrets and are truncated, but they are identifiers of a real account or organization, and CONTRIBUTING asks to keep real data out of tests. A made-up value tests the same thing.
 - **Fix:** use an obviously fake value in the real shape, e.g. `'00000000-0000-4000-8000-000000000000_11111111-1111-4111-8111-111111111111'`.
@@ -323,7 +323,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DUP-03 · Low · The shared-fakes fix (review 4 DUP-01) missed a few hand-made fakes, and one behaves differently
 
-- [ ] **Where:**
+- [x] **Where:**
   - `packages/cli/test/claude-code-plugins.test.ts:281-291`: own `confirm` prompter (`answers.shift() ?? false`) and own reporter
   - `packages/cli/test/agent-registry.test.ts:57-61`: own reporter
   - `packages/cli/test/auth-commands.test.ts:130-135`: four `bundles` methods that reject `not used`, which is what `fakeApi` in `fakes.ts:17-31` does
@@ -337,7 +337,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DUP-04 · Low · `claude-code-modules.test.ts` keeps a block the ARCH-04 fix made redundant, and its name no longer fits
 
-- [ ] **Where:** `packages/cli/test/claude-code-modules.test.ts:13-28`
+- [x] **Where:** `packages/cli/test/claude-code-modules.test.ts:13-28`
 - **Problem:** after ARCH-04 the module boundary is enforced by ESLint (`eslint.config.js:88-94`), and the regex checks were removed. What is left under the title "settings parsing is its own module" only calls `commandsInSettings` and `programOf`, which are tested in full in `claude-code-global-collector.test.ts:305-325` and `:438-451` and `claude-code-command-review.test.ts:413-422`. The rest of the file (`:30-108`) tests only `createClaudeJsonMerge`.
 - **Why it matters:** the title says a boundary is tested here when it is not; someone looking for the merge tests will not guess "modules".
 - **Fix:** delete `:13-28` and rename the file to `claude-code-claude-json-merge.test.ts`.
@@ -346,7 +346,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DUP-05 · Low · Small file helpers are copied across test files although `fakes.ts` is the shared place
 
-- [ ] **Where:** `CollectedFile` builders: `packages/cli/test/claude-code-restorer.test.ts:64-68` (`file`), `push-command.test.ts:64-68` (`text`, identical), `env.test.ts:50-54` (`file`, JSON variant); `put`/`read`: `claude-code-restorer.test.ts:58-62` and `pull-command.test.ts:63-67` (identical). Same builders in other batches: `claude-code-adapter.test.ts:35`, `claude-code-command-review.test.ts:13`, `claude-code-after-restore.test.ts:43`, `claude-code-account-skills.test.ts:181`, `claude-code-modules.test.ts:31`.
+- [x] **Where:** `CollectedFile` builders: `packages/cli/test/claude-code-restorer.test.ts:64-68` (`file`), `push-command.test.ts:64-68` (`text`, identical), `env.test.ts:50-54` (`file`, JSON variant); `put`/`read`: `claude-code-restorer.test.ts:58-62` and `pull-command.test.ts:63-67` (identical). Same builders in other batches: `claude-code-adapter.test.ts:35`, `claude-code-command-review.test.ts:13`, `claude-code-after-restore.test.ts:43`, `claude-code-account-skills.test.ts:181`, `claude-code-modules.test.ts:31`.
 - **Problem:** CONTRIBUTING.md ("Tests") says shared fakes live in `packages/cli/test/fakes.ts`; DUP-01 moved the big fakes there, but these one-liners exist in 8 files under 4 names (`file`, `text`, `json`, `saved`).
 - **Why it matters:** When `CollectedFile` gains a field, every copy changes; the different names for the same builder make tests harder to scan.
 - **Fix:** Add `collected(path, content: string | Uint8Array, executable = false)` and `collectedJson(path, value)` plus `writeTestFile(path, content)` to `fakes.ts` (or a sibling `test-files.ts`), and use them everywhere.
@@ -424,7 +424,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-04 · Low · Some tests still sit away from the code they cover (rest of review 4 READ-03/READ-05)
 
-- [ ] **Where:**
+- [x] **Where:**
   - `packages/cli/test/agent-registry.test.ts:77-138`: `describe('Claude Code adapter')` (id, detect/collect/restore, `CLAUDE_CONFIG_DIR`), while `packages/cli/test/claude-code-adapter.test.ts:19` says "The Claude Code adapter's own steps" live there
   - `packages/cli/test/bin.test.ts:207-212`: `unwrapAnswer` from `src/ui/clack-prompter.ts` inside the executable test, which is otherwise all child-process runs
   - `packages/cli/test/claude-code-command-review.test.ts:350-361`: `printable` from `src/ui/printable.ts`; `printableLine` (T71) has no unit test of its own, only the pull-level case at `pull-command.test.ts:229`
@@ -437,7 +437,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-05 · Low · `manifest` names three different things in the plugins test, and one schema rule is tested twice
 
-- [ ] **Where:** `packages/cli/test/claude-code-plugins.test.ts:207-209` (helper function `manifest(add)`), `:230` (module constant `manifest: PluginManifest`), `:416` (local `const manifest` from `readPluginManifest`); refusal cases at `:167-178` (helper `bad`) and `:206-228` (helper `manifest`)
+- [x] **Where:** `packages/cli/test/claude-code-plugins.test.ts:207-209` (helper function `manifest(add)`), `:230` (module constant `manifest: PluginManifest`), `:416` (local `const manifest` from `readPluginManifest`); refusal cases at `:167-178` (helper `bad`) and `:206-228` (helper `manifest`)
 - **Problem:** inside `describe('marketplace sources ...')` the name `manifest` is a function returning a boolean; elsewhere it is the shared fixture or a read result. The two helpers `bad` and `manifest` run the same `PluginManifestSchema.safeParse({ marketplaces: [{ name: 'm', add }], ... })`, and `'--scope'`/`'--help'` and the shell-character cases are spread over both.
 - **Why it matters:** a reader of `run()` (`:278`) has to check which `manifest` is in scope; a new marketplace rule tends to get a third helper.
 - **Fix:** one helper `addAccepted(add: string)` and one accept list / one refuse list; rename the fixture `savedManifest` and the local at `:416` `saved`.
@@ -446,7 +446,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-06 · Low · Small leftovers that make two tests harder to read
 
-- [ ] **Where:** `packages/cli/test/claude-code-adapter.test.ts:41-44` (`answer(choice)` returns `{ resolve }`, used only as `answer('merge').resolve`), `:85` (`lines` returned, never read), `:121-127` (an async IIFE inside `expect`); `packages/cli/test/agent-boundary.test.ts:235-246` (`pushed()` returns `seen`, no caller uses it)
+- [x] **Where:** `packages/cli/test/claude-code-adapter.test.ts:41-44` (`answer(choice)` returns `{ resolve }`, used only as `answer('merge').resolve`), `:85` (`lines` returned, never read), `:121-127` (an async IIFE inside `expect`); `packages/cli/test/agent-boundary.test.ts:235-246` (`pushed()` returns `seen`, no caller uses it)
 - **Problem:** indirections and unused returns with no purpose.
 - **Why it matters:** low; each one makes the reader look for a use that is not there.
 - **Fix:** `const answer = (choice: ConflictChoice) => () => Promise.resolve(choice)`; drop `lines` and the unused `seen`; write the first case of `:119-132` as two plain lines (`const t = planStep([true], []); await t.plan(); expect(t.asked).toEqual([])`).
@@ -455,7 +455,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-07 · Low · A comment about slow real programs now sits above the pure icacls parser tests
 
-- [ ] **Where:** `packages/cli/test/system.test.ts:184`
+- [x] **Where:** `packages/cli/test/system.test.ts:184`
 - **Problem:** "Real programs start slowly while the whole suite runs in parallel." explained the `{ timeout: 30_000 }` on the real-programs block. T74 (882f075) inserted the new `icacls output, parsed` block between the comment and that block, so the comment now describes tests that start no program.
 - **Why it matters:** A reader takes the parser tests for slow real-program tests, and the reason for the 30 s timeout at `:218` loses its comment.
 - **Fix:** Move the comment to just above `describe('the real programs (run on this OS)', …)` at line 218.
@@ -464,7 +464,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-08 · Low · The global setup's key is written three ways in the pull tests
 
-- [ ] **Where:** `packages/cli/test/pull-command.test.ts:448-449`, `:463` (`scopeKeyFor(crypto, dataKey, { kind: 'global' })`); `:487`, `:500`, `:517`, `:526` (`'global'`); `:647`, `:652`, `:661`, `:669` (`'claude-code/global'`)
+- [x] **Where:** `packages/cli/test/pull-command.test.ts:448-449`, `:463` (`scopeKeyFor(crypto, dataKey, { kind: 'global' })`); `:487`, `:500`, `:517`, `:526` (`'global'`); `:647`, `:652`, `:661`, `:669` (`'claude-code/global'`)
 - **Problem:** `scopeKeyFor` returns the constant `GLOBAL_SCOPE_KEY` for the global scope (`packages/core/src/project-names.ts:49-51`), so all three spellings mean the same thing, but nothing in the file says so. The `stored` map key format (`agent/scopeKey`) is a detail of `fakeBundleServer` (`fakes.ts:139`).
 - **Why it matters:** A reader of `:463` assumes the global key is derived from the data key and that `:487` sets a different entry. Tests that reach into `server.stored` by a literal break if the fake's key format changes.
 - **Fix:** One constant at the top (`const GLOBAL = scopeKeyFor(crypto, dataKey, { kind: 'global' })` or the exported `GLOBAL_SCOPE_KEY`), and a `revisionOn(server, scopeKey)` helper in `fakes.ts` instead of `server.stored.get('claude-code/global')`.
@@ -473,7 +473,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-09 · Low · The restorer test helper returns a one-field wrapper, and one test builds the restorer by hand anyway
 
-- [ ] **Where:** `packages/cli/test/claude-code-restorer.test.ts:77-90` (returns `{ restorer }`; every caller writes `restorer().restorer.restore(…)` or destructures `{ restorer: r }`), `:591-608` (calls `createClaudeCodeRestorer` with the same options the helper sets, although `Setup.isClaudeRunning` at `:74` exists for this case)
+- [x] **Where:** `packages/cli/test/claude-code-restorer.test.ts:77-90` (returns `{ restorer }`; every caller writes `restorer().restorer.restore(…)` or destructures `{ restorer: r }`), `:591-608` (calls `createClaudeCodeRestorer` with the same options the helper sets, although `Setup.isClaudeRunning` at `:74` exists for this case)
 - **Problem:** The wrapper object carries nothing else, so about 40 call sites read `restorer().restorer`. The test at `:591` repeats the seven options of the helper to pass its own `isClaudeRunning`.
 - **Why it matters:** Small, but it is the most-read helper in the largest test file; when a restorer option is added, two places must change.
 - **Fix:** Return the restorer itself from `restorer(setup)`, and write `:593-608` as `restorer({ isClaudeRunning: async () => { … } })`.
@@ -602,7 +602,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### QA-02 · Low · The "never replaces a profile it cannot read" test cannot fail
 
-- [ ] **Where:** `packages/cli/test/env.test.ts:223-231`; code under test `packages/cli/src/env/shell-profile.ts:134-157`, `packages/cli/src/system/files.ts:57-62`
+- [x] **Where:** `packages/cli/test/env.test.ts:223-231`; code under test `packages/cli/src/env/shell-profile.ts:134-157`, `packages/cli/src/system/files.ts:57-62`
 - **Problem:** The test makes the profile path a folder and expects `write` to reject with a bare `rejects.toThrow()`. If the guard at `shell-profile.ts:143-145` were removed (any read error treated as "missing"), `write` would go on to `writeFileAtomically`, whose `rename(temp, target)` onto a folder also fails (EISDIR on Linux and macOS, EPERM on Windows). The test passes either way.
 - **Why it matters:** T46's rule (an unreadable profile is never replaced) has no test that would catch its removal. A profile the user cannot read for another reason (permissions) would be overwritten.
 - **Fix:** On POSIX, use a real file with mode `000` (`chmod(profile, 0)`), expect the rejection, then restore the mode and check the content is unchanged. Or assert the read error itself: `rejects.toMatchObject({ code: 'EISDIR' })` plus "no backup file was written".
@@ -611,7 +611,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### QA-03 · Low · The shared scripted prompter casts each answer to whatever type was asked
 
-- [ ] **Where:** `packages/cli/test/fakes.ts:91-95` (`next(message) as T`, `as T[]`, `as string`, `as boolean`)
+- [x] **Where:** `packages/cli/test/fakes.ts:91-95` (`next(message) as T`, `as T[]`, `as string`, `as boolean`)
 - **Problem:** BP-01 removed the casts from the test files, but the shared fake now casts every scripted answer to the question's type without checking. A script whose answers are out of order (for example `'global'` reaching a `confirm`) returns a string where a boolean is expected; `'global'` is truthy, so the command goes on as if the user said yes.
 - **Why it matters:** Push and pull tests depend on the order of questions (`push-command.test.ts:168`, `pull-command.test.ts:476`, and many more). When a question is added or moved, a test can keep passing on the wrong path instead of failing near the cause, which is what BP-01 was meant to prevent.
 - **Fix:** Check the type per method and throw a clear error: `confirm` needs a boolean, `select`/`text`/`password` a string, `multiselect` an array of strings, e.g. `if (typeof answer !== 'boolean') throw new Error(\`"${message}" expected yes/no, got ${JSON.stringify(answer)}\`)`. That removes the casts too.
@@ -620,7 +620,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### QA-04 · Low · The real `readRegistry` test still asserts only its return type (QA-07 partly done)
 
-- [ ] **Where:** `packages/cli/test/system.test.ts:338-347`
+- [x] **Where:** `packages/cli/test/system.test.ts:338-347`
 - **Problem:** QA-07's fix added `parseRegSettings` and its unit tests (`managed-settings.test.ts:117-143`), but the Windows test of the real wrapper is unchanged: `expect(value === null || typeof value === 'string').toBe(true)` holds for any value the declared type allows.
 - **Why it matters:** The test can only fail by throwing. It reads as coverage of `readRegistry` on Windows while checking nothing about it, which is the exact problem QA-07 described.
 - **Fix:** On the CI runner no ClaudeCode policy key exists, so assert `toBeNull()` for both hives (with a comment saying so), or drop the test and rely on the parser tests plus the existing POSIX `null` test.
@@ -629,7 +629,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### QA-05 · Low · `contracts.test.ts` runs no CLI code and repeats the contracts package's own tests
 
-- [ ] **Where:** `packages/cli/test/contracts.test.ts:4-22`; same assertions in `packages/contracts/test/api.test.ts:60` (`API_ROUTES.bundle('claude-code', 'global')`) and `:207` (`PutBundleRequestHeadersSchema.parse`)
+- [x] **Where:** `packages/cli/test/contracts.test.ts:4-22`; same assertions in `packages/contracts/test/api.test.ts:60` (`API_ROUTES.bundle('claude-code', 'global')`) and `:207` (`PutBundleRequestHeadersSchema.parse`)
 - **Problem:** The describe is named "CLI uses the shared contracts", but the headers are built by hand inside the test and the route check is identical to the contracts package test. The CLI's real header building is tested in `packages/cli/test/api-client.test.ts:248-255`, which does not parse what it sent with the schema.
 - **Why it matters:** If the API client sent a header the server schema rejects, this file would still pass. It looks like a contract test between CLI and server, but it is not one.
 - **Fix:** Delete `contracts.test.ts` and, in `api-client.test.ts`, parse the headers the client actually sent with `PutBundleRequestHeadersSchema.parse(headers)`.

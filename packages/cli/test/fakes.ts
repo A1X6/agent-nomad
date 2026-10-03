@@ -1,15 +1,45 @@
 import type { BundleParams, BundleSummary } from '@agentnomad/contracts';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 // Module paths, not the package index: the agent boundary test uses these fakes and must
 // not load any agent's adapter.
+import type { CollectedFile } from '../src/agents/adapter.ts';
 import type { ApiClient, BundleUpload } from '../src/api/api-client.ts';
 import { ApiError } from '../src/api/api-errors.ts';
 import { SECRET_NAMES, type SecretName, type SecretStore } from '../src/secrets/secret-store.ts';
-import type { Prompter, Reporter } from '../src/ui/prompter.ts';
+import type { Choice, Prompter, Reporter } from '../src/ui/prompter.ts';
 
 /** Shared test fakes (DUP-01): one copy, so every test runs against the same behaviour. */
 
 const notUsed = (): Promise<never> => Promise.reject(new Error('not used'));
+
+/** A collected (or pulled) file as an adapter hands it over. */
+export const collected = (
+  path: string,
+  content: string | Uint8Array,
+  executable = false,
+): CollectedFile => ({
+  path,
+  content: typeof content === 'string' ? new TextEncoder().encode(content) : content,
+  executable,
+});
+
+/** A collected file holding `value` as JSON. */
+export const collectedJson = (path: string, value: unknown): CollectedFile =>
+  collected(path, JSON.stringify(value));
+
+/**
+ * Writes a file in a test's temporary folder, creating its folders first. The content
+ * defaults to `x` for tests where only the file being there matters.
+ */
+export async function writeTestFile(
+  path: string,
+  content: string | Uint8Array = 'x',
+): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content);
+}
 
 /**
  * An API client built from the parts a test gives; every other method rejects `not used`.
@@ -83,12 +113,40 @@ export function scriptedPrompter(answers: unknown[]) {
       rejected.push(problem);
     }
   };
+  // A scripted answer of the wrong kind fails here, near the cause, instead of sending the
+  // command down another path (a string where a yes/no is asked is truthy).
+  const wrong = (message: string, expected: string, answer: unknown) =>
+    new Error(`"${message}" expected ${expected}, got ${JSON.stringify(answer)}`);
+  const choice = <T extends string>(
+    message: string,
+    choices: readonly Choice<T>[],
+    answer: unknown,
+  ): T => {
+    const found = choices.find((option) => option.value === answer);
+    if (!found) {
+      throw wrong(message, `one of ${choices.map((option) => option.value).join(', ')}`, answer);
+    }
+    return found.value;
+  };
+  const text = (message: string, validate?: (value: string) => string | undefined) => {
+    const answer = next(message, validate);
+    if (typeof answer !== 'string') throw wrong(message, 'text', answer);
+    return answer;
+  };
   const prompter: Prompter = {
-    select: <T extends string>(message: string) => Promise.resolve(next(message) as T),
-    multiselect: <T extends string>(message: string) => Promise.resolve(next(message) as T[]),
-    text: (message, options) => Promise.resolve(next(message, options?.validate) as string),
-    password: (message, options) => Promise.resolve(next(message, options?.validate) as string),
-    confirm: (message) => Promise.resolve(next(message) as boolean),
+    select: (message, choices) => Promise.resolve(choice(message, choices, next(message))),
+    multiselect: (message, choices) => {
+      const answer = next(message);
+      if (!Array.isArray(answer)) throw wrong(message, 'a list', answer);
+      return Promise.resolve(answer.map((value: unknown) => choice(message, choices, value)));
+    },
+    text: (message, options) => Promise.resolve(text(message, options?.validate)),
+    password: (message, options) => Promise.resolve(text(message, options?.validate)),
+    confirm: (message) => {
+      const answer = next(message);
+      if (typeof answer !== 'boolean') throw wrong(message, 'yes/no', answer);
+      return Promise.resolve(answer);
+    },
   };
   return { prompter, asked, rejected, left: answers };
 }
@@ -183,3 +241,19 @@ export function fakeBundleServer(updatedAt = '2026-09-25T12:00:00Z') {
   });
   return { api, stored, puts };
 }
+
+/** What `server` holds for one setup, without knowing how the fake keys its map. */
+export function storedOn(
+  server: ReturnType<typeof fakeBundleServer>,
+  scopeKey: string,
+  agent = 'claude-code',
+): StoredBundle | undefined {
+  return server.stored.get(`${agent}/${scopeKey}`);
+}
+
+/** The revision `server` holds for one setup, or `undefined` when none is saved. */
+export const revisionOn = (
+  server: ReturnType<typeof fakeBundleServer>,
+  scopeKey: string,
+  agent = 'claude-code',
+): number | undefined => storedOn(server, scopeKey, agent)?.revision;

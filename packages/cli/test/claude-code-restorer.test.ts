@@ -11,10 +11,11 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { collected, writeTestFile } from './fakes.ts';
 import {
   createClaudeCodeGlobalCollector,
   createClaudeCodeProjectCollector,
@@ -29,7 +30,6 @@ import {
   projectHookScripts,
   sameForRestore,
   type ClaudeCodeRestorer,
-  type CollectedFile,
   type ConflictChoice,
   type ConflictQuestion,
 } from '../src/index.ts';
@@ -55,17 +55,8 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function put(path: string, content: string | Uint8Array = 'x'): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content);
-}
 const read = (path: string) => readFile(path, 'utf8');
 const readJson = async (path: string) => JSON.parse(await read(path)) as Record<string, unknown>;
-const file = (path: string, content: string, executable = false): CollectedFile => ({
-  path,
-  content: new TextEncoder().encode(content),
-  executable,
-});
 
 interface Setup {
   running?: boolean[];
@@ -74,19 +65,17 @@ interface Setup {
   isClaudeRunning?: () => Promise<boolean>;
 }
 
-function restorer(setup: Setup = {}): { restorer: ClaudeCodeRestorer } {
+function restorer(setup: Setup = {}): ClaudeCodeRestorer {
   const running = [...(setup.running ?? [false])];
-  return {
-    restorer: createClaudeCodeRestorer({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      env: {},
-      customConfigDir: setup.customConfigDir ?? false,
-      now: () => NOW,
-      isClaudeRunning: setup.isClaudeRunning ?? (() => Promise.resolve(running.shift() ?? false)),
-    }),
-  };
+  return createClaudeCodeRestorer({
+    baseDir: base,
+    homedir: home,
+    platform: process.platform,
+    env: {},
+    customConfigDir: setup.customConfigDir ?? false,
+    now: () => NOW,
+    isClaudeRunning: setup.isClaudeRunning ?? (() => Promise.resolve(running.shift() ?? false)),
+  });
 }
 
 /** Answers every conflict question the same way and records what was asked. */
@@ -103,10 +92,16 @@ describe('restorer: round trip', () => {
   it('a collected global setup restores byte-for-byte on a fresh PC', async () => {
     const sourceHome = join(root, 'source');
     const sourceBase = join(sourceHome, '.claude');
-    await put(join(sourceBase, 'settings.json'), '{"theme":"dark"}\n');
-    await put(join(sourceBase, 'CLAUDE.md'), '# Rules\r\nWindows line endings stay.\r\n');
-    await put(join(sourceBase, 'skills', 'deploy', 'SKILL.md'), '---\nname: deploy\n---\n');
-    await put(join(sourceBase, 'skills', 'deploy', 'logo.png'), new Uint8Array([0, 255, 1, 254]));
+    await writeTestFile(join(sourceBase, 'settings.json'), '{"theme":"dark"}\n');
+    await writeTestFile(join(sourceBase, 'CLAUDE.md'), '# Rules\r\nWindows line endings stay.\r\n');
+    await writeTestFile(
+      join(sourceBase, 'skills', 'deploy', 'SKILL.md'),
+      '---\nname: deploy\n---\n',
+    );
+    await writeTestFile(
+      join(sourceBase, 'skills', 'deploy', 'logo.png'),
+      new Uint8Array([0, 255, 1, 254]),
+    );
     const collected = await createClaudeCodeGlobalCollector({
       baseDir: sourceBase,
       homedir: sourceHome,
@@ -114,11 +109,7 @@ describe('restorer: round trip', () => {
       customConfigDir: false,
     }).collect({ kind: 'global' }, { includeMemory: false });
 
-    const report = await restorer().restorer.restore(
-      { kind: 'global' },
-      collected,
-      answer('skip').resolve,
-    );
+    const report = await restorer().restore({ kind: 'global' }, collected, answer('skip').resolve);
     expect(report.written).toEqual(collected.map((entry) => entry.path));
     for (const entry of collected) {
       expect(new Uint8Array(await readFile(join(base, ...entry.path.split('/'))))).toEqual(
@@ -129,10 +120,10 @@ describe('restorer: round trip', () => {
 
   it('a collected project setup restores into another folder, memory included', async () => {
     const source = join(root, 'other-pc', 'my-app');
-    await put(join(source, 'CLAUDE.md'), 'project rules');
-    await put(join(source, '.claude', 'settings.local.json'), '{}');
+    await writeTestFile(join(source, 'CLAUDE.md'), 'project rules');
+    await writeTestFile(join(source, '.claude', 'settings.local.json'), '{}');
     const sourceMemory = join(base, 'projects', projectDirName(source), 'memory');
-    await put(join(sourceMemory, 'MEMORY.md'), 'remember this');
+    await writeTestFile(join(sourceMemory, 'MEMORY.md'), 'remember this');
     const collected = await createClaudeCodeProjectCollector({
       baseDir: base,
       homedir: home,
@@ -140,7 +131,7 @@ describe('restorer: round trip', () => {
       env: {},
     }).collect({ kind: 'project', projectDir: source }, { includeMemory: true });
 
-    await restorer().restorer.restore(
+    await restorer().restore(
       { kind: 'project', projectDir: project },
       collected,
       answer('skip').resolve,
@@ -290,14 +281,14 @@ describe('restorer: refuses what a collector never produces', () => {
     const settings = JSON.stringify({
       hooks: { Stop: [{ hooks: [{ type: 'command', command: '~/.claude/hooks/check.sh' }] }] },
     });
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
       [
-        file('settings.json', settings),
-        file('hooks/check.sh', 'echo ok'),
-        file('chrome/chrome-native-host.bat', 'evil'),
-        file('local/node_modules/@anthropic-ai/claude-code/cli.js', 'evil'),
-        file('anything/else/run.ps1', 'evil'),
+        collected('settings.json', settings),
+        collected('hooks/check.sh', 'echo ok'),
+        collected('chrome/chrome-native-host.bat', 'evil'),
+        collected('local/node_modules/@anthropic-ai/claude-code/cli.js', 'evil'),
+        collected('anything/else/run.ps1', 'evil'),
       ],
       answer('overwrite').resolve,
     );
@@ -314,9 +305,9 @@ describe('restorer: refuses what a collector never produces', () => {
   });
 
   it('never writes into skills/synced/, even when a bundle contains it', async () => {
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('skills/synced/evil/SKILL.md', 'x'), file('skills/mine/SKILL.md', 'ok')],
+      [collected('skills/synced/evil/SKILL.md', 'x'), collected('skills/mine/SKILL.md', 'ok')],
       answer('overwrite').resolve,
     );
     expect(report.skipped).toEqual(['skills/synced/evil/SKILL.md']);
@@ -326,9 +317,9 @@ describe('restorer: refuses what a collector never produces', () => {
   });
 
   it('does not write programs.json (pull only reads it)', async () => {
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('.agentnomad/programs.json', '{"programs":[]}')],
+      [collected('.agentnomad/programs.json', '{"programs":[]}')],
       answer('skip').resolve,
     );
     expect(report).toEqual({ written: [], skipped: [], backups: [], warnings: [] });
@@ -338,11 +329,11 @@ describe('restorer: refuses what a collector never produces', () => {
 
 describe('restorer: existing files', () => {
   it('leaves an identical file alone without asking', async () => {
-    await put(join(base, 'CLAUDE.md'), 'same');
+    await writeTestFile(join(base, 'CLAUDE.md'), 'same');
     const { questions, resolve } = answer('overwrite');
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('CLAUDE.md', 'same')],
+      [collected('CLAUDE.md', 'same')],
       resolve,
     );
     expect(questions).toEqual([]);
@@ -350,11 +341,11 @@ describe('restorer: existing files', () => {
   });
 
   it('asks about a different file, and skip leaves it untouched', async () => {
-    await put(join(base, 'CLAUDE.md'), 'mine');
+    await writeTestFile(join(base, 'CLAUDE.md'), 'mine');
     const { questions, resolve } = answer('skip');
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('CLAUDE.md', 'theirs')],
+      [collected('CLAUDE.md', 'theirs')],
       resolve,
     );
     expect(questions).toEqual([['CLAUDE.md', { overwriteAllowed: true }]]);
@@ -363,10 +354,10 @@ describe('restorer: existing files', () => {
   });
 
   it('overwrite backs the old file up first', async () => {
-    await put(join(base, 'CLAUDE.md'), 'mine');
-    const report = await restorer().restorer.restore(
+    await writeTestFile(join(base, 'CLAUDE.md'), 'mine');
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('CLAUDE.md', 'theirs')],
+      [collected('CLAUDE.md', 'theirs')],
       answer('overwrite').resolve,
     );
     expect(await read(join(base, 'CLAUDE.md'))).toBe('theirs');
@@ -375,11 +366,11 @@ describe('restorer: existing files', () => {
   });
 
   it('never replaces an earlier backup made in the same second (T45)', async () => {
-    await put(join(base, 'CLAUDE.md'), 'first');
-    await put(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`), 'older backup');
-    const report = await restorer().restorer.restore(
+    await writeTestFile(join(base, 'CLAUDE.md'), 'first');
+    await writeTestFile(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`), 'older backup');
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('CLAUDE.md', 'second')],
+      [collected('CLAUDE.md', 'second')],
       answer('overwrite').resolve,
     );
     expect(report.backups).toEqual([`CLAUDE.md.agentnomad-backup-${STAMP}-2`]);
@@ -388,10 +379,13 @@ describe('restorer: existing files', () => {
   });
 
   it('merge combines JSON keys, the pulled values winning', async () => {
-    await put(join(base, 'settings.json'), JSON.stringify({ theme: 'light', model: 'opus' }));
-    await restorer().restorer.restore(
+    await writeTestFile(
+      join(base, 'settings.json'),
+      JSON.stringify({ theme: 'light', model: 'opus' }),
+    );
+    await restorer().restore(
       { kind: 'global' },
-      [file('settings.json', JSON.stringify({ theme: 'dark', effortLevel: 'high' }))],
+      [collected('settings.json', JSON.stringify({ theme: 'dark', effortLevel: 'high' }))],
       answer('merge').resolve,
     );
     expect(JSON.parse(await read(join(base, 'settings.json')))).toEqual({
@@ -402,10 +396,10 @@ describe('restorer: existing files', () => {
   });
 
   it('merge keeps a different text file and puts the pulled one next to it', async () => {
-    await put(join(base, 'CLAUDE.md'), 'mine');
-    const report = await restorer().restorer.restore(
+    await writeTestFile(join(base, 'CLAUDE.md'), 'mine');
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('CLAUDE.md', 'theirs')],
+      [collected('CLAUDE.md', 'theirs')],
       answer('merge').resolve,
     );
     expect(await read(join(base, 'CLAUDE.md'))).toBe('mine');
@@ -415,11 +409,11 @@ describe('restorer: existing files', () => {
 
   it.runIf(posix)('writes through a linked file, keeping the link (T53)', async () => {
     const real = join(root, 'dotfiles', 'CLAUDE.md');
-    await put(real, 'mine');
+    await writeTestFile(real, 'mine');
     await symlink(real, join(base, 'CLAUDE.md'));
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('CLAUDE.md', 'theirs')],
+      [collected('CLAUDE.md', 'theirs')],
       answer('overwrite').resolve,
     );
     expect((await lstat(join(base, 'CLAUDE.md'))).isSymbolicLink()).toBe(true);
@@ -431,11 +425,11 @@ describe('restorer: existing files', () => {
 
   it.runIf(posix)('merges through a linked ~/.claude.json, keeping the link (T53)', async () => {
     const real = join(root, 'dotfiles', 'claude.json');
-    await put(real, '{"diffTool":"auto"}');
+    await writeTestFile(real, '{"diffTool":"auto"}');
     await symlink(real, join(home, '.claude.json'));
-    await restorer().restorer.restore(
+    await restorer().restore(
       { kind: 'global' },
-      [file('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
+      [collected('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
       answer('merge').resolve,
     );
     expect((await lstat(join(home, '.claude.json'))).isSymbolicLink()).toBe(true);
@@ -443,9 +437,9 @@ describe('restorer: existing files', () => {
   });
 
   it('leaves no temporary files behind', async () => {
-    await restorer().restorer.restore(
+    await restorer().restore(
       { kind: 'global' },
-      [file('rules/a.md', 'a')],
+      [collected('rules/a.md', 'a')],
       answer('skip').resolve,
     );
     expect(await readdir(join(base, 'rules'))).toEqual(['a.md']);
@@ -453,7 +447,7 @@ describe('restorer: existing files', () => {
 });
 
 describe('restorer: ~/.claude.json', () => {
-  const incoming = file(
+  const incoming = collected(
     '.agentnomad/claude.json',
     JSON.stringify({ mcpServers: { github: { command: 'gh-mcp' } }, diffTool: 'terminal' }),
   );
@@ -465,9 +459,9 @@ describe('restorer: ~/.claude.json', () => {
   };
 
   it('merges only the servers and preferences, keeping the login and everything else', async () => {
-    await put(join(home, '.claude.json'), JSON.stringify(existingJson));
+    await writeTestFile(join(home, '.claude.json'), JSON.stringify(existingJson));
     const { questions, resolve } = answer('merge');
-    const report = await restorer().restorer.restore({ kind: 'global' }, [incoming], resolve);
+    const report = await restorer().restore({ kind: 'global' }, [incoming], resolve);
     expect(questions).toEqual([
       [
         '.agentnomad/claude.json',
@@ -487,21 +481,21 @@ describe('restorer: ~/.claude.json', () => {
   });
 
   it('never replaces the file, even when the answer is overwrite', async () => {
-    await put(join(home, '.claude.json'), JSON.stringify(existingJson));
-    await restorer().restorer.restore({ kind: 'global' }, [incoming], answer('overwrite').resolve);
+    await writeTestFile(join(home, '.claude.json'), JSON.stringify(existingJson));
+    await restorer().restore({ kind: 'global' }, [incoming], answer('overwrite').resolve);
     expect((await readJson(join(home, '.claude.json')))['oauthAccount']).toEqual(
       existingJson.oauthAccount,
     );
   });
 
   it('skip leaves it alone', async () => {
-    await put(join(home, '.claude.json'), JSON.stringify(existingJson));
-    await restorer().restorer.restore({ kind: 'global' }, [incoming], answer('skip').resolve);
+    await writeTestFile(join(home, '.claude.json'), JSON.stringify(existingJson));
+    await restorer().restore({ kind: 'global' }, [incoming], answer('skip').resolve);
     expect(JSON.parse(await read(join(home, '.claude.json')))).toEqual(existingJson);
   });
 
   it('asks nothing when the keys are already there', async () => {
-    await put(
+    await writeTestFile(
       join(home, '.claude.json'),
       JSON.stringify({
         ...existingJson,
@@ -510,14 +504,14 @@ describe('restorer: ~/.claude.json', () => {
       }),
     );
     const { questions, resolve } = answer('merge');
-    const report = await restorer().restorer.restore({ kind: 'global' }, [incoming], resolve);
+    const report = await restorer().restore({ kind: 'global' }, [incoming], resolve);
     expect(questions).toEqual([]);
     expect(report.written).toEqual([]);
   });
 
   it('never asks: Claude Code running while writing leaves it as it is, and says why (T61)', async () => {
-    await put(join(home, '.claude.json'), '{}');
-    const { restorer: r } = restorer({ running: [true] });
+    await writeTestFile(join(home, '.claude.json'), '{}');
+    const r = restorer({ running: [true] });
     const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve);
     expect(await read(join(home, '.claude.json'))).toBe('{}');
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
@@ -525,8 +519,8 @@ describe('restorer: ~/.claude.json', () => {
   });
 
   it('leaves it as it is when the plan chose to skip it, with the same warning (T61)', async () => {
-    await put(join(home, '.claude.json'), '{}');
-    const { restorer: r } = restorer({ running: [false] });
+    await writeTestFile(join(home, '.claude.json'), '{}');
+    const r = restorer({ running: [false] });
     const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve, {
       leaveClaudeJson: true,
     });
@@ -536,12 +530,12 @@ describe('restorer: ~/.claude.json', () => {
   });
 
   it('says what restoring would do to it: nothing, create it, or merge (T61)', async () => {
-    const { restorer: r } = restorer();
-    expect(await r.claudeJsonChange([file('CLAUDE.md', 'x')])).toBe('none');
+    const r = restorer();
+    expect(await r.claudeJsonChange([collected('CLAUDE.md', 'x')])).toBe('none');
     expect(await r.claudeJsonChange([incoming])).toBe('new');
-    await put(join(home, '.claude.json'), '{}');
+    await writeTestFile(join(home, '.claude.json'), '{}');
     expect(await r.claudeJsonChange([incoming])).toBe('merge');
-    await put(
+    await writeTestFile(
       join(home, '.claude.json'),
       JSON.stringify({ mcpServers: { github: { command: 'gh-mcp' } }, diffTool: 'terminal' }),
     );
@@ -549,8 +543,8 @@ describe('restorer: ~/.claude.json', () => {
   });
 
   it('restores only the servers and preferences, never projects or account state (T43)', async () => {
-    await put(join(home, '.claude.json'), JSON.stringify(existingJson));
-    const forged = file(
+    await writeTestFile(join(home, '.claude.json'), JSON.stringify(existingJson));
+    const forged = collected(
       '.agentnomad/claude.json',
       JSON.stringify({
         mcpServers: { github: { command: 'gh-mcp' } },
@@ -560,11 +554,7 @@ describe('restorer: ~/.claude.json', () => {
         oauthAccount: { emailAddress: 'attacker@example.com' },
       }),
     );
-    const report = await restorer().restorer.restore(
-      { kind: 'global' },
-      [forged],
-      answer('merge').resolve,
-    );
+    const report = await restorer().restore({ kind: 'global' }, [forged], answer('merge').resolve);
     const after = await readJson(join(home, '.claude.json'));
     expect(after['projects']).toEqual(existingJson.projects);
     expect(after['oauthAccount']).toEqual(existingJson.oauthAccount);
@@ -578,25 +568,15 @@ describe('restorer: ~/.claude.json', () => {
   });
 
   it('writes nothing when the bundle holds none of the keys it restores', async () => {
-    const forged = file('.agentnomad/claude.json', JSON.stringify({ projects: {} }));
-    const report = await restorer().restorer.restore(
-      { kind: 'global' },
-      [forged],
-      answer('merge').resolve,
-    );
+    const forged = collected('.agentnomad/claude.json', JSON.stringify({ projects: {} }));
+    const report = await restorer().restore({ kind: 'global' }, [forged], answer('merge').resolve);
     await expect(stat(join(home, '.claude.json'))).rejects.toThrow();
     expect(report.written).toEqual([]);
   });
 
   it('merges into the file as Claude Code left it after closing (T43)', async () => {
-    await put(join(home, '.claude.json'), JSON.stringify({ diffTool: 'auto' }));
-    const r = createClaudeCodeRestorer({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      env: {},
-      customConfigDir: false,
-      now: () => NOW,
+    await writeTestFile(join(home, '.claude.json'), JSON.stringify({ diffTool: 'auto' }));
+    const r = restorer({
       // Claude Code saved the file as it closed, after the conflict question was answered.
       isClaudeRunning: async () => {
         await writeFile(
@@ -619,13 +599,13 @@ describe('restorer: ~/.claude.json', () => {
   });
 
   it('creates it when missing, readable only by this user', async () => {
-    await restorer().restorer.restore({ kind: 'global' }, [incoming], answer('skip').resolve);
+    await restorer().restore({ kind: 'global' }, [incoming], answer('skip').resolve);
     expect((await readJson(join(home, '.claude.json')))['diffTool']).toBe('terminal');
     if (posix) expect((await stat(join(home, '.claude.json'))).mode & 0o777).toBe(0o600);
   });
 
   it('goes into CLAUDE_CONFIG_DIR when that is set', async () => {
-    await restorer({ customConfigDir: true }).restorer.restore(
+    await restorer({ customConfigDir: true }).restore(
       { kind: 'global' },
       [incoming],
       answer('skip').resolve,
@@ -637,12 +617,12 @@ describe('restorer: ~/.claude.json', () => {
 describe('restorer: home files', () => {
   it('puts tool settings and hook scripts back in the home folder', async () => {
     const hook = { Stop: [{ hooks: [{ type: 'command', command: '~/scripts/notify.sh' }] }] };
-    await restorer().restorer.restore(
+    await restorer().restore(
       { kind: 'global' },
       [
-        file('settings.json', JSON.stringify({ hooks: hook })),
-        file('.agentnomad/home/.config/ccstatusline/settings.json', '{"lines":[]}'),
-        file('.agentnomad/home/scripts/notify.sh', 'echo hi\n', true),
+        collected('settings.json', JSON.stringify({ hooks: hook })),
+        collected('.agentnomad/home/.config/ccstatusline/settings.json', '{"lines":[]}'),
+        collected('.agentnomad/home/scripts/notify.sh', 'echo hi\n', true),
       ],
       answer('skip').resolve,
     );
@@ -652,9 +632,9 @@ describe('restorer: home files', () => {
 
   it('skips a home script no hook runs, e.g. one for the Windows Startup folder (T38)', async () => {
     const startup = 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/update.bat';
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file(`.agentnomad/home/${startup}`, 'echo pwned\n')],
+      [collected(`.agentnomad/home/${startup}`, 'echo pwned\n')],
       answer('merge').resolve,
     );
     expect(report.written).toEqual([]);
@@ -665,10 +645,10 @@ describe('restorer: home files', () => {
 
 describe('restorer: one bad entry never stops the rest (T43)', () => {
   it('skips an entry it cannot write, with a warning, and writes the others', async () => {
-    await put(join(base, 'skills', 'deploy'), 'a file where the bundle has a folder');
-    const report = await restorer().restorer.restore(
+    await writeTestFile(join(base, 'skills', 'deploy'), 'a file where the bundle has a folder');
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('skills/deploy/SKILL.md', 'x'), file('skills/review/SKILL.md', 'ok')],
+      [collected('skills/deploy/SKILL.md', 'x'), collected('skills/review/SKILL.md', 'ok')],
       answer('overwrite').resolve,
     );
     expect(report.skipped).toEqual(['skills/deploy/SKILL.md']);
@@ -677,13 +657,13 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
   });
 
   it('a thrown non-Error still gives a readable warning (T53)', async () => {
-    await put(join(home, '.claude.json'), '{}');
+    await writeTestFile(join(home, '.claude.json'), '{}');
     const report = await restorer({
       // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the case under test
       isClaudeRunning: () => Promise.reject('the process list was empty'),
-    }).restorer.restore(
+    }).restore(
       { kind: 'global' },
-      [file('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
+      [collected('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
       answer('merge').resolve,
     );
     expect(report.warnings).toEqual([
@@ -692,9 +672,9 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
   });
 
   it('a broken .agentnomad/claude.json is skipped, not fatal', async () => {
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('.agentnomad/claude.json', '{not json'), file('rules/a.md', 'a')],
+      [collected('.agentnomad/claude.json', '{not json'), collected('rules/a.md', 'a')],
       answer('skip').resolve,
     );
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
@@ -704,9 +684,9 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
   it.runIf(process.platform === 'win32' || process.platform === 'darwin')(
     'writes only the first of two names this OS sees as one file',
     async () => {
-      const report = await restorer().restorer.restore(
+      const report = await restorer().restore(
         { kind: 'global' },
-        [file('rules/Notes.md', 'upper'), file('rules/notes.md', 'lower')],
+        [collected('rules/Notes.md', 'upper'), collected('rules/notes.md', 'lower')],
         answer('overwrite').resolve,
       );
       expect(report.written).toEqual(['rules/Notes.md']);
@@ -722,12 +702,16 @@ describe('restorer: a cancelled question stops the restore (T53)', () => {
   class Cancelled extends Error {}
 
   it('a rejected conflict question rejects restore, and no later file is written', async () => {
-    await put(join(base, 'rules', 'a.md'), 'mine a');
-    await put(join(base, 'rules', 'b.md'), 'mine b');
+    await writeTestFile(join(base, 'rules', 'a.md'), 'mine a');
+    await writeTestFile(join(base, 'rules', 'b.md'), 'mine b');
     const questions: string[] = [];
-    const restore = restorer().restorer.restore(
+    const restore = restorer().restore(
       { kind: 'global' },
-      [file('rules/a.md', 'theirs a'), file('rules/b.md', 'theirs b'), file('rules/c.md', 'c')],
+      [
+        collected('rules/a.md', 'theirs a'),
+        collected('rules/b.md', 'theirs b'),
+        collected('rules/c.md', 'c'),
+      ],
       (path) => {
         questions.push(path);
         return Promise.reject(new Cancelled('Cancelled'));
@@ -741,7 +725,7 @@ describe('restorer: a cancelled question stops the restore (T53)', () => {
 });
 
 describe('restorer: auto memory folder chosen by project settings (T43)', () => {
-  const memory = file('.agentnomad/auto-memory/MEMORY.md', 'remember');
+  const memory = collected('.agentnomad/auto-memory/MEMORY.md', 'remember');
 
   it.each([
     ['~/.config/autostart', 'a folder whose files run by themselves'],
@@ -749,11 +733,11 @@ describe('restorer: auto memory folder chosen by project settings (T43)', () => 
     ['~/.claude', "inside Claude Code's own folder"],
     ['~/', 'your home folder itself'],
   ])('refuses %s', async (dir, reason) => {
-    await put(
+    await writeTestFile(
       join(project, '.claude', 'settings.json'),
       JSON.stringify({ autoMemoryDirectory: dir }),
     );
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'project', projectDir: project },
       [memory],
       answer('skip').resolve,
@@ -765,11 +749,11 @@ describe('restorer: auto memory folder chosen by project settings (T43)', () => 
 
   it('refuses a folder outside the home folder', async () => {
     const outside = join(root, 'elsewhere');
-    await put(
+    await writeTestFile(
       join(project, '.claude', 'settings.json'),
       JSON.stringify({ autoMemoryDirectory: outside }),
     );
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'project', projectDir: project },
       [memory],
       answer('skip').resolve,
@@ -779,11 +763,11 @@ describe('restorer: auto memory folder chosen by project settings (T43)', () => 
   });
 
   it('uses a folder in the home folder', async () => {
-    await put(
+    await writeTestFile(
       join(project, '.claude', 'settings.json'),
       JSON.stringify({ autoMemoryDirectory: '~/notes/my-app' }),
     );
-    await restorer().restorer.restore(
+    await restorer().restore(
       { kind: 'project', projectDir: project },
       [memory],
       answer('skip').resolve,
@@ -807,12 +791,12 @@ describe('restorer: per-OS fixes', () => {
     // Git's autocrlf gives a CRLF .py on Windows; an LF .cmd comes from macOS or Linux.
     const py = 'print("a")\r\nprint("b")\r\n';
     const cmd = '@echo off\necho ok\n';
-    await put(join(base, 'hooks', 'check.py'), py);
-    await put(join(base, 'hooks', 'run.cmd'), cmd);
-    const incoming = [file('hooks/check.py', py), file('hooks/run.cmd', cmd)];
+    await writeTestFile(join(base, 'hooks', 'check.py'), py);
+    await writeTestFile(join(base, 'hooks', 'run.cmd'), cmd);
+    const incoming = [collected('hooks/check.py', py), collected('hooks/run.cmd', cmd)];
     for (const choice of ['merge', 'overwrite'] as const) {
       const { questions, resolve } = answer(choice);
-      const report = await restorer().restorer.restore({ kind: 'global' }, incoming, resolve);
+      const report = await restorer().restore({ kind: 'global' }, incoming, resolve);
       expect(questions).toEqual([]);
       expect(report.written).toEqual([]);
       expect(report.backups).toEqual([]);
@@ -829,18 +813,14 @@ describe('restorer: per-OS fixes', () => {
       { type: 'command', command: '~/.claude/hooks/run.cmd' },
     ];
     const incoming = [
-      file('settings.json', JSON.stringify({ hooks: { Stop: [{ hooks }] } })),
-      file('hooks/check.py', 'print("a")\r\n'),
-      file('hooks/run.cmd', '@echo off\n'),
+      collected('settings.json', JSON.stringify({ hooks: { Stop: [{ hooks }] } })),
+      collected('hooks/check.py', 'print("a")\r\n'),
+      collected('hooks/run.cmd', '@echo off\n'),
     ];
-    const first = await restorer().restorer.restore(
-      { kind: 'global' },
-      incoming,
-      answer('skip').resolve,
-    );
+    const first = await restorer().restore({ kind: 'global' }, incoming, answer('skip').resolve);
     expect([...first.written].sort()).toEqual(['hooks/check.py', 'hooks/run.cmd', 'settings.json']);
     const { questions, resolve } = answer('merge');
-    const second = await restorer().restorer.restore({ kind: 'global' }, incoming, resolve);
+    const second = await restorer().restore({ kind: 'global' }, incoming, resolve);
     expect(questions).toEqual([]);
     expect(second.written).toEqual([]);
     expect((await readdir(join(base, 'hooks'))).sort()).toEqual(['check.py', 'run.cmd']);
@@ -863,13 +843,13 @@ describe('restorer: per-OS fixes', () => {
       { type: 'command', command: '~/.claude/hooks/a.sh' },
       { type: 'command', command: 'sh ~/.claude/hooks/b.sh' },
     ];
-    await restorer().restorer.restore(
+    await restorer().restore(
       { kind: 'global' },
       [
-        file('settings.json', JSON.stringify({ hooks: { Stop: [{ hooks }] } })),
-        file('hooks/a.sh', 'echo a\n', true),
-        file('hooks/b.sh', '#!/bin/sh\necho b\n'),
-        file('CLAUDE.md', 'x'),
+        collected('settings.json', JSON.stringify({ hooks: { Stop: [{ hooks }] } })),
+        collected('hooks/a.sh', 'echo a\n', true),
+        collected('hooks/b.sh', '#!/bin/sh\necho b\n'),
+        collected('CLAUDE.md', 'x'),
       ],
       answer('skip').resolve,
     );
@@ -879,11 +859,11 @@ describe('restorer: per-OS fixes', () => {
   });
 
   it.runIf(posix)('an overwritten file keeps its own permissions', async () => {
-    await put(join(base, 'CLAUDE.md'), 'mine');
+    await writeTestFile(join(base, 'CLAUDE.md'), 'mine');
     await chmod(join(base, 'CLAUDE.md'), 0o600);
-    await restorer().restorer.restore(
+    await restorer().restore(
       { kind: 'global' },
-      [file('CLAUDE.md', 'theirs')],
+      [collected('CLAUDE.md', 'theirs')],
       answer('overwrite').resolve,
     );
     expect((await stat(join(base, 'CLAUDE.md'))).mode & 0o777).toBe(0o600);
@@ -900,9 +880,9 @@ describe('restorer: per-OS fixes', () => {
       },
     });
     const otherOs = posix ? 'win32' : 'linux';
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
-      [file('settings.json', settings)],
+      [collected('settings.json', settings)],
       answer('skip').resolve,
       { sourceOs: otherOs },
     );
@@ -911,9 +891,9 @@ describe('restorer: per-OS fixes', () => {
       `This hook or status line came from ${otherOs} and will likely not run here: ${expected}`,
     ]);
     // Nothing to warn about from the same OS.
-    const same = await restorer().restorer.restore(
+    const same = await restorer().restore(
       { kind: 'global' },
-      [file('settings.json', settings)],
+      [collected('settings.json', settings)],
       answer('skip').resolve,
       { sourceOs: process.platform === 'darwin' ? 'darwin' : posix ? 'linux' : 'win32' },
     );
@@ -952,13 +932,13 @@ describe('restorer: hooks in exec form and compound commands (BUG-01, SEC-01)', 
         ],
       },
     });
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'global' },
       [
-        file('settings.json', settings),
-        file('hooks/check.js', 'check'),
-        file('.agentnomad/home/tools/stop.sh', 'stop'),
-        file('.agentnomad/home/tools/notify.sh', 'notify'),
+        collected('settings.json', settings),
+        collected('hooks/check.js', 'check'),
+        collected('.agentnomad/home/tools/stop.sh', 'stop'),
+        collected('.agentnomad/home/tools/notify.sh', 'notify'),
       ],
       answer('skip').resolve,
     );
@@ -971,20 +951,20 @@ describe('restorer: hooks in exec form and compound commands (BUG-01, SEC-01)', 
 
 describe('restorer: project scripts', () => {
   const settings = (command: string) =>
-    file(
+    collected(
       '.claude/settings.json',
       JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
     );
 
   it('restores a script outside .claude/ only when a project hook runs it', async () => {
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'project', projectDir: project },
       [
         settings('python scripts/check.py && "$CLAUDE_PROJECT_DIR"/tools/lint.sh'),
-        file('scripts/check.py', 'print(1)'),
-        file('tools/lint.sh', 'lint'),
-        file('src/evil.ts', 'SECRET'),
-        file('.claude/hooks/any.sh', 'ok'),
+        collected('scripts/check.py', 'print(1)'),
+        collected('tools/lint.sh', 'lint'),
+        collected('src/evil.ts', 'SECRET'),
+        collected('.claude/hooks/any.sh', 'ok'),
       ],
       answer('skip').resolve,
     );
@@ -1025,17 +1005,21 @@ describe('restorer: names Windows cannot write safely (T38)', () => {
 
 describe('restorer: what pull asks before writing (T61)', () => {
   it('lists each file here that differs, in order, and ~/.claude.json whenever it is pulled', () => {
-    const { restorer: r } = restorer();
+    const r = restorer();
     const conflicts = r.conflicts(
       [
-        file('rules/b.md', 'theirs'),
-        file('rules/a.md', 'same'),
-        file('new.md', 'new'),
-        file('.agentnomad/claude.json', '{"diffTool":"terminal"}'),
+        collected('rules/b.md', 'theirs'),
+        collected('rules/a.md', 'same'),
+        collected('new.md', 'new'),
+        collected('.agentnomad/claude.json', '{"diffTool":"terminal"}'),
         // Saved from Windows with CRLF; this PC keeps it with LF: the same script (T53).
-        file('hooks/run.sh', 'echo ok\r\n'),
+        collected('hooks/run.sh', 'echo ok\r\n'),
       ],
-      [file('rules/b.md', 'mine'), file('rules/a.md', 'same'), file('hooks/run.sh', 'echo ok\n')],
+      [
+        collected('rules/b.md', 'mine'),
+        collected('rules/a.md', 'same'),
+        collected('hooks/run.sh', 'echo ok\n'),
+      ],
     );
     expect(conflicts.map((conflict) => conflict.path)).toEqual([
       '.agentnomad/claude.json',
@@ -1046,8 +1030,8 @@ describe('restorer: what pull asks before writing (T61)', () => {
   });
 
   it('reviews runnable entries and knows the variables that redirect Claude Code', () => {
-    const { restorer: r } = restorer();
-    const settings = file(
+    const r = restorer();
+    const settings = collected(
       'settings.json',
       JSON.stringify({ statusLine: { type: 'command', command: 'ccstatusline' } }),
     );
@@ -1063,11 +1047,11 @@ describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
   it('restores a script that a hook names by its absolute path in the project', async () => {
     const source = join(root, 'old', 'my-app');
     const command = `${join(source, 'scripts', 'a.sh')} --fix`;
-    await put(
+    await writeTestFile(
       join(source, '.claude', 'settings.json'),
       JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
     );
-    await put(join(source, 'scripts', 'a.sh'), 'echo hi');
+    await writeTestFile(join(source, 'scripts', 'a.sh'), 'echo hi');
     const files = await createClaudeCodeProjectCollector({
       baseDir: base,
       homedir: home,
@@ -1078,7 +1062,7 @@ describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
 
     // Pulled into the same folder (a reinstalled PC), the script comes back.
     await rm(join(source, 'scripts'), { recursive: true });
-    const report = await restorer().restorer.restore(
+    const report = await restorer().restore(
       { kind: 'project', projectDir: source },
       files,
       answer('overwrite').resolve,
