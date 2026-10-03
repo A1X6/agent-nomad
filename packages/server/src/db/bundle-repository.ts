@@ -111,21 +111,15 @@ export function createBundleRepository(db: Database): BundleRepository {
           .for('update');
         let current = await lockCurrent();
 
-        const [used] = await tx
-          .select({
-            setups: sql<number>`count(*)::int`,
-            bytes: sql<string>`coalesce(sum(${bundles.sizeBytes}), 0)::bigint`,
-          })
-          .from(bundles)
-          .where(eq(bundles.userId, write.key.userId));
-        const setups = (used?.setups ?? 0) + (current ? 0 : 1);
-        const bytes = Number(used?.bytes ?? 0) - (current?.sizeBytes ?? 0) + write.sizeBytes;
+        const used = await usageQuery(tx, write.key.userId);
+        const setups = used.setups + (current ? 0 : 1);
+        const bytes = used.bytes - (current?.sizeBytes ?? 0) + write.sizeBytes;
         if (setups > USER_STORAGE_LIMITS.maxSetups) {
-          return { outcome: 'over-limit', reason: overLimit('setups') };
+          return { outcome: 'over-limit', limit: 'setups' };
         }
         // Saving a setup no bigger than before is always allowed, so nobody gets stuck.
         if (bytes > USER_STORAGE_LIMITS.maxBytes && write.sizeBytes > (current?.sizeBytes ?? 0)) {
-          return { outcome: 'over-limit', reason: overLimit('bytes') };
+          return { outcome: 'over-limit', limit: 'bytes' };
         }
 
         if (!current) {
@@ -170,16 +164,7 @@ export function createBundleRepository(db: Database): BundleRepository {
       });
     },
 
-    async usage(userId) {
-      const [row] = await db
-        .select({
-          setups: sql<number>`count(*)::int`,
-          bytes: sql<string>`coalesce(sum(${bundles.sizeBytes}), 0)::bigint`,
-        })
-        .from(bundles)
-        .where(eq(bundles.userId, userId));
-      return { setups: row?.setups ?? 0, bytes: Number(row?.bytes ?? 0) };
-    },
+    usage: (userId) => usageQuery(db, userId),
 
     async delete(key) {
       const [row] = await db.delete(bundles).where(matchesKey(key)).returning(metaColumns);
@@ -188,11 +173,19 @@ export function createBundleRepository(db: Database): BundleRepository {
   };
 }
 
-/** Why a save is refused by the storage limits, in words the CLI shows as they are. */
-export function overLimit(kind: 'setups' | 'bytes'): string {
-  return kind === 'setups'
-    ? `An account keeps at most ${String(USER_STORAGE_LIMITS.maxSetups)} saved setups. Delete some with \`agentnomad delete\` first.`
-    : `An account keeps at most ${String(USER_STORAGE_LIMITS.maxBytes / 1024 / 1024)} MB of saved setups. Delete some with \`agentnomad delete\` or make this one smaller.`;
+/** How many setups the user keeps and their bytes; `db` may be a transaction. */
+async function usageQuery(
+  db: Database,
+  userId: string,
+): Promise<{ setups: number; bytes: number }> {
+  const [row] = await db
+    .select({
+      setups: sql<number>`count(*)::int`,
+      bytes: sql<string>`coalesce(sum(${bundles.sizeBytes}), 0)::bigint`,
+    })
+    .from(bundles)
+    .where(eq(bundles.userId, userId));
+  return { setups: row?.setups ?? 0, bytes: Number(row?.bytes ?? 0) };
 }
 
 /** The columns a save writes, apart from the revision number. */

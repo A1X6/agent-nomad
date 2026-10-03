@@ -101,16 +101,18 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     await limiter.reset(rule, subject);
   }
 
-  async function issueSession(userId: string, deviceName: string): Promise<IssuedSession> {
+  /** A new token and the session row to store for it (only the token's hash). */
+  async function newSession(deviceName: string) {
     const token = newSessionToken(randomBytes);
     const expiresAt = new Date(now().getTime() + SESSION_LIFETIME_MS);
-    await sessions.create({
-      userId,
-      tokenHash: await hashSessionToken(token),
-      deviceName,
-      expiresAt,
-    });
-    return { token, expiresAt };
+    const issued: IssuedSession = { token, expiresAt };
+    return { issued, row: { tokenHash: await hashSessionToken(token), deviceName, expiresAt } };
+  }
+
+  async function issueSession(userId: string, deviceName: string): Promise<IssuedSession> {
+    const { issued, row } = await newSession(deviceName);
+    await sessions.create({ userId, ...row });
+    return issued;
   }
 
   return {
@@ -123,14 +125,19 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     },
 
     async register(input) {
-      const user = await users.create({
-        username: input.username,
-        kdfSalt: input.kdfSalt,
-        kdfParams: input.kdfParams,
-        authHash: await keys.hashAuthKey(input.authKey),
-        wrappedDataKey: input.wrappedDataKey,
-      });
-      return issueSession(user.id, input.deviceName);
+      const { issued, row } = await newSession(input.deviceName);
+      // One transaction: a failed session leaves no account, so trying again works.
+      await users.createWithSession(
+        {
+          username: input.username,
+          kdfSalt: input.kdfSalt,
+          kdfParams: input.kdfParams,
+          authHash: await keys.hashAuthKey(input.authKey),
+          wrappedDataKey: input.wrappedDataKey,
+        },
+        row,
+      );
+      return issued;
     },
 
     async login(username, authKey, deviceName) {

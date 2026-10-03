@@ -37,6 +37,14 @@ export interface UserRepository {
   findById(id: string): Promise<UserRecord | null>;
   /** Throws UsernameTakenError when the username is taken. */
   create(user: NewUser): Promise<UserRecord>;
+  /**
+   * Creates the user and their first session in one transaction, so a failed session
+   * leaves no account behind. Throws UsernameTakenError when the username is taken.
+   */
+  createWithSession(
+    user: NewUser,
+    session: Omit<NewSession, 'userId'>,
+  ): Promise<{ readonly user: UserRecord; readonly session: SessionRecord }>;
   /** Removes the user; their sessions and bundles go with them. */
   delete(id: string): Promise<void>;
 }
@@ -71,6 +79,8 @@ export interface SessionRepository {
    * nothing else would ever remove them.
    */
   deleteStale(userId: string, idleTimeoutMs: number): Promise<void>;
+  /** Deletes every user's expired sessions, also of users who never log in again. */
+  deleteExpired(): Promise<void>;
 }
 
 /** Identifies one saved setup: one user, one agent, one scope. */
@@ -120,8 +130,11 @@ export type PutMetaResult =
   | { readonly outcome: 'unchanged'; readonly meta: BundleMeta }
   /** Someone saved a newer revision first. Nothing changed; delete the new file. */
   | { readonly outcome: 'conflict'; readonly currentRevision: number }
-  /** Saving it would take the account past its storage limits (T47). Nothing changed. */
-  | { readonly outcome: 'over-limit'; readonly reason: string };
+  /** Saving it would take the account past one of its storage limits (T47). Nothing changed. */
+  | { readonly outcome: 'over-limit'; readonly limit: StorageLimit };
+
+/** Which per-account limit a save would pass: the number of setups or their bytes. */
+export type StorageLimit = 'setups' | 'bytes';
 
 export interface BundlePage {
   readonly items: readonly BundleMeta[];

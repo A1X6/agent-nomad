@@ -86,6 +86,7 @@ describe('migrations', () => {
       'bundles_user_updated_idx',
       'rate_limits_pkey',
       'rate_limits_window_started_at_idx',
+      'sessions_expires_at_idx',
       'sessions_pkey',
       'sessions_token_hash_key',
       'sessions_user_id_idx',

@@ -19,8 +19,6 @@ export interface RateLimitStatus {
 export interface RateLimiter {
   /** Counts one hit and says whether it is within the limit. */
   hit(rule: RateLimitRule, subject: string): Promise<RateLimitStatus>;
-  /** Says whether the limit is already reached, without counting. */
-  check(rule: RateLimitRule, subject: string): Promise<RateLimitStatus>;
   /** Forgets the count, e.g. after a successful login. */
   reset(rule: RateLimitRule, subject: string): Promise<void>;
 }

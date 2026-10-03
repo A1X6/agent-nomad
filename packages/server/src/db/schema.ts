@@ -83,6 +83,8 @@ export const sessions = pgTable(
   (table) => [
     uniqueIndex('sessions_token_hash_key').on(table.tokenHash),
     index('sessions_user_id_idx').on(table.userId),
+    /** Deleting every user's expired sessions (DB-02). */
+    index('sessions_expires_at_idx').on(table.expiresAt),
   ],
 );
 

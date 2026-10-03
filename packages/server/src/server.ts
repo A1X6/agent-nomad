@@ -31,6 +31,20 @@ export interface Server {
 const PRUNE_CHANCE = 0.01;
 
 /**
+ * Neon's pooled URL in production; connections open lazily on the first query. An idle
+ * connection that drops (Neon suspending, a network blip) emits `error` on the pool, which
+ * Node would throw as an uncaught exception with no listener: it is logged instead, and the
+ * pool opens a new connection on the next query (BUG-02).
+ */
+export function createDatabasePool(connectionString: string, logger: Logger): Pool {
+  const pool = new Pool({ connectionString });
+  pool.on('error', (error: unknown) => {
+    logger.error('pool_error', describeError(error));
+  });
+  return pool;
+}
+
+/**
  * The composition root: builds the whole API from environment settings. Settings are
  * checked first, so a missing or bad DATABASE_URL or SERVER_SECRET stops startup with a
  * clear message (values are never printed).
@@ -42,20 +56,22 @@ export async function createServerFromEnv(
   const settings = readServerEnv(env);
   const logger = options.logger ?? createJsonLogger();
 
-  // Neon's pooled URL in production; connections open lazily on the first query.
-  const pool = new Pool({ connectionString: settings.DATABASE_URL });
+  const pool = createDatabasePool(settings.DATABASE_URL, logger);
   const db = drizzle({ client: pool });
   const keys = await createServerKeys(fromBase64(settings.SERVER_SECRET));
+  const sessions = createSessionRepository(db);
   const limiter = createPostgresRateLimiter({
     db,
     keys,
     shouldPrune: () => Math.random() < PRUNE_CHANCE,
+    // Sessions of users who never log in again are removed here (DB-02).
+    alsoPrune: () => sessions.deleteExpired(),
   });
 
   const app = createApp({
     auth: createAuthService({
       users: createUserRepository(db),
-      sessions: createSessionRepository(db),
+      sessions,
       keys,
       limiter,
       now: () => new Date(),
