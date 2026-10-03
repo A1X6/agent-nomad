@@ -148,7 +148,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### DUP-02 · Low · Test helpers are still copied next to the shared fakes
 
-- [ ] **Where:**
+- [x] **Where:**
   - hand-made reporters: `packages/cli/test/env.test.ts:454-458`, `:476`, `:493`, `:507`, `:514-516`, `:575-579`, `:675-679`; `packages/cli/test/managed-settings.test.ts:213`, `:237`
   - `CollectedFile` literals: `env.test.ts:97-101`; `claude-code-after-restore.test.ts:255-259`, `:286-290`; `push-command.test.ts:454-458`
   - a fake `EnvWriter`, five times: `pull-command.test.ts:155-159`, `:783-790`; `agent-boundary.test.ts:220-224`, `:335-342`; `env.test.ts:430-441`
@@ -173,7 +173,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### READ-02 · Low · Many tests sit in another module's test file
 
-- [ ] **Where:**
+- [x] **Where:**
   - `settings-commands.ts` has no test file: its tests are in `claude-code-global-collector.test.ts:348-368`, `:484-497`, `claude-code-project-collector.test.ts:344-356` and `claude-code-command-review.test.ts:444-453`; `pathWords` has no direct test
   - the programs locator: `claude-code-global-collector.test.ts:500-608`
   - auto memory: `claude-code-project-collector.test.ts:242-342`
@@ -221,7 +221,7 @@ Both need a setup forged with the user's own data key (threat 13: one of the use
 
 #### QA-01 · Low · Two tests hold look-alike characters as raw text
 
-- [ ] **Where:** `packages/core/test/crypto.test.ts:72-73`; `packages/core/test/project-names.test.ts:61`
+- [x] **Where:** `packages/core/test/crypto.test.ts:72-73`; `packages/core/test/project-names.test.ts:61`
 - **Problem:** The composed and decomposed forms of "café" are written as raw characters that look the same (checked with `od`: the bytes differ). Review 4 fixed the same pattern for a non-breaking space.
 - **Why it matters:** An editor or formatter that normalises text makes both sides equal, and the test then checks nothing.
 - **Fix:** Write them as `'café'` and `'café'`.
