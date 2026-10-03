@@ -62,7 +62,8 @@ export interface TransportDeps {
   readonly retryPolicy: RetryPolicy;
   /** Largest answer body accepted, so a wrong server cannot fill the memory. */
   readonly maxResponseBytes: number;
-  readonly userAgent: string;
+  /** Sent with every request (user agent, client version); a request's own headers win. */
+  readonly headers: Readonly<Record<string, string>>;
 }
 
 export interface Transport {
@@ -138,7 +139,7 @@ export function createTransport(deps: TransportDeps): Transport {
       for (const [name, value] of Object.entries(request.query ?? {})) {
         url.searchParams.set(name, value);
       }
-      const headers = { 'user-agent': deps.userAgent, ...request.headers };
+      const headers = { ...deps.headers, ...request.headers };
       // One copy backed by a plain ArrayBuffer (what fetch accepts), reused by every attempt.
       const body = request.body instanceof Uint8Array ? new Uint8Array(request.body) : request.body;
       const attempts = request.retry ? deps.retryPolicy.attempts : 1;

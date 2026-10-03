@@ -9,6 +9,7 @@ import {
   createHttpApiClient,
   DEFAULT_API_TIMEOUTS,
   DEFAULT_RETRY_POLICY,
+  describeError,
   InvalidResponseError,
   NetworkError,
   NotLoggedInError,
@@ -18,6 +19,7 @@ import {
   type HttpApiClientOptions,
   type Sleep,
 } from '../src/index.ts';
+import { CLI_VERSION } from '../src/version.ts';
 
 const BASE = new URL('https://api.test');
 const TOKEN = 'a'.repeat(43);
@@ -152,6 +154,67 @@ describe('ApiClient: requests and answers', () => {
   it('rejects an answer that breaks the contract', async () => {
     const { client } = fakeServer([json({ sessionToken: 'short', expiresAt: 'soon' })]);
     await expect(client.auth.login(loginRequest)).rejects.toBeInstanceOf(InvalidResponseError);
+  });
+
+  it('accepts answers with fields it does not know, at any level (ARCH-03)', async () => {
+    const item = {
+      agent: 'claude-code',
+      scopeKey: 'global',
+      nameEnc: null,
+      revision: 3,
+      formatVersion: 1,
+      sizeBytes: 2048,
+      updatedAt: '2026-09-24T13:00:00Z',
+    };
+    const { client } = fakeServer([
+      json({ ...SESSION, wrappedDataKey: WRAPPED, devices: 3 }),
+      json({ items: [{ ...item, pinned: true }], nextCursor: null, storageUsed: 2048 }),
+      json({ kdfSalt: SALT, kdfParams: { ...DEFAULT_KDF_PARAMS, hint: 'x' } }),
+    ]);
+    expect(await client.auth.login(loginRequest)).toEqual({ ...SESSION, wrappedDataKey: WRAPPED });
+    expect(await client.bundles.list()).toEqual({ items: [item], nextCursor: null });
+    expect(await client.auth.prelogin({ username: 'ahmed' })).toEqual({
+      kdfSalt: SALT,
+      kdfParams: DEFAULT_KDF_PARAMS,
+    });
+  });
+
+  it('still refuses KDF settings outside the safe bounds', async () => {
+    const { client } = fakeServer([
+      json({ kdfSalt: SALT, kdfParams: { ...DEFAULT_KDF_PARAMS, memoryKiB: 8_000_000 } }),
+    ]);
+    await expect(client.auth.prelogin({ username: 'ahmed' })).rejects.toBeInstanceOf(
+      InvalidResponseError,
+    );
+  });
+
+  it('turns an error code it does not know into a generic ApiError with the server message', async () => {
+    const { client } = fakeServer([
+      json({ error: { code: 'storage_full', message: 'Your storage is full.', limit: 9 } }, 507),
+    ]);
+    const error = await client.bundles.put(PARAMS, upload()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 507, code: 'unknown', message: 'Your storage is full.' });
+    expect(describeError(error)).toBe('Your storage is full.');
+  });
+
+  it('keeps known error codes as they are, even with extra fields', async () => {
+    const { client } = fakeServer([
+      json({ error: { code: 'unauthorized', message: 'Log in again', hint: 'x' } }, 401),
+    ]);
+    const error = await client.bundles.list().catch((e: unknown) => e);
+    expect(error).toMatchObject({ status: 401, code: 'unauthorized', message: 'Log in again' });
+  });
+
+  it('sends its version in x-an-client on every request, health check included', async () => {
+    const { client, calls } = fakeServer([json({ items: [], nextCursor: null })]);
+    await client.bundles.list();
+    expect(calls.map((call) => call.url.pathname)).toEqual(['/health', '/bundles']);
+    for (const call of calls) {
+      const headers = call.init.headers as Record<string, string>;
+      expect(headers[API_HEADERS.client]).toBe(CLI_VERSION);
+      expect(headers['user-agent']).toBe(`agentnomad/${CLI_VERSION}`);
+    }
   });
 
   it('rejects an answer that is not JSON (e.g. a proxy page)', async () => {

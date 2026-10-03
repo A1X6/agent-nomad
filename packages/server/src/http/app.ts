@@ -1,4 +1,9 @@
-import { API_ROUTES, type HealthResponse } from '@agentnomad/contracts';
+import {
+  API_HEADERS,
+  API_ROUTES,
+  ClientVersionSchema,
+  type HealthResponse,
+} from '@agentnomad/contracts';
 import { Hono } from 'hono';
 import { requestId, type RequestIdVariables } from 'hono/request-id';
 
@@ -45,13 +50,18 @@ export function createApp(deps: AppDeps): Hono<{ Variables: RequestIdVariables }
         c.header('Cache-Control', 'no-store');
         c.header('X-Content-Type-Options', 'nosniff');
         // One line per request. No headers, bodies or query strings: they carry tokens,
-        // keys and cursors.
+        // keys and cursors. The CLI version (T57) is the one header logged, and only when
+        // it looks like a version; older CLIs do not send it.
+        const client = c.req.header(API_HEADERS.client);
         logger.info('request', {
           requestId: c.get('requestId'),
           method: c.req.method,
           path: c.req.path,
           status: c.res.status,
           ms: Math.round(performance.now() - started),
+          ...(client !== undefined && {
+            client: ClientVersionSchema.safeParse(client).success ? client : 'invalid',
+          }),
         });
       })
       .get(API_ROUTES.health, (c) => c.json({ status: 'ok' } satisfies HealthResponse))

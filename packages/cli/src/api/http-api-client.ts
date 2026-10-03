@@ -5,15 +5,10 @@ import {
   API_ROUTES,
   AUTHORIZATION_SCHEME,
   BundleParamsSchema,
-  ErrorResponseSchema,
+  ClientAnswerSchemas,
+  ErrorCodeSchema,
   GetBundleResponseHeadersSchema,
-  HealthResponseSchema,
-  ListBundlesResponseSchema,
-  LoginResponseSchema,
   MAX_BUNDLE_BYTES,
-  PreloginResponseSchema,
-  PutBundleResponseSchema,
-  SessionResponseSchema,
   type BundleParams,
 } from '@agentnomad/contracts';
 import type * as z from 'zod';
@@ -117,7 +112,9 @@ function parseJson<S extends z.ZodType>(response: TransportResponse, schema: S):
 function failure(response: TransportResponse, noRetry?: NoRetryOperation): Error {
   const parsed = (() => {
     try {
-      return ErrorResponseSchema.safeParse(JSON.parse(new TextDecoder().decode(response.body)));
+      return ClientAnswerSchemas.error.safeParse(
+        JSON.parse(new TextDecoder().decode(response.body)),
+      );
     } catch {
       return undefined;
     }
@@ -125,7 +122,9 @@ function failure(response: TransportResponse, noRetry?: NoRetryOperation): Error
   if (parsed?.success) {
     const { code, message, currentRevision } = parsed.data.error;
     const retryAfterSeconds = parseRetryAfter(response.headers.get('retry-after'));
-    return new ApiError(response.status, code, message, {
+    // A code this CLI does not know yet: still the server's own error and message.
+    const known = ErrorCodeSchema.safeParse(code);
+    return new ApiError(response.status, known.success ? known.data : 'unknown', message, {
       ...(currentRevision !== undefined && { currentRevision }),
       ...(retryAfterSeconds !== undefined && { retryAfterSeconds }),
     });
@@ -149,7 +148,7 @@ function expect(response: TransportResponse, status: number, noRetry?: NoRetryOp
 /**
  * The ApiClient over HTTP (T21). Before its first request it checks /health with a long
  * timeout, because the free host sleeps when idle. Every answer is checked against the
- * shared contracts, and downloads against their SHA-256.
+ * shared contracts (unknown fields and error codes are tolerated, T57), and downloads against their SHA-256.
  */
 export function createHttpApiClient(options: HttpApiClientOptions): ApiClient {
   const timeouts = { ...DEFAULT_API_TIMEOUTS, ...options.timeouts };
@@ -161,7 +160,8 @@ export function createHttpApiClient(options: HttpApiClientOptions): ApiClient {
     random: options.random ?? Math.random,
     retryPolicy: options.retryPolicy ?? DEFAULT_RETRY_POLICY,
     maxResponseBytes: MAX_RESPONSE_BYTES,
-    userAgent: `agentnomad/${CLI_VERSION}`,
+    // The server reads x-an-client (T57), so it can tell old CLIs apart.
+    headers: { 'user-agent': `agentnomad/${CLI_VERSION}`, [API_HEADERS.client]: CLI_VERSION },
   });
 
   let awake: Promise<void> | undefined;
@@ -186,7 +186,7 @@ export function createHttpApiClient(options: HttpApiClientOptions): ApiClient {
         retry: true,
       });
       expect(response, 200);
-      parseJson(response, HealthResponseSchema);
+      parseJson(response, ClientAnswerSchemas.health);
     } finally {
       notice.abort();
       if (waking.shown) options.wakeUp?.onAwake();
@@ -240,19 +240,19 @@ export function createHttpApiClient(options: HttpApiClientOptions): ApiClient {
       async prelogin(request) {
         const response = await postJson(API_ROUTES.prelogin, request, true);
         expect(response, 200);
-        return parseJson(response, PreloginResponseSchema);
+        return parseJson(response, ClientAnswerSchemas.prelogin);
       },
 
       async register(request) {
         const response = await postJson(API_ROUTES.register, request, false, 'register');
         expect(response, 201, 'register');
-        return parseJson(response, SessionResponseSchema);
+        return parseJson(response, ClientAnswerSchemas.session);
       },
 
       async login(request) {
         const response = await postJson(API_ROUTES.login, request, true);
         expect(response, 200);
-        return parseJson(response, LoginResponseSchema);
+        return parseJson(response, ClientAnswerSchemas.login);
       },
 
       async logout() {
@@ -295,7 +295,7 @@ export function createHttpApiClient(options: HttpApiClientOptions): ApiClient {
           retry: true,
         });
         expect(response, 200);
-        return parseJson(response, ListBundlesResponseSchema);
+        return parseJson(response, ClientAnswerSchemas.listBundles);
       },
 
       async get(params): Promise<DownloadedBundle> {
@@ -354,7 +354,7 @@ export function createHttpApiClient(options: HttpApiClientOptions): ApiClient {
           retry: true,
         });
         expect(response, 200);
-        return parseJson(response, PutBundleResponseSchema);
+        return parseJson(response, ClientAnswerSchemas.putBundle);
       },
 
       async delete(params) {

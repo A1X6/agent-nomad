@@ -7,6 +7,9 @@ import { API_HEADERS, MAX_BUNDLE_BYTES, MAX_NAME_ENC_BYTES } from './common.ts';
 /** Scope key of the global setup. Project setups use a keyed hash instead (core, T12). */
 export const GLOBAL_SCOPE_KEY = 'global';
 
+/** Most saved setups in one page of GET /bundles. */
+export const MAX_PAGE_ITEMS = 100;
+
 /** `global`, or the keyed hash of a project name (32 bytes, lowercase hex). Never the name itself. */
 export const ScopeKeySchema = z
   .string()
@@ -43,7 +46,7 @@ export const ListBundlesQuerySchema = z.object({
     .string()
     .regex(/^[1-9]\d{0,2}$/, 'Limit must be a whole number')
     .transform(Number)
-    .pipe(z.int().max(100))
+    .pipe(z.int().max(MAX_PAGE_ITEMS))
     .default(50),
 });
 
@@ -60,7 +63,7 @@ export const BundleSummarySchema = z.strictObject({
 });
 
 export const ListBundlesResponseSchema = z.strictObject({
-  items: z.array(BundleSummarySchema).max(100),
+  items: z.array(BundleSummarySchema).max(MAX_PAGE_ITEMS),
   /** Pass back as `cursor` for the next page; `null` on the last page. */
   nextCursor: z.string().nullable(),
 });
