@@ -161,6 +161,22 @@ describe('server-managed settings (claude.ai admin console)', () => {
     expect(managedSettingsNotice(found, 'pull')).toContain('(the claude.ai admin console)');
   });
 
+  it('a plugin they block names the admin console, not the cached file (UX-03)', async () => {
+    const found = await detectManagedSettings(
+      fakeSystem({
+        platform: 'linux',
+        files: {
+          '/home/a/.claude/remote-settings.json': JSON.stringify({
+            blockedMarketplaces: [{ source: 'github', repo: 'x/y' }],
+          }),
+        },
+      }),
+    );
+    expect(explainPluginFailure('Marketplace y is blocked', found)).toBe(
+      "blocked by your organization's Claude Code policy (the claude.ai admin console). Ask your admin to allow it. Details: Marketplace y is blocked",
+    );
+  });
+
   it('an empty cache means none are set', async () => {
     const found = await detectManagedSettings(
       fakeSystem({ platform: 'linux', files: { '/home/a/.claude/remote-settings.json': '{}' } }),

@@ -138,15 +138,22 @@ export async function detectManagedSettings(
   };
 }
 
+/**
+ * Where the settings come from, for a message: the admin console for server-managed ones,
+ * not the cache file the user cannot edit (UX-03), and the path for the rest.
+ */
+const sourcesText = (found: ManagedSettings) =>
+  found.sources
+    .map((source) => (source.kind === 'remote' ? 'the claude.ai admin console' : source.where))
+    .join(', ');
+
 /** What push and pull say when this PC has managed settings; `null` when it has none. */
 export function managedSettingsNotice(
   found: ManagedSettings,
   command: 'push' | 'pull' | 'agents',
 ): string | null {
   if (found.sources.length === 0) return null;
-  const where = found.sources
-    .map((source) => (source.kind === 'remote' ? 'the claude.ai admin console' : source.where))
-    .join(', ');
+  const where = sourcesText(found);
   const limits = [
     ...(found.restrictsPlugins ? ['which plugins can be installed'] : []),
     ...(found.restrictsMcpServers ? ['which MCP servers can run'] : []),
@@ -171,10 +178,7 @@ const POLICY_WORDS =
 /** A clearer reason for a failed plugin install when the organization's policy blocked it. */
 export function explainPluginFailure(reason: string, found: ManagedSettings | null): string {
   if (!POLICY_WORDS.test(reason)) return reason;
-  const where =
-    found && found.sources.length > 0
-      ? ` (${found.sources.map((source) => source.where).join(', ')})`
-      : '';
+  const where = found && found.sources.length > 0 ? ` (${sourcesText(found)})` : '';
   return `blocked by your organization's Claude Code policy${where}. Ask your admin to allow it. Details: ${reason}`;
 }
 

@@ -1,6 +1,8 @@
+import { MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
 import { Command, Option, type CommandUnknownOpts } from '@commander-js/extra-typings';
 
 import type { OptionalPart } from '../agents/adapter.ts';
+import { formatSize } from '../ui/format-size.ts';
 import { CLI_VERSION } from '../version.ts';
 import type { CommandHandlers, CredentialOptions, ScopeFlags } from './commands.ts';
 import { parseAgentList, parseProjectName, parseUsername } from './flags.ts';
@@ -40,7 +42,7 @@ Examples:
 With no terminal (a script or CI), nothing is asked: a question the flags do not
 answer stops the command with exit code 1 and names the flags to add. Push and pull
 also exit with code 1 when a setup was skipped or refused without a "no" from you
-(a newer or older copy, over 5 MB, or skipped by --yes); the rest is done first.`;
+(a newer or older copy, over ${formatSize(MAX_BUNDLE_BYTES)}, or skipped by --yes); the rest is done first.`;
 
 /** `--<id>` and `--no-<id>` for each optional part, with the command's help texts. */
 function addPartOptions(
@@ -173,7 +175,7 @@ export function createProgram({ handlers, optionalParts, output }: ProgramDeps) 
     .addOption(pushAgent)
     .addOption(pushGlobal)
     .addOption(pushProject)
-    .addOption(new Option('--memory', 'include memory (subagent and auto memory)'))
+    .addOption(new Option('--memory', "include the agent's memory"))
     .addOption(new Option('--no-memory', 'leave memory out'));
   addPartOptions(push, parts, 'push');
   push.addOption(yesOption()).action((options, command) =>

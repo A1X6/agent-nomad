@@ -210,9 +210,10 @@ export async function installPlugins(
     const run = await deps.claude.run(['plugin', 'marketplace', 'add', marketplace.add], deps.cwd);
     if (run.exitCode !== 0) {
       failedMarketplaces.add(marketplace.name);
+      const reason = run.stderr.trim() || run.stdout.trim() || `exit code ${String(run.exitCode)}`;
       result.failed.push({
         what: `marketplace ${marketplace.name}`,
-        reason: run.stderr.trim() || run.stdout.trim() || `exit code ${String(run.exitCode)}`,
+        reason: deps.explainFailure?.(reason) ?? reason,
       });
     }
   }

@@ -497,6 +497,28 @@ describe('agentnomad push', () => {
     expect((await received(server, { kind: 'global' })).revision).toBe(1);
   });
 
+  it('a partial last pull names no cause it cannot know, such as a kept file (UX-01)', async () => {
+    const server = fakeBundleServer();
+    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    // The note a pull leaves when it kept a differing file as it was; state.json does not
+    // say why a pull was partial, so push must not blame declined commands.
+    const desktop = setup([], { server, pc: 'desktop' });
+    await desktop.state.setRevision('claude-code', 'global', 1, { partial: true });
+
+    await expect(desktop.command.push({ global: true, yes: true, memory: false })).rejects.toThrow(
+      'Not saved:\n  - the Claude Code global setup: its last pull here did not restore everything',
+    );
+    expect(desktop.lines.some((line) => line.includes('Run `agentnomad pull` first'))).toBe(true);
+    expect(desktop.lines.join('\n')).not.toMatch(/--allow-commands|commands you declined/);
+
+    const asked = setup([true], { server, pc: 'desktop' });
+    await asked.command.push({ global: true, yes: false, memory: false });
+    expect(asked.script.asked).toEqual([
+      "This PC's last pull of the Claude Code global setup did not restore everything, so pushing now may drop parts of the saved copy (and of your other PCs on their next pull). Push anyway?",
+    ]);
+    expect((await received(server, { kind: 'global' })).revision).toBe(2);
+  });
+
   it('--yes skips a copy deleted on the server; a yes from the user saves it again', async () => {
     const server = fakeBundleServer();
     const t = setup(['global', false], { server });

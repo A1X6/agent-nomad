@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { createApp, createAppRegistry } from '../src/app.ts';
@@ -9,6 +10,7 @@ import type { CommandHandlers } from '../src/cli/commands.ts';
 import type { PartFlags } from '../src/cli/program.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
 import { SetupsNotDoneError } from '../src/cli/setup-outcomes.ts';
+import { formatSize } from '../src/ui/format-size.ts';
 import { AnswerNeededError } from '../src/ui/no-terminal-prompter.ts';
 import { PromptCancelledError } from '../src/ui/prompter.ts';
 import { CLI_VERSION } from '../src/version.ts';
@@ -97,6 +99,17 @@ describe('help and version', () => {
       expect(out).toMatch(new RegExp(`^  ${command}\\b`, 'm'));
     }
     expect(out).toContain('no password recovery');
+  });
+
+  it('gives the size limit from the shared constant (READ-03)', async () => {
+    const { out } = await run(['--help']);
+    expect(out).toContain(`over ${formatSize(MAX_BUNDLE_BYTES)}`);
+  });
+
+  it("describes --memory without one agent's words (ARCH-02)", async () => {
+    const { out } = await run(['push', '--help']);
+    expect(out).toMatch(/--memory +include the agent's memory/);
+    expect(out).not.toContain('subagent');
   });
 
   it('shows the flags of a command', async () => {

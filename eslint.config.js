@@ -80,6 +80,19 @@ export default defineConfig(
     },
   },
   {
+    // The generic files of `agents/` itself (`adapter.ts`, `registry.ts`, ...) keep the same
+    // boundary (ARCH-01). From there an agent's folder is `./<id>/`, which the pattern above
+    // does not see; `./shared/` stays allowed.
+    files: ['packages/cli/src/agents/*.ts'],
+    rules: restrictedImports([
+      {
+        regex: String.raw`^\./(?!shared/)[^./][^/]*/`,
+        message:
+          'Generic agent code uses an agent only through the adapter interfaces (agents/adapter.ts).',
+      },
+    ]),
+  },
+  {
     files: ['packages/cli/src/agents/*/*.ts'],
     rules: restrictedImports([otherAgentFolder]),
   },

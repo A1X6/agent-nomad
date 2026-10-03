@@ -678,10 +678,10 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     await expect(
       pushFrom(b, server, [], { reporter })({ global: true, yes: true, memory: false }),
     ).rejects.toThrow(
-      'Not saved:\n  - the Claude Code global setup: its last pull here left out commands you declined',
+      'Not saved:\n  - the Claude Code global setup: its last pull here did not restore everything',
     );
     expect(revisionOn(server, GLOBAL_SCOPE_KEY)).toBe(1);
-    expect(lines.some((line) => line.includes('left out commands you declined'))).toBe(true);
+    expect(lines.some((line) => line.includes('did not restore everything'))).toBe(true);
 
     // Asked, and a yes pushes; afterwards this PC's copy is complete again.
     await pushFrom(b, server, [true])({ global: true, yes: false, memory: false });

@@ -354,6 +354,19 @@ describe('plugin reinstall on pull', () => {
     ]);
   });
 
+  it('a failed marketplace gets the same clearer reason as a failed plugin (UX-03)', async () => {
+    const { claude } = fakeClaude({ 'gitlab.example.com': 'blocked by strictKnownMarketplaces' });
+    const { reporter } = recordingReporter();
+    const result = await installPlugins(
+      { marketplaces: savedManifest.marketplaces, plugins: savedManifest.plugins, declined: [] },
+      { claude, reporter, cwd: '/work/app', explainFailure: (reason) => `explained: ${reason}` },
+    );
+    expect(result.failed[0]).toEqual({
+      what: 'marketplace company',
+      reason: 'explained: blocked by strictKnownMarketplaces',
+    });
+  });
+
   it('plans only what is missing', () => {
     expect(
       planPluginSync(savedManifest, {
