@@ -122,10 +122,14 @@ export function changelogSince(markdown: string, afterVersion: string): Changelo
 
 /**
  * A changelog line as it is shown in the issue (T48): text from outside the repository, so an
- * @mention cannot notify anyone and an image cannot load from elsewhere.
+ * @mention cannot notify anyone and an image (Markdown or HTML: `<` is shown as text) cannot
+ * load from elsewhere.
  */
 export function inert(line: string): string {
-  return line.replace(/@(?=[A-Za-z0-9])/g, '@\u200b').replace(/!\[/g, '!\\[');
+  return line
+    .replace(/@(?=[A-Za-z0-9])/g, '@\u200b')
+    .replace(/!\[/g, '!\\[')
+    .replace(/</g, '&lt;');
 }
 
 export function driftReport(input: DriftInput): DriftReport {

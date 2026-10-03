@@ -245,7 +245,7 @@ export function createPullPlanner(deps: PullDeps) {
       if (answer !== undefined)
         return answer === 'overwrite' && !question.overwriteAllowed ? 'merge' : answer;
       const chosen: ConflictAnswer = await prompter.select(
-        question.message ?? `${path} already exists here and is different.`,
+        question.message ?? `${printableLine(path)} already exists here and is different.`,
         [
           {
             value: 'merge',
@@ -351,7 +351,7 @@ export function createPullPlanner(deps: PullDeps) {
         const blocked = new Set(review.map((entry) => entry.file));
         files = files.filter((file) => !blocked.has(file.path));
         reporter.warn(
-          `Skipped ${[...blocked].join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
+          `Skipped ${[...blocked].map(printableLine).join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
         );
       }
     }
@@ -521,28 +521,35 @@ export function createPullApplier(deps: PullApplyDeps) {
     ];
     reporter.success(`Restored the ${name}: ${parts.join(', ')} (revision ${String(revision)}).`);
 
-    // Declined commands are noted, so a later push asks before dropping them (T46).
-    await deps
-      .localState()
-      .setRevision(adapter.id, setup.scopeKey, revision, { partial: declined });
+    // Declined commands and files left unasked are noted, so a later push asks before
+    // replacing them (T46, BUG-05).
+    await deps.localState().setRevision(adapter.id, setup.scopeKey, revision, {
+      partial: declined || notAsked.length > 0,
+    });
     if (setup.projectName !== null)
       await deps.localState().rememberProject(deps.cwd, setup.projectName);
 
     if (planned.env !== null && planned.env.toAdd.length > 0) {
       await writeEnvValues(
-        { section: planned.env.section, writer: deps.envWriter(), reporter },
+        {
+          section: planned.env.section,
+          writer: deps.envWriter(),
+          reporter,
+          agentName: adapter.displayName,
+        },
         planned.env.toAdd,
       );
     }
 
     if (notAsked.length === 0) return { setup: name, result: 'done' };
+    const leftAlone = notAsked.map(printableLine).join(', ');
     reporter.warn(
-      `Left as they are in the ${name}: ${notAsked.join(', ')}. They differ here, but pull did not ask about them before writing. Pull again with --merge or --overwrite to choose.`,
+      `Left as they are in the ${name}: ${leftAlone}. They differ here, but pull did not ask about them before writing. Pull again with --merge or --overwrite to choose.`,
     );
     return {
       setup: name,
       result: 'not-done',
-      reason: `not asked about ${notAsked.join(', ')}, so left as they are`,
+      reason: `not asked about ${leftAlone}, so left as they are`,
     };
   }
 

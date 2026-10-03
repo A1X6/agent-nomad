@@ -74,13 +74,18 @@ export function createAuthCommands(
 ): Pick<CommandHandlers, 'register' | 'login' | 'logout' | 'accountDelete'> {
   const { prompter, reporter } = deps;
 
-  /** `--username`, checked like a typed one; asked only when the flag is not given. */
-  async function usernameFrom(options: CredentialOptions, question: string): Promise<string> {
+  /**
+   * `--username`, checked like a typed one; asked only when the flag is not given, with
+   * `placeholder` as the hint (register shows the allowed characters).
+   */
+  async function usernameFrom(
+    options: CredentialOptions,
+    question: string,
+    placeholder?: string,
+  ): Promise<string> {
     if (options.username === undefined) {
       return prompter.text(question, {
-        ...(question === 'Choose a username' && {
-          placeholder: 'lowercase letters, digits, . _ -',
-        }),
+        ...(placeholder !== undefined && { placeholder }),
         validate: validateUsername,
       });
     }
@@ -202,7 +207,11 @@ export function createAuthCommands(
       const slot = await readyForNewLogin(secrets, options.yes);
       if (slot === 'keep') return;
 
-      const username = await usernameFrom(options, 'Choose a username');
+      const username = await usernameFrom(
+        options,
+        'Choose a username',
+        'lowercase letters, digits, . _ -',
+      );
 
       reporter.warn(NO_RECOVERY_WARNING);
       if (!options.yes && !(await prompter.confirm('I understand. Continue?', false))) {

@@ -37,9 +37,6 @@ export function createKeychainStore(
     async get(name) {
       return (await entry(name).getPassword()) ?? null;
     },
-    async set(name, value) {
-      await entry(name).setPassword(value);
-    },
     async setMany(values) {
       for (const name of SECRET_NAMES) {
         const value = values[name];

@@ -226,6 +226,14 @@ describe('agentnomad push', () => {
     expect(await t.state.projectNameFor(PROJECT)).toBe('my-app');
   });
 
+  it('a typed project name is remembered only once the project is saved (UX-03)', async () => {
+    // Cancelled at the memory question, after the name was typed.
+    const t = setup(['project', 'my-typo', new Error('cancelled')]);
+    await expect(t.command.push(noFlags)).rejects.toThrow('cancelled');
+    expect(t.server.puts).toEqual([]);
+    expect(await t.state.projectNameFor(PROJECT)).toBeNull();
+  });
+
   it('a second push from the same folder asks no name and moves to the next revision', async () => {
     const server = fakeBundleServer();
     await setup(['both', 'my-app', false], { server }).command.push(noFlags);
@@ -471,11 +479,11 @@ describe('agentnomad push', () => {
     };
     const t = setup(['global', false], { codec });
     await expect(t.command.push(noFlags)).rejects.toThrow(
-      'Not saved:\n  - the Claude Code global setup: 6.0 MB, over the 5 MB limit',
+      'Not saved:\n  - the Claude Code global setup: 6.0 MB, over the 5.0 MB limit',
     );
     expect(t.server.puts).toEqual([]);
     expect(t.lines.at(-1)).toBe(
-      'error: The Claude Code global setup is 6.0 MB after compression and encryption; the limit is 5 MB. Remove large files (e.g. images in skills) and try again.',
+      'error: The Claude Code global setup is 6.0 MB after compression and encryption; the limit is 5.0 MB. Remove large files (e.g. images in skills) and try again.',
     );
   });
 

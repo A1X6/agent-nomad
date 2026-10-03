@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 
-import { parseJsonWith, valueOrNull } from '../src/system/json.ts';
+import { parseJsonWith, valueOrNull } from '../src/index.ts';
 
 describe('parseJsonWith: JSON with a schema, and why it failed (DUP-04)', () => {
   const Schema = z.object({ name: z.string() });

@@ -126,6 +126,8 @@ export async function writeEnvValues(
     readonly section: EnvSection;
     readonly writer: Pick<EnvWriter, 'write' | 'where'>;
     readonly reporter: Pick<Reporter, 'success'>;
+    /** The agent the values were saved for, e.g. `Claude Code`: it reads them on its next start. */
+    readonly agentName: string;
   },
   toAdd: readonly string[],
 ): Promise<void> {
@@ -137,7 +139,7 @@ export async function writeEnvValues(
     [
       `Added ${toAdd.join(', ')} to ${deps.writer.where}.`,
       ...(backup ? [`Backup of the old file: ${backup}`] : []),
-      'Open a new terminal (and restart Claude Code) so they take effect.',
+      `Open a new terminal (and restart ${deps.agentName}) so they take effect.`,
     ].join('\n'),
   );
 }

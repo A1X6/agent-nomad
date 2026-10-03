@@ -81,8 +81,8 @@ describe('file store', () => {
     expect(secrets.backend).toBe('file');
     expect(await secrets.get('session-token')).toBeNull();
 
-    await secrets.set('session-token', 'token-1');
-    await secrets.set('data-key', 'key-1');
+    await secrets.setMany({ 'session-token': 'token-1' });
+    await secrets.setMany({ 'data-key': 'key-1' });
     expect(await secrets.get('session-token')).toBe('token-1');
     expect(await secrets.get('data-key')).toBe('key-1');
 
@@ -92,15 +92,15 @@ describe('file store', () => {
   });
 
   it('keeps each server apart', async () => {
-    await store().set('session-token', 'real');
-    await store('localhost:3000').set('session-token', 'test');
+    await store().setMany({ 'session-token': 'real' });
+    await store('localhost:3000').setMany({ 'session-token': 'test' });
     expect(await store().get('session-token')).toBe('real');
     await store('localhost:3000').delete('session-token');
     expect(await store().get('session-token')).toBe('real');
   });
 
   it('removes the file when nothing is left', async () => {
-    await store().set('session-token', 'x');
+    await store().setMany({ 'session-token': 'x' });
     await store().delete('session-token');
     await expect(stat(path())).rejects.toMatchObject({ code: 'ENOENT' });
   });
@@ -110,13 +110,13 @@ describe('file store', () => {
   });
 
   it('leaves no temporary files behind', async () => {
-    await store().set('session-token', 'a');
-    await store().set('session-token', 'b');
+    await store().setMany({ 'session-token': 'a' });
+    await store().setMany({ 'session-token': 'b' });
     expect(await readdir(join(dir, 'agentnomad'))).toEqual(['secrets.json']);
   });
 
   it('refuses a damaged file with a clear message', async () => {
-    await store().set('session-token', 'x');
+    await store().setMany({ 'session-token': 'x' });
     await writeFile(path(), '{ not json');
     await expect(store().get('session-token')).rejects.toBeInstanceOf(SecretsFileError);
     await writeFile(path(), JSON.stringify({ version: 2, servers: {} }));
@@ -124,13 +124,13 @@ describe('file store', () => {
   });
 
   it.runIf(posix)('is readable only by this user (file 600, folder 700)', async () => {
-    await store().set('session-token', 'x');
+    await store().setMany({ 'session-token': 'x' });
     expect((await stat(path())).mode & 0o777).toBe(0o600);
     expect((await stat(join(dir, 'agentnomad'))).mode & 0o777).toBe(0o700);
   });
 
   it.runIf(posix)('takes back access others were given', async () => {
-    await store().set('session-token', 'x');
+    await store().setMany({ 'session-token': 'x' });
     await chmod(path(), 0o644);
     await chmod(join(dir, 'agentnomad'), 0o755);
     expect(await store().get('session-token')).toBe('x');
@@ -139,7 +139,7 @@ describe('file store', () => {
   });
 
   it('stores readable JSON with one section per server', async () => {
-    await store().set('data-key', 'k');
+    await store().setMany({ 'data-key': 'k' });
     expect(JSON.parse(await readFile(path(), 'utf8'))).toEqual({
       version: 1,
       servers: { [SERVER]: { 'data-key': 'k' } },
@@ -157,7 +157,7 @@ describe('file store', () => {
         return Promise.resolve();
       },
     });
-    await store.set('data-key', 'key');
+    await store.setMany({ 'data-key': 'key' });
     expect(restricted).toHaveLength(1);
     // The temporary file, before it takes the real name (the shared atomic write's name, T62).
     expect(restricted[0]).toMatch(/\.secrets\.json\.agentnomad-tmp-[0-9a-f]+$/);
@@ -184,8 +184,8 @@ describe('file store', () => {
 describe('keychain store', () => {
   it('saves under "agentnomad" with one account per secret and server', async () => {
     const { saved, factory } = memoryKeychain();
-    await createKeychainStore(SERVER, factory).set('session-token', 'real');
-    await createKeychainStore('localhost:3000', factory).set('session-token', 'test');
+    await createKeychainStore(SERVER, factory).setMany({ 'session-token': 'real' });
+    await createKeychainStore('localhost:3000', factory).setMany({ 'session-token': 'test' });
     expect([...saved.keys()]).toEqual([
       'agentnomad/session-token@agentnomad-api.onrender.com',
       'agentnomad/session-token@localhost:3000',
@@ -217,7 +217,7 @@ describe('createSecretStore', () => {
   it('falls back to the user-only file when there is no keychain', async () => {
     const store = await createSecretStore({ ...input(), keychain: noKeychain });
     expect(store.backend).toBe('file');
-    await store.set('session-token', 'x');
+    await store.setMany({ 'session-token': 'x' });
     const file = join(configDir(input()), 'secrets.json');
     expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({
       servers: { [SERVER]: { 'session-token': 'x' } },
@@ -227,8 +227,8 @@ describe('createSecretStore', () => {
   it('moves a login left in the file into the keychain once it works again (T46)', async () => {
     // A run while the keychain was locked saved the login in the file.
     const fallback = await createSecretStore({ ...input(), keychain: noKeychain });
-    await fallback.set('session-token', 'token');
-    await fallback.set('data-key', 'key');
+    await fallback.setMany({ 'session-token': 'token' });
+    await fallback.setMany({ 'data-key': 'key' });
     const keychain = memoryKeychain();
     const store = await createSecretStore({ ...input(), keychain: keychain.factory });
     expect(store.backend).toBe('keychain');
@@ -240,6 +240,36 @@ describe('createSecretStore', () => {
       server: SERVER,
       restrictAccess: () => Promise.resolve(),
     });
+    expect(await file.get('data-key')).toBeNull();
+  });
+
+  it('prefers a login saved in the file while the keychain failed, and ends the old one (BUG-04)', async () => {
+    const keychain = memoryKeychain();
+    const before = await createSecretStore({ ...input(), keychain: keychain.factory });
+    await before.setMany({ 'session-token': 'old-token', 'data-key': 'old-key' });
+    // The keychain failed for a while, and a new login was saved in the file meanwhile.
+    const fallback = await createSecretStore({ ...input(), keychain: noKeychain });
+    await fallback.setMany({ 'session-token': 'new-token', 'data-key': 'new-key' });
+
+    const ended: string[] = [];
+    const store = await createSecretStore({
+      ...input(),
+      keychain: keychain.factory,
+      endReplacedSession: (token) => {
+        ended.push(token);
+        return Promise.reject(new Error('server unreachable'));
+      },
+    });
+    expect(store.backend).toBe('keychain');
+    expect(await store.get('session-token')).toBe('new-token');
+    expect(await store.get('data-key')).toBe('new-key');
+    expect(ended).toEqual(['old-token']);
+    const file = createFileStore({
+      path: join(configDir(input()), 'secrets.json'),
+      server: SERVER,
+      restrictAccess: () => Promise.resolve(),
+    });
+    expect(await file.get('session-token')).toBeNull();
     expect(await file.get('data-key')).toBeNull();
   });
 
@@ -286,8 +316,8 @@ describe.runIf(process.env['AGENTNOMAD_TEST_REAL_KEYCHAIN'] === '1')('real OS ke
       return;
     }
     try {
-      await store.set('session-token', 'real-keychain-value');
-      await store.set('data-key', 'second-secret');
+      await store.setMany({ 'session-token': 'real-keychain-value' });
+      await store.setMany({ 'data-key': 'second-secret' });
       expect(await store.get('session-token')).toBe('real-keychain-value');
       expect(await store.get('data-key')).toBe('second-secret');
       expect(keychainAccount('session-token', server)).toContain(server);

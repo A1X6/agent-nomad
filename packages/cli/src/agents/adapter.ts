@@ -59,6 +59,13 @@ export interface OptionalPart {
   unreadable(problem: string): string;
   /** Said when a flag asks for it but there is nothing to save. */
   readonly noneFound: string;
+  /** Help for its flags in push and in pull: what `--<id>` and `--no-<id>` do (ARCH-02). */
+  readonly flagHelp: Readonly<Record<'push' | 'pull', PartFlagHelp>>;
+}
+
+interface PartFlagHelp {
+  readonly include: string;
+  readonly leaveOut: string;
 }
 
 /** The user's answer when a pulled file already exists here. */

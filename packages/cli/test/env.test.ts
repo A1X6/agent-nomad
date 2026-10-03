@@ -398,10 +398,11 @@ describe('writing the profile', () => {
 describe('restoring values on pull', () => {
   /** Pull's two steps in a row: ask (plan), then write what was chosen (apply). */
   async function restoreEnvValues(
-    deps: Parameters<typeof planEnvRestore>[0] & { writer: EnvWriter },
+    deps: Parameters<typeof planEnvRestore>[0] & { writer: EnvWriter; agentName?: string },
   ) {
     const plan = await planEnvRestore(deps);
-    if (plan.toAdd.length > 0) await writeEnvValues(deps, plan.toAdd);
+    if (plan.toAdd.length > 0)
+      await writeEnvValues({ ...deps, agentName: deps.agentName ?? 'Claude Code' }, plan.toAdd);
     return { added: plan.toAdd, alreadySet: plan.alreadySet, declined: plan.declined };
   }
 
@@ -427,6 +428,7 @@ describe('restoring values on pull', () => {
       section,
       env: { API_KEY: 'already-here' },
       writer,
+      agentName: 'Other Agent',
       prompter: { confirm: () => Promise.resolve(true) },
       reporter: {
         info: (m) => lines.push(m),
@@ -437,7 +439,9 @@ describe('restoring values on pull', () => {
     expect(result).toEqual({ added: ['GITHUB_TOKEN'], alreadySet: ['API_KEY'], declined: false });
     expect(written).toEqual([{ GITHUB_TOKEN: 'ghp_secret' }]);
     expect(lines.join('\n')).not.toContain('ghp_secret');
-    expect(lines.join('\n')).toContain('Open a new terminal');
+    expect(lines.join('\n')).toContain(
+      'Open a new terminal (and restart Other Agent) so they take effect.',
+    );
   });
 
   it('writes nothing when the user says no', async () => {
@@ -664,9 +668,9 @@ describe('agentnomad env', () => {
     const lines = await run({ GITHUB_TOKEN: 'ghp_secret' });
     expect(lines[0]?.split('\n')).toEqual([
       'Environment variables your setups use:',
-      '  ✗ API_BASE      missing here    MCP server api (.mcp.json), Claude Code this project',
-      '  ✗ API_KEY       missing here    MCP server api (.mcp.json), Claude Code this project',
-      '  ✓ GITHUB_TOKEN  set here        MCP server github (.mcp.json), Claude Code this project; MCP server github (~/.claude.json), Claude Code global',
+      '  ✗ API_BASE      missing here     MCP server api (.mcp.json), Claude Code this project',
+      '  ✗ API_KEY       missing here     MCP server api (.mcp.json), Claude Code this project',
+      '  ✓ GITHUB_TOKEN  set here         MCP server github (.mcp.json), Claude Code this project; MCP server github (~/.claude.json), Claude Code global',
     ]);
     expect(lines[1]).toContain('2 missing here');
     expect(lines.join('\n')).not.toContain('ghp_secret');
@@ -677,7 +681,7 @@ describe('agentnomad env', () => {
       const lines = await run({ GITHUB_TOKEN: 'ghp_secret' }, cwd);
       expect(lines[0]?.split('\n')).toEqual([
         'Environment variables your setups use:',
-        '  ✓ GITHUB_TOKEN  set here        MCP server github (~/.claude.json), Claude Code global',
+        '  ✓ GITHUB_TOKEN  set here         MCP server github (~/.claude.json), Claude Code global',
       ]);
     }
   });
@@ -693,5 +697,21 @@ describe('agentnomad env', () => {
       CLAUDE_ENV_REFERENCES,
     );
     expect(describeEnv(scan, {})[0]).toContain('set in settings');
+  });
+
+  it('lines up the "used by" column whatever the status (UX-04)', () => {
+    const scan = {
+      variables: [
+        { name: 'A', usedBy: ['one'] },
+        { name: 'B', usedBy: ['two'] },
+        { name: 'C', usedBy: ['three'] },
+      ],
+      setBySettings: new Set(['A']),
+    };
+    expect(describeEnv(scan, { B: 'set' })).toEqual([
+      '✓ A  set in settings  one',
+      '✓ B  set here         two',
+      '✗ C  missing here     three',
+    ]);
   });
 });

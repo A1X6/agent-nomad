@@ -50,10 +50,6 @@ export function memorySecretStore(
   return {
     backend: options.backend ?? 'keychain',
     get: (name) => Promise.resolve(saved.get(name) ?? null),
-    set: (name, value) => {
-      saved.set(name, value);
-      return Promise.resolve();
-    },
     setMany: (values) => {
       for (const name of SECRET_NAMES) {
         const value = values[name];
