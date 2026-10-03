@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 
 import {
   createGzipBundleCodec,
@@ -203,6 +204,8 @@ describe('agentnomad push', () => {
       .map((put) => Buffer.from(put.upload.ciphertext).toString('latin1'))
       .join('');
     expect(sent).not.toContain('SECRET-PLAN-XYZ');
+    // Gzip alone already hides the marker: the upload must not be a plain gzip stream either.
+    for (const put of t.server.puts) expect(() => gunzipSync(put.upload.ciphertext)).toThrow();
   });
 
   it('saves a project under an encrypted name; the server only sees a keyed hash', async () => {

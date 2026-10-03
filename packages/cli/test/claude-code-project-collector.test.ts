@@ -177,7 +177,7 @@ describe('project collector: links and size (T45)', () => {
   const linkFolder = (target: string, path: string) =>
     symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir');
 
-  it('never follows a link into a folder for keys, and says so', async () => {
+  it('never follows a link to a folder for keys outside the project, and says why', async () => {
     await put(join(home, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
     await mkdir(join(project, '.claude', 'skills'), { recursive: true });
     await linkFolder(join(home, '.ssh'), join(project, '.claude', 'skills', 'x'));
@@ -188,6 +188,23 @@ describe('project collector: links and size (T45)', () => {
     );
     expect(paths(found).filter((path) => path.includes('skills'))).toEqual([]);
     expect(skipped).toEqual(['.claude/skills/x: it links to a place outside the project']);
+  });
+
+  it('never follows a link into a folder for keys inside the project (a project at home)', async () => {
+    // The project is the home folder, so its .ssh is inside the project: the keys rule decides.
+    await put(join(project, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
+    await mkdir(join(project, '.claude', 'skills'), { recursive: true });
+    await linkFolder(join(project, '.ssh'), join(project, '.claude', 'skills', 'x'));
+    const skipped: string[] = [];
+    const found = await createClaudeCodeProjectCollector({
+      ...options(),
+      homedir: project,
+    }).collect(
+      { kind: 'project', projectDir: project },
+      { includeMemory: false, onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`) },
+    );
+    expect(paths(found).filter((path) => path.includes('skills'))).toEqual([]);
+    expect(skipped).toEqual(['.claude/skills/x: it links into a folder for keys and logins']);
   });
 
   it('never follows a link out of the project', async () => {
