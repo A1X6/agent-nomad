@@ -157,6 +157,44 @@ describe('routing and flags', () => {
     ]);
   });
 
+  it('passes --allow-commands to pull only when given', async () => {
+    const withFlag = await run(['pull', '--global', '--yes', '--allow-commands']);
+    expect(withFlag.calls).toEqual([
+      { command: 'pull', options: { global: true, yes: true, allowCommands: true } },
+    ]);
+    const without = await run(['pull']);
+    expect(without.calls).toEqual([{ command: 'pull', options: { global: false, yes: false } }]);
+  });
+
+  it.each([
+    ['push', '--account-skills', true],
+    ['push', '--no-account-skills', false],
+    ['pull', '--account-skills', true],
+    ['pull', '--no-account-skills', false],
+  ])('passes %s %s as the account-skills part', async (command, flag, value) => {
+    const { calls } = await run([command, '--global', flag]);
+    expect(calls).toEqual([
+      {
+        command,
+        options: { global: true, yes: false, parts: new Map([['account-skills', value]]) },
+      },
+    ]);
+  });
+
+  it('passes --merge to pull as the conflict choice', async () => {
+    const { calls } = await run(['pull', '--global', '--merge']);
+    expect(calls).toEqual([
+      { command: 'pull', options: { global: true, yes: false, conflict: 'merge' } },
+    ]);
+  });
+
+  it('routes status and delete with their scope and --yes', async () => {
+    const status = await run(['status', '--project', 'x']);
+    expect(status.calls).toEqual([{ command: 'status', options: { global: false, project: 'x' } }]);
+    const removal = await run(['delete', '--global', '--yes']);
+    expect(removal.calls).toEqual([{ command: 'delete', options: { global: true, yes: true } }]);
+  });
+
   it('routes account delete', async () => {
     const { calls } = await run(['account', 'delete', '--yes']);
     expect(calls).toEqual([
@@ -198,11 +236,23 @@ describe('routing and flags', () => {
   it.each([
     ['an invalid agent id', ['push', '--agent', 'Claude Code'], 'not a valid agent id'],
     ['an empty agent list', ['push', '--agent', ','], 'at least one agent'],
-    ['an empty project name', ['pull', '--project', ''], ''],
-    ['a project name with a line break', ['pull', '--project', 'a\nb'], ''],
+    [
+      'an empty project name',
+      ['pull', '--project', ''],
+      "option '--project <name>' argument '' is invalid. Too small",
+    ],
+    [
+      'a project name with a line break',
+      ['pull', '--project', 'a\nb'],
+      "option '--project <name>' argument 'a\nb' is invalid. Project name must not contain control characters",
+    ],
     ['--merge with --overwrite', ['pull', '--merge', '--overwrite'], 'cannot be used with'],
     ['an unknown flag', ['push', '--force'], "unknown option '--force'"],
-    ['an invalid username', ['login', '--username', 'Ahmed Ali'], ''],
+    [
+      'an invalid username',
+      ['login', '--username', 'Ahmed Ali'],
+      "option '--username <name>' argument 'Ahmed Ali' is invalid. Username must be 3–32 lowercase",
+    ],
   ])('refuses %s without running the command', async (_, args, message) => {
     const { code, calls, err } = await run(args);
     expect(code).toBe(EXIT.failed);
@@ -272,13 +322,4 @@ describe('outcomes', () => {
       ]);
     },
   );
-
-  it("shows a failing command's own message and exits with failed", async () => {
-    const message = '"agentnomad push" is not available yet (coming in T33).';
-    const { code, messages } = await run(['push'], {
-      push: () => Promise.reject(new Error(message)),
-    });
-    expect(code).toBe(EXIT.failed);
-    expect(messages).toEqual([`error: ${message}`]);
-  });
 });
