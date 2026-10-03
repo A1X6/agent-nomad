@@ -384,8 +384,8 @@ compared, so a new `env` or `headersHelper` shows), files that commands here or 
 run (matched by path; any file that can run: a script extension, no extension, the executable
 bit or a `#!` line) and the scripts next to them, known tool settings (ccstatusline), and skill, command and subagent files with
 commands that run by themselves (`runnable-markdown.ts`: a `` !`command` `` placeholder, a
-` ```! ` block, frontmatter `hooks`; a fence closes only on the same character, at least as
-long). Commands written as instructions are never flagged. Hooks and MCP servers are read
+` ```! ` block at any indentation, as in a list item, frontmatter `hooks`; a fence closes
+only on the same character, at least as long). Commands written as instructions are never flagged. Hooks and MCP servers are read
 one by one: one that cannot be read is shown as unreadable (its JSON), never left out, and
 hides no other.
 The keys and names come from `reviewed-settings.ts`, each checked against Claude Code's

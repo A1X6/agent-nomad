@@ -16,8 +16,9 @@ export function runnableInMarkdown(text: string): string[] {
   let open: { readonly kind: 'plain' | 'command'; readonly fence: string } | null = null;
   const block: string[] = [];
   for (const line of text.split(/\r?\n/)) {
-    // Indented 4 spaces or more, a fence line is plain text.
-    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    // At any indentation: a fence inside a list item is indented with the item, and the
+    // review must fail toward showing a block, never toward hiding one.
+    const fence = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
     const marks = fence?.[1] ?? '';
     const after = (fence?.[2] ?? '').trim();
     if (open === null && fence) {
