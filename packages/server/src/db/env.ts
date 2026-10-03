@@ -22,8 +22,9 @@ function decodedLength(base64: string): number {
 }
 
 /**
- * Everything the API server needs. SERVER_SECRET keys the auth-key hashes and fake prelogin
- * salts: it must never change or leak, or no existing user can log in.
+ * Everything the API server needs. SERVER_SECRET keys the auth-key hashes, fake prelogin
+ * salts and the rate-limit keys: it must never change or leak, or no existing user can log
+ * in.
  */
 const ServerEnvSchema = DatabaseEnvSchema.extend({
   SERVER_SECRET: z

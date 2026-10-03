@@ -1,18 +1,12 @@
-import {
-  API_HEADERS,
-  DEFAULT_KDF_PARAMS,
-  ErrorResponseSchema,
-  SessionResponseSchema,
-} from '@agentnomad/contracts';
+import { API_HEADERS, ErrorResponseSchema, SessionResponseSchema } from '@agentnomad/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { describeError } from '../src/logging/logger.ts';
 import { RATE_LIMITS } from '../src/rate-limit/rate-limiter.ts';
 import { createServerFromEnv } from '../src/server.ts';
 import { TEST_IP_HEADER, createTestApp, postJson, type TestApp } from './support/app.ts';
+import { b64, bytes, registerUser } from './support/fixtures.ts';
 
-const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-const bytes = (length: number, fill: number) => new Uint8Array(length).fill(fill);
 const goodKey = b64(bytes(32, 1));
 const badKey = b64(bytes(32, 2));
 
@@ -28,22 +22,8 @@ afterEach(async () => {
 
 const fromIp = (ip: string) => ({ [TEST_IP_HEADER]: ip });
 
-async function register(username: string, ip = '198.51.100.1'): Promise<Response> {
-  return t.app.request(
-    '/auth/register',
-    postJson(
-      {
-        username,
-        kdfSalt: b64(bytes(16, 1)),
-        kdfParams: DEFAULT_KDF_PARAMS,
-        authKey: goodKey,
-        wrappedDataKey: b64(bytes(72, 3)),
-        deviceName: 'laptop',
-      },
-      fromIp(ip),
-    ),
-  );
-}
+const register = (username: string, ip = '198.51.100.1') =>
+  registerUser(t.app, username, { authKey: goodKey, headers: fromIp(ip) });
 
 async function login(username: string, authKey: string, ip = '198.51.100.1'): Promise<Response> {
   return t.app.request(
@@ -262,14 +242,13 @@ describe('createServerFromEnv', () => {
         { clientIp: () => undefined },
       ),
     ).rejects.toThrow(/DATABASE_URL/);
-    await createServerFromEnv(
+    const refused = createServerFromEnv(
       { DATABASE_URL: 'mysql://u:hunter2@h/db', SERVER_SECRET: secret },
-      {
-        clientIp: () => undefined,
-      },
-    ).catch((error: unknown) => {
-      expect(String(error)).not.toContain('hunter2');
-    });
+      { clientIp: () => undefined },
+    );
+    await expect(refused).rejects.toThrow(/DATABASE_URL/);
+    const error: unknown = await refused.catch((caught: unknown) => caught);
+    expect(String(error)).not.toContain('hunter2');
   });
 
   it('builds the whole API from valid settings (no database needed for /health)', async () => {

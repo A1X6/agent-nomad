@@ -49,7 +49,7 @@ export class BundleNotFoundError extends Error {
 interface BundleUploadInput {
   readonly key: BundleKey;
   readonly expectedRevision: number;
-  readonly ciphertext: Uint8Array;
+  readonly ciphertext: Uint8Array<ArrayBuffer>;
   /** SHA-256 the client computed; must match the bytes that arrived. */
   readonly contentHash: Uint8Array;
   readonly formatVersion: number;
@@ -65,7 +65,7 @@ type UploadResult =
 
 interface DownloadedBundle {
   readonly meta: BundleMeta;
-  readonly ciphertext: Uint8Array;
+  readonly ciphertext: Uint8Array<ArrayBuffer>;
 }
 
 /** Saved setups (T16), free of HTTP. Owns the safe upload order from T14. */

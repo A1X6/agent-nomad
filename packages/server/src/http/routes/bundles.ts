@@ -72,14 +72,14 @@ export function bundleRoutes(
   limiter: RateLimiter,
 ): Hono<{ Variables: SessionVariables }> {
   const routes = new Hono<{ Variables: SessionVariables }>();
-  routes.use(API_ROUTES.bundles, requireSession(auth));
+  // `/bundles/*` also matches `/bundles`, so the list runs the session check once (DB-01).
+  routes.use(`${API_ROUTES.bundles}/*`, requireSession(auth));
   /** Saves and deletes per account (T47); runs after the session check, before the body. */
   const writeLimit = createMiddleware<{ Variables: SessionVariables }>(async (c, next) => {
     const status = await limiter.hit(RATE_LIMITS.writesPerAccount, c.get('session').userId);
     if (!status.allowed) throw new RateLimitedError(status.retryAfterSeconds);
     await next();
   });
-  routes.use(`${API_ROUTES.bundles}/*`, requireSession(auth));
 
   return routes
     .get(API_ROUTES.bundles, validQuery(ListBundlesQuerySchema), async (c) => {
@@ -109,8 +109,7 @@ export function bundleRoutes(
       const { meta, ciphertext } = await service.download(key).catch((error: unknown) => {
         throw toApiError(error);
       });
-      // A copy backed by a plain ArrayBuffer, which is what Response bodies accept.
-      return c.body(new Uint8Array(ciphertext), 200, {
+      return c.body(ciphertext, 200, {
         'content-type': OCTET_STREAM,
         ...metaHeaders(meta),
       });
@@ -124,7 +123,11 @@ export function bundleRoutes(
       bodyLimit({
         maxSize: MAX_BUNDLE_BYTES,
         onError: () => {
-          throw new ApiError(413, 'payload_too_large', 'A saved setup can be at most 5 MB');
+          throw new ApiError(
+            413,
+            'payload_too_large',
+            `A saved setup can be at most ${String(MAX_BUNDLE_BYTES / 1024 / 1024)} MB`,
+          );
         },
       }),
       validParams(BundleParamsSchema),

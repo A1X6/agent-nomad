@@ -1,3 +1,4 @@
+export * from './api.ts';
 export * from './auth/auth-service.ts';
 export * from './auth/server-keys.ts';
 export * from './bundles/bundle-service.ts';

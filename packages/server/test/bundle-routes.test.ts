@@ -1,22 +1,18 @@
 import { createHash } from 'node:crypto';
 
 import {
-  DEFAULT_KDF_PARAMS,
   ErrorResponseSchema,
   GetBundleResponseHeadersSchema,
   ListBundlesResponseSchema,
   MAX_BUNDLE_BYTES,
   PutBundleResponseSchema,
-  SessionResponseSchema,
   USER_STORAGE_LIMITS,
 } from '@agentnomad/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RATE_LIMITS } from '../src/rate-limit/rate-limiter.ts';
-import { createTestApp, postJson, type TestApp } from './support/app.ts';
-
-const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-const bytes = (length: number, fill: number) => new Uint8Array(length).fill(fill);
+import { createTestApp, type TestApp } from './support/app.ts';
+import { b64, bytes, registerForToken, seedSetups } from './support/fixtures.ts';
 const sha256Hex = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
 
 const PROJECT = 'a'.repeat(64);
@@ -33,20 +29,7 @@ afterEach(async () => {
   await t.database.close();
 });
 
-async function register(username = 'ahmed'): Promise<string> {
-  const res = await t.app.request(
-    '/auth/register',
-    postJson({
-      username,
-      kdfSalt: b64(bytes(16, 1)),
-      kdfParams: DEFAULT_KDF_PARAMS,
-      authKey: b64(bytes(32, 2)),
-      wrappedDataKey: b64(bytes(72, 3)),
-      deviceName: 'laptop',
-    }),
-  );
-  return SessionResponseSchema.parse(await res.json()).sessionToken;
-}
+const register = (username = 'ahmed') => registerForToken(t.app, username);
 
 interface PutOptions {
   readonly expected: number;
@@ -234,6 +217,16 @@ describe('PUT checks', () => {
 });
 
 describe('GET /bundles', () => {
+  it('checks the session once (DB-01)', async () => {
+    const token = await register();
+    const authenticate = vi.spyOn(t.auth, 'authenticate');
+    expect((await t.app.request('/bundles', as(token))).status).toBe(200);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    authenticate.mockClear();
+    expect((await t.app.request(GLOBAL_PATH, as(token))).status).toBe(404);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+  });
+
   it('lists metadata only, newest first, page by page', async () => {
     const token = await register();
     for (let index = 0; index < 5; index++) {
@@ -298,16 +291,17 @@ describe('DELETE', () => {
 describe('limits per account (T47)', () => {
   it(`refuses a new setup past ${String(USER_STORAGE_LIMITS.maxSetups)} with 413 and says why, storing nothing`, async () => {
     const token = await register();
-    for (let index = 0; index < USER_STORAGE_LIMITS.maxSetups; index++) {
-      const path = `/bundles/claude-code/${index.toString(16).padStart(64, '0')}`;
-      const res = await put(token, {
-        expected: 0,
-        body: bytes(64, 1),
-        path,
-        nameEnc: bytes(40, 1),
-      });
-      expect(res.status).toBe(200);
-    }
+    // All but the last straight into the database; the last one through the API (QA-12).
+    const last = USER_STORAGE_LIMITS.maxSetups - 1;
+    await seedSetups(t.database.db, 'ahmed', last);
+    const lastPath = `/bundles/claude-code/${last.toString(16).padStart(64, '0')}`;
+    const atLimit = await put(token, {
+      expected: 0,
+      body: bytes(64, 1),
+      path: lastPath,
+      nameEnc: bytes(40, 1),
+    });
+    expect(atLimit.status).toBe(200);
     const files = await fileCount();
     const res = await put(token, { expected: 0, body: bytes(64, 2) });
     expect(res.status).toBe(413);

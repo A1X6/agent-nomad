@@ -75,7 +75,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### BUG-02 · Low · A failed housekeeping prune fails the user's login or save
 
-- [ ] **Where:** `packages/server/src/rate-limit/postgres-rate-limiter.ts:49-54`; wired at `packages/server/src/server.ts:67-69`
+- [x] **Where:** `packages/server/src/rate-limit/postgres-rate-limiter.ts:49-54`; wired at `packages/server/src/server.ts:67-69`
 - **Problem:** About 1 in 100 calls to `hit` also runs `delete from rate_limits …` and `alsoPrune()` (`sessions.deleteExpired()`, added by the DB-02 fix), awaited with no `try/catch`, after the hit was already counted. If either delete fails (a dropped connection, a lock or statement timeout), `hit` throws, so `limitPerIp`, `guardedCheck` (login, account delete) or the bundle `writeLimit` answer 500 for a request that was fine. The bundle service does the same kind of cleanup "quietly" (`bundle-service.ts:108-114`: caught and logged).
 - **Why it matters:** A housekeeping problem shows up to a random user as "Something went wrong on the server" on login or push; the prune also adds two unbounded deletes to that user's wait.
 - **Fix:** Catch and log inside `hit` (add a `logError` dep like `BundleServiceDeps`), or start the prune without awaiting it and attach a `.catch` that logs. Test: `alsoPrune` that rejects → `hit` still resolves with the right status.
@@ -138,7 +138,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DB-01 · Low · `GET /bundles` checks the session twice
 
-- [ ] **Where:** `packages/server/src/http/routes/bundles.ts:75` and `:82`
+- [x] **Where:** `packages/server/src/http/routes/bundles.ts:75` and `:82`
 - **Problem:** `routes.use('/bundles', requireSession(auth))` and `routes.use('/bundles/*', requireSession(auth))`. In Hono 4.13.9 the `/bundles/*` pattern also matches `/bundles`, so the list route runs `requireSession` twice: two SHA-256 hashes and two session queries per request. Confirmed with the real `createApp` and a counting fake: `GET /bundles` → 2 `authenticate` calls, `GET /bundles/x/y` → 1.
 - **Why it matters:** One extra round trip to Neon on every list (status, pull and every command that lists). Results stay correct.
 - **Fix:** Keep only `routes.use(\`${API_ROUTES.bundles}/*\`, requireSession(auth))`(it covers`/bundles`too) and add a test that counts`authenticate` calls for the list.
@@ -149,7 +149,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### PERF-01 · Low · A download holds the 5 MB bundle three times
 
-- [ ] **Where:** `packages/server/src/http/routes/bundles.ts:112-113`; `packages/server/src/db/schema.ts:32-33`
+- [x] **Where:** `packages/server/src/http/routes/bundles.ts:112-113`; `packages/server/src/db/schema.ts:32-33`
 - **Problem:** The driver returns a `Buffer`; `bytea.fromDriver` copies it into a new `Uint8Array` (already backed by a plain `ArrayBuffer`); the route copies it again (`new Uint8Array(ciphertext)`) only to satisfy the `c.body` type.
 - **Why it matters:** Up to about 15 MB per concurrent download on Render's free instance (512 MB). Small today, the first memory limit to hit with parallel pulls.
 - **Fix:** Type the blob store's bytes as `Uint8Array<ArrayBuffer>` (what `fromDriver` really returns) and pass `ciphertext` straight to `c.body`; drop the copy and its comment.
@@ -235,7 +235,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DEAD-03 · Low · `UserRepository.create` is only used by tests, and `bytea` is exported for one file
 
-- [ ] **Where:** `packages/server/src/db/repositories.ts:38-39`; `packages/server/src/db/user-repository.ts:58`; `packages/server/src/db/schema.ts:30`
+- [x] **Where:** `packages/server/src/db/repositories.ts:38-39`; `packages/server/src/db/user-repository.ts:58`; `packages/server/src/db/schema.ts:30`
 - **Problem:** Since DB-03, register calls `createWithSession`; no file in `src` calls `users.create` (all call sites are in `test/`). `bytea` is exported but only used inside `schema.ts`, against the T65 rule "a name used only in its own file is not exported" (knip does not see it because `index.ts` re-exports the module).
 - **Why it matters:** Every future `UserRepository` (the docs plan other storage) must implement a method production never calls.
 - **Fix:** Tests create users with a helper in `test/support/` (direct insert or `createWithSession`), and `create` leaves the interface; or keep it and tag it `@public` as test support. Drop `export` from `bytea`.
@@ -261,7 +261,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DUP-02 · Low · The API is wired in three places, and no test runs the production wiring
 
-- [ ] **Where:** `packages/server/src/server.ts:57-93`; `packages/server/test/support/app.ts:31-68`; `packages/e2e/src/local-server.ts:59-80`
+- [x] **Where:** `packages/server/src/server.ts:57-93`; `packages/server/test/support/app.ts:31-68`; `packages/e2e/src/local-server.ts:59-80`
 - **Problem:** Each builds keys, limiter, auth service, bundle service and app by hand. Only production wires `alsoPrune` (expired sessions) and logs cleanup failures. The two copies leave `shouldSweep` at its random default (`Math.random() < 0.02`, `bundle-service.ts:106`) while their `logError` throws, so about 1 save in 50 in route and e2e tests also runs the sweep, and a sweep failure would fail a random test. `createServerFromEnv` itself is only tested for `/health` (`limits-and-logs.test.ts:275-284`).
 - **Why it matters:** A wiring mistake in `server.ts` is not caught by any test, and each new dependency has to be added three times.
 - **Fix:** One `createApi({ db, keys, clientIp, logger, now, randomBytes, shouldPrune, shouldSweep, logError })` in `src`; `createServerFromEnv` only reads settings and builds the Neon pool, and test support and e2e call `createApi` with PGlite and `shouldSweep: () => false`.
@@ -297,7 +297,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DUP-06 · Low · Test fixtures are copied across the test files
 
-- [ ] **Where:**
+- [x] **Where:**
   - KDF settings literal equal to `DEFAULT_KDF_PARAMS`: `test/bundle-service.test.ts:47-53` and `:88-94`, `test/repositories.test.ts:25-31`, `test/schema.test.ts:14-20`
   - The same user fixture twice in one file: `test/bundle-service.test.ts:44-56` and `:84-97`
   - PGlite plus migrations set up by hand: `test/schema.test.ts:12` and `:27-32` (same as `test/support/database.ts:9-23`)
@@ -380,7 +380,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-06 · Low · Code comments still say cursors are tamper-checked (BUG-07 fix incomplete)
 
-- [ ] **Where:** `packages/server/src/db/bundle-cursor.ts:53`; `packages/server/src/db/repositories.ts:26` and `:147-148`
+- [x] **Where:** `packages/server/src/db/bundle-cursor.ts:53`; `packages/server/src/db/repositories.ts:26` and `:147-148`
 - **Problem:** "Throws InvalidCursorError for anything this server did not produce" and "A list cursor that was not produced by this server (or was changed)". The cursor is base64url JSON that is only format-checked; anyone can build one (`repositories.test.ts:527` does). BUG-07 asked for the wording to change; ARCHITECTURE.md now says "format-checked", these comments do not.
 - **Why it matters:** A later change could rely on cursors being signed. Harmless today: the query is always scoped to the user.
 - **Fix:** Say "a cursor that is not well-formed" in all three places.
@@ -389,7 +389,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-07 · Low · The 5 MB limit is written as a literal next to the constant
 
-- [ ] **Where:** `packages/server/src/http/routes/bundles.ts:125-127`; `packages/server/test/schema.test.ts:228`
+- [x] **Where:** `packages/server/src/http/routes/bundles.ts:125-127`; `packages/server/test/schema.test.ts:228`
 - **Problem:** `maxSize: MAX_BUNDLE_BYTES`, but the message is the literal "A saved setup can be at most 5 MB"; the schema test uses `5 * 1024 * 1024 + 1`. `overLimit` (`bundle-service.ts:35-38`) builds its MB figure from the constant, so the same job is done two ways.
 - **Why it matters:** If the limit changes, the message and the test lie.
 - **Fix:** Build the sentence from `MAX_BUNDLE_BYTES / 1024 / 1024` (same text today) and use the constant in the test.
@@ -398,7 +398,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-08 · Low · SERVER_SECRET comments leave out the rate-limit pseudonyms
 
-- [ ] **Where:** `packages/server/.env.example:7-9`; `packages/server/src/db/env.ts:24-26`
+- [x] **Where:** `packages/server/.env.example:7-9`; `packages/server/src/db/env.ts:24-26`
 - **Problem:** Both say the secret keys "the auth-key hashes and fake prelogin salts". It also keys the rate-limit pseudonyms (`server-keys.ts:12`, `:55`), as ARCHITECTURE.md section 3 says.
 - **Why it matters:** Small: someone reading only the env file does not know every use of the secret.
 - **Fix:** Add "and the rate-limit keys" in both places.
@@ -651,7 +651,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-12 · Low · Each test starts a new database, so the limit tests time out under load
 
-- [ ] **Where:** `packages/server/test/support/database.ts:18-23` (new PGlite plus all migrations in every `beforeEach`); `packages/server/test/bundle-routes.test.ts:299-330` (100 PUTs, then 121 DELETEs, in one test each); `packages/server/test/repositories.test.ts:373-399`
+- [x] **Where:** `packages/server/test/support/database.ts:18-23` (new PGlite plus all migrations in every `beforeEach`); `packages/server/test/bundle-routes.test.ts:299-330` (100 PUTs, then 121 DELETEs, in one test each); `packages/server/test/repositories.test.ts:373-399`
 - **Problem:** Measured on this PC with nothing else running: `bundle-routes.test.ts` takes 25 s for 30 tests; "refuses a new setup past 100" takes 1.2 s, "120 saves and deletes" 0.9 s. With the default 5 s test and 10 s hook timeouts, that does not leave much room. Seen twice on this floor: worker-t65 noted "refuses a new setup past 100" timing out with three test runs on the PC, and god noted two server tests timing out on a macOS CI runner during the T65 run (a re-run passed).
 - **Why it matters:** Red CI runs that pass on re-run teach people to ignore failures.
 - **Fix:** Seed the first 99 setups with one SQL insert (blobs and bundles) and send only the last PUT through the API; start one PGlite per file and `TRUNCATE` between tests; or set `testTimeout`/`hookTimeout` for the server project in `vitest.config.ts`.
@@ -660,7 +660,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-13 · Low · Some tests only check code that lives in the test, or cannot fail
 
-- [ ] **Where:**
+- [x] **Where:**
   - `packages/server/test/interfaces.test.ts:7-53`: tests a memory BlobStore and a `statusFor` switch both defined in the test; no route or other test uses them ("the kind of fake later route tests will use": none does).
   - `packages/server/test/contracts.test.ts:8-20`: parses two contract schemas, already covered in `packages/contracts/test/api.test.ts`.
   - `packages/server/test/limits-and-logs.test.ts:265-272`: `.catch((error) => expect(…))` passes without checking anything if the promise resolves.

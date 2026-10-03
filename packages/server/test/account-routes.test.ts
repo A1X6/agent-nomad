@@ -1,16 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import {
-  DEFAULT_KDF_PARAMS,
-  ErrorResponseSchema,
-  SessionResponseSchema,
-} from '@agentnomad/contracts';
+import { ErrorResponseSchema } from '@agentnomad/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTestApp, postJson, type TestApp } from './support/app.ts';
-
-const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-const bytes = (length: number, fill: number) => new Uint8Array(length).fill(fill);
+import { b64, bytes, registerForToken } from './support/fixtures.ts';
 
 /** Each test user has its own auth key (derived from their password in real life). */
 const authKeyOf = (username: string) => b64(bytes(32, username.length));
@@ -25,20 +19,8 @@ afterEach(async () => {
   await t.database.close();
 });
 
-async function register(username: string): Promise<string> {
-  const res = await t.app.request(
-    '/auth/register',
-    postJson({
-      username,
-      kdfSalt: b64(bytes(16, 1)),
-      kdfParams: DEFAULT_KDF_PARAMS,
-      authKey: authKeyOf(username),
-      wrappedDataKey: b64(bytes(72, 3)),
-      deviceName: 'laptop',
-    }),
-  );
-  return SessionResponseSchema.parse(await res.json()).sessionToken;
-}
+const register = (username: string) =>
+  registerForToken(t.app, username, { authKey: authKeyOf(username) });
 
 async function login(username: string, deviceName = 'desktop'): Promise<Response> {
   return t.app.request(

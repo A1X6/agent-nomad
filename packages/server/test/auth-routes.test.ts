@@ -10,21 +10,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SESSION_LIFETIME_MS } from '../src/auth/auth-service.ts';
 import { createTestApp, postJson, type TestApp } from './support/app.ts';
-
-const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-const bytes = (length: number, fill: number) => new Uint8Array(length).fill(fill);
+import { b64, bytes, registerForToken, registration } from './support/fixtures.ts';
 
 const realKdf: KdfParams = { ...DEFAULT_KDF_PARAMS, memoryKiB: 131_072 };
 const authKey = b64(bytes(32, 1));
 
-const registration = (username = 'ahmed') => ({
-  username,
-  kdfSalt: b64(bytes(16, 9)),
-  kdfParams: realKdf,
-  authKey,
-  wrappedDataKey: b64(bytes(72, 5)),
-  deviceName: 'laptop',
-});
+const realRegistration = (username = 'ahmed') => registration(username, { kdfParams: realKdf });
 
 let t: TestApp;
 
@@ -36,11 +27,7 @@ afterEach(async () => {
   await t.database.close();
 });
 
-async function register(username = 'ahmed'): Promise<string> {
-  const res = await t.app.request('/auth/register', postJson(registration(username)));
-  expect(res.status).toBe(201);
-  return SessionResponseSchema.parse(await res.json()).sessionToken;
-}
+const register = (username = 'ahmed') => registerForToken(t.app, username, { kdfParams: realKdf });
 
 async function errorCode(res: Response): Promise<string> {
   return ErrorResponseSchema.parse(await res.json()).error.code;
@@ -86,7 +73,7 @@ describe('POST /auth/prelogin', () => {
     await register();
     const res = await t.app.request('/auth/prelogin', postJson({ username: 'ahmed' }));
     expect(PreloginResponseSchema.parse(await res.json())).toEqual({
-      kdfSalt: b64(bytes(16, 9)),
+      kdfSalt: realRegistration().kdfSalt,
       kdfParams: realKdf,
     });
   });
@@ -127,7 +114,7 @@ describe('POST /auth/prelogin', () => {
 
 describe('POST /auth/register', () => {
   it('creates the account and returns a 90-day session at once', async () => {
-    const res = await t.app.request('/auth/register', postJson(registration()));
+    const res = await t.app.request('/auth/register', postJson(realRegistration()));
     expect(res.status).toBe(201);
     const body = SessionResponseSchema.parse(await res.json());
     const lifetime = new Date(body.expiresAt).getTime() - Date.now();
@@ -151,16 +138,19 @@ describe('POST /auth/register', () => {
 
   it('refuses a taken username with 409 username_taken', async () => {
     await register();
-    const res = await t.app.request('/auth/register', postJson(registration()));
+    const res = await t.app.request('/auth/register', postJson(realRegistration()));
     expect(res.status).toBe(409);
     expect(await errorCode(res)).toBe('username_taken');
   });
 
   it.each([
-    ['a missing field', { ...registration(), authKey: undefined }],
-    ['an unknown field', { ...registration(), isAdmin: true }],
-    ['a salt of the wrong length', { ...registration(), kdfSalt: b64(bytes(8, 1)) }],
-    ['KDF settings below the minimum', { ...registration(), kdfParams: { ...realKdf, passes: 1 } }],
+    ['a missing field', { ...realRegistration(), authKey: undefined }],
+    ['an unknown field', { ...realRegistration(), isAdmin: true }],
+    ['a salt of the wrong length', { ...realRegistration(), kdfSalt: b64(bytes(8, 1)) }],
+    [
+      'KDF settings below the minimum',
+      { ...realRegistration(), kdfParams: { ...realKdf, passes: 1 } },
+    ],
   ])('rejects %s with 400', async (_, body) => {
     const res = await t.app.request('/auth/register', postJson(body));
     expect(res.status).toBe(400);
@@ -180,7 +170,7 @@ describe('POST /auth/register', () => {
   it('refuses a body over 16 KB with 413 before reading it', async () => {
     const res = await t.app.request(
       '/auth/register',
-      postJson({ ...registration(), deviceName: 'x'.repeat(20_000) }),
+      postJson({ ...realRegistration(), deviceName: 'x'.repeat(20_000) }),
     );
     expect(res.status).toBe(413);
     expect(await errorCode(res)).toBe('payload_too_large');
@@ -196,7 +186,7 @@ describe('POST /auth/login', () => {
     );
     expect(res.status).toBe(200);
     const body = LoginResponseSchema.parse(await res.json());
-    expect(body.wrappedDataKey).toBe(b64(bytes(72, 5)));
+    expect(body.wrappedDataKey).toBe(realRegistration().wrappedDataKey);
   });
 
   it('gives the same answer for a wrong password and an unknown user', async () => {

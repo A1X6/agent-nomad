@@ -11,6 +11,8 @@ let database: TestDatabase;
 let limiter: RateLimiter;
 let prune = false;
 let alsoPruned = 0;
+let pruneFails = false;
+let logged: string[] = [];
 
 beforeEach(async () => {
   database = await createTestDatabase();
@@ -20,11 +22,14 @@ beforeEach(async () => {
     shouldPrune: () => prune,
     alsoPrune: () => {
       alsoPruned++;
-      return Promise.resolve();
+      return pruneFails ? Promise.reject(new Error('connection lost')) : Promise.resolve();
     },
+    logError: (message) => logged.push(message),
   });
   prune = false;
   alsoPruned = 0;
+  pruneFails = false;
+  logged = [];
 });
 
 afterEach(async () => {
@@ -97,7 +102,13 @@ describe('PostgresRateLimiter', () => {
     expect(alsoPruned).toBe(1);
   });
 
-  it('has no check method any more, only hit and reset (DEAD-02)', () => {
-    expect(Object.keys(limiter).sort()).toEqual(['hit', 'reset']);
+  it('still answers the hit when the housekeeping fails, and logs it (BUG-02)', async () => {
+    await hits(2);
+    prune = true;
+    pruneFails = true;
+    expect(await hits(1)).toEqual([{ allowed: true, retryAfterSeconds: 0 }]);
+    expect(logged).toEqual(['Could not prune expired rate limits and sessions']);
+    // The failed prune did not undo the count: the next hit is over the limit.
+    expect((await hits(1))[0]?.allowed).toBe(false);
   });
 });
