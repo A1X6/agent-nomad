@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { API_HEADERS, DEFAULT_KDF_PARAMS, type BundleParams } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
+import { ZodError } from 'zod';
 
 import {
   ApiError,
@@ -225,10 +226,11 @@ describe('ApiClient: requests and answers', () => {
   });
 
   it('builds bundle paths only from valid params', async () => {
-    const { client } = fakeServer([]);
+    const { client, calls } = fakeServer([]);
     await expect(
       client.bundles.get({ agent: 'claude-code', scopeKey: '../../account' }),
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(calls).toHaveLength(0);
   });
 });
 

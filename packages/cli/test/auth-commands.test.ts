@@ -10,7 +10,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { fakeApi, memorySecretStore, recordingReporter, scriptedPrompter } from './fakes.ts';
 
 import {
   ApiError,
@@ -23,6 +25,7 @@ import {
   loadZxcvbnChecker,
   NetworkError,
   NO_RECOVERY_WARNING,
+  OutcomeUnknownError,
   PromptCancelledError,
   SessionExpiredError,
   withSession,
@@ -30,9 +33,6 @@ import {
   type ApiClient,
   type LocalState,
   type PasswordChecker,
-  type Prompter,
-  type Reporter,
-  SECRET_NAMES,
   type SecretName,
   type SecretStore,
 } from '../src/index.ts';
@@ -59,71 +59,10 @@ const fastCrypto = (): CryptoService => ({
     } satisfies KdfParams),
 });
 
+/** A memory SecretStore and the map behind it. */
 function memorySecrets(backend: SecretStore['backend'] = 'keychain') {
   const saved = new Map<SecretName, string>();
-  const store: SecretStore = {
-    backend,
-    get: (name) => Promise.resolve(saved.get(name) ?? null),
-    set: (name, value) => {
-      saved.set(name, value);
-      return Promise.resolve();
-    },
-    setMany: (values) => {
-      for (const name of SECRET_NAMES) {
-        const value = values[name];
-        if (value !== undefined) saved.set(name, value);
-      }
-      return Promise.resolve();
-    },
-    delete: (name) => {
-      saved.delete(name);
-      return Promise.resolve();
-    },
-  };
-  return { store, saved };
-}
-
-/**
- * Answers questions from a script. A validator's complaint is recorded and the next answer
- * used; an Error answer is thrown, like a question the user cancels.
- */
-function scriptedPrompter(answers: (string | boolean | Error)[]) {
-  const asked: string[] = [];
-  const rejected: string[] = [];
-  const next = (message: string, validate?: (value: string) => string | undefined) => {
-    for (;;) {
-      asked.push(message);
-      const answer = answers.shift();
-      if (answer === undefined) throw new Error(`No answer scripted for "${message}"`);
-      if (answer instanceof Error) throw answer;
-      const problem = typeof answer === 'string' ? validate?.(answer) : undefined;
-      if (problem === undefined) return answer;
-      rejected.push(problem);
-    }
-  };
-  const prompter: Prompter = {
-    select: () => Promise.reject(new Error('not used')),
-    multiselect: () => Promise.reject(new Error('not used')),
-    text: (message, options) => Promise.resolve(next(message, options?.validate) as string),
-    password: (message, options) => Promise.resolve(next(message, options?.validate) as string),
-    confirm: (message) => Promise.resolve(next(message) as boolean),
-  };
-  return { prompter, asked, rejected, left: answers };
-}
-
-function recordingReporter() {
-  const lines: string[] = [];
-  const reporter: Reporter = {
-    info: (m) => lines.push(`info: ${m}`),
-    success: (m) => lines.push(`success: ${m}`),
-    warn: (m) => lines.push(`warn: ${m}`),
-    error: (m) => lines.push(`error: ${m}`),
-    spinner: () => ({
-      start: (m) => lines.push(`spin: ${m}`),
-      stop: (m) => lines.push(`done: ${m ?? ''}`),
-    }),
-  };
-  return { reporter, lines };
+  return { store: memorySecretStore({ backend, saved }), saved };
 }
 
 /** An in-memory server with the real API's rules for accounts and sessions. */
@@ -206,6 +145,16 @@ function fakeServer() {
   };
 }
 
+/** Damages ahmed's saved data key, so a login succeeds but unlocking fails; returns the original. */
+function damageWrappedKey(server: ReturnType<typeof fakeServer>) {
+  const user = server.users.get('ahmed');
+  if (user === undefined) throw new Error('not registered');
+  const wrapped = Buffer.from(user.wrappedDataKey, 'base64');
+  wrapped[30] = (wrapped[30] ?? 0) ^ 1;
+  server.users.set('ahmed', { ...user, wrappedDataKey: wrapped.toString('base64') });
+  return user;
+}
+
 function setup(
   answers: (string | boolean | Error)[],
   options: {
@@ -220,7 +169,7 @@ function setup(
   const server = options.server ?? fakeServer();
   const secrets = options.secrets ?? memorySecrets();
   const script = scriptedPrompter(answers);
-  const { reporter, lines } = recordingReporter();
+  const { reporter, lines } = recordingReporter({ spinner: true });
   // The fake server sees the token the CLI would send.
   const originalGet = secrets.store.get.bind(secrets.store);
   secrets.store.get = async (name) => {
@@ -389,11 +338,7 @@ describe('already logged in: the current login stays until the new one works (UX
 
   it('a data key that does not unlock ends only the new session (T66)', async () => {
     const pcLogin = await loggedInAsAhmed();
-    const user = pcLogin.server.users.get('ahmed');
-    if (user === undefined) throw new Error('not registered');
-    const wrapped = Buffer.from(user.wrappedDataKey, 'base64');
-    wrapped[30] = (wrapped[30] ?? 0) ^ 1;
-    pcLogin.server.users.set('ahmed', { ...user, wrappedDataKey: wrapped.toString('base64') });
+    damageWrappedKey(pcLogin.server);
     const t = setup([true, 'ahmed', STRONG], pcLogin);
     await expect(t.commands.login(ASK)).rejects.toThrow('could not be unlocked');
     expect(pcLogin.server.calls).toEqual(['prelogin', 'login', 'logout']);
@@ -498,11 +443,7 @@ describe('login: a data key that does not unlock (T66)', () => {
   async function lockedAccount() {
     const server = fakeServer();
     await setup(registerAnswers(), { server }).commands.register(ASK);
-    const user = server.users.get('ahmed');
-    if (user === undefined) throw new Error('not registered');
-    const wrapped = Buffer.from(user.wrappedDataKey, 'base64');
-    wrapped[30] = (wrapped[30] ?? 0) ^ 1;
-    server.users.set('ahmed', { ...user, wrappedDataKey: wrapped.toString('base64') });
+    damageWrappedKey(server);
     server.calls.length = 0;
     return server;
   }
@@ -578,7 +519,10 @@ describe('from a script (--username, --password-stdin, --yes)', () => {
 
   it('a weak piped password stops register with the reason, creating nothing', async () => {
     const t = setup([], { stdin: 'password123456' });
-    await expect(t.commands.register(flags())).rejects.toThrow();
+    // zxcvbn's reason, as the CLI shows it.
+    await expect(t.commands.register(flags())).rejects.toThrow(
+      'This is similar to a commonly used password',
+    );
     expect(t.server.calls).toEqual([]);
     expect(t.secrets.saved.size).toBe(0);
   });
@@ -590,7 +534,9 @@ describe('from a script (--username, --password-stdin, --yes)', () => {
 
   it('an invalid --username is refused like a typed one', async () => {
     const t = setup([], { stdin: STRONG });
-    await expect(t.commands.login(flags({ username: 'Ahmed Ali' }))).rejects.toThrow();
+    await expect(t.commands.login(flags({ username: 'Ahmed Ali' }))).rejects.toThrow(
+      'Username must be 3–32 lowercase letters',
+    );
     expect(t.server.calls).toEqual([]);
   });
 
@@ -875,11 +821,7 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
       expect(wrong.handedOut).toHaveLength(2);
       expect(wrong.allWiped()).toBe(true);
 
-      const user = server.users.get('ahmed');
-      if (user === undefined) throw new Error('not registered');
-      const wrapped = Buffer.from(user.wrappedDataKey, 'base64');
-      wrapped[30] = (wrapped[30] ?? 0) ^ 1;
-      server.users.set('ahmed', { ...user, wrappedDataKey: wrapped.toString('base64') });
+      const user = damageWrappedKey(server);
       const locked = secretTrackingCrypto();
       await expect(
         setup(['ahmed', STRONG], { server, crypto: locked.crypto }).commands.login(ASK),
@@ -947,5 +889,126 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
       expect(keys.handedOut).toEqual([]);
       expect(server.users.has('ahmed')).toBe(true);
     });
+  });
+});
+
+describe('agentnomad account delete, logged in with a local state', () => {
+  let dir: string;
+  let state: LocalState;
+  let dataKey: Uint8Array;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'agentnomad-account-'));
+    state = createLocalState({
+      path: join(dir, 'state.json'),
+      server: 's',
+      platform: process.platform,
+    });
+    dataKey = realCrypto.randomBytes(32);
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  function account(
+    answers: unknown[],
+    deleteAccount: () => Promise<void>,
+    stdin?: string,
+    saved = new Map<SecretName, string>(),
+  ) {
+    const script = scriptedPrompter(answers);
+    const { reporter, lines } = recordingReporter();
+    const secrets = memorySecretStore({ loggedIn: dataKey, saved });
+    const sent: string[] = [];
+    const api = fakeApi({
+      auth: {
+        prelogin: () =>
+          Promise.resolve({
+            kdfSalt: Buffer.alloc(16, 1).toString('base64'),
+            kdfParams: {
+              algorithm: 'argon2id',
+              version: 19,
+              memoryKiB: 19_456,
+              passes: 2,
+              parallelism: 1,
+            },
+          }),
+        deleteAccount: (request) => {
+          sent.push(request.authKey);
+          return deleteAccount();
+        },
+      },
+    });
+    const handlers = createAuthCommands({
+      prompter: script.prompter,
+      reporter,
+      api: () => api,
+      secrets: () => Promise.resolve(secrets),
+      crypto: () => Promise.resolve(realCrypto),
+      passwordChecker: () => Promise.reject(new Error('not used')),
+      deviceName: 'pc',
+      localState: () => state,
+      ...(stdin !== undefined && { readPasswordStdin: () => Promise.resolve(stdin) }),
+    });
+    return { run: handlers.accountDelete, asked: script.asked, lines, saved, sent };
+  }
+
+  it('asks for the username and password, deletes, and cleans up this PC', async () => {
+    await state.setRevision('claude-code', 'global', 3);
+    const t = account(['ahmed', 'plum-garage-violin-47'], () => Promise.resolve());
+    await t.run({ yes: true, passwordStdin: false });
+    expect(t.asked).toEqual(['Type your username to confirm', 'Password']);
+    expect(Buffer.from(t.sent[0] ?? '', 'base64')).toHaveLength(32);
+    expect(t.sent[0]).not.toContain('plum');
+    expect(t.saved.size).toBe(0);
+    expect(await state.knownRevisions()).toEqual({});
+    expect(t.lines[0]).toContain('cannot be undone');
+    expect(t.lines.at(-1)).toContain('Account "ahmed" and all its saved setups were deleted');
+  });
+
+  it('from a script: username and password by flags, confirmed with --yes', async () => {
+    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
+    await t.run({ yes: true, passwordStdin: true, username: 'ahmed' });
+    expect(t.asked).toEqual([]);
+    expect(t.sent).toHaveLength(1);
+    expect(t.saved.size).toBe(0);
+  });
+
+  it('from a script without --yes: refuses, deleting nothing', async () => {
+    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
+    await expect(t.run({ yes: false, passwordStdin: true, username: 'ahmed' })).rejects.toThrow(
+      'Nothing was deleted. Add --yes to confirm deleting the account.',
+    );
+    expect(t.sent).toEqual([]);
+    expect(t.saved.has('session-token')).toBe(true);
+  });
+
+  it('a wrong password deletes nothing and keeps the login', async () => {
+    const t = account(['ahmed', 'wrong'], () =>
+      Promise.reject(new ApiError(401, 'unauthorized', 'Wrong password')),
+    );
+    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toThrow(
+      'Wrong username or password. Nothing was deleted.',
+    );
+    expect(t.saved.has('session-token')).toBe(true);
+  });
+
+  it('an ended session clears the login and says to log in again', async () => {
+    const t = account(['ahmed', 'pw'], () =>
+      Promise.reject(new ApiError(401, 'unauthorized', 'Log in again: no valid session')),
+    );
+    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toThrow(
+      'Your session has expired',
+    );
+    expect(t.saved.has('session-token')).toBe(false);
+  });
+
+  it('a lost answer says the result is unknown and keeps everything here', async () => {
+    const t = account(['ahmed', 'pw'], () =>
+      Promise.reject(new OutcomeUnknownError('delete-account')),
+    );
+    await expect(t.run({ yes: false, passwordStdin: false })).rejects.toBeInstanceOf(
+      OutcomeUnknownError,
+    );
+    expect(t.saved.has('session-token')).toBe(true);
   });
 });

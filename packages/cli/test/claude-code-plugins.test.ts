@@ -178,6 +178,55 @@ describe('plugin list on push', () => {
   });
 });
 
+describe('plugin ids in the manifest (T44)', () => {
+  it('a normal plugin id is accepted (control for the next test)', () => {
+    expect(
+      PluginManifestSchema.safeParse({
+        marketplaces: [],
+        plugins: [{ id: 'x@market', scope: 'user', commandSource: false }],
+        skipped: [],
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each(['-x@market', 'x@-market', '--help@x'])(
+    'a plugin id that starts like an option is refused: %s',
+    (id) => {
+      expect(
+        PluginManifestSchema.safeParse({
+          marketplaces: [],
+          plugins: [{ id, scope: 'user', commandSource: false }],
+          skipped: [],
+        }).success,
+      ).toBe(false);
+    },
+  );
+});
+
+describe('marketplace sources: only the forms push writes (T44)', () => {
+  const manifest = (add: string) =>
+    PluginManifestSchema.safeParse({ marketplaces: [{ name: 'm', add }], plugins: [], skipped: [] })
+      .success;
+  it.each([
+    'owner/repo',
+    'owner/repo#v1.2',
+    'https://example.com/marketplace.json',
+    'git@github.com:owner/repo.git#main',
+  ])('accepts %s', (add) => {
+    expect(manifest(add)).toBe(true);
+  });
+  it.each([
+    '/home/me/marketplace',
+    'C:\\market',
+    './local',
+    'http://example.com/m.json',
+    '--help',
+    'owner/repo; rm -rf ~',
+  ])('refuses %s', (add) => {
+    expect(manifest(add)).toBe(false);
+  });
+});
+
 const manifest: PluginManifest = {
   marketplaces: [
     { name: 'brag', add: 'latent-spaces/brag' },

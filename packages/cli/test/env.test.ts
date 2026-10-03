@@ -163,6 +163,10 @@ describe('shell profile block', () => {
     expect(EnvSectionSchema.safeParse({ variables: { TOKEN: value } }).success).toBe(false);
   });
 
+  it('quotes a value for a POSIX shell, a single quote included', () => {
+    expect(quotePosix("a'b")).toBe(`'a'\\''b'`);
+  });
+
   it('keeps ordinary values, even multi-line ones', () => {
     const variables = { KEY: 'line one\nline two', B: "it's" };
     expect(EnvSectionSchema.safeParse({ variables }).success).toBe(true);
@@ -689,6 +693,5 @@ describe('agentnomad env', () => {
       CLAUDE_ENV_REFERENCES,
     );
     expect(describeEnv(scan, {})[0]).toContain('set in settings');
-    expect(quotePosix("a'b")).toBe(`'a'\\''b'`);
   });
 });

@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { recordingReporter, scriptedPrompter } from './fakes.ts';
+
 import {
   ACCOUNT_SKILLS_PREFIX,
   collectAccountSkills,
@@ -17,8 +19,6 @@ import {
   SKIPPED_NAMES,
   type CollectedFile,
   type ExecutableLookupSystem,
-  type Prompter,
-  type Reporter,
 } from '../src/index.ts';
 
 let root: string;
@@ -217,8 +217,8 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     options: { assumeYes?: boolean; allowCommands?: boolean; accountSkills?: boolean } = {},
     answers: boolean[] = [],
   ) {
-    const asked: string[] = [];
-    const lines: string[] = [];
+    const script = scriptedPrompter(answers);
+    const { reporter, lines } = recordingReporter({ levels: false });
     const system: ExecutableLookupSystem = {
       platform: process.platform,
       homedir: home,
@@ -233,13 +233,6 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
       customConfigDir: false,
       isClaudeRunning: () => Promise.resolve(false),
     });
-    const reporter: Reporter = {
-      info: (m) => lines.push(m),
-      success: (m) => lines.push(m),
-      warn: (m) => lines.push(m),
-      error: (m) => lines.push(m),
-      spinner: () => ({ start: () => undefined, stop: () => undefined }),
-    };
     // The plan step asks; the follow-up it returns writes, with no prompter (T61).
     const planned = createClaudeCodeAfterRestore({
       system,
@@ -253,16 +246,11 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
       parts: new Map(
         options.accountSkills === undefined ? [] : [['account-skills', options.accountSkills]],
       ),
-      prompter: {
-        confirm: (message: string) => {
-          asked.push(message);
-          return Promise.resolve(answers.shift() ?? false);
-        },
-      } as unknown as Prompter,
+      prompter: script.prompter,
       reporter,
     });
     const done = planned.then((followUp) => followUp({ reporter }));
-    return { planned, done, asked, lines };
+    return { planned, done, asked: script.asked, lines };
   }
   const skillFile = (name: string) => readFile(join(base, 'skills', name, 'SKILL.md'), 'utf8');
 

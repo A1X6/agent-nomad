@@ -247,7 +247,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DUP-01 · Low · The same test fakes are copied into many files, and the copies behave differently
 
-- [ ] **Where:**
+- [x] **Where:**
   - logged-in SecretStore: `setup-commands.test.ts:123`, `push-command.test.ts:143`, `pull-command.test.ts:110`, `agent-boundary.test.ts:104`, plus `interfaces.test.ts:14`
   - empty (logged-out) SecretStore literal: `setup-commands.test.ts:219`, `push-command.test.ts:712`, `pull-command.test.ts:732`
   - scripted prompter: `setup-commands.test.ts:148`, `push-command.test.ts:157`, `pull-command.test.ts:124`, `agent-boundary.test.ts:118` (`auth-commands.test.ts:90` has its own variant)
@@ -311,7 +311,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### DUP-07 · Low · Pull tests copy a 15-line push setup because `pushFrom` has no `env` option
 
-- [ ] **Where:** `packages/cli/test/pull-command.test.ts:779-793` and `:862-876` (identical), helper at `:167-192`
+- [x] **Where:** `packages/cli/test/pull-command.test.ts:779-793` and `:862-876` (identical), helper at `:167-192`
 - **Problem:** Two tests need push to see `GITHUB_TOKEN`, so they rebuild `createPushCommand` with every dependency instead of calling `pushFrom`. They also use a different state file name (`s.json`) from `pushFrom` (`state.json`).
 - **Why it matters:** A change to `PushDeps` must be made three times in this file. The different state file is an easy way to get a confusing result.
 - **Fix:** Add `env?: Record<string, string>` to `pushFrom`'s options and call it from both tests.
@@ -347,7 +347,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-03 · Low · The restorer test file is 1191 lines and tests several other modules
 
-- [ ] **Where:** `packages/cli/test/claude-code-restorer.test.ts:939-988` (`isClaudeProcess`, `createClaudeRunningCheck` from `running-claude.ts`), `:1019-1042` (`windowsNameProblem`), `:1080-1191` (the adapter's `planRestore`)
+- [x] **Where:** `packages/cli/test/claude-code-restorer.test.ts:939-988` (`isClaudeProcess`, `createClaudeRunningCheck` from `running-claude.ts`), `:1019-1042` (`windowsNameProblem`), `:1080-1191` (the adapter's `planRestore`)
 - **Problem:** One file covers the restorer, the running-Claude process check, the Windows name rules and the adapter's plan step. `PluginManifestSchema` is likewise tested in three files (`claude-code-after-restore.test.ts:163-184`, `claude-code-command-review.test.ts:363-385`, `claude-code-plugins.test.ts:164-175`).
 - **Why it matters:** Someone looking for the tests of `running-claude.ts` or of the plan step will not find them by file name. A file this long is slow to review, and new cases tend to land wherever is open.
 - **Fix:** Move `running Claude Code` to `claude-code-running.test.ts`, and the plan-step block to `claude-code-adapter.test.ts`, or to `agent-registry.test.ts`, which already tests the adapter. Keep the manifest-schema cases in `claude-code-plugins.test.ts` only.
@@ -356,7 +356,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-04 · Low · An invisible non-breaking space in a test case
 
-- [ ] **Where:** `packages/cli/test/system.test.ts:80`
+- [x] **Where:** `packages/cli/test/system.test.ts:80`
 - **Problem:** The case `['a non-breaking space', 'a b']` contains a raw U+00A0 (bytes `c2 a0`, checked with `od -c`). In an editor it looks like a normal space.
 - **Why it matters:** A formatter, a copy-paste or an editor setting can silently turn it into a normal space. The test would then check an ordinary space, and the NBSP case would quietly disappear.
 - **Fix:** Write it as `'a\u00a0b'`.
@@ -365,7 +365,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### READ-05 · Low · Tests filed under the wrong file or describe block
 
-- [ ] **Where:**
+- [x] **Where:**
   - `setup-commands.test.ts:260-314`: local-state tests (T56, BUG-06) in the `list`/`status`/`delete` file
   - `setup-commands.test.ts:352-455`: `account delete` tests. The code is in `auth/auth-commands.ts`, and `auth-commands.test.ts:802-840` also tests account delete.
   - `secret-store.test.ts:212-244`: two `createFileStore` tests inside `describe('createSecretStore')`
@@ -463,7 +463,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### BP-01 · Low · Unchecked casts in test fakes
 
-- [ ] **Where:** `packages/cli/test/setup-commands.test.ts:119`, `:160`, `:381`; `packages/cli/test/pull-command.test.ts:73`, `:137`, `:907`; `packages/cli/test/push-command.test.ts:105`
+- [x] **Where:** `packages/cli/test/setup-commands.test.ts:119`, `:160`, `:381`; `packages/cli/test/pull-command.test.ts:73`, `:137`, `:907`; `packages/cli/test/push-command.test.ts:105`
 - **Problem:** Fakes are built as `{...} as unknown as ApiClient`, `as unknown as Prompter` and `{} as ApiClient['auth']`. CONTRIBUTING.md ("How we write code") says no unchecked casts. `push-command.test.ts:157-172` shows the typed alternative: a `Prompter` built without a cast.
 - **Why it matters:** When an `ApiClient` or `Prompter` method is renamed or added, these fakes still compile. The test then fails at runtime with "x is not a function", far from the cause, or keeps passing on a path that no longer exists.
 - **Fix:** Build the fakes from typed shared helpers (DUP-01). For a partial API, write a typed `fakeApi({ bundles: {...} })` that fills the rest with methods that reject `'not used'`, as `push-command.test.ts:120-121` does.
@@ -472,7 +472,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### BP-02 · Low · `pnpm test` writes to the developer's real OS keychain
 
-- [ ] **Where:** `packages/cli/test/secret-store.test.ts:260-306`
+- [x] **Where:** `packages/cli/test/secret-store.test.ts:260-306`
 - **Problem:** The "real OS keychain" test writes and deletes two entries under the service `agentnomad-test` on every run, on every OS. Lines 294-299 also read the real `agentnomad` service through `createSecretStore`. CONTRIBUTING.md ("Tests") says tests "must never read or write the real home folder, the real keychain or the hosted API". ARCHITECTURE section 11 says CI uses the real keychain on purpose.
 - **Why it matters:** The risk is small: it uses a random `.invalid` server and cleans up in `finally`. But it contradicts the written rule. On a developer's Mac it can show a keychain prompt in the middle of a run, and a crash between `set` and `finally` leaves a test entry behind.
 - **Fix:** Run the test only when an environment variable is set (CI already sets `AGENTNOMAD_EXPECT_KEYCHAIN` on Linux; add one for macOS and Windows CI), or write the exception into CONTRIBUTING.md.
@@ -539,7 +539,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-01 · Medium · `agentnomad agents` test runs against the real home, PATH and managed settings
 
-- [ ] **Where:** `packages/cli/test/bin.test.ts:13-25`, `packages/cli/test/bin.test.ts:49-56`
+- [x] **Where:** `packages/cli/test/bin.test.ts:13-25`, `packages/cli/test/bin.test.ts:49-56`
 - **Problem:** `agentnomad()` calls `spawnSync` without an `env` option, so the child gets the developer's environment. `src/bin.ts:19-21` passes `process.env` and `homedir()` to the app. The `agents` test therefore detects the real `~/.claude` (or the real `CLAUDE_CONFIG_DIR`), finds and runs the real `claude --version` from the real PATH (`agents/claude-code/detector.ts:201`), and shows managed-settings notices read from this PC (`/etc/claude-code`, `C:\Program Files\ClaudeCode`, and `reg query` on Windows) through `showNotices` in `agents/agents-command.ts:33`.
 - **Why it matters:** CONTRIBUTING says tests "must never read or write the real home folder". The test also spawns whatever `claude` is first on the developer's PATH. Its result depends on the machine. It still passes because it only checks for the words "Claude Code" and "supported agent", so a regression in detection would not be caught either. SOLID-01 removed this same real-PC read from the unit tests, but this end-to-end path still does it.
 - **Fix:** Give the child a temp home and an empty PATH, as `agent-registry.test.ts:86-92` does for the adapter:
@@ -554,7 +554,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-02 · Medium · `--allow-commands`, `--account-skills`, `status` and `delete` never go through the parser in any test
 
-- [ ] **Where:** `packages/cli/test/program.test.ts:115-212`; the untested mapping is in `packages/cli/src/cli/program.ts:157-163` (push `partsOf`), `:194-202` (pull `allowCommands`, `parts`, `--merge`), `:217-233` (`status`, `delete`)
+- [x] **Where:** `packages/cli/test/program.test.ts:115-212`; the untested mapping is in `packages/cli/src/cli/program.ts:157-163` (push `partsOf`), `:194-202` (pull `allowCommands`, `parts`, `--merge`), `:217-233` (`status`, `delete`)
 - **Problem:** `program.test.ts` is the only test that calls `runCli` (checked with `grep -rln runCli packages/cli/test`). It routes `logout`, `list`, `agents`, `env`, push with `--agent/--global/-y/--memory`, pull with `--project/--overwrite`, register, login and account delete. It never passes `--allow-commands`, `--account-skills`, `--no-account-skills` or `--merge` on its own, and never runs `status` or `delete`. The command tests for push and pull call the handlers with options objects they build themselves, so they skip the flag-to-option mapping.
 - **Why it matters:** `--allow-commands` is the flag that lets pull install plugins and run new hooks without asking. If the mapping turned it on by mistake, or dropped it, or if `delete --yes` lost its `yes`, every test would still pass.
 - **Fix:** Add routing cases for each of these: `pull --global --yes --allow-commands` → `{ global: true, yes: true, allowCommands: true }`, `pull` with no flag → no `allowCommands` key, `push --account-skills` / `--no-account-skills` → `parts: Map{account-skills → true/false}`, `pull --merge` → `conflict: 'merge'`, `status --project x` → `{ global: false, project: 'x' }`, `delete --global --yes` → `{ global: true, yes: true }`.
@@ -563,7 +563,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-03 · Medium · The pull test named "warns when this PC runs an older Claude Code" only checks that no warning appears
 
-- [ ] **Where:** `packages/cli/test/pull-command.test.ts:754-769`; the code path it should cover is `packages/cli/src/pull/pull-command.ts:319`
+- [x] **Where:** `packages/cli/test/pull-command.test.ts:754-769`; the code path it should cover is `packages/cli/src/pull/pull-command.ts:319`
 - **Problem:** The test pushes with the real adapter and an empty `PATH`, so the bundle has no version stamp. It then pulls with a detector reporting `1.0.0` and asserts `line.includes('was saved from')` is **false**. The comment on line 756 says it fakes a newer version on this PC, but it sets `'1.0.0'`. No test anywhere makes pull show the version warning. `agentVersionNotice` is unit-tested on its own (`claude-code-paths-data.test.ts:131-139`), but the pull wiring (`adapter.inspector?.versionNotice?.(bundle.agentVersion, version)`) is not; `grep versionNotice packages/cli/test` finds nothing.
 - **Why it matters:** If pull stopped passing the stamp, or stopped showing the note, users would get no "update Claude Code" warning and no test would fail. The test name says this case is covered when it is not.
 - **Fix:** Push with an adapter whose detector reports `'9.0.0'` (wrap `claudeAdapter(a.home)`), pull with `'1.0.0'`, and expect a line containing `This setup was saved from Claude Code 9.0.0`. Keep the no-stamp case as a second test with an accurate name.
@@ -572,7 +572,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-04 · Low · A bare `rejects.toThrow()` lets tests pass for the wrong reason
 
-- [ ] **Where:** `packages/cli/test/api-client.test.ts:227-232`; `packages/cli/test/auth-commands.test.ts:493-498`, `packages/cli/test/auth-commands.test.ts:505-509`
+- [x] **Where:** `packages/cli/test/api-client.test.ts:227-232`; `packages/cli/test/auth-commands.test.ts:493-498`, `packages/cli/test/auth-commands.test.ts:505-509`
 - **Problem:** "builds bundle paths only from valid params" gives the fake server no steps (`fakeServer([])`). If the `BundleParamsSchema.parse` in `http-api-client.ts:236` were removed, `new URL` would normalise `../../account` and send the request. The fake fetch would then throw `unexpected request` (`api-client.test.ts:67`), and the test would still pass. "a weak piped password stops register **with the reason**" never checks the reason.
 - **Why it matters:** The path guard keeps a forged scope key from reaching another API route. Its only test cannot fail when the guard is removed.
 - **Fix:** Assert what was refused and that nothing was sent:
@@ -589,7 +589,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-05 · Low · Directory listings are compared in OS order without sorting
 
-- [ ] **Where:** `packages/cli/test/claude-code-restorer.test.ts:746`, `:828`, `:854`
+- [x] **Where:** `packages/cli/test/claude-code-restorer.test.ts:746`, `:828`, `:854`
 - **Problem:** `expect(await readdir(dir)).toEqual(['a.md', 'b.md'])` (and `['check.py', 'run.cmd']`) assumes `readdir` returns names sorted. Node returns them in the file system's order. NTFS and APFS sort them; ext4 with `dir_index` returns hash order, and the hash seed is set per file system; tmpfs order depends on the kernel version.
 - **Why it matters:** These tests can fail on a contributor's Linux PC, or on a CI runner image with a different file system, without any code change. The same file already sorts in other places (`[...report.written].sort()` at `:312`, `:849`).
 - **Fix:** `expect((await readdir(dir)).sort()).toEqual([...])`.
@@ -598,7 +598,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-06 · Low · The project "link into a folder for keys" test never reaches the keys rule
 
-- [ ] **Where:** `packages/cli/test/claude-code-project-collector.test.ts:180-191`
+- [x] **Where:** `packages/cli/test/claude-code-project-collector.test.ts:180-191`
 - **Problem:** The test is titled "never follows a link into a folder for keys, and says so". It links `.claude/skills/x` to `~/.ssh`, which is outside the project, and it expects the reason "it links to a place outside the project". In `file-gathering.ts:73-84`, the `within` check runs first and returns that reason. The `isSensitiveHomePath` check after it is never reached for a project. The next test (`:193-198`) already covers "outside the project".
 - **Why it matters:** For a project, the keys rule only matters when the project folder contains a key folder, for example a project at `~` or a repo that holds `.ssh/`. No test covers that case, so removing the rule would go unnoticed. The test title also says something the test does not check.
 - **Fix:** Rename this test to match what it checks. Add a case where the project is the home folder and links to `.ssh`: put `.ssh/id_ed25519` inside `project`, call the collector with `homedir: project`, and expect `'it links into a folder for keys and logins'`.
@@ -607,7 +607,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-07 · Low · The `readRegistry` test can never fail, so the first review's QA-01 fix is incomplete for it
 
-- [ ] **Where:** `packages/cli/test/system.test.ts:333-342`; parser at `packages/cli/src/agents/claude-code/managed-settings.ts:213-215`
+- [x] **Where:** `packages/cli/test/system.test.ts:333-342`; parser at `packages/cli/src/agents/claude-code/managed-settings.ts:213-215`
 - **Problem:** On Windows the test asserts `value === null || typeof value === 'string'`, which the return type already guarantees. The regex that pulls the value out of `reg query` output never runs on sample output in any test. When `reg` succeeds but the line does not match (for example a `REG_MULTI_SZ` value), `readRegistry` returns `''` instead of `null`. `detectManagedSettings` then lists an `hklm`/`hkcu` source with no keys.
 - **Why it matters:** The first review (`review-2026-10-03.md`, QA-01) asked for real tests of these thin wrappers. For `readRegistry` the test that was added proves nothing, so a broken regex or a change in `reg` output would go unnoticed.
 - **Fix:** Move the parsing into a pure `parseRegSettings(stdout)` and test it with captured `reg query` output: `REG_SZ`, `REG_EXPAND_SZ`, a value with spaces, and no match (decide between `null` and `''` and assert it).
@@ -616,7 +616,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-08 · Low · "Never sends a readable byte" would still pass with encryption removed
 
-- [ ] **Where:** `packages/cli/test/push-command.test.ts:281-290`
+- [x] **Where:** `packages/cli/test/push-command.test.ts:281-290`
 - **Problem:** The test searches the uploaded bytes, read as latin1, for `SECRET-PLAN-XYZ`. The bundle is gzipped before it is encrypted, and gzip alone already hides this marker. Checked with `node -e "zlib.gzipSync(JSON.stringify({files:[{path:'CLAUDE.md',content:'SECRET-PLAN-XYZ'}]})).toString('latin1').includes('SECRET-PLAN-XYZ')"`, which prints `false`.
 - **Why it matters:** The test's name claims something it cannot check. Encryption is still proven elsewhere: `received()` decrypts at line 237, and the e2e plaintext check (`packages/e2e/src/plaintext.ts`) looks for encoded and compressed forms. So this is a misleading test, not a gap.
 - **Fix:** Also assert the upload is not gzip (`gunzipSync(ciphertext)` throws), or reuse the e2e plaintext helper. Otherwise rename the test to say what it really checks.
@@ -625,7 +625,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-09 · Low · Three refusal cases check `toContain('')`, which is always true
 
-- [ ] **Where:** `packages/cli/test/program.test.ts:201`, `:202`, `:205`
+- [x] **Where:** `packages/cli/test/program.test.ts:201`, `:202`, `:205`
 - **Problem:** The cases for an empty project name, a project name with a line break, and an invalid username pass `''` as the expected message. `expect(err).toContain('')` always passes, so they only check the exit code and that no handler ran.
 - **Why it matters:** If one of these inputs were refused for the wrong reason (another option error, a commander change), the test would not notice.
 - **Fix:** Expect the commander prefix plus the schema text, e.g. `"option '--project <name>' argument"` and `"option '--username <name>' argument"`, or the specific `ProjectNameSchema` / username messages.
@@ -634,7 +634,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-10 · Low · `interfaces.test.ts` only tests its own fakes
 
-- [ ] **Where:** `packages/cli/test/interfaces.test.ts:13-84`
+- [x] **Where:** `packages/cli/test/interfaces.test.ts:13-84`
 - **Problem:** The memory SecretStore, the fake adapter, the registry and the restorer are all defined in this file, and the three tests only call them. No production code runs except the `SECRET_NAMES` constant and the test helper `stubRestorer`. The comment on line 13 says this is "the kind of fake later command tests will use", but each later test file wrote its own copy (DUP-01).
 - **Why it matters:** The file adds test count and upkeep but cannot catch a regression. Its one real job, checking that the fakes match the interfaces, is already done by `tsc` in every other test file. The real registry is tested in `agent-registry.test.ts`.
 - **Fix:** Delete the file, or turn `memorySecretStore` into the shared fake from DUP-01 and drop the self-tests.
@@ -643,7 +643,7 @@ Nothing found blocks a merge of `dev` into `main`. SEC-01 and BUG-01 are worth f
 
 #### QA-11 · Low · "The apply step has no prompter" is checked on the test's own object
 
-- [ ] **Where:** `packages/cli/test/push-command.test.ts:611`, `packages/cli/test/pull-command.test.ts:571`
+- [x] **Where:** `packages/cli/test/push-command.test.ts:611`, `packages/cli/test/pull-command.test.ts:571`
 - **Problem:** `expect('prompter' in desktop.applyDeps).toBe(false)` checks the `applyDeps` object the test itself built without a prompter (`push-command.test.ts:209-221`, `pull-command.test.ts:215-233`). It says nothing about the production types.
 - **Why it matters:** The T59 rule is that apply cannot ask. That rule lives in the `PushApplyDeps` / `PullApplyDeps` types. If someone added `prompter` to those types, this assertion would still pass.
 - **Fix:** Use a type-level check, e.g. `expectTypeOf<PushApplyDeps>().not.toHaveProperty('prompter')` (Vitest `expectTypeOf`), and the same for `PullApplyDeps`.

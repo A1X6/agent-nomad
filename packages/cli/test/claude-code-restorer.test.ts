@@ -16,18 +16,13 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  AnswerNeededError,
-  createClaudeCodeAdapter,
   createClaudeCodeGlobalCollector,
   createClaudeCodeProjectCollector,
   createClaudeCodeRestorer,
-  createClaudeRunningCheck,
-  createNoTerminalPrompter,
   globalDestination,
   hookScripts,
   windowsNameProblem,
   hooksForOtherOs,
-  isClaudeProcess,
   lineEndingsFor,
   projectDestination,
   projectDirName,
@@ -37,10 +32,6 @@ import {
   type CollectedFile,
   type ConflictChoice,
   type ConflictQuestion,
-  type ManagedSettingsSystem,
-  type Prompter,
-  type Reporter,
-  type RestorePlanContext,
 } from '../src/index.ts';
 
 const posix = process.platform !== 'win32';
@@ -744,7 +735,7 @@ describe('restorer: a cancelled question stops the restore (T53)', () => {
     );
     await expect(restore).rejects.toBeInstanceOf(Cancelled);
     expect(questions).toEqual(['rules/a.md']);
-    expect(await readdir(join(base, 'rules'))).toEqual(['a.md', 'b.md']);
+    expect((await readdir(join(base, 'rules'))).sort()).toEqual(['a.md', 'b.md']);
     expect(await read(join(base, 'rules', 'a.md'))).toBe('mine a');
   });
 });
@@ -826,7 +817,7 @@ describe('restorer: per-OS fixes', () => {
       expect(report.written).toEqual([]);
       expect(report.backups).toEqual([]);
     }
-    expect(await readdir(join(base, 'hooks'))).toEqual(['check.py', 'run.cmd']);
+    expect((await readdir(join(base, 'hooks'))).sort()).toEqual(['check.py', 'run.cmd']);
     expect(await read(join(base, 'hooks', 'check.py'))).toBe(py);
     expect(await read(join(base, 'hooks', 'run.cmd'))).toBe(cmd);
   });
@@ -852,7 +843,7 @@ describe('restorer: per-OS fixes', () => {
     const second = await restorer().restorer.restore({ kind: 'global' }, incoming, resolve);
     expect(questions).toEqual([]);
     expect(second.written).toEqual([]);
-    expect(await readdir(join(base, 'hooks'))).toEqual(['check.py', 'run.cmd']);
+    expect((await readdir(join(base, 'hooks'))).sort()).toEqual(['check.py', 'run.cmd']);
   });
 
   it('sameForRestore: equal before or after the line-ending fix, never otherwise (T53)', () => {
@@ -934,57 +925,6 @@ describe('restorer: per-OS fixes', () => {
     expect(hooksForOtherOs(json('pwsh ./x.ps1'), 'linux')).toHaveLength(1);
     expect(hooksForOtherOs(json('bash ~/x.sh'), 'win32')).toHaveLength(1);
     expect(hooksForOtherOs(json('ccstatusline'), 'win32')).toEqual([]);
-  });
-});
-
-describe('running Claude Code', () => {
-  it.each([
-    ['claude.exe', true],
-    ['/usr/local/bin/claude --resume', true],
-    ['/Users/a/.local/bin/claude', true],
-    ['node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js', true],
-    ['"C:\\Users\\a\\.local\\bin\\claude.exe" --continue', true],
-    // A folder with a space in its name (BUG-13).
-    ['/Users/John Smith/.local/bin/claude --resume', true],
-    ['/Users/John Smith/.local/bin/claude', true],
-    ['"C:\\Users\\John Smith\\.local\\bin\\claude.exe" --continue', true],
-    // npm's Claude Code on Windows, seen by its command line (BUG-08).
-    [
-      '"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\a\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js',
-      true,
-    ],
-    // The Claude app: its Code tab runs Claude Code, which shares ~/.claude.json (BUG-13).
-    ['C:\\Users\\a\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe', true],
-    ['/Applications/Claude.app/Contents/MacOS/Claude', true],
-    ['agentnomad pull', false],
-    ['claude-helper', false],
-    ['/usr/bin/vim claude.md', false],
-    ['grep claude notes.txt', false],
-    ['/home/a/claude/bin/tool', false],
-    ['/home/a/claude-code-notes/run.sh', false],
-  ])('%j is Claude Code: %s', (line, expected) => {
-    expect(isClaudeProcess(line)).toBe(expected);
-  });
-
-  // Seen on Windows 11 (T67) through systemProcessLister, from a real
-  // `npm install --prefix <dir> @anthropic-ai/claude-code` (2.1.285) started with `claude.cmd
-  // mcp serve`. The npm package now ships the native claude.exe and the .cmd launcher starts it
-  // directly; node only runs when postinstall was skipped (cli-wrapper.cjs). The cmd.exe parent
-  // need not match: its claude.exe child does.
-  it.each([
-    '"C:\\Users\\a\\AppData\\Roaming\\npm\\node_modules\\.bin\\\\..\\@anthropic-ai\\claude-code\\bin\\claude.exe"    mcp serve',
-    'C:\\nvm4w\\nodejs\\node.exe C:\\Users\\a\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli-wrapper.cjs mcp serve',
-    'C:\\Users\\a\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code-win32-x64\\claude.exe mcp serve',
-  ])('a real npm install on Windows is Claude Code: %j', (line) => {
-    expect(isClaudeProcess(line)).toBe(true);
-  });
-
-  it('is detected from the process list, and a list that cannot be read never blocks', async () => {
-    expect(
-      await createClaudeRunningCheck(() => Promise.resolve(['explorer.exe', 'claude.exe']))(),
-    ).toBe(true);
-    expect(await createClaudeRunningCheck(() => Promise.resolve(['explorer.exe']))()).toBe(false);
-    expect(await createClaudeRunningCheck(() => Promise.resolve(null))()).toBe(false);
   });
 });
 
@@ -1075,119 +1015,6 @@ describe('restorer: what pull asks before writing (T61)', () => {
     expect(r.isRedirectVariable('ANTHROPIC_BASE_URL')).toBe(true);
     expect(r.isRedirectVariable('https_proxy')).toBe(true);
     expect(r.isRedirectVariable('GITHUB_TOKEN')).toBe(false);
-  });
-});
-
-describe('Claude Code plan step: closing Claude Code before ~/.claude.json changes (T61)', () => {
-  const incoming = file('.agentnomad/claude.json', '{"diffTool":"terminal"}');
-  const noManagedSettings: ManagedSettingsSystem = {
-    platform: 'linux',
-    env: {},
-    baseDir: '/nowhere',
-    readText: () => Promise.resolve(null),
-    exists: () => Promise.resolve(false),
-    listDir: () => Promise.resolve([]),
-    readRegistry: () => Promise.resolve(null),
-  };
-  const QUESTION =
-    'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.';
-
-  function planStep(running: boolean[], answers: string[], prompter?: Prompter) {
-    const asked: string[] = [];
-    const scripted = {
-      select: (message: string) => {
-        asked.push(message);
-        return Promise.resolve(answers.shift());
-      },
-      confirm: (message: string) => {
-        asked.push(message);
-        return Promise.resolve(false);
-      },
-    } as unknown as Prompter;
-    const lines: string[] = [];
-    const reporter: Reporter = {
-      info: (m) => lines.push(m),
-      success: (m) => lines.push(m),
-      warn: (m) => lines.push(m),
-      error: (m) => lines.push(m),
-      spinner: () => ({ start: () => undefined, stop: () => undefined }),
-    };
-    const adapter = createClaudeCodeAdapter({
-      env: { PATH: '' },
-      homedir: home,
-      platform: process.platform,
-      isClaudeRunning: () => Promise.resolve(running.shift() ?? false),
-      managedSystem: noManagedSettings,
-    });
-    const plan = (overrides: Partial<RestorePlanContext> = {}) => {
-      if (!adapter.planRestore) throw new Error('no plan step');
-      return adapter.planRestore({
-        target: { kind: 'global' },
-        files: [incoming],
-        conflicts: new Map([['.agentnomad/claude.json', 'merge']]),
-        conflictAnswer: undefined,
-        prompter: prompter ?? scripted,
-        reporter,
-        assumeYes: false,
-        allowCommands: false,
-        parts: new Map(),
-        ...overrides,
-      });
-    };
-    return { plan, asked, lines };
-  }
-
-  it('"I closed it, continue" checks again, then the restore merges it', async () => {
-    await put(join(home, '.claude.json'), '{}');
-    const t = planStep([true, true, false, false], ['retry', 'retry']);
-    const planned = await t.plan();
-    expect(t.asked).toEqual([QUESTION, QUESTION]);
-    const report = await planned.restore(answer('merge').resolve, {});
-    expect(report.written).toEqual(['.agentnomad/claude.json']);
-    expect((await readJson(join(home, '.claude.json')))['diffTool']).toBe('terminal');
-  });
-
-  it('"Skip" leaves it as it is with the warning, and nothing is asked while writing', async () => {
-    await put(join(home, '.claude.json'), '{}');
-    const t = planStep([true], ['skip']);
-    const planned = await t.plan();
-    expect(t.asked).toEqual([QUESTION]);
-    const report = await planned.restore(answer('merge').resolve, {});
-    expect(await read(join(home, '.claude.json'))).toBe('{}');
-    expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
-    expect(t.asked).toHaveLength(1);
-  });
-
-  it('--yes never asks: the file is left with the warning while Claude Code runs', async () => {
-    await put(join(home, '.claude.json'), '{}');
-    const t = planStep([true, true], []);
-    const planned = await t.plan({ assumeYes: true });
-    expect(t.asked).toEqual([]);
-    const report = await planned.restore(answer('merge').resolve, {});
-    expect(await read(join(home, '.claude.json'))).toBe('{}');
-    expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
-  });
-
-  it('is not asked when the file would not change or its merge was declined', async () => {
-    await put(join(home, '.claude.json'), '{"diffTool":"terminal"}');
-    expect(
-      await (async () => {
-        const t = planStep([true], []);
-        await t.plan();
-        return t.asked;
-      })(),
-    ).toEqual([]);
-    await put(join(home, '.claude.json'), '{}');
-    const declined = planStep([true], []);
-    await declined.plan({ conflicts: new Map([['.agentnomad/claude.json', 'skip']]) });
-    expect(declined.asked).toEqual([]);
-  });
-
-  it('without a terminal, the open question stops the plan', async () => {
-    await put(join(home, '.claude.json'), '{}');
-    const t = planStep([true], [], createNoTerminalPrompter());
-    await expect(t.plan()).rejects.toBeInstanceOf(AnswerNeededError);
-    expect(await read(join(home, '.claude.json'))).toBe('{}');
   });
 });
 

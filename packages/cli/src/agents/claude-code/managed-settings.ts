@@ -206,9 +206,16 @@ export function nodeManagedSettingsSystem(
         ['query', `${hive}\\SOFTWARE\\Policies\\ClaudeCode`, '/v', 'Settings'],
         { timeoutMs: 10_000 },
       );
-      if (error) return null;
-      // "    Settings    REG_SZ    {...}"
-      return /Settings\s+REG_(?:EXPAND_)?SZ\s+(.*)$/m.exec(stdout)?.[1]?.trim() ?? '';
+      return error ? null : parseRegSettings(stdout);
     },
   };
+}
+
+/**
+ * The `Settings` value in `reg query` output, or `null` when there is no text value
+ * (`REG_SZ` or `REG_EXPAND_SZ`), e.g. a `REG_MULTI_SZ`: nothing to read keys from.
+ */
+export function parseRegSettings(stdout: string): string | null {
+  // "    Settings    REG_SZ    {...}"
+  return /Settings\s+REG_(?:EXPAND_)?SZ\s+(.*)$/m.exec(stdout)?.[1]?.trim() ?? null;
 }

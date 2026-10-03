@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { recordingReporter, scriptedPrompter } from './fakes.ts';
+
 import {
   createClaudeCodeAfterRestore,
   type ProgramCli,
@@ -7,7 +9,6 @@ import {
   type ExecutableLookupSystem,
   type FollowUpPlanContext,
   type ManagedSettings,
-  PluginManifestSchema,
 } from '../src/index.ts';
 
 /** Organization-managed settings, injected so no test reads this PC's (SOLID-01). */
@@ -56,29 +57,18 @@ function system(executables: string[]): ExecutableLookupSystem {
 }
 
 function context(files: CollectedFile[], answers: boolean[] = [true, true]) {
-  const lines: string[] = [];
-  const asked: string[] = [];
+  const script = scriptedPrompter(answers);
+  const { reporter, lines } = recordingReporter({ levels: false });
   const ctx: FollowUpPlanContext = {
     target: { kind: 'global' },
     files,
     assumeYes: false,
     allowCommands: false,
     parts: new Map(),
-    prompter: {
-      confirm: (message: string) => {
-        asked.push(message);
-        return Promise.resolve(answers.shift() ?? false);
-      },
-    } as unknown as FollowUpPlanContext['prompter'],
-    reporter: {
-      info: (m) => lines.push(m),
-      success: (m) => lines.push(m),
-      warn: (m) => lines.push(m),
-      error: (m) => lines.push(m),
-      spinner: () => ({ start: () => undefined, stop: () => undefined }),
-    },
+    prompter: script.prompter,
+    reporter,
   };
-  return { ctx, lines, asked };
+  return { ctx, lines, asked: script.asked };
 }
 
 function recordingCli() {
@@ -157,29 +147,6 @@ describe('after a Claude Code restore', () => {
       });
       await afterRestore({ system: system(['/usr/bin/npm']), cli })(context([bad]).ctx);
       expect(runs).toEqual([]);
-    },
-  );
-
-  it('a normal plugin id is accepted (control for the next test)', () => {
-    expect(
-      PluginManifestSchema.safeParse({
-        marketplaces: [],
-        plugins: [{ id: 'x@market', scope: 'user', commandSource: false }],
-        skipped: [],
-      }).success,
-    ).toBe(true);
-  });
-
-  it.each(['-x@market', 'x@-market', '--help@x'])(
-    'a plugin id that starts like an option is refused: %s',
-    (id) => {
-      expect(
-        PluginManifestSchema.safeParse({
-          marketplaces: [],
-          plugins: [{ id, scope: 'user', commandSource: false }],
-          skipped: [],
-        }).success,
-      ).toBe(false);
     },
   );
 

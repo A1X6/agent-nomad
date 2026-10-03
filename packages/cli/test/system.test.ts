@@ -80,7 +80,7 @@ describe('createProgramCli: the command line (every OS)', () => {
 
   it.each([
     ['a tab', 'a\tb'],
-    ['a non-breaking space', 'a b'],
+    ['a non-breaking space', 'a\u00a0b'],
     ['a line break', 'a\r\nb'],
     ['a quote', 'a"b'],
     ['an ampersand', 'a&calc'],
@@ -182,6 +182,39 @@ describe('systemProcessLister: which program it runs (every OS)', () => {
 });
 
 // Real programs start slowly while the whole suite runs in parallel.
+describe('icacls output, parsed (every OS)', () => {
+  it('aclPrincipals reads every principal of an icacls listing (a GitHub runner, every OS)', () => {
+    const file = 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\agentnomad system-v3MTv6\\secret.json';
+    const pad = ' '.repeat(file.length + 1);
+    const listing = [
+      `${file} NT AUTHORITY\\SYSTEM:(F)`,
+      `${pad}BUILTIN\\Administrators:(F)`,
+      `${pad}runnervmfi6oq\\runneradmin:(F)`,
+      `${pad}S-1-5-21-1-2-3-1001:(I)(RX)`,
+      '',
+      'Successfully processed 1 files; Failed processing 0 files',
+      '',
+    ].join('\r\n');
+    expect(aclPrincipals(listing, file)).toEqual([
+      'NT AUTHORITY\\SYSTEM',
+      'BUILTIN\\Administrators',
+      'runnervmfi6oq\\runneradmin',
+      'S-1-5-21-1-2-3-1001',
+    ]);
+  });
+
+  it('principalsToRemove removes the others only when the current user is found once', () => {
+    const user = { name: 'runnervmfi6oq\\runneradmin', sid: 'S-1-5-21-1-2-3-500' };
+    const others = ['NT AUTHORITY\\SYSTEM', 'BUILTIN\\Administrators'];
+    expect(principalsToRemove([...others, 'RUNNERVMFI6OQ\\RunnerAdmin'], user)).toEqual(others);
+    expect(principalsToRemove([...others, 's-1-5-21-1-2-3-500'], user)).toEqual(others);
+    // icacls names the user differently from whoami: take nothing away.
+    expect(principalsToRemove([...others, 'runneradmin'], user)).toEqual([]);
+    expect(principalsToRemove(others, user)).toEqual([]);
+    expect(principalsToRemove([...others, user.name, user.sid], user)).toEqual([]);
+  });
+});
+
 describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
   let dir: string;
 
@@ -261,37 +294,6 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
     await expect(realPowerShell(process.env)('Write-Output hi', {})).rejects.toThrow(
       /PowerShell failed/,
     );
-  });
-
-  it('aclPrincipals reads every principal of an icacls listing (a GitHub runner, every OS)', () => {
-    const file = 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\agentnomad system-v3MTv6\\secret.json';
-    const pad = ' '.repeat(file.length + 1);
-    const listing = [
-      `${file} NT AUTHORITY\\SYSTEM:(F)`,
-      `${pad}BUILTIN\\Administrators:(F)`,
-      `${pad}runnervmfi6oq\\runneradmin:(F)`,
-      `${pad}S-1-5-21-1-2-3-1001:(I)(RX)`,
-      '',
-      'Successfully processed 1 files; Failed processing 0 files',
-      '',
-    ].join('\r\n');
-    expect(aclPrincipals(listing, file)).toEqual([
-      'NT AUTHORITY\\SYSTEM',
-      'BUILTIN\\Administrators',
-      'runnervmfi6oq\\runneradmin',
-      'S-1-5-21-1-2-3-1001',
-    ]);
-  });
-
-  it('principalsToRemove removes the others only when the current user is found once', () => {
-    const user = { name: 'runnervmfi6oq\\runneradmin', sid: 'S-1-5-21-1-2-3-500' };
-    const others = ['NT AUTHORITY\\SYSTEM', 'BUILTIN\\Administrators'];
-    expect(principalsToRemove([...others, 'RUNNERVMFI6OQ\\RunnerAdmin'], user)).toEqual(others);
-    expect(principalsToRemove([...others, 's-1-5-21-1-2-3-500'], user)).toEqual(others);
-    // icacls names the user differently from whoami: take nothing away.
-    expect(principalsToRemove([...others, 'runneradmin'], user)).toEqual([]);
-    expect(principalsToRemove(others, user)).toEqual([]);
-    expect(principalsToRemove([...others, user.name, user.sid], user)).toEqual([]);
   });
 
   it.runIf(win32)('windowsOwnerOnly leaves only the current user on a temp file', async () => {

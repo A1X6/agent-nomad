@@ -530,7 +530,9 @@ exit code; they are warned about.
 | Cross-OS             | The same three steps on different machines, the database handed over as an artifact: macOS → Windows → macOS and Linux → Windows → Linux                                                                                                                                                            | `.github/workflows/ci.yml` |
 
 CI runs `pnpm check` (typecheck, lint, format, tests) on macOS, Linux and Windows with
-Node 22.13 and 24, the real Linux keychain (GNOME Keyring), and the two cross-OS chains,
+Node 22.13 and 24, the real OS keychain on every OS (the test runs only where
+`AGENTNOMAD_TEST_REAL_KEYCHAIN=1`, so `pnpm test` on a developer's PC leaves the keychain
+alone), the real Linux keychain (GNOME Keyring), and the two cross-OS chains,
 each chain in its own jobs, so a failure in one does not skip the other's later steps.
 On every OS and Node version it also builds the npm package, installs it globally, and runs
 the e2e steps with the installed `agentnomad` command. One job (Linux, Node 24) also runs

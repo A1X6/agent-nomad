@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   commandsInSettings,
   LOADER_VARIABLE,
-  PluginManifestSchema,
   planAccountSkills,
   printable,
   reviewRunnable,
@@ -358,30 +357,6 @@ describe('printable: nothing from a bundle or the server can drive the terminal 
 
   it('keeps newlines, tabs and ordinary text', () => {
     expect(printable('line 1\n\tline 2 ✓ é')).toBe('line 1\n\tline 2 ✓ é');
-  });
-});
-
-describe('marketplace sources: only the forms push writes (T44)', () => {
-  const manifest = (add: string) =>
-    PluginManifestSchema.safeParse({ marketplaces: [{ name: 'm', add }], plugins: [], skipped: [] })
-      .success;
-  it.each([
-    'owner/repo',
-    'owner/repo#v1.2',
-    'https://example.com/marketplace.json',
-    'git@github.com:owner/repo.git#main',
-  ])('accepts %s', (add) => {
-    expect(manifest(add)).toBe(true);
-  });
-  it.each([
-    '/home/me/marketplace',
-    'C:\\market',
-    './local',
-    'http://example.com/m.json',
-    '--help',
-    'owner/repo; rm -rf ~',
-  ])('refuses %s', (add) => {
-    expect(manifest(add)).toBe(false);
   });
 });
 

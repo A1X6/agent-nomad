@@ -44,6 +44,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         # The lowest version the package supports is tested before publishing too (T48).
         node: ['22.13', '24']
+    # The real OS keychain test writes to the keychain, so it runs only where this is set (BP-02).
+    env:
+      AGENTNOMAD_TEST_REAL_KEYCHAIN: '1'
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
