@@ -142,10 +142,9 @@ agentnomad's own backup copies).
 ```ts
 // packages/cli/src/agents/example/collector.ts
 import type { CollectedFile, Collector } from '../adapter.ts';
+import { underFolder } from '../shared/bundle-paths.ts';
 import { createFileGatherer, uniqueByPath } from '../shared/file-gathering.ts';
 import { EXAMPLE_PATHS } from './example-paths.data.ts';
-
-const under = (path: string, entry: string) => path === entry || path.startsWith(`${entry}/`);
 
 export function createExampleCollector(options: {
   baseDir: string;
@@ -162,7 +161,7 @@ export function createExampleCollector(options: {
       const scope = target.kind === 'global' ? EXAMPLE_PATHS.global : EXAMPLE_PATHS.project;
       const root = target.kind === 'global' ? options.baseDir : target.projectDir;
       const excluded = (bundlePath: string) =>
-        scope.neverSynced.some((entry) => under(bundlePath, entry));
+        scope.neverSynced.some((entry) => underFolder(bundlePath, entry));
 
       const single =
         target.kind === 'global' ? EXAMPLE_PATHS.global.files : EXAMPLE_PATHS.project.rootFiles;
