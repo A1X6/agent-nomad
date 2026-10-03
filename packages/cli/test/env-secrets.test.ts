@@ -1,5 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,6 +29,7 @@ import {
   projectDestination,
   quotePosix,
   readBlock,
+  realPowerShell,
   restoreEnvValues,
   scanEnvReferences,
   shellProfileFor,
@@ -256,16 +267,81 @@ describe('writing the profile', () => {
     expect(shell.stdout).toBe(value);
   });
 
+  it('reads back its block, and an unchanged block is neither backed up nor written (T56)', async () => {
+    const profile = join(dir, '.zshrc');
+    await writeFile(profile, 'alias ll="ls -l"\n');
+    let clock = 0;
+    const writer = createShellProfileWriter(
+      { path: profile, kind: 'posix', label: '~/.zshrc' },
+      () => new Date(Date.UTC(2026, 9, 3, 12, 0, clock++)),
+    );
+    expect(await writer.current(['TOKEN'])).toEqual(new Map());
+    expect((await writer.write({ TOKEN: 'abc', OTHER: 'x' })).backup).not.toBeNull();
+    expect(await writer.current(['TOKEN', 'MISSING'])).toEqual(new Map([['TOKEN', 'abc']]));
+    const before = await readFile(profile, 'utf8');
+    const modified = (await stat(profile)).mtimeMs;
+    expect(await writer.write({ TOKEN: 'abc' })).toEqual({ backup: null });
+    expect(await readFile(profile, 'utf8')).toBe(before);
+    expect((await stat(profile)).mtimeMs).toBe(modified);
+    expect((await readdir(dir)).filter((name) => name.includes('backup'))).toHaveLength(1);
+    // A changed value is still written, after a backup.
+    expect((await writer.write({ TOKEN: 'new' })).backup).not.toBeNull();
+    expect(await writer.current(['TOKEN'])).toEqual(new Map([['TOKEN', 'new']]));
+  });
+
+  it('a missing profile has no values yet (T56)', async () => {
+    const writer = createShellProfileWriter({
+      path: join(dir, 'none', '.zshrc'),
+      kind: 'posix',
+      label: '~/.zshrc',
+    });
+    expect(await writer.current(['TOKEN'])).toEqual(new Map());
+  });
+
+  it('Windows: reads user variables back and leaves one that already has the value (T56)', async () => {
+    const calls: { script: string; env: Readonly<Record<string, string>> }[] = [];
+    const stored: Record<string, string> = { GITHUB_TOKEN: 'ghp_secret', API_KEY: 'old' };
+    const writer = createWindowsEnvWriter((script, env) => {
+      calls.push({ script, env });
+      const asked = (env['AGENTNOMAD_ENV_NAMES'] ?? '').split('\n');
+      const found = Object.entries(stored).filter(([name]) => asked.includes(name));
+      return Promise.resolve(
+        Buffer.from(JSON.stringify(Object.fromEntries(found)), 'utf8').toString('base64'),
+      );
+    });
+    expect(await writer.current(['GITHUB_TOKEN', 'NOPE'])).toEqual(
+      new Map([['GITHUB_TOKEN', 'ghp_secret']]),
+    );
+    calls.length = 0;
+    await writer.write({ GITHUB_TOKEN: 'ghp_secret', API_KEY: 'new' });
+    const sets = calls.filter((call) => call.env['AGENTNOMAD_ENV_VALUE'] !== undefined);
+    expect(sets.map((call) => call.env['AGENTNOMAD_ENV_NAME'])).toEqual(['API_KEY']);
+    expect(calls.every((call) => !call.script.includes('ghp_secret'))).toBe(true);
+  });
+
+  it.runIf(process.platform === 'win32')(
+    'Windows: the real PowerShell reads user variables back, read only (T56)',
+    async () => {
+      const writer = createWindowsEnvWriter(realPowerShell(process.env));
+      expect(await writer.current(['AGENTNOMAD_T56_NEVER_SET', 'AGENTNOMAD_T56_NOR_THIS'])).toEqual(
+        new Map(),
+      );
+    },
+    30_000,
+  );
+
   it('Windows: sets user variables with the value never on the command line', async () => {
     const calls: { script: string; env: Readonly<Record<string, string>> }[] = [];
     const writer = createWindowsEnvWriter((script, env) => {
       calls.push({ script, env });
-      return Promise.resolve('');
+      // The read before writing finds no user variables.
+      return Promise.resolve(Buffer.from('{}').toString('base64'));
     });
     await writer.write({ GITHUB_TOKEN: 'ghp_secret' });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.script).not.toContain('ghp_secret');
-    expect(calls[0]?.env).toEqual({
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.env).toEqual({ AGENTNOMAD_ENV_NAMES: 'GITHUB_TOKEN' });
+    expect(calls[1]?.script).not.toContain('ghp_secret');
+    expect(calls[1]?.env).toEqual({
       AGENTNOMAD_ENV_NAME: 'GITHUB_TOKEN',
       AGENTNOMAD_ENV_VALUE: 'ghp_secret',
     });
@@ -277,6 +353,7 @@ describe('restoring values on pull', () => {
     const written: Record<string, string>[] = [];
     const writer: EnvWriter = {
       where: '~/.zshrc',
+      current: () => Promise.resolve(new Map()),
       write: (variables) => {
         written.push({ ...variables });
         return Promise.resolve({ backup: '/home/a/.zshrc.agentnomad-backup-x' });
@@ -317,6 +394,90 @@ describe('restoring values on pull', () => {
     });
     expect(result.declined).toBe(true);
     expect(written).toEqual([]);
+  });
+
+  it('counts a value already in its block as set: no question, no write (T56)', async () => {
+    const { writer, written } = recordingWriter();
+    const result = await restoreEnvValues({
+      section,
+      env: {},
+      writer: {
+        ...writer,
+        current: () => Promise.resolve(new Map(Object.entries(section.variables))),
+      },
+      prompter: { confirm: () => Promise.reject(new Error('must not ask')) },
+      reporter: { info: () => undefined, success: () => undefined, warn: () => undefined },
+    });
+    expect(result).toEqual({ added: [], alreadySet: ['API_KEY', 'GITHUB_TOKEN'], declined: false });
+    expect(written).toEqual([]);
+  });
+
+  it('a different value in its block is still offered (T56)', async () => {
+    const { writer, written } = recordingWriter();
+    const result = await restoreEnvValues({
+      section,
+      env: {},
+      writer: { ...writer, current: () => Promise.resolve(new Map([['API_KEY', 'older']])) },
+      prompter: { confirm: () => Promise.resolve(true) },
+      reporter: { info: () => undefined, success: () => undefined, warn: () => undefined },
+    });
+    expect(result.added).toEqual(['API_KEY', 'GITHUB_TOKEN']);
+    expect(written).toEqual([section.variables]);
+  });
+
+  it('--yes alone never adds a variable that sends traffic elsewhere (T56)', async () => {
+    const lines: string[] = [];
+    const push = (m: string) => lines.push(m);
+    const reporter = { info: push, success: push, warn: push };
+    const redirects = {
+      variables: { API_KEY: 'key-1', HTTPS_PROXY: 'http://p', ANTHROPIC_BASE_URL: 'https://x' },
+    };
+    const first = recordingWriter();
+    const result = await restoreEnvValues({
+      section: redirects,
+      env: {},
+      writer: first.writer,
+      prompter: { confirm: () => Promise.reject(new Error('must not ask')) },
+      reporter,
+      assumeYes: true,
+    });
+    expect(first.written).toEqual([{ API_KEY: 'key-1' }]);
+    expect(result.declined).toBe(true);
+    expect(lines.join('\n')).toContain('Not added: ANTHROPIC_BASE_URL, HTTPS_PROXY.');
+    expect(lines.join('\n')).toContain('--allow-commands');
+    expect(lines.join('\n')).not.toContain('http://p');
+
+    const asked: [string, boolean | undefined][] = [];
+    const second = recordingWriter();
+    await restoreEnvValues({
+      section: redirects,
+      env: {},
+      writer: second.writer,
+      prompter: {
+        confirm: (message, initial) => {
+          asked.push([message, initial]);
+          return Promise.resolve(initial ?? false);
+        },
+      },
+      reporter,
+    });
+    expect(asked[1]).toEqual([
+      'ANTHROPIC_BASE_URL, HTTPS_PROXY send programs’ requests elsewhere. Add them too?',
+      false,
+    ]);
+    expect(second.written).toEqual([{ API_KEY: 'key-1' }]);
+
+    const third = recordingWriter();
+    await restoreEnvValues({
+      section: redirects,
+      env: {},
+      writer: third.writer,
+      prompter: { confirm: () => Promise.reject(new Error('must not ask')) },
+      reporter,
+      assumeYes: true,
+      allowCommands: true,
+    });
+    expect(third.written).toEqual([redirects.variables]);
   });
 
   describe('variables that make programs run code (T44)', () => {

@@ -45,6 +45,8 @@ export interface Pc {
   readonly project: string;
   /** Runs `agentnomad <args>` here with no terminal; `input` is piped to stdin. */
   run(args: readonly string[], input?: string): Promise<RunResult>;
+  /** Runs another Node.js script as this PC: same environment, keychain rule and folder. */
+  runScript(file: string, args: readonly string[]): Promise<RunResult>;
   /** A secret the CLI keeps on this PC after login, as it stores it (T48: leak check). */
   secret(name: 'session-token' | 'data-key'): Promise<string | null>;
   remove(): Promise<void>;
@@ -56,7 +58,12 @@ const stripAnsi = (text: string) => text.replace(ANSI, '');
 
 export async function newPc(
   name: string,
-  options: { apiUrl: string; keychain: boolean },
+  options: {
+    apiUrl: string;
+    keychain: boolean;
+    /** Variables already set in this PC's environment. */
+    env?: Readonly<Record<string, string>>;
+  },
 ): Promise<Pc> {
   const root = await realpath(await mkdtemp(join(tmpdir(), `agentnomad-e2e-${name}-`)));
   const home = join(root, 'home');
@@ -77,29 +84,33 @@ export async function newPc(
     USERPROFILE: home,
     APPDATA: join(root, 'appdata'),
     AGENTNOMAD_API_URL: options.apiUrl,
+    ...options.env,
   });
+
+  const start = (entry: string, args: readonly string[], input: string) =>
+    new Promise<RunResult>((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [...(options.keychain ? [] : ['--import', NO_KEYCHAIN]), entry, ...args],
+        { cwd: project, env, stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
+      child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
+      child.on('error', reject);
+      child.on('close', (code) => {
+        resolve({ code, stdout: stripAnsi(stdout), stderr: stripAnsi(stderr) });
+      });
+      child.stdin.end(input);
+    });
 
   return {
     name,
     home,
     project,
-    run: (args, input = '') =>
-      new Promise((resolve, reject) => {
-        const child = spawn(
-          process.execPath,
-          [...(options.keychain ? [] : ['--import', NO_KEYCHAIN]), BIN, ...args],
-          { cwd: project, env, stdio: ['pipe', 'pipe', 'pipe'] },
-        );
-        let stdout = '';
-        let stderr = '';
-        child.stdout.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
-        child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
-        child.on('error', reject);
-        child.on('close', (code) => {
-          resolve({ code, stdout: stripAnsi(stdout), stderr: stripAnsi(stderr) });
-        });
-        child.stdin.end(input);
-      }),
+    run: (args, input = '') => start(BIN, args, input),
+    runScript: (file, args) => start(file, args, ''),
     // Read-only: never createSecretStore, which may move a login between the file and the
     // keychain (T46), and the CLI's process may not reach the keychain the test's can.
     secret: async (name) => {

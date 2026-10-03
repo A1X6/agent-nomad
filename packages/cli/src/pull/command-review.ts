@@ -40,6 +40,22 @@ const SETTINGS_FILES = new Set([
 const MCP_FILES = new Set(['.mcp.json', '.agentnomad/claude.json']);
 
 /**
+ * `permissions.defaultMode` values that let Claude act without asking (T56, Claude Code's
+ * settings reference). `auto` and `bypassPermissions` take effect only from user settings;
+ * `acceptEdits` from any settings file. `default`, `manual`, `plan` and `dontAsk` ask or deny.
+ */
+const LOOSENING_MODES: Readonly<
+  Record<string, { readonly note: string; readonly userOnly: boolean } | undefined>
+> = {
+  bypassPermissions: { note: 'Claude asks nothing', userOnly: true },
+  auto: { note: 'Claude acts without asking; a classifier checks its actions', userOnly: true },
+  acceptEdits: {
+    note: 'Claude edits files and runs mkdir, mv and the like without asking',
+    userOnly: false,
+  },
+};
+
+/**
  * Labels that many entries share (each hook, allow rule or directory is one entry): a new
  * one beside others is new, never a change of the others.
  */
@@ -145,19 +161,13 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
       entries.push(entry(file.path, `setting env ${name}`, `${name}=${String(value)}`));
     }
   }
-  // Claude Code takes these only from user settings (its permission-modes docs).
+  // A starting mode that lets Claude act without asking, from the files it takes effect in.
   const permissions = Json.safeParse(json['permissions']);
-  if (
-    file.path === 'settings.json' &&
-    permissions.success &&
-    permissions.data['defaultMode'] === 'bypassPermissions'
-  ) {
+  const mode = permissions.success ? permissions.data['defaultMode'] : undefined;
+  const loosening = typeof mode === 'string' ? LOOSENING_MODES[mode] : undefined;
+  if (loosening !== undefined && (!loosening.userOnly || file.path === 'settings.json')) {
     entries.push(
-      entry(
-        file.path,
-        'setting permissions.defaultMode',
-        'bypassPermissions (Claude asks nothing)',
-      ),
+      entry(file.path, 'setting permissions.defaultMode', `${String(mode)} (${loosening.note})`),
     );
   }
   // Rules that approve tools and folders Claude may use without asking, from any settings

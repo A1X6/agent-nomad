@@ -19,7 +19,13 @@ import { BACKUP_MARKER } from '@agentnomad/core';
 export interface EnvWriter {
   /** Where they go, for the question and the summary, e.g. `~/.zshrc`. */
   readonly where: string;
-  /** Adds or updates the variables; returns the backup made, if any. */
+  /**
+   * The values already there for these names (T56): agentnomad's block in the profile, or the
+   * Windows user variables. A name whose saved value is here counts as set, even when the
+   * terminal running the pull started before it was added.
+   */
+  current(names: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  /** Adds or updates the variables, and writes nothing when none changes; returns the backup made, if any. */
   write(variables: Readonly<Record<string, string>>): Promise<{ readonly backup: string | null }>;
 }
 
@@ -148,6 +154,17 @@ export function createShellProfileWriter(
 ): EnvWriter {
   return {
     where: profile.label,
+    async current(names) {
+      let text: string;
+      try {
+        text = await readFile(await writeTargetOf(profile.path), 'utf8');
+      } catch (error) {
+        if (isMissing(error)) return new Map();
+        throw error;
+      }
+      const block = readBlock(text, profile.kind);
+      return new Map([...block].filter(([name]) => names.includes(name)));
+    },
     async write(variables) {
       const target = await writeTargetOf(profile.path);
       let existing: string | null;
@@ -161,13 +178,15 @@ export function createShellProfileWriter(
         if (!isMissing(error)) throw error;
         existing = null;
       }
+      const updated = upsertBlock(existing ?? '', variables, profile.kind);
+      // Same block as before (T56): no backup and no write, so a repeated pull leaves no trace.
+      if (updated === existing) return { backup: null };
       await mkdir(posix.dirname(target), { recursive: true });
       let backup: string | null = null;
       if (existing !== null) {
         backup = `${target}${BACKUP_MARKER}${stamp(now())}`;
         await writeFile(backup, existing, { mode });
       }
-      const updated = upsertBlock(existing ?? '', variables, profile.kind);
       const temp = `${target}.agentnomad-tmp-${randomBytes(4).toString('hex')}`;
       try {
         await writeFile(temp, updated, { flag: 'wx', mode });
@@ -211,10 +230,30 @@ export function realPowerShell(
  * account"). Values never appear on a command line, where other programs could see them.
  */
 export function createWindowsEnvWriter(run: PowerShellRunner): EnvWriter {
+  async function current(names: readonly string[]): Promise<ReadonlyMap<string, string>> {
+    if (names.length === 0) return new Map();
+    // Names in, values out as base64 UTF-8 JSON, so no console code page can change them.
+    const output = await run(
+      '$found = @{}; foreach ($name in ($env:AGENTNOMAD_ENV_NAMES -split "`n")) { $value = [Environment]::GetEnvironmentVariable($name, \'User\'); if ($null -ne $value) { $found[$name] = $value } }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $found -Compress)))',
+      { AGENTNOMAD_ENV_NAMES: names.join('\n') },
+    );
+    const parsed: unknown = JSON.parse(Buffer.from(output.trim(), 'base64').toString('utf8'));
+    const found = new Map<string, string>();
+    if (typeof parsed === 'object' && parsed !== null) {
+      for (const [name, value] of Object.entries(parsed)) {
+        if (names.includes(name) && typeof value === 'string') found.set(name, value);
+      }
+    }
+    return found;
+  }
   return {
     where: 'your Windows user environment variables',
+    current,
     async write(variables) {
+      // A user variable that already has the value is left as it is (T56).
+      const here = await current(Object.keys(variables));
       for (const [name, value] of Object.entries(variables)) {
+        if (here.get(name) === value) continue;
         await run(
           "[Environment]::SetEnvironmentVariable($env:AGENTNOMAD_ENV_NAME, $env:AGENTNOMAD_ENV_VALUE, 'User')",
           { AGENTNOMAD_ENV_NAME: name, AGENTNOMAD_ENV_VALUE: value },

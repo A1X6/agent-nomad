@@ -330,7 +330,9 @@ run a command (`apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`, `gcpAuth
 `otelHeadersHelper`, `fileSuggestion`), loader variables in a settings `env` block
 (`NODE_OPTIONS`, `LD_PRELOAD`, …) and `env` names that redirect Claude Code
 (`ANTHROPIC_BASE_URL` and the other endpoints, proxies, `NODE_EXTRA_CA_CERTS`, its shell
-variables, OpenTelemetry endpoints, `PATH`), `bypassPermissions` in global settings,
+variables, OpenTelemetry endpoints, `PATH`), a `permissions.defaultMode` that lets Claude act
+without asking (`bypassPermissions` and `auto` in global settings, where alone Claude Code
+takes them; `acceptEdits` from any settings file),
 `permissions.allow` rules and `permissions.additionalDirectories` new on this PC, a new or
 changed `sandbox` block, `enableAllProjectMcpServers`, MCP servers (the whole definition is
 compared, so a new `env` or `headersHelper` shows), files that commands here or in the bundle
@@ -340,7 +342,11 @@ commands that run by themselves (`runnable-markdown.ts`: a `` !`command` `` plac
 ` ```! ` block, frontmatter `hooks`). Commands written as instructions are never flagged.
 The keys and names come from `reviewed-settings.ts`, each checked against Claude Code's
 settings reference. Declining skips the files that hold them. Saved environment values that make programs load
-code need their own yes, and `--yes` alone never adds them. Everything printed from a bundle
+code, or send programs' requests elsewhere (the redirect names above, such as `HTTPS_PROXY`
+and `ANTHROPIC_BASE_URL`), need their own yes, and `--yes` alone never adds them. A saved
+value already in agentnomad's block of the shell profile (on Windows: a user variable with
+that value) counts as set, even in a terminal opened before it was added, so pulling again
+asks nothing; a block that would not change is neither backed up nor written (T56). Everything printed from a bundle
 or the server goes through `printable`, so escape sequences are shown, never acted on.
 
 **claude.ai skills (T42, opt-in):** Claude Code downloads the skills of the user's claude.ai
@@ -413,11 +419,11 @@ its parameters. There are no CORS headers and no cookies.
 
 ## 9. What the CLI keeps on a PC
 
-| What                         | Where                                                                                                                                                             | Why                                                                                                                                                        |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session token and data key   | OS keychain: Windows Credential Manager, macOS Keychain, Linux Secret Service. Service `agentnomad`, account `<secret>@<server host>`                             | So later commands work without the password; one entry per server                                                                                          |
-| The same, without a keychain | `%APPDATA%\agentnomad\secrets.json` or `~/.config/agentnomad/secrets.json`, readable only by the user (600 in a 700 folder; on Windows an ACL for this user only) | Servers, WSL, SSH sessions; the CLI says when it is used. A login saved there while the keychain failed is moved into it once it works again               |
-| Local state                  | `state.json` in the same folder                                                                                                                                   | Which name each project folder was saved under, and the last revision this PC pushed or pulled of each setup (for conflicts, `status` and rollback checks) |
+| What                         | Where                                                                                                                                                             | Why                                                                                                                                                                                                                                                                                         |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session token and data key   | OS keychain: Windows Credential Manager, macOS Keychain, Linux Secret Service. Service `agentnomad`, account `<secret>@<server host>`                             | So later commands work without the password; one entry per server                                                                                                                                                                                                                           |
+| The same, without a keychain | `%APPDATA%\agentnomad\secrets.json` or `~/.config/agentnomad/secrets.json`, readable only by the user (600 in a 700 folder; on Windows an ACL for this user only) | Servers, WSL, SSH sessions; the CLI says when it is used. A login saved there while the keychain failed is moved into it once it works again                                                                                                                                                |
+| Local state                  | `state.json` in the same folder                                                                                                                                   | Which name each project folder was saved under, and the last revision this PC pushed or pulled of each setup (for conflicts, `status` and rollback checks), and the account those revisions belong to: a login or register as another account clears them and keeps the project names (T56) |
 
 `AGENTNOMAD_API_URL` points the CLI at another server (https, or http for localhost).
 
@@ -572,7 +578,7 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 | `secrets/file-store.ts`          | The user-only file fallback, written atomically.                                            |
 | `secrets/create-secret-store.ts` | Picks the keychain when it works, else the file.                                            |
 | `config/config-dir.ts`           | agentnomad's folder: `%APPDATA%\agentnomad` or `$XDG_CONFIG_HOME` / `~/.config/agentnomad`. |
-| `state/local-state.ts`           | `state.json`: project names per folder and known revisions, per server.                     |
+| `state/local-state.ts`           | `state.json`: project names per folder, known revisions and their account, per server.      |
 
 ### `push/`, `pull/`, `commands/`: the setup commands
 
@@ -588,13 +594,13 @@ Paths are relative to each package's `src/`. Tests mirror these files under each
 
 ### `env/`: environment variables in setups
 
-| File                | Responsible for                                                                                                        |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `env-references.ts` | Finding `${VAR}` references in collected files (Claude Code's own variables excluded).                                 |
-| `env-section.ts`    | The encrypted `.agentnomad/env.json` section and choosing which values to save (opt-in).                               |
-| `env-restore.ts`    | On pull: adding saved values that are missing here, after asking.                                                      |
-| `shell-profile.ts`  | Writing them: a marked block in the shell profile (sh, bash, zsh, fish), or Windows user variables through PowerShell. |
-| `env-command.ts`    | `agentnomad env`.                                                                                                      |
+| File                | Responsible for                                                                                                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env-references.ts` | Finding `${VAR}` references in collected files (Claude Code's own variables excluded).                                                                                                 |
+| `env-section.ts`    | The encrypted `.agentnomad/env.json` section and choosing which values to save (opt-in).                                                                                               |
+| `env-restore.ts`    | On pull: adding saved values that are missing here (not in the environment nor already written), after asking.                                                                         |
+| `shell-profile.ts`  | Writing them, and reading back what is there: a marked block in the shell profile (sh, bash, zsh, fish), rewritten only when it changes, or Windows user variables through PowerShell. |
+| `env-command.ts`    | `agentnomad env`.                                                                                                                                                                      |
 
 ### `agents/`: the plug-in layer
 

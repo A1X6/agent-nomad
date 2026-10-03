@@ -19,6 +19,7 @@ import {
   createNoTerminalPrompter,
   listAllBundles,
   createPushCommand,
+  createShellProfileWriter,
   AnswerNeededError,
   MislabelledSetupError,
   SetupUnreadableError,
@@ -210,7 +211,11 @@ function pullOn(
     codec: createGzipBundleCodec(),
     localState: () => state,
     envWriter: () =>
-      options.writer ?? { where: 'test profile', write: () => Promise.resolve({ backup: null }) },
+      options.writer ?? {
+        where: 'test profile',
+        current: () => Promise.resolve(new Map()),
+        write: () => Promise.resolve({ backup: null }),
+      },
     env: {},
     cwd: machine.project,
     homedir: machine.home,
@@ -628,6 +633,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     };
     const writer: EnvWriter = {
       where: 'test profile',
+      current: () => Promise.resolve(new Map()),
       write: (variables) => {
         written.push({ ...variables });
         return Promise.resolve({ backup: null });
@@ -636,6 +642,82 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     await pullOn(b, server, [], { adapter, writer }).pull({ global: true, yes: true });
     expect(followUps[0]).toContain('.agentnomad/env.json');
     expect(written).toEqual([{ GITHUB_TOKEN: 'ghp_secret' }]);
+  });
+
+  it('login A, push, logout, login B, pull: no "older copy" warning, nothing skipped (T56)', async () => {
+    const quick = { global: true, yes: true, memory: false };
+    const laptop = pc('laptop');
+    const state = () =>
+      createLocalState({
+        path: join(laptop.home, 'state.json'),
+        server: 's',
+        platform: process.platform,
+      });
+    // Account A: this PC pushes its global setup three times (revision 3).
+    const accountA = fakeServer();
+    await state().useAccount('alice');
+    for (const text of ['one', 'two', 'three']) {
+      await put(join(laptop.base, 'CLAUDE.md'), text);
+      await pushFrom(laptop, accountA, [])(quick);
+    }
+    expect(await state().revisionOf('claude-code', 'global')).toBe(3);
+
+    // Account B (same server host) has revision 1, pushed from another PC.
+    const accountB = fakeServer();
+    const desktop = pc('desktop');
+    await put(join(desktop.base, 'CLAUDE.md'), 'bob notes');
+    await pushFrom(desktop, accountB, [])(quick);
+
+    // What `login` as bob does to this PC's state.
+    await state().useAccount('bob');
+    const t = pullOn(laptop, accountB, []);
+    await t.pull({ global: true, yes: true, conflict: 'overwrite' });
+    expect(t.lines.join('\n')).not.toContain('older than revision');
+    expect(t.lines.join('\n')).not.toContain('Skipped the');
+    expect(await read(join(laptop.base, 'CLAUDE.md'))).toBe('bob notes');
+    expect(await t.state.revisionOf('claude-code', 'global')).toBe(1);
+  });
+
+  it('a second pull asks nothing and leaves the shell profile and its backups alone (T56)', async () => {
+    const server = fakeServer();
+    const a = pc('laptop');
+    await put(
+      join(a.home, '.claude.json'),
+      JSON.stringify({ mcpServers: { gh: { command: 'gh-mcp', env: { T: '${GITHUB_TOKEN}' } } } }),
+    );
+    await put(join(a.base, 'CLAUDE.md'), 'x');
+    await createPushCommand({
+      prompter: scripted(['global', false, ['GITHUB_TOKEN']]).prompter,
+      reporter: recorder().reporter,
+      registry: () => createAgentRegistry([claudeAdapter(a.home)]),
+      secrets: () => Promise.resolve(loggedIn()),
+      api: () => server.api,
+      crypto: () => Promise.resolve(crypto),
+      codec: createGzipBundleCodec(),
+      localState: () =>
+        createLocalState({ path: join(a.home, 's.json'), server: 's', platform: process.platform }),
+      env: { GITHUB_TOKEN: 'ghp_secret' },
+      cwd: a.project,
+      homedir: a.home,
+      platform: process.platform,
+    }).push(none);
+
+    // The terminal running the pulls never sees the profile: GITHUB_TOKEN stays unset there.
+    const b = pc('desktop');
+    const profile = join(b.home, '.zshrc');
+    await put(profile, 'alias ll="ls -l"\n');
+    const writer = createShellProfileWriter({ path: profile, kind: 'posix', label: '~/.zshrc' });
+    await pullOn(b, server, [], { writer }).pull({ global: true, yes: true, allowCommands: true });
+    expect(await read(profile)).toContain("export GITHUB_TOKEN='ghp_secret'");
+    const after = await read(profile);
+    const files = await readdir(b.home, { recursive: true });
+
+    const second = pullOn(b, server, [], { writer, prompter: createNoTerminalPrompter() });
+    await second.pull({ global: true, yes: false, allowCommands: true });
+    expect(second.lines.join('\n')).toContain('0 written');
+    expect(second.lines.join('\n')).toContain('already set here');
+    expect(await read(profile)).toBe(after);
+    expect((await readdir(b.home, { recursive: true })).sort()).toEqual(files.sort());
   });
 });
 

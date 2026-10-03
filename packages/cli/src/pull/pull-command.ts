@@ -16,7 +16,7 @@ import type { ApiClient } from '../api/api-client.ts';
 import { NotLoggedInError } from '../api/api-errors.ts';
 import { withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
-import { restoreEnvValues } from '../env/env-restore.ts';
+import { restoreEnvValues, splitEnvValues } from '../env/env-restore.ts';
 import { ENV_BUNDLE_PATH, parseEnvSection } from '../env/env-section.ts';
 import type { EnvWriter } from '../env/shell-profile.ts';
 import { fromBundleFiles, preferLocalEquivalents } from '../push/bundle-files.ts';
@@ -301,9 +301,12 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
   /**
    * Without a terminal (T46): every question the flags leave open is found before anything is
    * written. A file that differs here needs --merge, --overwrite or --yes; saved environment
-   * values missing here need --yes.
+   * values missing here (T56: not even in the shell profile block) need --yes.
    */
-  function checkAnswerable(prepared: readonly Prepared[], options: PullOptions): void {
+  async function checkAnswerable(
+    prepared: readonly Prepared[],
+    options: PullOptions,
+  ): Promise<void> {
     if (prompter.canAsk !== false || options.yes) return;
     for (const { files, current } of prepared) {
       if (options.conflict === undefined) {
@@ -320,8 +323,10 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
       }
       const envFile = files.find((file) => file.path === ENV_BUNDLE_PATH);
       const section = envFile ? parseEnvSection(envFile.content) : null;
-      const missing = Object.keys(section?.variables ?? {}).filter(
-        (name) => (deps.env[name] ?? '') === '',
+      const { missing } = await splitEnvValues(
+        section?.variables ?? {},
+        deps.env,
+        deps.envWriter(),
       );
       if (missing.length > 0) throw new AnswerNeededError(`Add ${missing.join(', ')}?`);
     }
@@ -429,7 +434,7 @@ export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'>
             if (ready) prepared.push(ready);
           }
         }
-        checkAnswerable(prepared, options);
+        await checkAnswerable(prepared, options);
         const resolver = conflictResolver(options);
         for (const ready of prepared) await applyOne(ready, resolver, options);
       } finally {
