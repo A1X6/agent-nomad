@@ -1,5 +1,5 @@
 import type { BundleParams, BundleSummary } from '@agentnomad/contracts';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 // Module paths, not the package index: the agent boundary test uses these fakes and must
@@ -7,6 +7,7 @@ import { dirname } from 'node:path';
 import type { CollectedFile } from '../src/agents/adapter.ts';
 import type { ApiClient, BundleUpload } from '../src/api/api-client.ts';
 import { ApiError } from '../src/api/api-errors.ts';
+import type { EnvWriter } from '../src/env/shell-profile.ts';
 import { SECRET_NAMES, type SecretName, type SecretStore } from '../src/secrets/secret-store.ts';
 import type { Choice, Prompter, Reporter } from '../src/ui/prompter.ts';
 
@@ -39,6 +40,45 @@ export async function writeTestFile(
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content);
+}
+
+/** A file's text (UTF-8). */
+export const readText = (path: string): Promise<string> => readFile(path, 'utf8');
+
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** A JSON file that must hold an object; anything else fails the test here. */
+export async function readJson(path: string): Promise<Record<string, unknown>> {
+  const value: unknown = JSON.parse(await readText(path));
+  if (!isJsonObject(value)) throw new Error(`${path} does not hold a JSON object`);
+  return value;
+}
+
+/** Whether anything (a file or a folder) is at `path`. */
+export const exists = (path: string): Promise<boolean> =>
+  stat(path).then(
+    () => true,
+    () => false,
+  );
+
+/**
+ * An EnvWriter that touches no profile: `written` records the variables of each write.
+ * `current` is what its block holds already (nothing by default).
+ */
+export function fakeEnvWriter(
+  options: { where?: string; current?: ReadonlyMap<string, string>; backup?: string | null } = {},
+) {
+  const written: Record<string, string>[] = [];
+  const writer: EnvWriter = {
+    where: options.where ?? 'test profile',
+    current: () => Promise.resolve(options.current ?? new Map<string, string>()),
+    write: (variables) => {
+      written.push({ ...variables });
+      return Promise.resolve({ backup: options.backup ?? null });
+    },
+  };
+  return { writer, written };
 }
 
 /**

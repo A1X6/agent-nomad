@@ -14,8 +14,10 @@ import {
   b64,
   bytes,
   errorCode,
+  putSetup,
   registerForToken,
   scopeKeyOf,
+  type PutSetupOptions,
   seedSetups,
   sha256Hex,
 } from './support/fixtures.ts';
@@ -36,33 +38,7 @@ afterEach(async () => {
 
 const register = (username = 'ahmed') => registerForToken(t.app, username);
 
-interface PutOptions {
-  readonly expected: number;
-  readonly body: Uint8Array;
-  readonly path?: string;
-  readonly nameEnc?: Uint8Array;
-  readonly hash?: string;
-  readonly contentType?: string;
-  readonly omitHeader?: string;
-}
-
-async function put(token: string, options: PutOptions): Promise<Response> {
-  const headers: Record<string, string> = {
-    authorization: `Bearer ${token}`,
-    'content-type': options.contentType ?? 'application/octet-stream',
-    'x-an-expected-revision': String(options.expected),
-    'x-an-content-sha256': options.hash ?? sha256Hex(options.body),
-    'x-an-format-version': '1',
-    ...(options.nameEnc && { 'x-an-name-enc': b64(options.nameEnc) }),
-  };
-  return t.app.request(options.path ?? GLOBAL_PATH, {
-    method: 'PUT',
-    body: options.body,
-    headers: Object.fromEntries(
-      Object.entries(headers).filter(([name]) => name !== options.omitHeader),
-    ),
-  });
-}
+const put = (token: string, options: PutSetupOptions) => putSetup(t.app, token, options);
 
 const as = (token: string, method = 'GET') => ({
   method,

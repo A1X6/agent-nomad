@@ -106,6 +106,45 @@ export function loginRequest(
   );
 }
 
+export interface PutSetupOptions {
+  /** The revision the upload says is saved now (0 for a new setup). */
+  readonly expected: number;
+  readonly body: Uint8Array;
+  /** The setup's path; the global setup by default. */
+  readonly path?: string;
+  readonly nameEnc?: Uint8Array;
+  /** `x-an-content-sha256`; the body's real hash by default. */
+  readonly hash?: string;
+  readonly contentType?: string;
+  /** A header to leave out, to test the answer when it is missing. */
+  readonly omitHeader?: string;
+}
+
+/** `PUT /bundles/...` as the CLI sends it, signed in with `token`. */
+export function putSetup(
+  app: TestApp['app'],
+  token: string,
+  options: PutSetupOptions,
+): Promise<Response> {
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${token}`,
+    'content-type': options.contentType ?? 'application/octet-stream',
+    'x-an-expected-revision': String(options.expected),
+    'x-an-content-sha256': options.hash ?? sha256Hex(options.body),
+    'x-an-format-version': '1',
+    ...(options.nameEnc && { 'x-an-name-enc': b64(options.nameEnc) }),
+  };
+  return Promise.resolve(
+    app.request(options.path ?? '/bundles/claude-code/global', {
+      method: 'PUT',
+      body: options.body,
+      headers: Object.fromEntries(
+        Object.entries(headers).filter(([name]) => name !== options.omitHeader),
+      ),
+    }),
+  );
+}
+
 /** `DELETE /account` with this body (normally `{ authKey }`), signed in when `token` is given. */
 export function deleteAccountRequest(
   app: TestApp['app'],

@@ -1,4 +1,4 @@
-import { API_HEADERS, ErrorResponseSchema, SessionResponseSchema } from '@agentnomad/contracts';
+import { API_HEADERS, ErrorResponseSchema } from '@agentnomad/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { describeError } from '../src/logging/logger.ts';
@@ -11,6 +11,7 @@ import {
   deleteAccountRequest,
   errorCode,
   loginRequest,
+  registerForToken,
   registerUser,
 } from './support/fixtures.ts';
 
@@ -31,6 +32,9 @@ const fromIp = (ip: string) => ({ [TEST_IP_HEADER]: ip });
 
 const register = (username: string, ip = '198.51.100.1') =>
   registerUser(t.app, username, { authKey: goodKey, headers: fromIp(ip) });
+
+const registerToken = (username: string, ip = '198.51.100.1') =>
+  registerForToken(t.app, username, { authKey: goodKey, headers: fromIp(ip) });
 
 const login = (username: string, authKey: string, ip = '198.51.100.1') =>
   loginRequest(t.app, username, authKey, { headers: fromIp(ip) });
@@ -106,7 +110,7 @@ describe('failed logins per account', () => {
   });
 
   it('failed logins by someone else never block the owner deleting the account (T47)', async () => {
-    const token = SessionResponseSchema.parse(await (await register('ahmed')).json()).sessionToken;
+    const token = await registerToken('ahmed');
     for (let index = 0; index < limit; index++) await login('ahmed', badKey);
     const res = await deleteAccountRequest(t.app, token, { authKey: goodKey });
     expect(res.status).toBe(204);
@@ -120,7 +124,7 @@ describe('failed logins per account', () => {
   });
 
   it('also limits wrong-password account deletes', async () => {
-    const token = SessionResponseSchema.parse(await (await register('ahmed')).json()).sessionToken;
+    const token = await registerToken('ahmed');
     const del = (authKey: string) => deleteAccountRequest(t.app, token, { authKey });
     for (let index = 0; index < limit; index++) expect((await del(badKey)).status).toBe(401);
     await expectRateLimited(await del(goodKey));
@@ -190,7 +194,7 @@ describe('logging', () => {
   });
 
   it('never logs tokens, keys or bodies', async () => {
-    const token = SessionResponseSchema.parse(await (await register('ahmed')).json()).sessionToken;
+    const token = await registerToken('ahmed');
     await login('ahmed', goodKey);
     await t.app.request('/bundles?cursor=secret-cursor', {
       headers: { authorization: `Bearer ${token}` },

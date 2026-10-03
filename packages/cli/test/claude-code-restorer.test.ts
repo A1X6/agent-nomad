@@ -15,7 +15,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { collected, writeTestFile } from './fakes.ts';
+import { collected, readJson, readText, writeTestFile } from './fakes.ts';
 import {
   createClaudeCodeGlobalCollector,
   createClaudeCodeProjectCollector,
@@ -54,9 +54,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
-
-const read = (path: string) => readFile(path, 'utf8');
-const readJson = async (path: string) => JSON.parse(await read(path)) as Record<string, unknown>;
 
 interface Setup {
   running?: boolean[];
@@ -136,11 +133,11 @@ describe('restorer: round trip', () => {
       collected,
       answer('skip').resolve,
     );
-    expect(await read(join(project, 'CLAUDE.md'))).toBe('project rules');
+    expect(await readText(join(project, 'CLAUDE.md'))).toBe('project rules');
     // Memory lands in this folder's own memory directory.
-    expect(await read(join(base, 'projects', projectDirName(project), 'memory', 'MEMORY.md'))).toBe(
-      'remember this',
-    );
+    expect(
+      await readText(join(base, 'projects', projectDirName(project), 'memory', 'MEMORY.md')),
+    ).toBe('remember this');
   });
 });
 
@@ -298,7 +295,7 @@ describe('restorer: refuses what a collector never produces', () => {
       'chrome/chrome-native-host.bat',
       'local/node_modules/@anthropic-ai/claude-code/cli.js',
     ]);
-    expect(await read(join(base, 'hooks', 'check.sh'))).toBe('echo ok');
+    expect(await readText(join(base, 'hooks', 'check.sh'))).toBe('echo ok');
     await expect(stat(join(base, 'chrome'))).rejects.toThrow();
     await expect(stat(join(base, 'local'))).rejects.toThrow();
     await expect(stat(join(base, 'anything'))).rejects.toThrow();
@@ -313,7 +310,7 @@ describe('restorer: refuses what a collector never produces', () => {
     expect(report.skipped).toEqual(['skills/synced/evil/SKILL.md']);
     expect(report.warnings).toEqual(['Refused "skills/synced/evil/SKILL.md": never synced.']);
     await expect(stat(join(base, 'skills', 'synced'))).rejects.toThrow();
-    expect(await read(join(base, 'skills', 'mine', 'SKILL.md'))).toBe('ok');
+    expect(await readText(join(base, 'skills', 'mine', 'SKILL.md'))).toBe('ok');
   });
 
   it('does not write programs.json (pull only reads it)', async () => {
@@ -350,7 +347,7 @@ describe('restorer: existing files', () => {
     );
     expect(questions).toEqual([['CLAUDE.md', { overwriteAllowed: true }]]);
     expect(report.skipped).toEqual(['CLAUDE.md']);
-    expect(await read(join(base, 'CLAUDE.md'))).toBe('mine');
+    expect(await readText(join(base, 'CLAUDE.md'))).toBe('mine');
   });
 
   it('overwrite backs the old file up first', async () => {
@@ -360,8 +357,8 @@ describe('restorer: existing files', () => {
       [collected('CLAUDE.md', 'theirs')],
       answer('overwrite').resolve,
     );
-    expect(await read(join(base, 'CLAUDE.md'))).toBe('theirs');
-    expect(await read(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('mine');
+    expect(await readText(join(base, 'CLAUDE.md'))).toBe('theirs');
+    expect(await readText(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('mine');
     expect(report.backups).toEqual([`CLAUDE.md.agentnomad-backup-${STAMP}`]);
   });
 
@@ -374,8 +371,8 @@ describe('restorer: existing files', () => {
       answer('overwrite').resolve,
     );
     expect(report.backups).toEqual([`CLAUDE.md.agentnomad-backup-${STAMP}-2`]);
-    expect(await read(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('older backup');
-    expect(await read(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}-2`))).toBe('first');
+    expect(await readText(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('older backup');
+    expect(await readText(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}-2`))).toBe('first');
   });
 
   it('merge combines JSON keys, the pulled values winning', async () => {
@@ -388,7 +385,7 @@ describe('restorer: existing files', () => {
       [collected('settings.json', JSON.stringify({ theme: 'dark', effortLevel: 'high' }))],
       answer('merge').resolve,
     );
-    expect(JSON.parse(await read(join(base, 'settings.json')))).toEqual({
+    expect(JSON.parse(await readText(join(base, 'settings.json')))).toEqual({
       theme: 'dark',
       model: 'opus',
       effortLevel: 'high',
@@ -402,8 +399,8 @@ describe('restorer: existing files', () => {
       [collected('CLAUDE.md', 'theirs')],
       answer('merge').resolve,
     );
-    expect(await read(join(base, 'CLAUDE.md'))).toBe('mine');
-    expect(await read(join(base, `CLAUDE.md.agentnomad-incoming-${STAMP}`))).toBe('theirs');
+    expect(await readText(join(base, 'CLAUDE.md'))).toBe('mine');
+    expect(await readText(join(base, `CLAUDE.md.agentnomad-incoming-${STAMP}`))).toBe('theirs');
     expect(report.written).toEqual([`CLAUDE.md.agentnomad-incoming-${STAMP}`]);
   });
 
@@ -417,8 +414,8 @@ describe('restorer: existing files', () => {
       answer('overwrite').resolve,
     );
     expect((await lstat(join(base, 'CLAUDE.md'))).isSymbolicLink()).toBe(true);
-    expect(await read(real)).toBe('theirs');
-    expect(await read(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('mine');
+    expect(await readText(real)).toBe('theirs');
+    expect(await readText(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('mine');
     expect(report.written).toEqual(['CLAUDE.md']);
     expect(await readdir(join(root, 'dotfiles'))).toEqual(['CLAUDE.md']);
   });
@@ -472,7 +469,7 @@ describe('restorer: ~/.claude.json', () => {
         },
       ],
     ]);
-    expect(JSON.parse(await read(join(home, '.claude.json')))).toEqual({
+    expect(JSON.parse(await readText(join(home, '.claude.json')))).toEqual({
       ...existingJson,
       mcpServers: { local: { command: 'local-mcp' }, github: { command: 'gh-mcp' } },
       diffTool: 'terminal',
@@ -491,7 +488,7 @@ describe('restorer: ~/.claude.json', () => {
   it('skip leaves it alone', async () => {
     await writeTestFile(join(home, '.claude.json'), JSON.stringify(existingJson));
     await restorer().restore({ kind: 'global' }, [incoming], answer('skip').resolve);
-    expect(JSON.parse(await read(join(home, '.claude.json')))).toEqual(existingJson);
+    expect(JSON.parse(await readText(join(home, '.claude.json')))).toEqual(existingJson);
   });
 
   it('asks nothing when the keys are already there', async () => {
@@ -513,7 +510,7 @@ describe('restorer: ~/.claude.json', () => {
     await writeTestFile(join(home, '.claude.json'), '{}');
     const r = restorer({ running: [true] });
     const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve);
-    expect(await read(join(home, '.claude.json'))).toBe('{}');
+    expect(await readText(join(home, '.claude.json'))).toBe('{}');
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
     expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
   });
@@ -524,7 +521,7 @@ describe('restorer: ~/.claude.json', () => {
     const report = await r.restore({ kind: 'global' }, [incoming], answer('merge').resolve, {
       leaveClaudeJson: true,
     });
-    expect(await read(join(home, '.claude.json'))).toBe('{}');
+    expect(await readText(join(home, '.claude.json'))).toBe('{}');
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
     expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
   });
@@ -626,8 +623,10 @@ describe('restorer: home files', () => {
       ],
       answer('skip').resolve,
     );
-    expect(await read(join(home, '.config', 'ccstatusline', 'settings.json'))).toBe('{"lines":[]}');
-    expect(await read(join(home, 'scripts', 'notify.sh'))).toBe('echo hi\n');
+    expect(await readText(join(home, '.config', 'ccstatusline', 'settings.json'))).toBe(
+      '{"lines":[]}',
+    );
+    expect(await readText(join(home, 'scripts', 'notify.sh'))).toBe('echo hi\n');
   });
 
   it('skips a home script no hook runs, e.g. one for the Windows Startup folder (T38)', async () => {
@@ -639,7 +638,7 @@ describe('restorer: home files', () => {
     );
     expect(report.written).toEqual([]);
     expect(report.skipped).toEqual([`.agentnomad/home/${startup}`]);
-    await expect(read(join(home, ...startup.split('/')))).rejects.toThrow();
+    await expect(readText(join(home, ...startup.split('/')))).rejects.toThrow();
   });
 });
 
@@ -653,7 +652,7 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
     );
     expect(report.skipped).toEqual(['skills/deploy/SKILL.md']);
     expect(report.warnings[0]).toMatch(/^Skipped "skills\/deploy\/SKILL.md": /);
-    expect(await read(join(base, 'skills', 'review', 'SKILL.md'))).toBe('ok');
+    expect(await readText(join(base, 'skills', 'review', 'SKILL.md'))).toBe('ok');
   });
 
   it('a thrown non-Error still gives a readable warning (T53)', async () => {
@@ -678,7 +677,7 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
       answer('skip').resolve,
     );
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
-    expect(await read(join(base, 'rules', 'a.md'))).toBe('a');
+    expect(await readText(join(base, 'rules', 'a.md'))).toBe('a');
   });
 
   it.runIf(process.platform === 'win32' || process.platform === 'darwin')(
@@ -720,7 +719,7 @@ describe('restorer: a cancelled question stops the restore (T53)', () => {
     await expect(restore).rejects.toBeInstanceOf(Cancelled);
     expect(questions).toEqual(['rules/a.md']);
     expect((await readdir(join(base, 'rules'))).sort()).toEqual(['a.md', 'b.md']);
-    expect(await read(join(base, 'rules', 'a.md'))).toBe('mine a');
+    expect(await readText(join(base, 'rules', 'a.md'))).toBe('mine a');
   });
 });
 
@@ -772,7 +771,7 @@ describe('restorer: auto memory folder chosen by project settings (T43)', () => 
       [memory],
       answer('skip').resolve,
     );
-    expect(await read(join(home, 'notes', 'my-app', 'MEMORY.md'))).toBe('remember');
+    expect(await readText(join(home, 'notes', 'my-app', 'MEMORY.md'))).toBe('remember');
   });
 });
 
@@ -802,8 +801,8 @@ describe('restorer: per-OS fixes', () => {
       expect(report.backups).toEqual([]);
     }
     expect((await readdir(join(base, 'hooks'))).sort()).toEqual(['check.py', 'run.cmd']);
-    expect(await read(join(base, 'hooks', 'check.py'))).toBe(py);
-    expect(await read(join(base, 'hooks', 'run.cmd'))).toBe(cmd);
+    expect(await readText(join(base, 'hooks', 'check.py'))).toBe(py);
+    expect(await readText(join(base, 'hooks', 'run.cmd'))).toBe(cmd);
   });
 
   it('a script pulled onto a fresh PC is unchanged by a second pull (T53)', async () => {
@@ -943,9 +942,9 @@ describe('restorer: hooks in exec form and compound commands (BUG-01, SEC-01)', 
       answer('skip').resolve,
     );
     expect(report.skipped).toEqual([]);
-    expect(await read(join(base, 'hooks', 'check.js'))).toBe('check');
-    expect(await read(join(home, 'tools', 'stop.sh'))).toBe('stop');
-    expect(await read(join(home, 'tools', 'notify.sh'))).toBe('notify');
+    expect(await readText(join(base, 'hooks', 'check.js'))).toBe('check');
+    expect(await readText(join(home, 'tools', 'stop.sh'))).toBe('stop');
+    expect(await readText(join(home, 'tools', 'notify.sh'))).toBe('notify');
   });
 });
 

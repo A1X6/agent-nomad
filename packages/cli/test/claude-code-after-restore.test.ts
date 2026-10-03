@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { collectedJson, recordingReporter, scriptedPrompter } from './fakes.ts';
+import { collected, collectedJson, recordingReporter, scriptedPrompter } from './fakes.ts';
 
 import {
   createClaudeCodeAfterRestore,
@@ -252,11 +252,7 @@ describe('pull says when saved plugins or programs cannot be read (BUG-01)', () 
     ['not the expected shape', '{"plugins": 1}'],
   ])('warns when plugins.json is %s', async (_, text) => {
     const { cli, runs } = recordingCli();
-    const file = {
-      path: '.agentnomad/plugins.json',
-      content: new TextEncoder().encode(text),
-      executable: false,
-    };
+    const file = collected('.agentnomad/plugins.json', text);
     const t = context([file]);
     await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx);
     expect(runs).toEqual([]);
@@ -283,11 +279,7 @@ describe('pull says when saved plugins or programs cannot be read (BUG-01)', () 
 
   it('warns when programs.json cannot be read', async () => {
     const { cli } = recordingCli();
-    const file = {
-      path: '.agentnomad/programs.json',
-      content: new TextEncoder().encode('[]'),
-      executable: false,
-    };
+    const file = collected('.agentnomad/programs.json', '[]');
     const t = context([file]);
     await afterRestore({ system: system(['/usr/bin/npm']), cli })(t.ctx);
     expect(t.lines.some((line) => line.startsWith('Saved programs could not be read: '))).toBe(

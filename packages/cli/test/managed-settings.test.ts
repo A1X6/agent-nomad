@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { recordingReporter } from './fakes.ts';
 import {
   createAgentRegistry,
   createAgentsCommand,
@@ -213,7 +214,7 @@ describe('warnings (T31 done-when)', () => {
   });
 
   it('agentnomad agents shows the notice, from the adapter’s inspector (SOLID-01)', async () => {
-    const lines: string[] = [];
+    const { reporter, lines: reported } = recordingReporter();
     const adapter = createClaudeCodeAdapter({
       env: { PATH: '' },
       homedir: '/nowhere',
@@ -226,8 +227,9 @@ describe('warnings (T31 done-when)', () => {
     });
     await createAgentsCommand({
       registry: () => createAgentRegistry([adapter]),
-      reporter: { info: () => undefined, success: () => undefined, warn: (m) => lines.push(m) },
+      reporter,
     }).agents();
+    const lines = reported.filter((line) => line.startsWith('warn: '));
     expect(lines[0]).toContain('never synced');
     expect(managedSettingsNotice(found, 'agents')).toContain('never synced');
   });
@@ -250,7 +252,7 @@ describe('warnings (T31 done-when)', () => {
             stderr: '',
           }),
       },
-      reporter: { success: () => undefined, warn: () => undefined },
+      reporter: recordingReporter().reporter,
       cwd: '/',
       explainFailure: (reason) => explainPluginFailure(reason, found),
     });
