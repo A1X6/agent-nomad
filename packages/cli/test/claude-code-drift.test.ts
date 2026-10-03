@@ -9,6 +9,7 @@ import {
   reportMarkdown,
 } from '../scripts/drift/drift.ts';
 import { CLAUDE_CODE_PATHS } from '../src/index.ts';
+import { WATCHED_SETTINGS } from '../src/pull/reviewed-settings.ts';
 
 /** Every top-level name the ".claude directory" docs page named on 2026-09-26 (Claude Code 2.1.283). */
 const DOCS_NAMES_2026_09_26 = [
@@ -81,6 +82,47 @@ describe('drift check (T41): reading the sources', () => {
     expect(changelogSince(CHANGELOG, '2.1.282').map((section) => section.version)).toEqual([
       '2.1.290',
       '2.1.283',
+    ]);
+  });
+});
+
+describe('drift check (T55): settings the pull review watches', () => {
+  it('watches every key and variable the review lists', () => {
+    for (const key of [
+      'apiKeyHelper',
+      'permissions.defaultMode',
+      'permissions.allow',
+      'permissions.additionalDirectories',
+      'sandbox',
+      'ANTHROPIC_BASE_URL',
+      'HTTPS_PROXY',
+      'NODE_EXTRA_CA_CERTS',
+      'CLAUDE_CODE_SHELL_PREFIX',
+    ]) {
+      expect(WATCHED_SETTINGS).toContain(key);
+    }
+  });
+
+  it('keeps changelog entries that name a watched setting', () => {
+    const changelog = [
+      '## 2.1.300',
+      '',
+      '- Added `sandbox.network.allowAll` to open the network',
+      '- Changed `ANTHROPIC_BASE_URL` to also apply to MCP tool search',
+      '- Added wildcards in `permissions.allow` rules for MCP servers',
+      '- Fixed a crash when the sandbox could not start',
+      '- Added a new theme',
+      '',
+    ].join('\n');
+    expect(changelogSince(changelog, '2.1.299')).toEqual([
+      {
+        version: '2.1.300',
+        lines: [
+          '- Added `sandbox.network.allowAll` to open the network',
+          '- Changed `ANTHROPIC_BASE_URL` to also apply to MCP tool search',
+          '- Added wildcards in `permissions.allow` rules for MCP servers',
+        ],
+      },
     ]);
   });
 });
