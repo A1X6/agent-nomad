@@ -124,6 +124,10 @@ function exampleAdapter(home: string, seen: Seen): AgentAdapter {
         question: (names) => `Also save your prompts library (${names.join(', ')})?`,
         unreadable: (problem) => problem,
         noneFound: 'No prompts library here.',
+        flagHelp: {
+          push: { include: 'save the prompts library', leaveOut: 'leave it out' },
+          pull: { include: 'add the prompts library', leaveOut: 'do not add it' },
+        },
       },
     ],
     restorer: {

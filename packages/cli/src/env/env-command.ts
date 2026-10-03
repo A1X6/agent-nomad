@@ -14,6 +14,13 @@ export interface EnvCommandDeps {
   readonly platform: NodeJS.Platform;
 }
 
+const STATUS = {
+  settings: { mark: '✓', label: 'set in settings' },
+  here: { mark: '✓', label: 'set here' },
+  missing: { mark: '✗', label: 'missing here' },
+} as const;
+const STATUS_WIDTH = Math.max(...Object.values(STATUS).map((status) => status.label.length));
+
 /** Lines for `agentnomad env`; never includes a value. */
 export function describeEnv(
   scan: EnvScan,
@@ -22,11 +29,11 @@ export function describeEnv(
   const width = Math.max(...scan.variables.map((variable) => variable.name.length));
   return scan.variables.map((variable) => {
     const status = scan.setBySettings.has(variable.name)
-      ? '✓ set in settings'
+      ? STATUS.settings
       : (env[variable.name] ?? '') !== ''
-        ? '✓ set here      '
-        : '✗ missing here  ';
-    return `${status.slice(0, 1)} ${variable.name.padEnd(width)}  ${status.slice(2)}  ${variable.usedBy.join('; ')}`;
+        ? STATUS.here
+        : STATUS.missing;
+    return `${status.mark} ${variable.name.padEnd(width)}  ${status.label.padEnd(STATUS_WIDTH)}  ${variable.usedBy.join('; ')}`;
   });
 }
 

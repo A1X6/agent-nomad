@@ -64,6 +64,7 @@ export * from './secrets/keychain-store.ts';
 export * from './secrets/secret-store.ts';
 export * from './state/local-state.ts';
 export * from './system/files.ts';
+export * from './system/json.ts';
 export * from './system/paths.ts';
 export * from './system/run-program.ts';
 export * from './ui/clack-prompter.ts';

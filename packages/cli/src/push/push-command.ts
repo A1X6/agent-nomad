@@ -177,10 +177,13 @@ export function createPushPlanner(deps: PushDeps) {
     ]);
   }
 
-  /** The folder's saved name, the `--project` name, or a new one the user types once. */
+  /**
+   * The folder's saved name, the `--project` name, or a new one the user types once. The
+   * apply step remembers it once the project is saved, so a cancelled push forgets it (UX-03).
+   */
   async function projectName(options: PushOptions): Promise<string> {
     const state = deps.localState();
-    const name =
+    return (
       (options.project ??
         (await state.projectNameFor(deps.cwd)) ??
         (
@@ -192,9 +195,8 @@ export function createPushPlanner(deps: PushDeps) {
             },
           })
         ).trim()) ||
-      basename(deps.cwd);
-    await state.rememberProject(deps.cwd, name);
-    return name;
+      basename(deps.cwd)
+    );
   }
 
   /** Each chosen agent with its scopes: one item per setup to save. */
@@ -464,6 +466,8 @@ export function createPushApplier(deps: PushApplyDeps) {
             ),
           );
           await deps.localState().setRevision(planned.adapter.id, scopeKey, revision);
+          if (planned.scope.kind === 'project')
+            await deps.localState().rememberProject(deps.cwd, planned.scope.name);
           result = { kind: 'saved', revision, size };
         } catch (error) {
           // Another PC saved it after the plan compared revisions: never replaced unasked.
@@ -477,12 +481,12 @@ export function createPushApplier(deps: PushApplyDeps) {
 
     if (result.kind === 'too-large') {
       reporter.error(
-        `The ${setup} is ${formatSize(result.size)} after compression and encryption; the limit is 5 MB. Remove large files (e.g. images in skills) and try again.`,
+        `The ${setup} is ${formatSize(result.size)} after compression and encryption; the limit is ${formatSize(MAX_BUNDLE_BYTES)}. Remove large files (e.g. images in skills) and try again.`,
       );
       return {
         setup,
         result: 'not-done',
-        reason: `${formatSize(result.size)}, over the 5 MB limit`,
+        reason: `${formatSize(result.size)}, over the ${formatSize(MAX_BUNDLE_BYTES)} limit`,
       };
     }
     if (result.kind === 'conflict') {

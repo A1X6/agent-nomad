@@ -85,6 +85,17 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       `Also save a copy of your ${String(names.length)} claude.ai skill${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account.`,
     unreadable: (problem) => `${problem} Your claude.ai skills were not saved.`,
     noneFound: 'No claude.ai skills of your own were found on this PC.',
+    flagHelp: {
+      push: {
+        include: 'save a copy of your own claude.ai skills (normally synced by your account)',
+        leaveOut: 'leave claude.ai skills out',
+      },
+      pull: {
+        include:
+          'add saved claude.ai skills as local skills (for a PC without that claude.ai account)',
+        leaveOut: 'do not add saved claude.ai skills',
+      },
+    },
   };
 
   return {

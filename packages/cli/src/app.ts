@@ -6,7 +6,7 @@ import {
   type CryptoService,
 } from '@agentnomad/core';
 
-import type { AgentRegistry } from './agents/adapter.ts';
+import type { AgentRegistry, OptionalPart } from './agents/adapter.ts';
 import { createAgentsCommand } from './agents/agents-command.ts';
 import { createClaudeCodeAdapter } from './agents/claude-code/claude-code-adapter.ts';
 import { createAgentRegistry } from './agents/registry.ts';
@@ -64,11 +64,52 @@ export function deviceNameOf(hostname: string): string {
 }
 
 /**
+ * Every supported agent; adding one means adding its adapter here (T28). Building them reads
+ * nothing yet, so the command line can take their optional parts' flags from them (ARCH-02).
+ * It throws when the home folder cannot be used (e.g. `/`).
+ */
+export function createAppRegistry(
+  app: Pick<AppEnvironment, 'env' | 'homedir' | 'platform'>,
+): AgentRegistry {
+  return createAgentRegistry([
+    createClaudeCodeAdapter({
+      env: app.env,
+      homedir: app.homedir,
+      platform: app.platform,
+    }),
+  ]);
+}
+
+/**
+ * The command handlers, and the registered agents' optional parts for the command line's
+ * flags (ARCH-02). When the agents cannot be built here, there are no part flags; the
+ * commands that need the agents say why, and the others (`--help`, login) still work.
+ */
+export function createApp(app: AppEnvironment): {
+  readonly handlers: CommandHandlers;
+  readonly optionalParts: readonly OptionalPart[];
+} {
+  const registry = lazy(() => createAppRegistry(app));
+  let optionalParts: readonly OptionalPart[] = [];
+  try {
+    optionalParts = registry()
+      .list()
+      .flatMap((adapter) => adapter.optionalParts ?? []);
+  } catch {
+    // Left empty: building the registry again in the command reports the error.
+  }
+  return { handlers: createAppHandlers(app, registry), optionalParts };
+}
+
+/**
  * The composition root: builds the real services and the command handlers from them.
  * Nothing (keychain, crypto, network) is touched until a command needs it, so `--help`
  * stays instant and never fails.
  */
-export function createAppHandlers(app: AppEnvironment): CommandHandlers {
+export function createAppHandlers(
+  app: AppEnvironment,
+  registry: () => AgentRegistry = lazy(() => createAppRegistry(app)),
+): CommandHandlers {
   const apiUrl = lazy(() => resolveApiUrl(app.env));
   const secrets = lazy<Promise<SecretStore>>(() =>
     createSecretStore({
@@ -76,6 +117,7 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       env: app.env,
       platform: app.platform,
       homedir: app.homedir,
+      endReplacedSession: (sessionToken): Promise<void> => api().auth.logout(sessionToken),
     }),
   );
   const crypto = lazy<Promise<CryptoService>>(() => createSodiumCryptoService());
@@ -98,17 +140,6 @@ export function createAppHandlers(app: AppEnvironment): CommandHandlers {
       },
     });
   });
-
-  // Every supported agent; adding one means adding its adapter here (T28).
-  const registry = lazy<AgentRegistry>(() =>
-    createAgentRegistry([
-      createClaudeCodeAdapter({
-        env: app.env,
-        homedir: app.homedir,
-        platform: app.platform,
-      }),
-    ]),
-  );
 
   const localState = lazy<LocalState>(() =>
     createLocalState({

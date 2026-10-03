@@ -184,11 +184,6 @@ export function createFileStore(options: FileStoreOptions): SecretStore {
     async get(name) {
       return (await load()).servers[server]?.[name] ?? null;
     },
-    async set(name, value) {
-      const file = await load();
-      file.servers[server] = { ...file.servers[server], [name]: value };
-      await save(file);
-    },
     async setMany(values) {
       const file = await load();
       file.servers[server] = { ...file.servers[server], ...values };

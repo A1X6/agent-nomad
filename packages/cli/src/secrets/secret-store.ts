@@ -11,8 +11,7 @@ export interface SecretStore {
   readonly backend: 'keychain' | 'file';
   /** `null` when the secret is not stored (e.g. not logged in). */
   get(name: SecretName): Promise<string | null>;
-  set(name: SecretName, value: string): Promise<void>;
-  /** Several secrets at once: the file store writes its file once (PERF-02). */
+  /** Saves the given secrets; the file store writes its file once (PERF-02). */
   setMany(values: Readonly<Partial<Record<SecretName, string>>>): Promise<void>;
   /** Does nothing when the secret is not stored. */
   delete(name: SecretName): Promise<void>;

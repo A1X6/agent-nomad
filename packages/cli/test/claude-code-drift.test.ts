@@ -178,4 +178,10 @@ describe('drift check (T48): changelog text is shown inert', () => {
     expect(shown).not.toContain('![');
     expect(shown).toContain('~/.claude');
   });
+
+  it('shows HTML as text, so an <img> cannot load either (SEC-05)', () => {
+    expect(inert('- Logo <img src="https://tracker.example/p.png"> added')).toBe(
+      '- Logo &lt;img src="https://tracker.example/p.png"> added',
+    );
+  });
 });

@@ -13,6 +13,7 @@ import {
 } from '@agentnomad/contracts';
 import type * as z from 'zod';
 
+import { formatSize } from '../ui/format-size.ts';
 import { CLI_VERSION } from '../version.ts';
 import type { ApiClient, BundleUpload, DownloadedBundle } from './api-client.ts';
 import {
@@ -335,7 +336,7 @@ export function createHttpApiClient(options: HttpApiClientOptions): ApiClient {
 
       async put(params, upload: BundleUpload) {
         if (upload.ciphertext.byteLength > MAX_BUNDLE_BYTES) {
-          throw new RangeError('A saved setup can be at most 5 MB');
+          throw new RangeError(`A saved setup can be at most ${formatSize(MAX_BUNDLE_BYTES)}`);
         }
         // The hash is how the server recognises a retry; a wrong one would break that.
         if (sha256Hex(upload.ciphertext) !== upload.contentSha256) {

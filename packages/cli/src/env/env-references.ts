@@ -9,7 +9,10 @@ export interface ScannedFile {
   readonly content: Uint8Array;
 }
 
-/** `${NAME}` or `${NAME:-default}`, as Claude Code expands them. */
+/**
+ * `${NAME}` or `${NAME:-default}`: the reference form every adapter's files use (an agent
+ * with another form needs its own pattern in `EnvReferenceFiles`).
+ */
 const REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g;
 
 interface EnvUsage {
@@ -20,7 +23,7 @@ interface EnvUsage {
 
 export interface EnvScan {
   readonly variables: readonly EnvUsage[];
-  /** Set by an `env` block in the settings, so Claude Code has them without the shell. */
+  /** Set by an `env` block in the agent's settings, so it has them without the shell. */
   readonly setBySettings: ReadonlySet<string>;
 }
 

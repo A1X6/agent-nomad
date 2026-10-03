@@ -1,21 +1,39 @@
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { createApp, createAppRegistry } from '../src/app.ts';
 import type { CommandHandlers } from '../src/cli/commands.ts';
+import type { PartFlags } from '../src/cli/program.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
 import { SetupsNotDoneError } from '../src/cli/setup-outcomes.ts';
 import { AnswerNeededError } from '../src/ui/no-terminal-prompter.ts';
 import { PromptCancelledError } from '../src/ui/prompter.ts';
 import { CLI_VERSION } from '../src/version.ts';
+import { recordingReporter, scriptedPrompter } from './fakes.ts';
 
 interface Call {
   readonly command: string;
   readonly options?: unknown;
 }
 
+/** The optional parts of the agents an installed CLI registers (Claude Code's claude.ai skills). */
+const REGISTERED_PARTS = createAppRegistry({
+  env: {},
+  homedir: join(tmpdir(), 'agentnomad-program-home'),
+  platform: process.platform,
+})
+  .list()
+  .flatMap((adapter) => adapter.optionalParts ?? []);
+
 /** Runs the CLI with handlers that record what they were called with. */
-async function run(args: string[], overrides: Partial<CommandHandlers> = {}) {
+async function run(
+  args: string[],
+  overrides: Partial<CommandHandlers> = {},
+  optionalParts: readonly PartFlags[] = REGISTERED_PARTS,
+) {
   const calls: Call[] = [];
   let out = '';
   let err = '';
@@ -42,6 +60,7 @@ async function run(args: string[], overrides: Partial<CommandHandlers> = {}) {
   };
   const code = await runCli(args, {
     handlers,
+    optionalParts,
     reporter: {
       error: (message) => messages.push(`error: ${message}`),
       warn: (message) => messages.push(`warn: ${message}`),
@@ -179,6 +198,69 @@ describe('routing and flags', () => {
         options: { global: true, yes: false, parts: new Map([['account-skills', value]]) },
       },
     ]);
+  });
+
+  it('gives every optional part of an agent its flags, help and hint (ARCH-02)', async () => {
+    const parts: PartFlags[] = [
+      ...REGISTERED_PARTS,
+      {
+        id: 'prompts',
+        flagHelp: {
+          push: { include: 'save the prompts library', leaveOut: 'leave the prompts out' },
+          pull: { include: 'add the prompts library', leaveOut: 'do not add the prompts' },
+        },
+      },
+    ];
+    const both = await run(['push', '--global', '--no-account-skills', '--prompts'], {}, parts);
+    expect(both.calls).toEqual([
+      {
+        command: 'push',
+        options: {
+          global: true,
+          yes: false,
+          parts: new Map([
+            ['account-skills', false],
+            ['prompts', true],
+          ]),
+        },
+      },
+    ]);
+    const pull = await run(['pull', '--global', '--no-prompts'], {}, parts);
+    expect(pull.calls).toEqual([
+      {
+        command: 'pull',
+        options: { global: true, yes: false, parts: new Map([['prompts', false]]) },
+      },
+    ]);
+    expect((await run(['push', '--help'], {}, parts)).out).toMatch(
+      /--prompts +save the prompts library.*--no-prompts +leave the prompts out/s,
+    );
+    expect((await run(['pull', '--help'], {}, parts)).out).toMatch(
+      /--prompts +add the prompts library.*--no-prompts +do not add the prompts/s,
+    );
+    const { messages } = await run(
+      ['push'],
+      { push: () => Promise.reject(new AnswerNeededError('Which agents?')) },
+      parts,
+    );
+    expect(messages[0]).toContain(
+      '--account-skills or --no-account-skills, --prompts or --no-prompts, and --yes.',
+    );
+  });
+
+  it('offers no part flags, and still runs, where the agents cannot be built (ARCH-02)', () => {
+    // A home folder of `/` makes the agents throw; only the commands that need them fail.
+    const { handlers, optionalParts } = createApp({
+      env: {},
+      platform: 'linux',
+      homedir: '/',
+      hostname: 'pc',
+      cwd: '/',
+      prompter: scriptedPrompter([]).prompter,
+      reporter: recordingReporter().reporter,
+    });
+    expect(optionalParts).toEqual([]);
+    expect(Object.keys(handlers)).toContain('login');
   });
 
   it('passes --merge to pull as the conflict choice', async () => {

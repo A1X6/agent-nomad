@@ -104,7 +104,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### BUG-04 · Low · A login made while the keychain was failing is stranded in the plain file once the keychain works again
 
-- [ ] **Where:** `packages/cli/src/secrets/create-secret-store.ts:35-56`; `packages/cli/src/auth/auth-commands.ts:146` (`readyForNewLogin` checks only the store it was given)
+- [x] **Where:** `packages/cli/src/secrets/create-secret-store.ts:35-56`; `packages/cli/src/auth/auth-commands.ts:146` (`readyForNewLogin` checks only the store it was given)
 - **Problem:** The file login is moved into the keychain only when the keychain holds **no** session token (`if (token === null)`, line 41). Scenario: the user is logged in (keychain). The keychain fails for a while (locked, a "Deny" click; the case the comment at lines 22-24 describes), so `createSecretStore` returns the file store. `login` (or `register`) then sees no login in the file (`hasLocalSession(file)` is false), does not ask "already logged in", and saves the new login in the file. When the keychain works again it still holds the old token, so `createSecretStore` returns the keychain and the new login stays in `secrets.json` for good.
 - **Why it matters:** Later commands run as the old login while `useAccount` already switched the local state to the new account (`auth-commands.ts:297`), and the new data key stays in a plain file the comment promises is "neither stranded nor left in plain text". If the two logins are different accounts, push and pull use the old account's keys without saying so.
 - **Fix:** When the keychain works and the file also holds a full login, decide which is newer instead of ignoring the file: simplest is to prefer the file login (it can only have been written while the keychain failed, so it is the later one), move it into the keychain and log the old keychain session out (or at least warn). Add a test with both stores holding a login.
@@ -113,7 +113,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### BUG-05 · Low · Pull records a setup as fully pulled when it left differing files unasked
 
-- [ ] **Where:** `packages/cli/src/pull/pull-command.ts:525-546`
+- [x] **Where:** `packages/cli/src/pull/pull-command.ts:525-546`
 - **Problem:** `applyOne` calls `setRevision(..., { partial: declined })` (lines 525-527) before it looks at `notAsked` (line 538). A setup whose restore met a differing file the plan never asked about is reported as not done (exit 1, "Pull again with --merge or --overwrite"), yet the local state now says this PC has that revision, with no partial note.
 - **Why it matters:** `status` then shows the setup as up to date, and the next `push` from this PC passes `decide` (`push-command.ts:343-368`: not partial, `onServer === known`) and replaces the saved copy, including the local versions of the files the user never chose about, for every PC, without a question. That is the exact case the `#partial` note exists to stop for declined commands. The path is rare (a file that changes between plan and apply, or an agent's own restore step meeting a conflict), and the test at `packages/cli/test/pull-command.test.ts:529-562` checks the error but not the recorded revision.
 - **Fix:** When `notAsked` is not empty, record the revision with `partial: true` (so push asks first), or do not record it; add the state check to that test.
@@ -183,7 +183,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### SEC-04 · Low · Bundle file paths are printed with their line breaks in pull's messages (SEC-03 covered the review lines only)
 
-- [ ] **Where:** `packages/cli/src/pull/pull-command.ts:248` (conflict question `${path} already exists here…`), `:354` (`Skipped ${[...blocked].join(', ')}`), `:540` (`Left as they are … ${notAsked.join(', ')}`); bundle paths may hold `\n` (`packages/contracts/src/bundle.ts:60-64` refuses only NUL, backslash, absolute, empty, `.` and `..` segments)
+- [x] **Where:** `packages/cli/src/pull/pull-command.ts:248` (conflict question `${path} already exists here…`), `:354` (`Skipped ${[...blocked].join(', ')}`), `:540` (`Left as they are … ${notAsked.join(', ')}`); bundle paths may hold `\n` (`packages/contracts/src/bundle.ts:60-64` refuses only NUL, backslash, absolute, empty, `.` and `..` segments)
 - **Problem:** These messages go through the reporter's or prompter's `printable`, which keeps line breaks (`ui/printable.ts:168-176`). SEC-03's fix uses `printableLine` for each review entry's label and command (line 341), but the file paths printed in the same review warning and in the conflict question can still add lines.
 - **Why it matters:** A bundle path such as `a.md\n  ~ hook …` can make the skip warning or a conflict question show text that looks like extra entries or advice. Impact is small: the bundle is sealed with the user's own data key, and these lines come after or outside the allow question.
 - **Fix:** Pass bundle paths through `printableLine` wherever they are joined into one line (`[...blocked].map(printableLine)`, `notAsked.map(printableLine)`, `printableLine(path)` in the default question).
@@ -192,7 +192,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### SEC-05 · Low · The drift issue still renders raw HTML images from the changelog
 
-- [ ] **Where:** `packages/cli/scripts/drift/drift.ts:210-216` (`inert`), used at `:262`
+- [x] **Where:** `packages/cli/scripts/drift/drift.ts:210-216` (`inert`), used at `:262`
 - **Problem:** `inert` escapes `@` mentions and Markdown `![` images, as its comment promises ("an image cannot load from elsewhere"), but leaves HTML such as `<img src="https://…">`, which GitHub renders in issue bodies.
 - **Why it matters:** A changelog line with an HTML image would load it in the drift issue. The source is Anthropic's own changelog, so the risk is low; the comment overstates what the function does.
 - **Fix:** Also neutralise `<` (e.g. replace it with `&lt;`), or wrap each changelog line in inline code.
@@ -234,7 +234,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### UX-03 · Low · Push remembers a typed project name before anything is saved
 
-- [ ] **Where:** `packages/cli/src/push/push-command.ts:181-198` (`rememberProject` in `projectName`), called from the plan step at `:213`
+- [x] **Where:** `packages/cli/src/push/push-command.ts:181-198` (`rememberProject` in `projectName`), called from the plan step at `:213`
 - **Problem:** The plan step is meant to only ask (T59), but it writes the folder's project name to `state.json` as soon as it is typed. If the user then cancels a later question (memory, optional parts, env values, "replace a newer copy?") or the setup is skipped, the name stays remembered, and the next push uses it without asking again.
 - **Why it matters:** A typo in the name becomes sticky and silent; the only way out is to pass `--project` or edit `state.json`. Other PCs then see the setup under the typo once a push goes through.
 - **Fix:** Return the name from the plan and call `rememberProject` in the apply step after the project upload succeeds (pull already remembers it only after restoring, `pull-command.ts:528-529`).
@@ -243,7 +243,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### UX-04 · Low · `agentnomad env` misaligns the "used by" column when a variable is set in settings
 
-- [ ] **Where:** `packages/cli/src/env/env-command.ts:24-29`
+- [x] **Where:** `packages/cli/src/env/env-command.ts:24-29`
 - **Problem:** The three status texts are padded by hand: `'set in settings'` is 15 characters after `slice(2)`, `'set here      '` and `'missing here  '` are 14, so rows with "set in settings" push their "used by" text one column right.
 - **Why it matters:** Cosmetic only; the list is the command's whole output.
 - **Fix:** Keep the three labels unpadded and `padEnd` them to the longest label's length.
@@ -270,7 +270,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### DEAD-02 · Low · `SecretStore.set` is used only by tests
 
-- [ ] **Where:** `packages/cli/src/secrets/secret-store.ts:124` (interface), implementations at `packages/cli/src/secrets/keychain-store.ts:97-99` and `packages/cli/src/secrets/file-store.ts:187-191`; callers only in `packages/cli/test/secret-store.test.ts:84-127` and `packages/cli/test/fakes.ts:53`
+- [x] **Where:** `packages/cli/src/secrets/secret-store.ts:124` (interface), implementations at `packages/cli/src/secrets/keychain-store.ts:97-99` and `packages/cli/src/secrets/file-store.ts:187-191`; callers only in `packages/cli/test/secret-store.test.ts:84-127` and `packages/cli/test/fakes.ts:53`
 - **Problem:** Production saves through `setMany` (`auth/local-session.ts:22`, `secrets/create-secret-store.ts:48`); no file under `packages/cli/src` or `packages/e2e/src` calls `set`. knip cannot see interface members.
 - **Why it matters:** Every store and fake must implement and test a method nothing uses, and two ways to save a secret invite a half-saved login.
 - **Fix:** Remove `set` from the interface and both stores; switch the tests to `setMany`.
@@ -397,7 +397,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-01 · Low · The CLI still writes the 5 MB limit as a literal next to `MAX_BUNDLE_BYTES` (READ-07 fixed the server only)
 
-- [ ] **Where:** `packages/cli/src/api/http-api-client.ts:337-338`; `packages/cli/src/push/push-command.ts:441` (constant) with `:480` and `:485` (literal "5 MB")
+- [x] **Where:** `packages/cli/src/api/http-api-client.ts:337-338`; `packages/cli/src/push/push-command.ts:441` (constant) with `:480` and `:485` (literal "5 MB")
 - **Problem:** Review 4's READ-07 built the server's message from the constant; the CLI's guard and push's two messages still hard-code "5 MB" right next to the constant they describe.
 - **Why it matters:** If the limit changes, these messages lie, the same risk READ-07 fixed on the server.
 - **Fix:** Use `formatSize(MAX_BUNDLE_BYTES)` (gives "5.0 MB") or one shared `MAX_BUNDLE_LABEL` built from the constant in `contracts`.
@@ -406,7 +406,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-02 · Low · The username placeholder depends on the question's wording
 
-- [ ] **Where:** `packages/cli/src/auth/auth-commands.ts:78-86`
+- [x] **Where:** `packages/cli/src/auth/auth-commands.ts:78-86`
 - **Problem:** `usernameFrom` adds the placeholder only when `question === 'Choose a username'`, so behaviour is keyed on a display string.
 - **Why it matters:** Rewording the register question silently drops the hint, and a reader has to spot the string match to know why only register shows it.
 - **Fix:** Pass the placeholder (or a `forNewAccount` flag) as a parameter from `register`.
@@ -415,7 +415,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### READ-03 · Low · `index.ts` re-exports every module except `system/json.ts`
 
-- [ ] **Where:** `packages/cli/src/index.ts:1-74` (no `./system/json.ts`; every other `src` file but `bin.ts` is listed); `packages/cli/test/json.test.ts:4` imports the deep path instead
+- [x] **Where:** `packages/cli/src/index.ts:1-74` (no `./system/json.ts`; every other `src` file but `bin.ts` is listed); `packages/cli/test/json.test.ts:4` imports the deep path instead
 - **Problem:** The index is documented as "Re-exports the package for tests" (`docs/ARCHITECTURE.md:634`), and tests import from it, but the module T69 added was not added there.
 - **Why it matters:** Small inconsistency: the next reader cannot tell whether `system/json.ts` is meant to be internal.
 - **Fix:** Add `export * from './system/json.ts';` and import it from the index in `json.test.ts`, or note why it is left out.
@@ -545,7 +545,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### BP-01 · Low · The CLI package's own `test` script runs Vitest without the root config
 
-- [ ] **Where:** `packages/cli/package.json:20` (`"test": "vitest run"`); the root config that sets the `agentnomad-source` condition is `vitest.config.ts:9`
+- [x] **Where:** `packages/cli/package.json:20` (`"test": "vitest run"`); the root config that sets the `agentnomad-source` condition is `vitest.config.ts:9`
 - **Problem:** Run from `packages/cli` (`pnpm --filter @agentnomad/cli test`), Vitest does not load the root `vitest.config.ts`, so `@agentnomad/core` and `contracts` resolve to their built `dist/`. Without a build that fails to resolve (worker-t73 recorded "core entry fails to resolve there"); after an old build it tests stale code, which is what the root config's comment says it prevents.
 - **Why it matters:** A contributor running the package script gets a confusing failure or a wrong pass. CONTRIBUTING.md only documents the root `pnpm test`, so this script is a trap rather than a tool.
 - **Fix:** Point it at the root project (`vitest run --root ../.. --project @agentnomad/cli`) or drop the script (the same pattern is in contracts, core and server; see cross-file notes).
@@ -564,7 +564,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### ARCH-02 · Low · Optional-part flags are hard-coded to Claude Code's `account-skills`
 
-- [ ] **Where:** `packages/cli/src/cli/program.ts:36-41` (`partsOf` maps only `accountSkills` to the literal `'account-skills'`), `:150-156`, `:188-194`; `packages/cli/src/cli/run.ts:194-195` (hints); the id itself is `ACCOUNT_SKILLS_PART` in `packages/cli/src/agents/claude-code/account-skills.ts:20`
+- [x] **Where:** `packages/cli/src/cli/program.ts:36-41` (`partsOf` maps only `accountSkills` to the literal `'account-skills'`), `:150-156`, `:188-194`; `packages/cli/src/cli/run.ts:194-195` (hints); the id itself is `ACCOUNT_SKILLS_PART` in `packages/cli/src/agents/claude-code/account-skills.ts:20`
 - **Problem:** `docs/ARCHITECTURE.md:322` says an adapter's `optionalParts` are answered by `--<id>` / `--no-<id>`, and push and pull read them generically through `options.parts`. But the parser only knows one part, written as a literal copy of the Claude Code constant (the `cli/` lint rule forbids importing it), and `docs/ADDING-AN-AGENT.md:231-232` does not tell a new adapter to add its flags there.
 - **Why it matters:** A second agent with an optional part gets no flag, so from a script its part can never be included (`--yes` answers no); the "a new agent is a new folder plus one line in `app.ts`" promise breaks, and renaming the Claude Code part id silently disconnects `--account-skills`.
 - **Fix:** Either build the part flags from data the composition root passes to `createProgram` (part ids and help texts from the registered adapters), or state in ADDING-AN-AGENT.md that a new part needs its flags in `program.ts` and `run.ts`, and add a test that every registered part id has a flag.
@@ -573,7 +573,7 @@ Nothing found blocks a merge of `dev` into `main`. The four Medium findings exis
 
 #### ARCH-03 · Low · The generic env code still names Claude Code (ARCH-01 fix incomplete)
 
-- [ ] **Where:** `packages/cli/src/env/env-restore.ts:140` ("Open a new terminal (and restart Claude Code) so they take effect."), `packages/cli/src/env/env-references.ts:103` (`REFERENCE` comment: "as Claude Code expands them")
+- [x] **Where:** `packages/cli/src/env/env-restore.ts:140` ("Open a new terminal (and restart Claude Code) so they take effect."), `packages/cli/src/env/env-references.ts:103` (`REFERENCE` comment: "as Claude Code expands them")
 - **Problem:** Review 4's ARCH-01 moved the Claude Code file lists into the adapter, but the agent-neutral restore message tells every user to restart Claude Code, whichever agent the values were saved for, and the reference syntax is documented as Claude Code's. god noted both as leftovers after T73; they are still there at `b49a335`.
 - **Why it matters:** With a second agent, pull tells its users to restart the wrong program; the comment hides that the `${VAR}` syntax is an assumption every adapter must share.
 - **Fix:** Name the agent from the planned restore (`planned.adapter.displayName`, passed to `writeEnvValues`), or say "restart your agent"; reword the comment as "the `${VAR}` / `${VAR:-default}` form the adapters' files use", or move the pattern into `EnvReferenceFiles` if agents may differ.

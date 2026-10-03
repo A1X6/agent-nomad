@@ -11,6 +11,11 @@ export interface CreateSecretStoreOptions extends ConfigDirInput {
   readonly keychain?: KeychainEntryFactory;
   /** For tests: see FileStoreOptions. */
   readonly restrictAccess?: (file: string) => Promise<void>;
+  /**
+   * Ends the keychain's session on the server when a newer login from the file replaces it
+   * (BUG-04). Best effort: a failure is ignored, the session then ends by itself.
+   */
+  readonly endReplacedSession?: (sessionToken: string) => Promise<void>;
 }
 
 /**
@@ -21,7 +26,9 @@ export interface CreateSecretStoreOptions extends ConfigDirInput {
  *
  * A keychain can also fail for a while (locked, a "Deny" click, slow at login), and the file
  * is used then. When it works again, a login left in the file is moved into it and removed
- * from the file (T46), so it is neither stranded nor left in plain text.
+ * from the file (T46), so it is neither stranded nor left in plain text. The file login wins
+ * over one still in the keychain: it can only have been saved while the keychain failed, so
+ * it is the later one (BUG-04).
  */
 export async function createSecretStore(options: CreateSecretStoreOptions): Promise<SecretStore> {
   const keychain = createKeychainStore(options.server, options.keychain ?? osKeychain);
@@ -38,20 +45,20 @@ export async function createSecretStore(options: CreateSecretStoreOptions): Prom
   } catch {
     return file;
   }
-  if (token === null) {
-    const [fileToken, fileKey] = await Promise.all([
-      file.get('session-token'),
-      file.get('data-key'),
-    ]).catch(() => [null, null] as const);
-    if (fileToken !== null && fileKey !== null) {
-      try {
-        await keychain.setMany({ 'session-token': fileToken, 'data-key': fileKey });
-      } catch {
-        return file;
-      }
-      await file.delete('session-token');
-      await file.delete('data-key');
-    }
+  const [fileToken, fileKey] = await Promise.all([
+    file.get('session-token'),
+    file.get('data-key'),
+  ]).catch(() => [null, null] as const);
+  if (fileToken === null || fileKey === null) return keychain;
+  try {
+    await keychain.setMany({ 'session-token': fileToken, 'data-key': fileKey });
+  } catch {
+    return file;
+  }
+  await file.delete('session-token');
+  await file.delete('data-key');
+  if (token !== null && token !== fileToken) {
+    await options.endReplacedSession?.(token).catch(() => undefined);
   }
   return keychain;
 }

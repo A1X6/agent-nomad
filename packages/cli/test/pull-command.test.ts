@@ -554,11 +554,50 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
       'Not restored:\n  - the Claude Code global setup: not asked about notes/extra.md, so left as they are',
     );
     expect(t.asked).toEqual([]);
+    // The revision is noted as partial, so a later push asks before replacing those files (BUG-05).
+    expect(await t.state.revisionOf('claude-code', 'global')).toBe(1);
+    expect(await t.state.isPartial('claude-code', 'global')).toBe(true);
 
     // With an answer for every file (--merge), there is nothing left unasked.
     const merged = pullOn(b, server, [], { adapter });
     await merged.pull({ global: true, yes: false, allowCommands: true, conflict: 'merge' });
     expect(merged.asked).toEqual([]);
+    expect(await merged.state.isPartial('claude-code', 'global')).toBe(false);
+  });
+
+  it('shows bundle paths with a line break on one line (SEC-04)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const base = claudeAdapter(b.home);
+    const adapter: AgentAdapter = {
+      ...base,
+      restorer: {
+        ...base.restorer,
+        conflicts: () => [
+          { path: 'asked.md\n  ~ hook: fake', question: { overwriteAllowed: true } },
+        ],
+      },
+      planRestore: async (context) => {
+        if (!base.planRestore) throw new Error('no plan step');
+        return {
+          ...(await base.planRestore(context)),
+          restore: async (onConflict) => {
+            await onConflict('left.md\nfake advice', { overwriteAllowed: true });
+            return { written: [], skipped: [], backups: [], warnings: [] };
+          },
+        };
+      },
+    };
+    const t = pullOn(b, server, ['skip'], { adapter });
+    await expect(t.pull({ global: true, yes: false, allowCommands: true })).rejects.toThrow(
+      'not asked about left.md\\u{000a}fake advice, so left as they are',
+    );
+    expect(t.asked).toEqual([
+      'asked.md\\u{000a}  ~ hook: fake already exists here and is different.',
+    ]);
+    expect(t.lines.join('\n')).toContain(
+      'Left as they are in the Claude Code global setup: left.md\\u{000a}fake advice.',
+    );
   });
 
   it('Ctrl+C at a file question stops pull before anything is written (T53, T59)', async () => {
