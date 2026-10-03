@@ -360,7 +360,8 @@ The scripts hooks and the status line run are found in the words each program ge
 (`settings-commands.ts`, one reading for push, pull and the review): a hook in exec form
 (`args` set) passes each `args` element as one word, spaces and all; a shell-form command is
 split like a shell, and a word that carries a command line (`bash -c "a.sh; true"`,
-`pwsh -Command "& 'a.ps1'"`) is split again, also on shell operators (`a.sh;`, `a.sh&&b`).
+`pwsh -Command "& 'a.ps1'"`) is split again, at any depth, also on shell operators (`a.sh;`,
+`a.sh&&b`).
 
 **Restore rules** (`restore-rules.ts`): a file is written only if a collector could have
 produced it. A home-folder file must be a known tool's settings or a script the setup's
@@ -375,7 +376,9 @@ only in case or Unicode form are one file on Windows and macOS: only the first i
 entry that cannot be written is skipped with a warning; the rest continue. `~/.claude.json`
 is only ever merged, with a backup: only `mcpServers` and the preference keys, never
 `projects` or account state. It is skipped while Claude Code is running (a process whose program is `claude` or the
-Claude app, or node running the npm package; an argument naming them does not count; it
+Claude app, or an interpreter or launcher such as `node`, `bun`, `sh` or `env` running
+Claude Code's script, as `node /usr/local/bin/claude`; an argument naming them does not
+count; it
 rewrites the file while open): pull's plan step asks to close it ("I closed it, continue" checks again,
 "Skip ~/.claude.json this time" leaves it with a warning; `--yes` never waits), and the
 restorer checks once more right before writing and leaves the file if it is open again. It is

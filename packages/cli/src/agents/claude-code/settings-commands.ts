@@ -102,24 +102,28 @@ export function commandWords(command: string): string[] {
 
 /** Shell operators, which end a word without a space: `a.sh;`, `a.sh&&b`, `$(cat a.sh)`. */
 const SHELL_OPERATORS = /[;&|()<>`]+/;
+/** Everything that can end a word: white space, quotes and shell operators. */
+const WORD_ENDS = /[\s"';&|()<>`]+/;
 
 /**
- * Every word of a command that can name a script (SEC-01): each word, the words of a
+ * Every word of a command that can name a script (SEC-01): each word; the words of a
  * command line a word carries (`bash -c "a.sh; true"`, `pwsh -Command "& 'a.ps1' -Flag"`,
- * `cmd /c "a.cmd && b"`), and the parts of all of them between shell operators. The whole
- * words stay in, so a quoted path with spaces is found too. Extra words only make the
- * review show more, never less.
+ * `cmd /c "a.cmd && b"`), again inside those, at any depth; and the parts of all of them
+ * between white space, quotes and shell operators. The whole words stay in, so a quoted
+ * path with spaces is found too. Extra words only make the review show more, never less.
  */
 export function pathWords(words: readonly string[]): string[] {
   const found = new Set<string>();
   const add = (word: string) => {
+    if (word === '' || found.has(word)) return;
     found.add(word);
-    for (const part of word.split(SHELL_OPERATORS)) if (part !== '') found.add(part);
-  };
-  for (const word of words) {
-    add(word);
+    for (const part of word.split(WORD_ENDS)) found.add(part);
+    for (const part of word.split(SHELL_OPERATORS)) add(part);
+    // Each pass removes a pair of quotes or splits the word, so this ends.
     if (/[\s"']/.test(word)) commandWords(word).forEach(add);
-  }
+  };
+  words.forEach(add);
+  found.delete('');
   return [...found];
 }
 

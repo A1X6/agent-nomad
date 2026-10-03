@@ -1088,6 +1088,7 @@ describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
 
   it.each([
     ['$CLAUDE_PROJECT_DIR/scripts/a.sh', ['scripts/a.sh']],
+    [`bash -c "bash -lc '$CLAUDE_PROJECT_DIR/scripts/a.sh arg; true'"`, ['scripts/a.sh']],
     ['scripts\\a.sh', ['scripts/a.sh']],
     ['~/a.sh', []],
     ['$HOME/a.sh', []],

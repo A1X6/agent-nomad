@@ -502,6 +502,8 @@ describe('reviewRunnable: a script a compound command runs (review 5 SEC-01)', (
     'bash ~/.claude/skills/x/run.sh',
     'bash -c "~/.claude/skills/x/run.sh; true"',
     'bash ~/.claude/skills/x/run.sh;',
+    // A command line inside a command line: found whatever the depth.
+    `bash -c "bash -lc '~/.claude/skills/x/run.sh arg; true'"`,
   ])('shows the changed script behind %j', (command) => {
     expect(labels(changed('skills/x/run.sh'), hereRuns(command, 'skills/x/run.sh'))).toEqual([
       'changed script',

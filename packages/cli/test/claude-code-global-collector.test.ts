@@ -273,6 +273,7 @@ describe('global collector: hook and status line scripts', () => {
   it('takes a script named inside a quoted command line or next to a ; (SEC-01)', async () => {
     await put(join(base, 'hooks', 'a.sh'));
     await put(join(base, 'hooks', 'b.sh'));
+    await put(join(base, 'hooks', 'c.sh'));
     const files = await withSettings({
       hooks: {
         Stop: [
@@ -280,12 +281,19 @@ describe('global collector: hook and status line scripts', () => {
             hooks: [
               { type: 'command', command: `bash -c "${join(base, 'hooks', 'a.sh')}; true"` },
               { type: 'command', command: `${join(base, 'hooks', 'b.sh')};` },
+              // A command line inside a command line.
+              {
+                type: 'command',
+                command: `bash -c "bash -lc '${join(base, 'hooks', 'c.sh')} arg; true'"`,
+              },
             ],
           },
         ],
       },
     });
-    expect(paths(files)).toEqual(expect.arrayContaining(['hooks/a.sh', 'hooks/b.sh']));
+    expect(paths(files)).toEqual(
+      expect.arrayContaining(['hooks/a.sh', 'hooks/b.sh', 'hooks/c.sh']),
+    );
   });
 
   it('understands ~ and $HOME in commands', async () => {

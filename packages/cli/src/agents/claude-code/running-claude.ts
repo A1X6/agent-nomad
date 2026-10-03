@@ -78,25 +78,56 @@ export function systemProcessLister(
  */
 const LEADING_FOLDERS = String.raw`(?:[^\s"]|\s(?![-/"]|[A-Za-z]:[\\/]))*[\\/]`;
 
-/** A command line whose program (the first word, quoted or not) is `name`. */
-const startsWithProgram = (name: string) =>
-  new RegExp(String.raw`^(?:"(?:[^"]*[\\/])?${name}"|(?:${LEADING_FOLDERS})?${name})(?:\s|$)`, 'i');
+/** The first word of a command line (quoted or not) when it is the file `name`, any folder. */
+const firstWordIs = (name: string) =>
+  new RegExp(
+    String.raw`^(?:"(?:[^"]*[\\/])?(?:${name})"|(?:${LEADING_FOLDERS})?(?:${name}))(?=\s|$)`,
+    'i',
+  );
 
-const CLAUDE_PROGRAM = startsWithProgram(String.raw`claude(?:\.exe)?`);
-const NODE_PROGRAM = startsWithProgram(String.raw`node(?:\.exe)?`);
+const CLAUDE_PROGRAM = firstWordIs(String.raw`claude(?:\.exe)?`);
+/** Interpreters and launchers that run a script: npm's `bin/claude` is a node script. */
+const LAUNCHER = firstWordIs(String.raw`(?:node|bun|deno|sh|bash|zsh|env)(?:\.exe)?`);
+const ENV = /(?:^|[\\/"])env(?:\.exe)?"?$/i;
+const CLAUDE_SCRIPT = firstWordIs(String.raw`claude(?:\.exe|\.cmd|\.js)?`);
+/** The script argument, quoted or not: unquoted, a space goes on as in LEADING_FOLDERS. */
+const SCRIPT_ARGUMENT = /^(?:"[^"]*"|(?:[^\s"]|\s(?![-/"]|[A-Za-z]:[\\/]))*)/;
+const NPM_PACKAGE = /@anthropic-ai[\\/]claude-code(?:[\\/]|$)/i;
+
+/** The command line after its first word and the options that follow it. */
+function afterFirstWord(line: string, first: string, assignments = false): string {
+  let rest = line.slice(first.length).trimStart();
+  const option = assignments ? /^(?:-|[A-Za-z_][A-Za-z0-9_]*=)\S*\s*/ : /^-\S*\s*/;
+  for (let match = option.exec(rest); match !== null; match = option.exec(rest)) {
+    rest = rest.slice(match[0].length);
+  }
+  return rest;
+}
 
 /**
  * True for a Claude Code process: the `claude` program (`claude.exe`, `/usr/local/bin/claude
- * --resume`, also under a folder with a space in its name) or the npm package running under
- * node. The Claude app (`Claude.exe`, `Claude.app/…/Claude`) counts too: its Code tab runs
- * Claude Code, which shares `~/.claude.json` (BUG-13). Only the program counts (UX-02): not an
- * editor open on a `claude` folder, `npm install -g @anthropic-ai/claude-code`, this CLI or
- * unrelated names.
+ * --resume`, also under a folder with a space in its name), or an interpreter or launcher
+ * (`node`, `bun`, `deno`, `sh`, `bash`, `zsh`, `env`) whose script is `claude`, `claude.js`,
+ * `claude.cmd`, `claude.exe` or in the npm package: npm links `bin/claude` to a node script,
+ * so `ps` shows `node /usr/local/bin/claude`. The Claude app (`Claude.exe`,
+ * `Claude.app/…/Claude`) counts too: its Code tab runs Claude Code, which shares
+ * `~/.claude.json` (BUG-13). Only the program and its script count (UX-02): not an editor open
+ * on a `claude` folder, `npm install -g @anthropic-ai/claude-code`, this CLI or unrelated
+ * names. Any launcher with such a script counts, so the check leans toward "running": a
+ * missed Claude Code would let pull merge `~/.claude.json` under it.
  */
 export function isClaudeProcess(line: string): boolean {
   const trimmed = line.trim();
   if (CLAUDE_PROGRAM.test(trimmed)) return true;
-  return NODE_PROGRAM.test(trimmed) && /@anthropic-ai[\\/]claude-code/i.test(trimmed);
+  const launcher = LAUNCHER.exec(trimmed)?.[0];
+  if (launcher === undefined) return false;
+  let rest = afterFirstWord(trimmed, launcher, ENV.test(launcher));
+  if (ENV.test(launcher)) {
+    // env starts the program named next (`env node …`), or Claude Code itself.
+    if (CLAUDE_PROGRAM.test(rest)) return true;
+    rest = afterFirstWord(rest, /^(?:"[^"]*"|\S*)/.exec(rest)?.[0] ?? '');
+  }
+  return CLAUDE_SCRIPT.test(rest) || NPM_PACKAGE.test(SCRIPT_ARGUMENT.exec(rest)?.[0] ?? '');
 }
 
 /**
