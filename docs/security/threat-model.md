@@ -124,6 +124,7 @@ Found in the 2026-10-03 code review (review 4), about threat 13:
 | 41  | Medium   | One malformed hook or MCP server hid every hook or server in that file from the pull review.                                  | Hooks and MCP servers are read one by one; one that cannot be read is shown as unreadable (its JSON), never left out, and hides no other (T69). |
 | 42  | Low      | A ` ```! ` block was missed when an earlier code block held a fence line of the other character.                              | A fence closes only on the same character, at least as long; a fence still opens at any indentation, so a block in a list item is shown (T69).  |
 | 43  | Low      | Review lists printed commands from a bundle with their real line breaks, so a command could look like several harmless lines. | The label and command of each review entry go through `printableLine`, which shows line breaks escaped (T71).                                   |
+| 44  | Medium   | Downloads had no per-account limit, so one account could loop 5 MB downloads.                                                 | 600 downloads per account per hour (the list of setups counts too), answered with the same `429` as the other limits (T77).                     |
 
 ## Accepted risks
 
