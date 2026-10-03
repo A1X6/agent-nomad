@@ -120,7 +120,7 @@ describe('the Settings value in reg query output (QA-07)', () => {
     ['', 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\ClaudeCode', line, '', ''].join('\r\n');
 
   it.each([
-    ['REG_SZ', '    Settings    REG_SZ    {"model":"opus"}', '{"model":"opus"}'],
+    ['a REG_SZ value', '    Settings    REG_SZ    {"model":"opus"}', '{"model":"opus"}'],
     [
       'REG_EXPAND_SZ',
       '    Settings    REG_EXPAND_SZ    {"env":{"A":"%HOME%"}}',
@@ -131,7 +131,7 @@ describe('the Settings value in reg query output (QA-07)', () => {
       '    Settings    REG_SZ    { "permissions": { "deny": ["Bash(rm -rf)"] } }',
       '{ "permissions": { "deny": ["Bash(rm -rf)"] } }',
     ],
-  ])('reads a %s value', (_, line, value) => {
+  ])('reads %s', (_, line, value) => {
     expect(parseRegSettings(regOutput(line))).toBe(value);
   });
 
