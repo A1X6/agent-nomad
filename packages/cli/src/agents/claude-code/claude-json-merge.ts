@@ -9,8 +9,15 @@ import {
   CLAUDE_JSON_MCP_KEY,
   CLAUDE_JSON_PREFERENCE_KEYS,
 } from './global-paths.ts';
-import { ClaudeJsonError } from './global-collector.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
+
+/** `~/.claude.json` could not be read as JSON (e.g. Claude Code was writing it). */
+export class ClaudeJsonError extends Error {
+  constructor(path: string, options?: ErrorOptions) {
+    super(`Could not read ${path}. If Claude Code is running, try again in a moment.`, options);
+    this.name = 'ClaudeJsonError';
+  }
+}
 
 /** `~/.claude.json`'s question: never replaced, only merged or skipped. */
 export const CLAUDE_JSON_QUESTION: ConflictQuestion = {

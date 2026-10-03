@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 
 import * as z from 'zod';
 
+import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import type { CollectedFile } from '../adapter.ts';
 import type { FileGatherer } from './file-gathering.ts';
 import { RESERVED_DIR } from './global-paths.ts';
@@ -63,15 +64,7 @@ export async function readSyncedSkills(
     if (!account.isDirectory() || account.name.startsWith('.')) continue;
     const accountDir = path.join(root, account.name);
     const text = await readFile(path.join(accountDir, 'manifest.json'), 'utf8').catch(() => null);
-    let manifest: z.infer<typeof ManifestSchema> | null = null;
-    if (text !== null) {
-      try {
-        const parsed = ManifestSchema.safeParse(JSON.parse(text));
-        if (parsed.success) manifest = parsed.data;
-      } catch {
-        // Treated like an unknown format below.
-      }
-    }
+    const manifest = text === null ? null : valueOrNull(parseJsonWith(ManifestSchema, text));
     if (manifest === null) {
       problem = `Claude Code's list of synced skills (${SYNCED_SKILLS_DIR}/${account.name}/manifest.json) is missing or in a format agentnomad does not know.`;
       continue;

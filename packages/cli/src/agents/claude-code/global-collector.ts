@@ -18,10 +18,11 @@ import {
   PROGRAMS_BUNDLE_PATH,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
+import { ClaudeJsonError } from './claude-json-merge.ts';
 import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
-import type { ProgramInfo, ProgramLocator } from './programs.ts';
+import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
 
 export interface GlobalCollectorOptions {
   /** Claude Code's base folder, from the detector (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -32,14 +33,6 @@ export interface GlobalCollectorOptions {
   readonly customConfigDir: boolean;
   /** Looks up programs hooks and the status line run; without it none are recorded. */
   readonly findProgram?: ProgramLocator;
-}
-
-/** `~/.claude.json` could not be read as JSON (e.g. Claude Code was writing it). */
-export class ClaudeJsonError extends Error {
-  constructor(path: string, options?: ErrorOptions) {
-    super(`Could not read ${path}. If Claude Code is running, try again in a moment.`, options);
-    this.name = 'ClaudeJsonError';
-  }
 }
 
 /** True when `bundlePath` is a never-synced entry or inside one. */
@@ -68,9 +61,14 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
    * For each program the commands run: its known settings file (e.g. ccstatusline's) and,
    * unless it runs through npx, what it is and how it was installed, so pull can check it.
    */
-  async function programs(files: FileGatherer, settingsJson: string): Promise<CollectedFile[]> {
+  async function programs(
+    files: FileGatherer,
+    settingsJson: string,
+    onSkipped: CollectOptions['onSkipped'],
+  ): Promise<CollectedFile[]> {
     const found: CollectedFile[] = [];
-    const programsFound = new Map<string, ProgramInfo>();
+    // `null`: left out, as pull would refuse it.
+    const programsFound = new Map<string, ProgramInfo | null>();
     for (const command of commandsInSettings(settingsJson)) {
       const program = programOf(command);
       if (program === null) continue;
@@ -81,18 +79,21 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         );
         if (file) found.push(file);
       }
-      if (!program.runner && !programsFound.has(program.name)) {
-        const info = (await options.findProgram?.(program.name)) ?? {
+      if (!program.runner && !programsFound.has(program.name) && options.findProgram) {
+        const info = (await options.findProgram(program.name)) ?? {
           command: program.name,
           npm: null,
         };
-        programsFound.set(program.name, info);
+        // Checked as pull checks it (BUG-01): an entry pull refuses is said here, not saved.
+        const accepted = ProgramEntrySchema.safeParse(info).success;
+        if (!accepted) onSkipped?.(`program ${program.name}`, 'pull refuses its name or package');
+        programsFound.set(program.name, accepted ? info : null);
       }
     }
-    if (programsFound.size > 0 && options.findProgram) {
-      const list = [...programsFound.values()].sort((a, b) => a.command.localeCompare(b.command));
-      found.push(jsonFile(PROGRAMS_BUNDLE_PATH, { programs: list }));
-    }
+    const list = [...programsFound.values()]
+      .filter((info): info is ProgramInfo => info !== null)
+      .sort((a, b) => a.command.localeCompare(b.command));
+    if (list.length > 0) found.push(jsonFile(PROGRAMS_BUNDLE_PATH, { programs: list }));
     return found;
   }
 
@@ -155,7 +156,10 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       const settings = found.find((file) => file.path === 'settings.json');
       if (settings) {
         const text = new TextDecoder().decode(settings.content);
-        found.push(...(await hookScriptFiles(files, text)), ...(await programs(files, text)));
+        found.push(
+          ...(await hookScriptFiles(files, text)),
+          ...(await programs(files, text, collectOptions.onSkipped)),
+        );
       }
 
       const selected = await claudeJson();

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -13,8 +13,11 @@ import {
   projectDestination,
   readCurrentPlugins,
   readPluginManifest,
-  syncPlugins,
-  type ClaudeCli,
+  askPluginSync,
+  installPlugins,
+  type AskPluginSyncDeps,
+  type InstallPluginsDeps,
+  type ProgramCli,
   type PluginManifest,
 } from '../src/index.ts';
 
@@ -190,7 +193,7 @@ const manifest: PluginManifest = {
 
 function fakeClaude(failures: Record<string, string> = {}) {
   const runs: string[] = [];
-  const claude: ClaudeCli = {
+  const claude: ProgramCli = {
     run: (args, cwd) => {
       runs.push(`${args.join(' ')} @ ${cwd}`);
       const key = args.join(' ');
@@ -222,7 +225,7 @@ function run(options: {
   const asked: string[] = [];
   const lines: string[] = [];
   const { claude, runs } = fakeClaude(options.failures);
-  const done = syncPlugins({
+  const deps: AskPluginSyncDeps & InstallPluginsDeps = {
     manifest,
     current: options.current ?? { marketplaces: new Set(), installed: new Set() },
     claude,
@@ -240,7 +243,9 @@ function run(options: {
     cwd: '/work/app',
     ...(options.assumeYes !== undefined && { assumeYes: options.assumeYes }),
     ...(options.allowCommands !== undefined && { allowCommands: options.allowCommands }),
-  });
+  };
+  // As pull does it: the questions in the plan step, the installs after writing (T61).
+  const done = askPluginSync(deps).then((choice) => installPlugins(choice, deps));
   return { done, asked, lines, runs };
 }
 
@@ -341,5 +346,59 @@ describe('plugin reinstall on pull', () => {
     expect(current.installed.has('brag@brag|user')).toBe(true);
     expect(current.installed.has('team-lint@company|project')).toBe(true);
     expect(current.installed.has('other@company|project')).toBe(false);
+  });
+});
+
+describe('push saves only what pull accepts (BUG-01)', () => {
+  it('leaves out, with why, a marketplace URL or plugin name pull would refuse', async () => {
+    await put(join(base, 'plugins', 'installed_plugins.json'), {
+      plugins: {
+        'ok@plain': [{ scope: 'user' }],
+        'tool@encoded': [{ scope: 'user' }],
+        'tool@query': [{ scope: 'user' }],
+        '.x@plain': [{ scope: 'user' }],
+      },
+    });
+    await put(join(base, 'plugins', 'known_marketplaces.json'), {
+      plain: { source: { source: 'url', url: 'https://host/market.json' } },
+      encoded: { source: { source: 'url', url: 'https://host/my%20market.json' } },
+      query: { source: { source: 'url', url: 'https://host/m.json?a=1&b=2' } },
+    });
+    const manifest = await readPluginManifest({
+      baseDir: base,
+      platform: process.platform,
+      scope: { kind: 'global' },
+    });
+    expect(manifest?.plugins.map((plugin) => plugin.id)).toEqual(['ok@plain']);
+    expect(manifest?.skipped).toEqual([
+      { what: 'tool@encoded', reason: 'its marketplace address has characters pull refuses' },
+      { what: 'tool@query', reason: 'its marketplace address has characters pull refuses' },
+      { what: '.x@plain', reason: 'unexpected plugin name' },
+    ]);
+    expect(PluginManifestSchema.safeParse(manifest).success).toBe(true);
+  });
+});
+
+describe('one reader of installed_plugins.json (BUG-03)', () => {
+  it('counts a project install whose path is written another way as installed', async () => {
+    await put(join(base, 'plugins', 'installed_plugins.json'), {
+      plugins: { 'lint@company': [{ scope: 'project', projectPath: `${project()}${sep}` }] },
+    });
+    const current = await readCurrentPlugins(base, process.platform, project());
+    expect(current.installed.has('lint@company|project')).toBe(true);
+    const saved = await readPluginManifest({
+      baseDir: base,
+      platform: process.platform,
+      scope: { kind: 'project', projectDir: project() },
+    });
+    expect(saved?.skipped.map((entry) => entry.what)).toEqual(['lint@company']);
+  });
+
+  it.runIf(process.platform === 'win32')('ignores the case of a Windows path', async () => {
+    await put(join(base, 'plugins', 'installed_plugins.json'), {
+      plugins: { 'lint@company': [{ scope: 'project', projectPath: project().toUpperCase() }] },
+    });
+    const current = await readCurrentPlugins(base, 'win32', project());
+    expect(current.installed.has('lint@company|project')).toBe(true);
   });
 });

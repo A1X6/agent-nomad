@@ -406,6 +406,35 @@ describe('global collector: programs the status line and hooks need', () => {
     });
   });
 
+  it('leaves out, and says so, a program pull would refuse (BUG-01)', async () => {
+    await put(
+      join(base, 'settings.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: 'command', command: '_tool --x' }] },
+            { hooks: [{ type: 'command', command: 'terminal-notifier -message done' }] },
+          ],
+        },
+      }),
+    );
+    const skipped: string[] = [];
+    const files = await createClaudeCodeGlobalCollector({
+      baseDir: base,
+      homedir: home,
+      platform: process.platform,
+      customConfigDir: false,
+      findProgram: (command) => Promise.resolve({ command, npm: null }),
+    }).collect(
+      { kind: 'global' },
+      { includeMemory: false, onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`) },
+    );
+    expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
+      programs: [{ command: 'terminal-notifier', npm: null }],
+    });
+    expect(skipped).toEqual(['program _tool: pull refuses its name or package']);
+  });
+
   it.each([
     ['ccstatusline', { name: 'ccstatusline', runner: false }],
     ['npx -y ccstatusline@latest', { name: 'ccstatusline', runner: true }],

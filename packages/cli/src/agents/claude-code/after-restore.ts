@@ -1,7 +1,5 @@
 import { readdir } from 'node:fs/promises';
 
-import * as z from 'zod';
-
 import type {
   AfterRestoreContext,
   CollectedFile,
@@ -25,48 +23,18 @@ import { PLUGINS_BUNDLE_PATH, PROGRAMS_BUNDLE_PATH } from './global-paths.ts';
 import { explainPluginFailure, type ManagedSettings } from './managed-settings.ts';
 import {
   askPluginSync,
-  createClaudeCli,
+  createProgramCli,
   installPlugins,
   readCurrentPlugins,
-  type ClaudeCli,
+  type ProgramCli,
 } from './plugin-sync.ts';
-import { PluginManifestSchema } from './plugins.ts';
-import { NPM_PACKAGE_NAME, NPM_VERSION } from './programs.ts';
-
-/** `.agentnomad/programs.json`, checked before anything from it reaches a command line. */
-const ProgramsFileSchema = z.strictObject({
-  programs: z.array(
-    z.strictObject({
-      command: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
-      npm: z
-        .strictObject({
-          package: z.string().regex(NPM_PACKAGE_NAME),
-          version: z.string().regex(NPM_VERSION),
-        })
-        .nullable(),
-    }),
-  ),
-});
-
-function readJson<S extends z.ZodType>(
-  files: readonly CollectedFile[],
-  path: string,
-  schema: S,
-): z.infer<S> | null {
-  const file = files.find((entry) => entry.path === path);
-  if (!file) return null;
-  try {
-    const parsed = schema.safeParse(JSON.parse(new TextDecoder().decode(file.content)));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
+import { readSavedPlugins } from './plugins.ts';
+import { readSavedPrograms } from './programs.ts';
 
 export interface AfterRestoreDeps {
   readonly system: ExecutableLookupSystem;
   /** Runs a found program (`claude`, `npm`); injected for tests. */
-  readonly cli?: (path: string) => ClaudeCli;
+  readonly cli?: (path: string) => ProgramCli;
   /** Writes saved claude.ai skills as local skills (T42), with the restorer's safety rules. */
   readonly restorer?: Restorer;
   /** Organization-managed settings on this PC (T31), read through the adapter (SOLID-01). */
@@ -91,11 +59,24 @@ const nothingToDo: FollowUp = () => Promise.resolve();
  * follow-up it returns only installs what was agreed to.
  */
 export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
-  const cli = deps.cli ?? ((path: string) => createClaudeCli(path, deps.system));
+  const cli = deps.cli ?? ((path: string) => createProgramCli(path, deps.system));
 
   async function plugins(context: FollowUpPlanContext): Promise<FollowUp> {
-    const manifest = readJson(context.files, PLUGINS_BUNDLE_PATH, PluginManifestSchema);
-    if (manifest === null || manifest.plugins.length === 0) return nothingToDo;
+    const file = context.files.find((entry) => entry.path === PLUGINS_BUNDLE_PATH);
+    if (!file) return nothingToDo;
+    // Said, never dropped silently (BUG-01): the rest of the file is still offered.
+    const saved = readSavedPlugins(file.content);
+    if (!('value' in saved)) {
+      context.reporter.warn(`Saved plugins could not be read: ${saved.problem}`);
+      return nothingToDo;
+    }
+    const { manifest, refused } = saved.value;
+    for (const entry of refused) {
+      context.reporter.warn(
+        `A saved plugin entry was left out, as it is not safe to pass to Claude Code: ${entry}`,
+      );
+    }
+    if (manifest.plugins.length === 0) return nothingToDo;
     const claudePath = await findClaudeExecutable(deps.system);
     if (claudePath === null) {
       context.reporter.warn(
@@ -126,10 +107,20 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
   }
 
   async function programs(context: FollowUpPlanContext): Promise<FollowUp> {
-    const saved = readJson(context.files, PROGRAMS_BUNDLE_PATH, ProgramsFileSchema);
-    if (saved === null) return nothingToDo;
+    const file = context.files.find((entry) => entry.path === PROGRAMS_BUNDLE_PATH);
+    if (!file) return nothingToDo;
+    const saved = readSavedPrograms(file.content);
+    if (!('value' in saved)) {
+      context.reporter.warn(`Saved programs could not be read: ${saved.problem}`);
+      return nothingToDo;
+    }
+    for (const entry of saved.value.refused) {
+      context.reporter.warn(
+        `A saved program entry was left out, as it is not safe to pass to npm: ${entry}`,
+      );
+    }
     const installs: { readonly npmPath: string; readonly spec: string }[] = [];
-    for (const program of saved.programs) {
+    for (const program of saved.value.programs) {
       if ((await findExecutable(deps.system, program.command)) !== null) continue;
       if (program.npm === null) {
         context.reporter.warn(

@@ -9,7 +9,7 @@ import {
   globalDestination,
   managedSettingsDir,
   managedSettingsNotice,
-  syncPlugins,
+  installPlugins,
   type ManagedSettingsSystem,
 } from '../src/index.ts';
 
@@ -188,13 +188,12 @@ describe('warnings (T31 done-when)', () => {
   });
 
   it('a plugin blocked by policy gets a clear reason', async () => {
-    const result = await syncPlugins({
-      manifest: {
-        marketplaces: [],
-        plugins: [{ id: 'tool@evil-market', scope: 'user', commandSource: false }],
-        skipped: [],
-      },
-      current: { marketplaces: new Set(['evil-market']), installed: new Set() },
+    const choice = {
+      marketplaces: [],
+      plugins: [{ id: 'tool@evil-market', scope: 'user' as const, commandSource: false }],
+      declined: [],
+    };
+    const result = await installPlugins(choice, {
       claude: {
         run: () =>
           Promise.resolve({
@@ -206,8 +205,7 @@ describe('warnings (T31 done-when)', () => {
             stderr: '',
           }),
       },
-      prompter: { confirm: () => Promise.resolve(true) },
-      reporter: { info: () => undefined, success: () => undefined, warn: () => undefined },
+      reporter: { success: () => undefined, warn: () => undefined },
       cwd: '/',
       explainFailure: (reason) => explainPluginFailure(reason, found),
     });

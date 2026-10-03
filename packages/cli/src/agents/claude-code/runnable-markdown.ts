@@ -11,21 +11,31 @@ export function runnableInMarkdown(text: string): string[] {
   if (frontmatter?.[1] !== undefined && /^hooks\s*:/m.test(frontmatter[1])) {
     found.push('hooks in its frontmatter');
   }
-  let inFence: 'plain' | 'command' | null = null;
+  // The open code block and its fence: as in CommonMark, only a fence of the same character,
+  // at least as long and with nothing after it, closes it (SEC-02).
+  let open: { readonly kind: 'plain' | 'command'; readonly fence: string } | null = null;
   const block: string[] = [];
   for (const line of text.split(/\r?\n/)) {
-    const fence = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
-    if (inFence === null && fence) {
-      inFence = fence[2]?.trim() === '!' ? 'command' : 'plain';
+    // Indented 4 spaces or more, a fence line is plain text.
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    const marks = fence?.[1] ?? '';
+    const after = (fence?.[2] ?? '').trim();
+    if (open === null && fence) {
+      open = { kind: after === '!' ? 'command' : 'plain', fence: marks };
       continue;
     }
-    if (inFence !== null && fence && (fence[2] ?? '').trim() === '') {
-      if (inFence === 'command') found.push(`! block: ${block.join('; ')}`);
+    if (
+      open !== null &&
+      after === '' &&
+      marks.startsWith(open.fence[0] ?? '') &&
+      marks.length >= open.fence.length
+    ) {
+      if (open.kind === 'command') found.push(`! block: ${block.join('; ')}`);
       block.length = 0;
-      inFence = null;
+      open = null;
       continue;
     }
-    if (inFence === 'command') {
+    if (open?.kind === 'command') {
       if (line.trim() !== '') block.push(line.trim());
       continue;
     }
@@ -35,6 +45,6 @@ export function runnableInMarkdown(text: string): string[] {
       found.push(`!\`${match[1] ?? ''}\``);
     }
   }
-  if (inFence === 'command' && block.length > 0) found.push(`! block: ${block.join('; ')}`);
+  if (open?.kind === 'command' && block.length > 0) found.push(`! block: ${block.join('; ')}`);
   return found;
 }

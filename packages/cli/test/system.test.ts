@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { nodeManagedSettingsSystem } from '../src/agents/claude-code/managed-settings.ts';
-import { createClaudeCli, type StartProgram } from '../src/agents/claude-code/plugin-sync.ts';
+import { createProgramCli, type StartProgram } from '../src/agents/claude-code/plugin-sync.ts';
 import {
   createClaudeRunningCheck,
   systemProcessLister,
@@ -31,10 +31,10 @@ function fakeStart() {
 
 const windowsPc = { platform: 'win32' as const, env: {} };
 
-describe('createClaudeCli: the command line (every OS)', () => {
+describe('createProgramCli: the command line (every OS)', () => {
   it('runs a Windows .cmd launcher through cmd.exe with one verbatim command line', async () => {
     const { calls, start } = fakeStart();
-    const cli = createClaudeCli('C:\\Program Files\\nodejs\\npm.cmd', windowsPc, { start });
+    const cli = createProgramCli('C:\\Program Files\\nodejs\\npm.cmd', windowsPc, { start });
     const run = await cli.run(['install', '-g', 'pkg@1.0.0'], 'C:\\Users\\me');
     expect(run).toEqual({ exitCode: 0, stdout: 'ok', stderr: '' });
     expect(calls).toEqual([
@@ -48,14 +48,17 @@ describe('createClaudeCli: the command line (every OS)', () => {
 
   it('treats .bat the same, whatever the case of the extension', async () => {
     const { calls, start } = fakeStart();
-    await createClaudeCli('C:\\tools\\claude.BAT', windowsPc, { start }).run(['--version'], 'C:\\');
+    await createProgramCli('C:\\tools\\claude.BAT', windowsPc, { start }).run(
+      ['--version'],
+      'C:\\',
+    );
     expect(calls[0]?.file).toBe('cmd.exe');
     expect(calls[0]?.args.at(-1)).toBe('""C:\\tools\\claude.BAT" --version"');
   });
 
   it('runs a Windows .exe directly, letting Node quote the arguments', async () => {
     const { calls, start } = fakeStart();
-    const cli = createClaudeCli('C:\\Users\\me\\.local\\bin\\claude.exe', windowsPc, { start });
+    const cli = createProgramCli('C:\\Users\\me\\.local\\bin\\claude.exe', windowsPc, { start });
     await cli.run(['plugin', 'marketplace', 'add', 'C:\\My Plugins'], 'C:\\');
     expect(calls).toEqual([
       {
@@ -68,7 +71,7 @@ describe('createClaudeCli: the command line (every OS)', () => {
 
   it('chooses the .cmd branch from the injected platform, not from the PC running it', async () => {
     const { calls, start } = fakeStart();
-    await createClaudeCli('/home/me/bin/tool.cmd', { platform: 'linux', env: {} }, { start }).run(
+    await createProgramCli('/home/me/bin/tool.cmd', { platform: 'linux', env: {} }, { start }).run(
       ['a b'],
       '/home/me',
     );
@@ -89,7 +92,7 @@ describe('createClaudeCli: the command line (every OS)', () => {
     ['an empty argument', ''],
   ])('refuses an argument with %s for a .cmd launcher, starting nothing', async (_, arg) => {
     const { calls, start } = fakeStart();
-    const cli = createClaudeCli('C:\\nodejs\\npm.cmd', windowsPc, { start });
+    const cli = createProgramCli('C:\\nodejs\\npm.cmd', windowsPc, { start });
     const run = await cli.run(['install', '-g', arg], 'C:\\');
     expect(run).toEqual({ exitCode: 1, stdout: '', stderr: 'Unsafe characters for cmd.exe' });
     expect(calls).toEqual([]);
@@ -97,7 +100,7 @@ describe('createClaudeCli: the command line (every OS)', () => {
 
   it('quotes an argument with spaces for a .cmd launcher, e.g. a local marketplace folder', async () => {
     const { calls, start } = fakeStart();
-    const cli = createClaudeCli('C:\\nodejs\\claude.cmd', windowsPc, { start });
+    const cli = createProgramCli('C:\\nodejs\\claude.cmd', windowsPc, { start });
     await cli.run(['plugin', 'marketplace', 'add', 'C:\\My Plugins', 'C:\\My Plugins\\'], 'C:\\');
     expect(calls).toEqual([
       {
@@ -116,7 +119,7 @@ describe('createClaudeCli: the command line (every OS)', () => {
 
   it('refuses a .cmd launcher whose path cmd.exe would change (%, !, ")', async () => {
     const { calls, start } = fakeStart();
-    const cli = createClaudeCli('C:\\100%\\npm.cmd', windowsPc, { start });
+    const cli = createProgramCli('C:\\100%\\npm.cmd', windowsPc, { start });
     expect((await cli.run(['--version'], 'C:\\')).exitCode).toBe(1);
     expect(calls).toEqual([]);
   });
@@ -192,11 +195,11 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
   });
 
   it.runIf(win32)(
-    'createClaudeCli runs a real .cmd launcher and passes its arguments',
+    'createProgramCli runs a real .cmd launcher and passes its arguments',
     async () => {
       const launcher = join(dir, 'echo-args.cmd');
       await writeFile(launcher, '@echo off\r\necho ARGS:%*\r\n');
-      const cli = createClaudeCli(launcher, { platform: 'win32', env: process.env });
+      const cli = createProgramCli(launcher, { platform: 'win32', env: process.env });
       const run = await cli.run(['install', '-g', '@scope/pkg@1.0.0'], dir);
       expect(run.stderr).toBe('');
       expect(run.exitCode).toBe(0);
@@ -205,7 +208,7 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
   );
 
   it.runIf(win32)(
-    'createClaudeCli passes a path with spaces through a real npm-style .cmd launcher intact',
+    'createProgramCli passes a path with spaces through a real npm-style .cmd launcher intact',
     async () => {
       // Like npm's launcher for Claude Code: node runs the script with every argument (%*).
       await writeFile(
@@ -216,7 +219,7 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
       await writeFile(launcher, `@echo off\r\n"${process.execPath}" "%~dp0print-args.js" %*\r\n`);
       const folder = join(dir, 'My Plugins');
       const args = ['plugin', 'marketplace', 'add', folder, `${folder}\\`, 'two  spaces'];
-      const run = await createClaudeCli(launcher, { platform: 'win32', env: process.env }).run(
+      const run = await createProgramCli(launcher, { platform: 'win32', env: process.env }).run(
         args,
         dir,
       );
@@ -226,21 +229,21 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
     },
   );
 
-  it.runIf(win32)('createClaudeCli reports the exit code of a failing .cmd launcher', async () => {
+  it.runIf(win32)('createProgramCli reports the exit code of a failing .cmd launcher', async () => {
     const launcher = join(dir, 'fail.cmd');
     await writeFile(launcher, '@echo off\r\nexit /b 3\r\n');
-    const run = await createClaudeCli(launcher, { platform: 'win32', env: process.env }).run(
+    const run = await createProgramCli(launcher, { platform: 'win32', env: process.env }).run(
       [],
       dir,
     );
     expect(run.exitCode).toBe(3);
   });
 
-  it.runIf(posix)('createClaudeCli runs a real program with its arguments as given', async () => {
+  it.runIf(posix)('createProgramCli runs a real program with its arguments as given', async () => {
     const program = join(dir, 'echo-args');
     await writeFile(program, '#!/bin/sh\nprintf "ARGS:%s|" "$@"\n');
     await chmod(program, 0o755);
-    const cli = createClaudeCli(program, { platform: process.platform, env: process.env });
+    const cli = createProgramCli(program, { platform: process.platform, env: process.env });
     const run = await cli.run(['install', 'two words'], dir);
     expect(run.exitCode).toBe(0);
     expect(run.stdout).toBe('ARGS:install|ARGS:two words|');

@@ -1,8 +1,8 @@
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { createFileGatherer, type FileGatherer, jsonFile, uniqueByPath } from './file-gathering.ts';
-import { commandsInSettings, commandWords } from './settings-commands.ts';
-import { PLUGINS_BUNDLE_PATH, SCRIPT_EXTENSIONS } from './global-paths.ts';
+import { PLUGINS_BUNDLE_PATH } from './global-paths.ts';
+import { projectHookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
@@ -32,28 +32,19 @@ const isNeverSynced = (bundlePath: string) =>
 export function createClaudeCodeProjectCollector(options: ProjectCollectorOptions): Collector {
   const { path } = createFileGatherer(options.platform);
 
-  /**
-   * Scripts the project's hooks run, when they are inside the project: written as
-   * `$CLAUDE_PROJECT_DIR/...` or relative to the project (hooks start there).
-   */
-  async function hookScripts(
+  /** The script files the project's hooks run, when they are inside the project. */
+  async function projectHookScriptFiles(
     files: FileGatherer,
     projectDir: string,
     settingsJson: string,
   ): Promise<CollectedFile[]> {
     const found: CollectedFile[] = [];
-    const projectVariable =
-      /^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\}|%CLAUDE_PROJECT_DIR%)(?=[\\/]|$)/i;
-    for (const command of commandsInSettings(settingsJson)) {
-      for (const word of commandWords(command)) {
-        const expanded = word.replace(projectVariable, () => projectDir);
-        if (!SCRIPT_EXTENSIONS.has(path.extname(expanded).toLowerCase())) continue;
-        const nativePath = path.resolve(projectDir, expanded);
-        const bundlePath = files.relativeInside(projectDir, nativePath);
-        if (bundlePath === null || isNeverSynced(bundlePath)) continue;
-        const file = await files.readIfFile(nativePath, bundlePath);
-        if (file) found.push(file);
-      }
+    for (const script of projectHookScripts(settingsJson, {
+      projectDir,
+      platform: options.platform,
+    })) {
+      const file = await files.readIfFile(script.nativePath, script.bundlePath);
+      if (file) found.push(file);
     }
     return found;
   }
@@ -112,7 +103,11 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
         const file = found.find((entry) => entry.path === settings);
         if (file)
           found.push(
-            ...(await hookScripts(files, projectDir, new TextDecoder().decode(file.content))),
+            ...(await projectHookScriptFiles(
+              files,
+              projectDir,
+              new TextDecoder().decode(file.content),
+            )),
           );
       }
       if (collectOptions.includeMemory) {

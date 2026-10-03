@@ -4,13 +4,10 @@
  * `skills/synced/...` or a path outside the target, is refused, so a damaged or tampered
  * bundle cannot write where it should not.
  */
-import { posix } from 'node:path';
-
 import { BundlePathSchema } from '@agentnomad/contracts';
 import { windowsNameProblem } from '@agentnomad/core';
 
 import { ENV_BUNDLE_PATH } from '../../env/env-section.ts';
-import { commandsInSettings, commandWords } from './settings-commands.ts';
 
 import {
   CLAUDE_JSON_BUNDLE_PATH,
@@ -62,21 +59,24 @@ const refused = (reason: string): RestoreDestination => ({ kind: 'refused', reas
 
 /**
  * Home files a bundle may restore: known tool settings, or scripts that the setup's own hooks
- * or status line run (`hookScripts`, T38). Any other file could be one that runs by itself
+ * or status line run (`allowedScripts`, T38). Any other file could be one that runs by itself
  * (a Startup folder, a shell or PowerShell profile) without ever being shown for review; those
  * places are refused even when a hook names them (T43).
  */
-function homeDestination(relative: string, hookScripts: ReadonlySet<string>): RestoreDestination {
+function homeDestination(
+  relative: string,
+  allowedScripts: ReadonlySet<string>,
+): RestoreDestination {
   const problem = homePathProblem(relative);
   if (problem !== null) return refused(problem);
   const toolSettings = Object.values(TOOL_CONFIG_FILES).flat();
-  if (toolSettings.includes(relative) || hookScripts.has(HOME_SCRIPTS_PREFIX + relative))
+  if (toolSettings.includes(relative) || allowedScripts.has(HOME_SCRIPTS_PREFIX + relative))
     return { kind: 'home', path: relative };
   return refused('no hook or status line in this setup runs it');
 }
 
 /**
- * Where a global bundle entry goes. `hookScripts`: bundle paths of the scripts the setup's
+ * Where a global bundle entry goes. `allowedScripts`: bundle paths of the scripts the setup's
  * own hooks and status line run (from its `settings.json`). As in the home folder, a script
  * outside the synced folders is restored only when one of those runs it, and never in Claude
  * Code's own state (T55), so a bundle cannot replace a launcher such as
@@ -84,7 +84,7 @@ function homeDestination(relative: string, hookScripts: ReadonlySet<string>): Re
  */
 export function globalDestination(
   path: string,
-  hookScripts: ReadonlySet<string>,
+  allowedScripts: ReadonlySet<string>,
 ): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
   if (path === CLAUDE_JSON_BUNDLE_PATH) return { kind: 'claude-json' };
@@ -94,7 +94,7 @@ export function globalDestination(
   // Saved claude.ai skills (T42): written only by pull's follow-up, after asking.
   if (path.startsWith(ACCOUNT_SKILLS_PREFIX)) return { kind: 'metadata' };
   if (path.startsWith(HOME_SCRIPTS_PREFIX)) {
-    return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length), hookScripts);
+    return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length), allowedScripts);
   }
   if (underAnyCase(path, RESERVED_DIR)) return refused('unknown agentnomad entry');
   if (GLOBAL_REFUSED.some((entry) => underAnyCase(path, entry))) return refused('never synced');
@@ -104,7 +104,7 @@ export function globalDestination(
     [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].some((folder) => path.startsWith(`${folder}/`));
   if (allowed) return { kind: 'target', path };
   if (isScript(path)) {
-    return hookScripts.has(path)
+    return allowedScripts.has(path)
       ? { kind: 'target', path }
       : refused('no hook or status line in this setup runs it');
   }
@@ -112,34 +112,13 @@ export function globalDestination(
 }
 
 /**
- * Scripts that a project's hooks run, as project-relative bundle paths
- * (`"$CLAUDE_PROJECT_DIR"/scripts/a.sh` or `scripts/a.sh`), from its settings files.
- */
-export function projectHookScripts(settingsFiles: readonly string[]): Set<string> {
-  const scripts = new Set<string>();
-  const projectVariable =
-    /^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\}|%CLAUDE_PROJECT_DIR%)[\\/]/i;
-  for (const settings of settingsFiles) {
-    for (const command of commandsInSettings(settings)) {
-      for (const word of commandWords(command)) {
-        const relative = word.replace(projectVariable, '').replace(/\\/g, '/');
-        // Absolute, home or other variable paths are not inside the project.
-        if (!isScript(relative) || /^([A-Za-z]:|\/|~|\$|%)/.test(relative)) continue;
-        const normalized = posix.normalize(relative);
-        if (BundlePathSchema.safeParse(normalized).success) scripts.add(normalized);
-      }
-    }
-  }
-  return scripts;
-}
-
-/**
  * Where a project bundle entry goes. A script outside `.claude/` is only restored when the
- * bundle's own hooks run it, so a bundle cannot drop code anywhere in the project.
+ * bundle's own hooks run it (`allowedScripts`, from `projectHookScripts`), so a bundle
+ * cannot drop code anywhere in the project.
  */
 export function projectDestination(
   path: string,
-  hookScripts: ReadonlySet<string> = new Set(),
+  allowedScripts: ReadonlySet<string> = new Set(),
 ): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
   if (path === PLUGINS_BUNDLE_PATH || path === ENV_BUNDLE_PATH) return { kind: 'metadata' };
@@ -158,6 +137,6 @@ export function projectDestination(
     PROJECT_ROOT_FILES.includes(path) ||
     PROJECT_CLAUDE_FILES.some((name) => path === `.claude/${name}`) ||
     claudeFolders.some((folder) => path.startsWith(`.claude/${folder}/`)) ||
-    (isScript(path) && (path.startsWith('.claude/') || hookScripts.has(path)));
+    (isScript(path) && (path.startsWith('.claude/') || allowedScripts.has(path)));
   return allowed ? { kind: 'target', path } : refused('not part of a Claude Code setup');
 }

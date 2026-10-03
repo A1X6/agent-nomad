@@ -11,6 +11,7 @@ import {
   GLOBAL_MEMORY_FOLDERS,
   IGNORED_COPY_PATTERNS,
   NEVER_SYNCED,
+  RESERVED_DIR,
 } from './global-paths.ts';
 import { hookScripts } from './hook-scripts.ts';
 import {
@@ -47,7 +48,7 @@ async function hookScriptNames(input: UnknownFilesInput): Promise<string[]> {
     platform: input.platform,
   })
     .map((script) => script.bundlePath)
-    .filter((bundlePath) => !bundlePath.startsWith('.agentnomad/'))
+    .filter((bundlePath) => !bundlePath.startsWith(`${RESERVED_DIR}/`))
     .map(topLevel);
 }
 
