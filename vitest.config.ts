@@ -16,5 +16,12 @@ export default defineConfig({
         include: [`packages/${name}/test/**/*.test.ts`],
       },
     })),
+    // T64: off in `pnpm test`; `pnpm test:coverage` turns it on. A report only, no threshold.
+    coverage: {
+      provider: 'v8',
+      include: packages.map((name) => `packages/${name}/src/**/*.ts`),
+      reporter: ['text-summary', 'text', 'html', 'json-summary'],
+      reportsDirectory: './coverage',
+    },
   },
 });

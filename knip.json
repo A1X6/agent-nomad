@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "includeEntryExports": true,
+  "workspaces": {
+    "packages/cli": {
+      "entry": ["scripts/build-release.ts", "scripts/drift/check-claude-code.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
+    },
+    "packages/server": {
+      "entry": ["src/main.ts"]
+    }
+  }
+}
