@@ -6,7 +6,7 @@ import type { CollectedFile } from '../agents/adapter.ts';
 const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
 
 /** The file's text when it is valid UTF-8 without NUL bytes; `null` for binary files. */
-export function asText(content: Uint8Array): string | null {
+function asText(content: Uint8Array): string | null {
   if (content.includes(0)) return null;
   try {
     return strictUtf8.decode(content);

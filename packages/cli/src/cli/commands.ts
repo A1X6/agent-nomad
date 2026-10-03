@@ -40,11 +40,11 @@ export interface PullOptions extends ScopeFlags {
   readonly parts?: ReadonlyMap<string, boolean>;
 }
 
-export interface DeleteOptions extends ScopeFlags {
+interface DeleteOptions extends ScopeFlags {
   readonly yes: boolean;
 }
 
-export interface ConfirmOptions {
+interface ConfirmOptions {
   readonly yes: boolean;
 }
 

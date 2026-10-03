@@ -16,7 +16,7 @@ export interface MarketplaceEntry {
   readonly add: string;
 }
 
-export type PluginScope = 'user' | 'project' | 'local';
+type PluginScope = 'user' | 'project' | 'local';
 
 export interface PluginEntry {
   /** `plugin@marketplace`. */

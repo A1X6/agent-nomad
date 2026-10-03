@@ -181,7 +181,7 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
  * stop Claude Code asking, MCP servers (the whole definition is compared), and skill,
  * command and subagent files with commands that run by themselves.
  */
-export function runnableEntries(files: readonly CollectedFile[]): RunnableEntry[] {
+function runnableEntries(files: readonly CollectedFile[]): RunnableEntry[] {
   const entries: RunnableEntry[] = [];
   for (const file of files) {
     if (MARKDOWN_FOLDERS.test(file.path) && file.path.toLowerCase().endsWith('.md')) {

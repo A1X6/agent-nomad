@@ -96,9 +96,11 @@ export const GetBundleResponseHeadersSchema = z.object({
 
 export type ScopeKey = z.infer<typeof ScopeKeySchema>;
 export type BundleParams = z.infer<typeof BundleParamsSchema>;
+/** @public the wire type of `ListBundlesQuerySchema`, like every other schema here. */
 export type ListBundlesQuery = z.infer<typeof ListBundlesQuerySchema>;
 export type BundleSummary = z.infer<typeof BundleSummarySchema>;
 export type ListBundlesResponse = z.infer<typeof ListBundlesResponseSchema>;
 export type PutBundleRequestHeaders = z.infer<typeof PutBundleRequestHeadersSchema>;
 export type PutBundleResponse = z.infer<typeof PutBundleResponseSchema>;
+/** @public the wire type of `GetBundleResponseHeadersSchema`, like every other schema here. */
 export type GetBundleResponseHeaders = z.infer<typeof GetBundleResponseHeadersSchema>;

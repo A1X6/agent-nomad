@@ -13,9 +13,9 @@ import { runProgram } from '../../system/run-program.ts';
  * set them, only `claude doctor` can tell.
  */
 
-export type ManagedSourceKind = 'remote' | 'file' | 'drop-ins' | 'mcp' | 'plist' | 'hklm' | 'hkcu';
+type ManagedSourceKind = 'remote' | 'file' | 'drop-ins' | 'mcp' | 'plist' | 'hklm' | 'hkcu';
 
-export interface ManagedSource {
+interface ManagedSource {
   readonly kind: ManagedSourceKind;
   /** Where it is, for the message, e.g. `/etc/claude-code/managed-settings.json`. */
   readonly where: string;
@@ -45,7 +45,7 @@ export interface ManagedSettingsSystem {
 }
 
 /** Where Claude Code caches server-managed settings, inside its base folder. */
-export const REMOTE_SETTINGS_FILE = 'remote-settings.json';
+const REMOTE_SETTINGS_FILE = 'remote-settings.json';
 
 const PLUGIN_KEYS = ['strictKnownMarketplaces', 'blockedMarketplaces'];
 const MCP_KEYS = [

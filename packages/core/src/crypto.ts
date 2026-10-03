@@ -22,7 +22,10 @@ export interface DerivedKeys {
   readonly passwordKey: Uint8Array;
 }
 
-/** Turns a password into keys. Slow on purpose, so guessing passwords is expensive. */
+/**
+ * Turns a password into keys. Slow on purpose, so guessing passwords is expensive.
+ * @public one of the crypto interfaces core offers (docs/ARCHITECTURE.md).
+ */
 export interface PasswordKdf {
   deriveKeys(password: string, salt: Uint8Array, params: KdfParams): Promise<DerivedKeys>;
 }
@@ -52,7 +55,10 @@ export interface Digest {
   sha256(data: Uint8Array): Uint8Array;
 }
 
-/** Cryptographically secure random bytes (salts, data keys). */
+/**
+ * Cryptographically secure random bytes (salts, data keys).
+ * @public one of the crypto interfaces core offers (docs/ARCHITECTURE.md).
+ */
 export interface RandomSource {
   randomBytes(length: number): Uint8Array;
 }

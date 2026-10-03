@@ -13,13 +13,13 @@ export interface MultiselectOptions<T extends string> {
   readonly initial?: readonly T[];
 }
 
-export interface TextOptions {
+interface TextOptions {
   readonly placeholder?: string;
   /** Returns an error message, or `undefined` when the value is fine. */
   readonly validate?: (value: string) => string | undefined;
 }
 
-export interface PasswordOptions {
+interface PasswordOptions {
   /** Returns an error message, or `undefined` when the value is fine. */
   readonly validate?: (value: string) => string | undefined;
 }

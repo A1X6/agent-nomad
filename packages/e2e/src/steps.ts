@@ -43,7 +43,7 @@ const PUSH_ENV_VALUE = fileURLToPath(new URL('../dist/src/push-env-value.js', im
 const ACCOUNT_SKILL =
   '---\nname: my-account-skill\ndescription: From claude.ai\n---\nWrite release notes.\n';
 
-export interface StepContext {
+interface StepContext {
   readonly server: LocalServer;
   /** false when several PCs share this machine (see NO_KEYCHAIN in pc.ts). */
   readonly keychain: boolean;
@@ -229,7 +229,7 @@ async function expectSecondPullChangesNothing(pc: Pc, conflict: '--merge' | '--o
 }
 
 /** Step 1, first OS: a realistic setup is registered, pushed with memory, and up to date. */
-export async function firstPc({ server, keychain }: StepContext): Promise<void> {
+async function firstPc({ server, keychain }: StepContext): Promise<void> {
   const pc = await newPc('first', {
     apiUrl: server.url,
     keychain,
@@ -326,7 +326,7 @@ export async function firstPc({ server, keychain }: StepContext): Promise<void> 
  * Step 2, another OS: a wrong password saves nothing; pull merges into existing files and
  * rewrites every path for this PC; pulling again changes nothing; an edit is pushed back.
  */
-export async function secondPc({ server, keychain }: StepContext): Promise<void> {
+async function secondPc({ server, keychain }: StepContext): Promise<void> {
   const pc = await newPc('second', { apiUrl: server.url, keychain, env: PRESET_ENV });
   try {
     // This PC already has its own settings and Claude Code login state.
@@ -401,7 +401,7 @@ export async function secondPc({ server, keychain }: StepContext): Promise<void>
  * PC's edit arrives with this PC's paths; a PC out of step cannot overwrite the newer copy;
  * delete and account delete leave nothing on the server.
  */
-export async function thirdPc({ server, keychain }: StepContext): Promise<void> {
+async function thirdPc({ server, keychain }: StepContext): Promise<void> {
   const pc = await newPc('third', { apiUrl: server.url, keychain, env: PRESET_ENV });
   // Never pulled: knows no revision. Its login is kept in its own folder (see pc.ts).
   const stale = await newPc('stale', { apiUrl: server.url, keychain: false });

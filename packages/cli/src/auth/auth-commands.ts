@@ -51,7 +51,7 @@ export interface AuthCommandDeps {
   readonly readPasswordStdin?: () => Promise<string>;
 }
 
-export const ACCOUNT_DELETE_WARNING =
+const ACCOUNT_DELETE_WARNING =
   'This deletes your agentnomad account and every setup saved in it, on every PC. ' +
   'Files on your PCs are not touched. It cannot be undone.';
 

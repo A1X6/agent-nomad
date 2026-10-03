@@ -3,14 +3,14 @@
  * guessing (slowed by Argon2id), so guessable passwords are refused. No "must contain a
  * symbol" rules: NIST SP 800-63B advises length plus a check against common passwords.
  */
-export const MIN_PASSWORD_LENGTH = 12;
-export const MAX_PASSWORD_LENGTH = 256;
+const MIN_PASSWORD_LENGTH = 12;
+const MAX_PASSWORD_LENGTH = 256;
 /**
  * zxcvbn score 0–4. 4 = at least 10^10 guesses ("strong protection from an offline slow-hash
  * attack", our threat). Score 3 starts at 10^8, which GPUs get through in hours even
  * against Argon2id at 64 MiB; e.g. "Summer2026!!!" scores 3.
  */
-export const MIN_PASSWORD_SCORE = 4;
+const MIN_PASSWORD_SCORE = 4;
 /** zxcvbn gets slow on very long input; anything this long is past guessing anyway. */
 const MAX_CHECKED_LENGTH = 100;
 
@@ -21,7 +21,7 @@ export type PasswordChecker = (
 ) => string | undefined;
 
 /** The strength estimate the policy needs (zxcvbn-ts in production). */
-export interface StrengthEstimate {
+interface StrengthEstimate {
   readonly score: number;
   readonly warning: string | null;
   readonly suggestions: readonly string[];

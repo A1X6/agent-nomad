@@ -153,7 +153,10 @@ export interface Restorer {
   ): Promise<RestoreReport>;
 }
 
-/** Agent-specific checks that commands show to the user (T31, T32). */
+/**
+ * Agent-specific checks that commands show to the user (T31, T32).
+ * @public part of the adapter contract an agent implements (docs/ARCHITECTURE.md).
+ */
 export interface AgentInspector {
   /** Entries the collector does not know, e.g. a folder a newer agent version added. */
   unknownEntries(target: ScopeTarget): Promise<readonly string[]>;

@@ -14,7 +14,7 @@ import { createProgram, type ProgramOutput } from './program.ts';
 export const EXIT = { ok: 0, failed: 1, cancelled: 130 } as const;
 
 /** Per command: the flags that answer its questions when there is no terminal (T36). */
-export const ANSWER_FLAGS: Readonly<Record<string, string>> = {
+const ANSWER_FLAGS: Readonly<Record<string, string>> = {
   register: 'Use --username, --password-stdin and --yes.',
   login: 'Use --username and --password-stdin (and --yes to replace a login already here).',
   push: 'Use --agent, --global or --project <name>, --memory or --no-memory, --account-skills or --no-account-skills, and --yes.',
@@ -24,10 +24,7 @@ export const ANSWER_FLAGS: Readonly<Record<string, string>> = {
 };
 
 /** The one line shown when a question could not be asked. */
-export function describeAnswerNeeded(
-  error: AnswerNeededError,
-  command: string | undefined,
-): string {
+function describeAnswerNeeded(error: AnswerNeededError, command: string | undefined): string {
   const hint = command === undefined ? undefined : ANSWER_FLAGS[command];
   const help = command === undefined ? 'agentnomad --help' : `agentnomad ${command} --help`;
   return `${error.message} ${hint ?? 'Answer it with flags.'} See \`${help}\`.`;

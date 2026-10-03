@@ -29,7 +29,7 @@ node packages/cli/dist/src/bin.js --help
 | `pnpm build`                | Compiles every package (`tsc --build`).                                                  |
 | `pnpm test`                 | All unit and integration tests (Vitest).                                                 |
 | `pnpm test:coverage`        | The tests with a coverage report (in `coverage/`).                                       |
-| `pnpm knip`                 | Lists unused files, dependencies and exports.                                            |
+| `pnpm knip`                 | Lists unused files, dependencies and exports (mark a kept export `@public`).             |
 | `pnpm test:e2e`             | Builds, then runs the built CLI end to end against a local API (three simulated PCs).    |
 | `pnpm check`                | Typecheck, lint, format check and tests: what CI runs. Run it before every pull request. |
 | `pnpm lint` / `pnpm format` | ESLint / Prettier on their own.                                                          |

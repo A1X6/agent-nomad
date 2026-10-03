@@ -55,7 +55,7 @@ export const DEFAULT_API_TIMEOUTS: ApiTimeouts = {
 };
 
 /** Lets the command show "Waking up the server…" while the free host starts. */
-export interface WakeUpListener {
+interface WakeUpListener {
   onWaking(): void;
   onAwake(): void;
 }

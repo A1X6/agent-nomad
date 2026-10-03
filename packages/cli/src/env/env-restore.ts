@@ -30,7 +30,7 @@ export interface RestoreEnvResult {
  * Windows user variables), which a terminal opened before the last pull does not see yet.
  * Shared by the restore and pull's no-terminal pre-check.
  */
-export async function splitEnvValues(
+async function splitEnvValues(
   variables: Readonly<Record<string, string>>,
   env: Readonly<Record<string, string | undefined>>,
   writer: Pick<EnvWriter, 'current'>,

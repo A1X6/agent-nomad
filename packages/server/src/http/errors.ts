@@ -26,7 +26,7 @@ export class ApiError extends Error {
   }
 }
 
-export function errorJson(c: Context, error: ApiError): Response {
+function errorJson(c: Context, error: ApiError): Response {
   const body: ErrorResponse = {
     error: {
       code: error.code,

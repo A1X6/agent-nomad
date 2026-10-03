@@ -23,7 +23,7 @@ export const COMMAND_SETTINGS = [
  * certificate variables of its environment variable and network pages, its shell variables,
  * and `PATH` (Claude Code writes every `env` entry into its process environment).
  */
-export const REDIRECT_VARIABLES = [
+const REDIRECT_VARIABLES = [
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_BEDROCK_BASE_URL',
   'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
@@ -54,7 +54,7 @@ export const isRedirectVariable = (name: string): boolean => REDIRECT_NAMES.has(
  * Permission and sandbox settings that let Claude Code act without asking (T44, T55). Each
  * takes effect from any settings file, except the two modes noted in `command-review.ts`.
  */
-export const LOOSENING_SETTINGS = [
+const LOOSENING_SETTINGS = [
   'permissions.defaultMode',
   'permissions.allow',
   'permissions.additionalDirectories',
