@@ -17,8 +17,8 @@ import {
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
   GLOBAL_MEMORY_FOLDERS,
+  GLOBAL_REFUSED,
   HOME_SCRIPTS_PREFIX,
-  NEVER_SYNCED,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
   RESERVED_DIR,
@@ -78,7 +78,10 @@ function homeDestination(relative: string, hookScripts: ReadonlySet<string>): Re
 
 /**
  * Where a global bundle entry goes. `hookScripts`: bundle paths of the scripts the setup's
- * own hooks and status line run (from its `settings.json`).
+ * own hooks and status line run (from its `settings.json`). As in the home folder, a script
+ * outside the synced folders is restored only when one of those runs it, and never in Claude
+ * Code's own state (T55), so a bundle cannot replace a launcher such as
+ * `chrome/chrome-native-host.bat` without it being shown for review.
  */
 export function globalDestination(
   path: string,
@@ -95,13 +98,18 @@ export function globalDestination(
     return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length), hookScripts);
   }
   if (underAnyCase(path, RESERVED_DIR)) return refused('unknown agentnomad entry');
-  if (NEVER_SYNCED.some((entry) => underAnyCase(path, entry))) return refused('never synced');
+  if (GLOBAL_REFUSED.some((entry) => underAnyCase(path, entry))) return refused('never synced');
 
   const allowed =
     GLOBAL_FILES.includes(path) ||
-    [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].some((folder) => path.startsWith(`${folder}/`)) ||
-    isScript(path);
-  return allowed ? { kind: 'target', path } : refused('not part of a Claude Code setup');
+    [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].some((folder) => path.startsWith(`${folder}/`));
+  if (allowed) return { kind: 'target', path };
+  if (isScript(path)) {
+    return hookScripts.has(path)
+      ? { kind: 'target', path }
+      : refused('no hook or status line in this setup runs it');
+  }
+  return refused('not part of a Claude Code setup');
 }
 
 /**

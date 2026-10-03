@@ -255,6 +255,77 @@ describe('restorer: refuses what a collector never produces', () => {
     expect(projectDestination(path)).toEqual({ kind: 'refused', reason });
   });
 
+  // A forged bundle cannot replace a launcher or Claude Code itself in its folder (T55, SEC-03).
+  it.each([
+    ['chrome/chrome-native-host.bat', 'never synced'],
+    ['local/node_modules/@anthropic-ai/claude-code/cli.js', 'never synced'],
+    ['Chrome/chrome-native-host.bat', 'never synced'],
+    ['anything/else/run.ps1', 'no hook or status line in this setup runs it'],
+    ['run.sh', 'no hook or status line in this setup runs it'],
+  ])('global: a script outside the synced folders that no hook runs: %s', (path, reason) => {
+    expect(globalDestination(path, new Set())).toEqual({ kind: 'refused', reason });
+  });
+
+  it('global: a base-folder script is restored when a hook runs it, never in Claude Code state', () => {
+    const settings = JSON.stringify({
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              { type: 'command', command: '~/.claude/hooks/check.sh' },
+              { type: 'command', command: '~/.claude/chrome/chrome-native-host.bat' },
+              { type: 'command', command: 'node ~/.claude/local/node_modules/x/cli.js' },
+            ],
+          },
+        ],
+      },
+    });
+    const scripts = new Set(
+      hookScripts(settings, { homedir: home, baseDir: base, platform: process.platform }).map(
+        (script) => script.bundlePath,
+      ),
+    );
+    expect(scripts).toEqual(new Set(['hooks/check.sh']));
+    expect(globalDestination('hooks/check.sh', scripts)).toEqual({
+      kind: 'target',
+      path: 'hooks/check.sh',
+    });
+    // Even a set that names it (as an older bundle might) does not open Claude Code's state.
+    expect(
+      globalDestination(
+        'chrome/chrome-native-host.bat',
+        new Set(['chrome/chrome-native-host.bat']),
+      ),
+    ).toEqual({ kind: 'refused', reason: 'never synced' });
+  });
+
+  it('restores no script outside the synced folders unless a hook in the bundle runs it', async () => {
+    const settings = JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: '~/.claude/hooks/check.sh' }] }] },
+    });
+    const report = await restorer().restorer.restore(
+      { kind: 'global' },
+      [
+        file('settings.json', settings),
+        file('hooks/check.sh', 'echo ok'),
+        file('chrome/chrome-native-host.bat', 'evil'),
+        file('local/node_modules/@anthropic-ai/claude-code/cli.js', 'evil'),
+        file('anything/else/run.ps1', 'evil'),
+      ],
+      answer('overwrite').resolve,
+    );
+    expect([...report.written].sort()).toEqual(['hooks/check.sh', 'settings.json']);
+    expect([...report.skipped].sort()).toEqual([
+      'anything/else/run.ps1',
+      'chrome/chrome-native-host.bat',
+      'local/node_modules/@anthropic-ai/claude-code/cli.js',
+    ]);
+    expect(await read(join(base, 'hooks', 'check.sh'))).toBe('echo ok');
+    await expect(stat(join(base, 'chrome'))).rejects.toThrow();
+    await expect(stat(join(base, 'local'))).rejects.toThrow();
+    await expect(stat(join(base, 'anything'))).rejects.toThrow();
+  });
+
   it('never writes into skills/synced/, even when a bundle contains it', async () => {
     const report = await restorer().restorer.restore(
       { kind: 'global' },
@@ -769,7 +840,13 @@ describe('restorer: per-OS fixes', () => {
   });
 
   it('a script pulled onto a fresh PC is unchanged by a second pull (T53)', async () => {
+    // Base-folder scripts outside the synced folders come back only when a hook runs them (T55).
+    const hooks = [
+      { type: 'command', command: 'python ~/.claude/hooks/check.py' },
+      { type: 'command', command: '~/.claude/hooks/run.cmd' },
+    ];
     const incoming = [
+      file('settings.json', JSON.stringify({ hooks: { Stop: [{ hooks }] } })),
       file('hooks/check.py', 'print("a")\r\n'),
       file('hooks/run.cmd', '@echo off\n'),
     ];
@@ -778,7 +855,7 @@ describe('restorer: per-OS fixes', () => {
       incoming,
       answer('skip').resolve,
     );
-    expect(first.written).toEqual(['hooks/check.py', 'hooks/run.cmd']);
+    expect([...first.written].sort()).toEqual(['hooks/check.py', 'hooks/run.cmd', 'settings.json']);
     const { questions, resolve } = answer('merge');
     const second = await restorer().restorer.restore({ kind: 'global' }, incoming, resolve);
     expect(questions).toEqual([]);

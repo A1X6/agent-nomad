@@ -19,6 +19,13 @@ export const NEVER_SYNCED: readonly string[] = DATA.global.neverSynced;
 /** Known base-folder entries left out on purpose, so the unknown-file check stays quiet. */
 export const GLOBAL_KNOWN_STATE: readonly string[] = DATA.global.knownState;
 
+/**
+ * Never read for a hook nor written by pull, even when a hook names a file there (T55): the
+ * never-synced entries and Claude Code's own state, e.g. `chrome/` (a launcher Chrome starts)
+ * and `local/` (Claude Code itself).
+ */
+export const GLOBAL_REFUSED: readonly string[] = [...NEVER_SYNCED, ...GLOBAL_KNOWN_STATE];
+
 /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
 export const SKIPPED_NAMES: ReadonlySet<string> = new Set(DATA.skippedNames);
 
