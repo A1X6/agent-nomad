@@ -614,11 +614,27 @@ only gets the pooled one.
 
 Paths are relative to each package's `src/`. A module's tests are in each package's `test/`,
 in the file named after the module (with `claude-code-` in front for the Claude Code adapter's
-files, e.g. `agents/claude-code/restore-rules.ts` → `claude-code-restore-rules.test.ts`), or
-after the folder for a folder of small modules (`ui.test.ts`, `system.test.ts`,
-`secret-store.test.ts`). Tests that run a whole command or the API through several modules
-are named after what they run (`pull-command.test.ts`, `bundle-routes.test.ts`,
-`limits-and-logs.test.ts`, `agent-boundary.test.ts`).
+files, e.g. `agents/claude-code/restore-rules.ts` → `claude-code-restore-rules.test.ts`;
+`claude-code-adapter.test.ts` and `claude-code-paths-data.test.ts` for the adapter and its data
+file, `claude-code-drift.test.ts` for `scripts/drift/drift.ts`). Every other test file is one
+of these:
+
+- **A folder of small modules:** `ui.test.ts` (`ui/`: the clack answers, `printable`,
+  `formatSize`), `secret-store.test.ts` (`secrets/`), `env.test.ts` (`env/`, except
+  `loader-variables.test.ts`), `system.test.ts` (the real programs the CLI runs: the process
+  list, `icacls`, PowerShell, `claude plugin`; `system/json.ts` has `json.test.ts`), the
+  server's `repositories.test.ts` (the `db/repositories.ts` contracts, run against the user,
+  session and bundle repositories) and `schema.test.ts` (`db/schema.ts` and the migrations),
+  contracts' `api.test.ts` (`api/`) and core's `interfaces.test.ts` (the interface types).
+- **A whole command, the program or the API through several modules,** named after what it
+  runs: `pull-command.test.ts`, `push-command.test.ts`, `setup-commands.test.ts`,
+  `auth-commands.test.ts`, `program.test.ts` (parsing, routing and exit codes),
+  `bin.test.ts` (the built executable), `agent-boundary.test.ts`, the server's
+  `account-routes.test.ts`, `auth-routes.test.ts`, `bundle-routes.test.ts` and
+  `limits-and-logs.test.ts`.
+- **Shared set-up, not tests:** `fakes.ts` (tested by `fakes.test.ts`), `stub-restorer.ts`,
+  `claude-code-project-fixtures.ts`, `claude-code-plugin-fixtures.ts`, and the server's
+  `support/` (`app.ts`, `database.ts`, `fixtures.ts`).
 
 ## `packages/contracts/src`
 
