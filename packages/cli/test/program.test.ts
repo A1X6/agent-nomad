@@ -79,7 +79,7 @@ async function run(
 }
 
 describe('help and version', () => {
-  it('lists every command from the PRD', async () => {
+  it('lists every command', async () => {
     const { code, out } = await run(['--help']);
     expect(code).toBe(EXIT.ok);
     for (const command of [
