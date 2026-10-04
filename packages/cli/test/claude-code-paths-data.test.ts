@@ -27,6 +27,8 @@ describe('paths data file', () => {
   });
 
   it('names every settings file of the data file in the settings lists (DUP-01)', () => {
+    // Deliberately wider than the code's rule (`settings*.json`): a new name such as
+    // `settings.yaml` in the data file fails here and forces a decision.
     const named = (names: readonly string[]) => names.filter((name) => /settings/i.test(name));
     expect(GLOBAL_SETTINGS_FILES).toEqual(named(CLAUDE_CODE_PATHS.global.files));
     expect(PROJECT_SETTINGS_FILES).toEqual(

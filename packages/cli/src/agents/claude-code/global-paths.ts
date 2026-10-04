@@ -4,16 +4,12 @@
  */
 import { RESERVED_DIR } from '../adapter.ts';
 import { inHomeFolder, isSensitiveHomePath } from '../shared/file-gathering.ts';
-import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
+import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 
 /** Single files in the base folder. */
 export const GLOBAL_FILES: readonly string[] = DATA.global.files;
 
-/** Claude Code's settings files among `names` (DUP-01): `settings.json`, `settings.local.json`. */
-export const settingsFilesIn = (names: readonly string[]): readonly string[] =>
-  names.filter((name) => name.startsWith('settings') && name.endsWith('.json'));
-
-/** The settings files among the single files: hooks and the status line live there. */
+/** The settings files among the single files (DUP-01): hooks and the status line live there. */
 export const GLOBAL_SETTINGS_FILES: readonly string[] = settingsFilesIn(GLOBAL_FILES);
 
 /** Folders in the base folder, taken whole (minus the skips below). */

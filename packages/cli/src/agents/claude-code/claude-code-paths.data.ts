@@ -243,3 +243,10 @@ export type ClaudeCodePathsData = z.infer<typeof PathsDataSchema>;
 
 /** The checked data; a mistake in the lists fails loudly at startup and in tests. */
 export const CLAUDE_CODE_PATHS: ClaudeCodePathsData = PathsDataSchema.parse(RAW);
+
+/**
+ * Claude Code's settings files among `names` (DUP-01), e.g. `settings.json` and
+ * `settings.local.json`: the global and project views take their settings lists from it.
+ */
+export const settingsFilesIn = (names: readonly string[]): readonly string[] =>
+  names.filter((name) => name.startsWith('settings') && name.endsWith('.json'));
