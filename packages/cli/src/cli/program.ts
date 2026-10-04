@@ -120,7 +120,7 @@ function scope(options: {
 }
 
 /**
- * The `agentnomad` command line (T20): every command from the PRD, its flags and help.
+ * The `agentnomad` command line (T20): every command, its flags and help.
  * Parsing only; each command's work is done by the injected handlers.
  */
 export function createProgram({ handlers, optionalParts, output }: ProgramDeps) {

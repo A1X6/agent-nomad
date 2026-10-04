@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 
 /** Database settings, read from the environment (`packages/server/.env` locally). */
 const DatabaseEnvSchema = z.object({

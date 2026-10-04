@@ -62,7 +62,10 @@ export interface PushDeps {
 /** What the apply step gets: no prompter, so it cannot ask anything (T59). */
 export type PushApplyDeps = Omit<PushDeps, 'prompter'>;
 
-/** What push says without a login: its own wording, kept as it was (carry-over D). */
+/**
+ * What push says without a login: its own wording, kept when push's own error class was
+ * replaced by NotLoggedInError (T62).
+ */
 const NOT_LOGGED_IN_ON_THIS_PC = 'You are not logged in on this PC. Run `agentnomad login` first.';
 
 /** The logged-in session and the data key, for the length of one push. */

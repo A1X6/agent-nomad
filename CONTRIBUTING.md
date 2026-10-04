@@ -81,6 +81,33 @@ When testing by hand, use a temporary home folder (set `HOME` and, on Windows,
   libraries already in use, and a security tool should have few dependencies.
 - **Comments explain why,** in plain English; code says what.
 
+## Finding IDs and task numbers in comments
+
+Many comments and test titles end with a reference such as `(T44)`, `(BUG-07)` or
+`(review 6 SEC-01)`. `T44` is the task that wrote the line: `git log --grep '^T44:' --oneline`
+lists its commits. `BUG-07` is a finding of one of the code reviews in
+[docs/reviews](docs/reviews), whose entry says what was wrong and why it was fixed that way.
+Review N is the file or folder whose name ends in `-N` (review 1 has no number:
+`review-2026-10-03.md`). Every review numbers its findings from 01 again, so when a reference
+does not name its review:
+
+1. Run `git log -S 'BUG-07' --oneline -- <file>`. It lists the commits that added or removed
+   the ID in that file; the last one listed wrote it. Its message starts with the task and
+   names the ID, usually with its review (`T69: … from review 4 (SEC-01, …)`). If it does not
+   name the ID, the line was moved there: run it again on the folder the code came from, or on
+   the whole repository.
+2. If the file cites the same ID for findings of several reviews, ask for that one line
+   instead: `git log -L 84,84:<file> --oneline --no-patch`.
+3. `grep -rnE '^#+ BUG-07 ·' docs/reviews` lists every finding with that ID. The one meant is
+   in the review the commit names, or else the latest review before the commit, and its
+   **Where** names the file.
+
+For example, `(BUG-07)` in `packages/server/src/db/bundle-cursor.ts` leads to
+`acc3e57 T58: … (BUG-07) …` and to "BUG-07 · Low · A well-formed cursor with an impossible
+date gives a 500" in `docs/reviews/review-2026-10-03.md`. Keep the reason in the comment
+itself; the reference only says where to read more. Never point at something a reader cannot
+open, such as a chat or an option letter from a discussion.
+
 ## Tests
 
 - Every change comes with tests: a failing test first for a bug, tests for each new

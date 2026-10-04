@@ -85,7 +85,10 @@ function deepMerge(
   return Object.fromEntries(merged);
 }
 
-/** The three conflict strategies from the PRD (T11). All pure: they return planned writes. */
+/**
+ * The three conflict strategies (T11): JSON merge by key, text side by side, overwrite with a
+ * backup. All pure: they return planned writes.
+ */
 export function createMergeStrategies(options: MergeStrategyOptions = {}): MergeStrategies {
   const now = options.now ?? (() => new Date());
 
