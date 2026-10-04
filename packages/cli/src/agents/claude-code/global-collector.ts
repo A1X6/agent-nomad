@@ -12,6 +12,7 @@ import {
 import { pathsOf } from '../shared/detector-system.ts';
 import { underFolder } from '../shared/bundle-paths.ts';
 import { commandsInSettings, programOf } from './settings-commands.ts';
+import { settingsFilesIn } from './claude-code-paths.data.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
@@ -19,7 +20,6 @@ import {
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
   GLOBAL_MEMORY_FOLDERS,
-  GLOBAL_SETTINGS_FILES,
   HOME_SCRIPTS_PREFIX,
   NEVER_SYNCED,
   PLUGINS_BUNDLE_PATH,
@@ -42,6 +42,8 @@ export interface GlobalCollectorOptions {
   readonly customConfigDir: boolean;
   /** Looks up programs hooks and the status line run; without it none are recorded. */
   readonly findProgram?: ProgramLocator;
+  /** Single files in the base folder; the paths data file's list unless a test gives one. */
+  readonly globalFiles?: readonly string[];
 }
 
 /** True when `bundlePath` is a never-synced entry or inside one. */
@@ -52,6 +54,9 @@ const isNeverSynced = (bundlePath: string) =>
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {
   const path = pathsOf(options.platform);
   const { baseDir, homedir } = options;
+  const globalFiles = options.globalFiles ?? GLOBAL_FILES;
+  // The settings files among them (DUP-01), as `GLOBAL_SETTINGS_FILES` is made.
+  const settingsFiles = settingsFilesIn(globalFiles);
 
   /** Script files that hooks and the status line run, if they are in the home folder. */
   async function hookScriptFiles(
@@ -67,18 +72,19 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
   }
 
   /**
-   * For each program the commands run: its known settings file (e.g. ccstatusline's) and,
-   * unless it runs through npx, what it is and how it was installed, so pull can check it.
+   * For each program the commands of all settings files run: its known settings file (e.g.
+   * ccstatusline's) and, unless it runs through npx, what it is and how it was installed, so
+   * pull can check it. All in one `programs.json` (T86): one per settings file kept only the last.
    */
   async function programs(
     files: FileGatherer,
-    settingsJson: string,
+    settingsJsons: readonly string[],
     onSkipped: CollectOptions['onSkipped'],
   ): Promise<CollectedFile[]> {
     const found: CollectedFile[] = [];
     // `null`: left out, as pull would refuse it.
     const programsFound = new Map<string, ProgramInfo | null>();
-    for (const words of commandsInSettings(settingsJson)) {
+    for (const words of settingsJsons.flatMap((json) => commandsInSettings(json))) {
       const program = programOf(words);
       if (program === null) continue;
       for (const relative of TOOL_CONFIG_FILES[program.name] ?? []) {
@@ -151,7 +157,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),
       });
 
-      for (const name of GLOBAL_FILES) {
+      for (const name of globalFiles) {
         const file = await files.readIfFile(path.join(baseDir, name), name);
         if (file) found.push(file);
       }
@@ -163,13 +169,11 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         found.push(...(await files.walk(path.join(baseDir, name), name, isNeverSynced, seen)));
       }
 
-      for (const settings of found.filter((file) => GLOBAL_SETTINGS_FILES.includes(file.path))) {
-        const text = new TextDecoder().decode(settings.content);
-        found.push(
-          ...(await hookScriptFiles(files, text)),
-          ...(await programs(files, text, collectOptions.onSkipped)),
-        );
-      }
+      const settingsJsons = found
+        .filter((file) => settingsFiles.includes(file.path))
+        .map((file) => new TextDecoder().decode(file.content));
+      for (const text of settingsJsons) found.push(...(await hookScriptFiles(files, text)));
+      found.push(...(await programs(files, settingsJsons, collectOptions.onSkipped)));
 
       const selected = await claudeJson();
       if (selected) found.push(selected);
