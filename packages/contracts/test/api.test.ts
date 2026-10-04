@@ -9,6 +9,7 @@ import {
   DEFAULT_KDF_PARAMS,
   DeleteAccountRequestSchema,
   ErrorResponseSchema,
+  GLOBAL_SCOPE_KEY,
   GetBundleResponseHeadersSchema,
   KDF_SALT_BYTES,
   KdfParamsSchema,
@@ -25,7 +26,7 @@ import {
   SessionResponseSchema,
   WRAPPED_DATA_KEY_BYTES,
 } from '../src/index.ts';
-import { kdfParams, token } from './fixtures.ts';
+import { kdfParams, summary, token } from './fixtures.ts';
 
 /** Canonical base64 for `n` zero bytes (content is irrelevant, only the decoded length matters). */
 function b64(n: number): string {
@@ -116,10 +117,10 @@ describe('auth', () => {
 
   const register = {
     username: 'ahmed',
-    kdfSalt: b64(16),
+    kdfSalt: b64(KDF_SALT_BYTES),
     kdfParams,
-    authKey: b64(32),
-    wrappedDataKey: b64(72),
+    authKey: b64(AUTH_KEY_BYTES),
+    wrappedDataKey: b64(WRAPPED_DATA_KEY_BYTES),
     deviceName: 'Ahmed laptop',
   };
 
@@ -157,14 +158,14 @@ describe('auth', () => {
 
 describe('bundles', () => {
   it.each([
-    { agent: 'claude-code', scopeKey: 'global' },
+    { agent: 'claude-code', scopeKey: GLOBAL_SCOPE_KEY },
     { agent: 'claude-code', scopeKey: sha256 },
   ])('accepts path params %j', (params) => {
     expect(ok(BundleParamsSchema, params)).toBe(true);
   });
 
   it.each([
-    { agent: 'Claude', scopeKey: 'global' },
+    { agent: 'Claude', scopeKey: GLOBAL_SCOPE_KEY },
     { agent: 'claude-code', scopeKey: 'my-project' },
     { agent: 'claude-code', scopeKey: 'A'.repeat(64) },
   ])('rejects path params %j', (params) => {
@@ -184,15 +185,7 @@ describe('bundles', () => {
   });
 
   it('list response: metadata only, never ciphertext', () => {
-    const item = {
-      agent: 'claude-code',
-      scopeKey: sha256,
-      nameEnc: b64(60),
-      revision: 3,
-      formatVersion: 1,
-      sizeBytes: 2048,
-      updatedAt: '2026-09-24T13:00:00Z',
-    };
+    const item = { ...summary, scopeKey: sha256, nameEnc: b64(60) };
     expect(ok(ListBundlesResponseSchema, { items: [item], nextCursor: null })).toBe(true);
     expect(
       ok(ListBundlesResponseSchema, { items: [{ ...item, ciphertext: 'x' }], nextCursor: null }),

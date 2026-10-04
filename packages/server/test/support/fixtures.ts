@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 
 import {
+  AUTH_KEY_BYTES,
+  BUNDLE_FORMAT_VERSION,
   DEFAULT_KDF_PARAMS,
   ErrorResponseSchema,
+  GLOBAL_SCOPE_KEY,
   KDF_SALT_BYTES,
   SessionResponseSchema,
   WRAPPED_DATA_KEY_BYTES,
@@ -32,6 +35,10 @@ export const sha256Hex = (data: Uint8Array) => createHash('sha256').update(data)
 export const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 /** The project scope key numbered `index` (its hex, padded to 64 characters). */
 export const scopeKeyOf = (index: number) => index.toString(16).padStart(64, '0');
+/** A well-formed id that no row has. */
+export const UNKNOWN_ID = '00000000-0000-4000-8000-000000000000';
+/** The auth key `registration` sends unless a test gives its own (base64). */
+export const authKey = b64(bytes(AUTH_KEY_BYTES, 1));
 
 /** The error code of an API error answer. */
 export async function errorCode(res: Response): Promise<string> {
@@ -80,7 +87,7 @@ export const registration = (username = 'ahmed', options: RegisterOptions = {}) 
   username,
   kdfSalt: b64(bytes(KDF_SALT_BYTES, 1)),
   kdfParams: options.kdfParams ?? DEFAULT_KDF_PARAMS,
-  authKey: options.authKey ?? b64(bytes(32, 1)),
+  authKey: options.authKey ?? authKey,
   wrappedDataKey: b64(bytes(WRAPPED_DATA_KEY_BYTES, 3)),
   deviceName: 'laptop',
 });
@@ -104,6 +111,15 @@ export async function registerForToken(
 ): Promise<string> {
   const res = await registerUser(app, username, options);
   return SessionResponseSchema.parse(await res.json()).sessionToken;
+}
+
+/** `POST /auth/prelogin` as the CLI sends it. */
+export function preloginRequest(
+  app: TestApp['app'],
+  username: string,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return Promise.resolve(app.request('/auth/prelogin', postJson({ username }, headers)));
 }
 
 export interface LoginOptions {
@@ -197,25 +213,40 @@ export async function seedSetups(db: Database, username: string, count: number):
     .values(Array.from({ length: count }, () => ({ userId: user.id, ciphertext })))
     .returning({ id: bundleBlobs.id });
   await db.insert(bundles).values(
-    files.map((file, index) => ({
-      userId: user.id,
-      agent: 'claude-code',
-      scopeKey: scopeKeyOf(index),
-      nameEnc: bytes(40, 1),
-      contentHash: fromHex(sha256Hex(ciphertext)),
-      formatVersion: 1,
-      revision: 1,
-      sizeBytes: ciphertext.length,
-      blobId: file.id,
-    })),
+    files.map((file, index) =>
+      bundleRow(user.id, file.id, {
+        scopeKey: scopeKeyOf(index),
+        nameEnc: bytes(40, 1),
+        contentHash: fromHex(sha256Hex(ciphertext)),
+        sizeBytes: ciphertext.length,
+      }),
+    ),
   );
 }
+
+/** A `bundles` row of the user's global setup, pointing at `blobId`; `fields` change columns. */
+export const bundleRow = (
+  userId: string,
+  blobId: string,
+  fields: Partial<typeof bundles.$inferInsert> = {},
+): typeof bundles.$inferInsert => ({
+  userId,
+  agent: 'claude-code',
+  scopeKey: GLOBAL_SCOPE_KEY,
+  nameEnc: null,
+  contentHash: bytes(32),
+  formatVersion: BUNDLE_FORMAT_VERSION,
+  revision: 1,
+  sizeBytes: 100,
+  blobId,
+  ...fields,
+});
 
 /** The key of a user's global setup. */
 export const globalKey = (userId: string): BundleKey => ({
   userId,
   agent: 'claude-code',
-  scopeKey: 'global',
+  scopeKey: GLOBAL_SCOPE_KEY,
 });
 
 /** A setup save as the bundle service hands it to `putMeta`. */
@@ -230,7 +261,7 @@ export function metaWrite(
     expectedRevision,
     nameEnc: null,
     contentHash: bytes(32, hashFill),
-    formatVersion: 1,
+    formatVersion: BUNDLE_FORMAT_VERSION,
     sizeBytes: 40,
     blobId,
   };

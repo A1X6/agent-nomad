@@ -9,9 +9,16 @@ import {
   projectDestination,
 } from '../src/index.ts';
 
+import { stopHook } from './claude-code-project-fixtures.ts';
+
 // The rules read no file, so these folders need not exist.
 const home = resolve('/home/a');
 const base = join(home, '.claude');
+const context = { homedir: home, baseDir: base, platform: process.platform };
+
+/** The bundle paths of the scripts the hooks and status line in `settings` run. */
+const scriptsRunBy = (settings: string) =>
+  new Set(hookScripts(settings, context).map((script) => script.bundlePath));
 
 describe('restore rules: refuses what a collector never produces', () => {
   it.each([
@@ -51,10 +58,7 @@ describe('restore rules: refuses what a collector never produces', () => {
 
   it('global: a hook naming an autostart file does not make it restorable (T43)', () => {
     const startup = 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/a.cmd';
-    const settings = JSON.stringify({
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: `~/${startup}` }] }] },
-    });
-    const context = { homedir: home, baseDir: base, platform: process.platform };
+    const settings = JSON.stringify(stopHook(`~/${startup}`));
     expect(hookScripts(settings, context)).toEqual([]);
     expect(
       globalDestination(`.agentnomad/home/${startup}`, new Set([`.agentnomad/home/${startup}`])),
@@ -64,13 +68,9 @@ describe('restore rules: refuses what a collector never produces', () => {
   it('global: a home script is restored only when a hook or the status line runs it', () => {
     const settings = JSON.stringify({
       statusLine: { type: 'command', command: '~/scripts/statusline.sh' },
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'bash $HOME/tools/stop.sh' }] }] },
+      ...stopHook('bash $HOME/tools/stop.sh'),
     });
-    const scripts = new Set(
-      hookScripts(settings, { homedir: home, baseDir: base, platform: process.platform }).map(
-        (script) => script.bundlePath,
-      ),
-    );
+    const scripts = scriptsRunBy(settings);
     expect(scripts).toEqual(
       new Set(['.agentnomad/home/scripts/statusline.sh', '.agentnomad/home/tools/stop.sh']),
     );
@@ -127,11 +127,7 @@ describe('restore rules: refuses what a collector never produces', () => {
         ],
       },
     });
-    const scripts = new Set(
-      hookScripts(settings, { homedir: home, baseDir: base, platform: process.platform }).map(
-        (script) => script.bundlePath,
-      ),
-    );
+    const scripts = scriptsRunBy(settings);
     expect(scripts).toEqual(new Set(['hooks/check.sh']));
     expect(globalDestination('hooks/check.sh', scripts)).toEqual({
       kind: 'target',

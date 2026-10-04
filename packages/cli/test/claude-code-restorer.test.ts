@@ -10,6 +10,8 @@ import {
   home,
   project,
   root,
+  setMemoryDirectory,
+  stopHook,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
 import { collected, readJson, readText, writeTestFile } from './fakes.ts';
@@ -20,6 +22,7 @@ import {
   projectDirName,
   sameForRestore,
   type ClaudeCodeRestorer,
+  type CollectedFile,
   type ConflictChoice,
   type ConflictQuestion,
 } from '../src/index.ts';
@@ -60,6 +63,28 @@ function answer(choice: ConflictChoice) {
   return { questions, resolve };
 }
 
+/** Restores `files` into the global setup, answering every conflict question `choice`. */
+function restoreGlobal(
+  files: readonly CollectedFile[],
+  choice: ConflictChoice,
+  context?: Parameters<ClaudeCodeRestorer['restore']>[3],
+) {
+  return restorer().restore({ kind: 'global' }, files, answer(choice).resolve, context);
+}
+
+/** Restores `files` into the test's project, answering every conflict question `choice`. */
+function restoreProject(files: readonly CollectedFile[], choice: ConflictChoice) {
+  return restorer().restore(
+    { kind: 'project', projectDir: project },
+    files,
+    answer(choice).resolve,
+  );
+}
+
+/** Settings with a status line that runs `command`. */
+const statusLine = (command: string) =>
+  JSON.stringify({ statusLine: { type: 'command', command } });
+
 describe('restorer: round trip', () => {
   it('a collected global setup restores byte-for-byte on a fresh PC', async () => {
     const sourceHome = join(root, 'source');
@@ -79,7 +104,7 @@ describe('restorer: round trip', () => {
       homedir: sourceHome,
     }).collect({ kind: 'global' }, { includeMemory: false });
 
-    const report = await restorer().restore({ kind: 'global' }, collected, answer('skip').resolve);
+    const report = await restoreGlobal(collected, 'skip');
     expect(report.written).toEqual(collected.map((entry) => entry.path));
     for (const entry of collected) {
       expect(new Uint8Array(await readFile(join(base, ...entry.path.split('/'))))).toEqual(
@@ -96,11 +121,7 @@ describe('restorer: round trip', () => {
     await writeTestFile(join(sourceMemory, 'MEMORY.md'), 'remember this');
     const collected = await collect(true, {}, source);
 
-    await restorer().restore(
-      { kind: 'project', projectDir: project },
-      collected,
-      answer('skip').resolve,
-    );
+    await restoreProject(collected, 'skip');
     expect(await readText(join(project, 'CLAUDE.md'))).toBe('project rules');
     // Memory lands in this folder's own memory directory.
     expect(
@@ -111,11 +132,8 @@ describe('restorer: round trip', () => {
 
 describe('restorer: refuses what a collector never produces', () => {
   it('restores no script outside the synced folders unless a hook in the bundle runs it', async () => {
-    const settings = JSON.stringify({
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: '~/.claude/hooks/check.sh' }] }] },
-    });
-    const report = await restorer().restore(
-      { kind: 'global' },
+    const settings = JSON.stringify(stopHook('~/.claude/hooks/check.sh'));
+    const report = await restoreGlobal(
       [
         collected('settings.json', settings),
         collected('hooks/check.sh', 'echo ok'),
@@ -123,7 +141,7 @@ describe('restorer: refuses what a collector never produces', () => {
         collected('local/node_modules/@anthropic-ai/claude-code/cli.js', 'evil'),
         collected('anything/else/run.ps1', 'evil'),
       ],
-      answer('overwrite').resolve,
+      'overwrite',
     );
     expect([...report.written].sort()).toEqual(['hooks/check.sh', 'settings.json']);
     expect([...report.skipped].sort()).toEqual([
@@ -138,10 +156,9 @@ describe('restorer: refuses what a collector never produces', () => {
   });
 
   it('never writes into skills/synced/, even when a bundle contains it', async () => {
-    const report = await restorer().restore(
-      { kind: 'global' },
+    const report = await restoreGlobal(
       [collected('skills/synced/evil/SKILL.md', 'x'), collected('skills/mine/SKILL.md', 'ok')],
-      answer('overwrite').resolve,
+      'overwrite',
     );
     expect(report.skipped).toEqual(['skills/synced/evil/SKILL.md']);
     expect(report.warnings).toEqual(['Refused "skills/synced/evil/SKILL.md": never synced.']);
@@ -150,10 +167,9 @@ describe('restorer: refuses what a collector never produces', () => {
   });
 
   it('does not write programs.json (pull only reads it)', async () => {
-    const report = await restorer().restore(
-      { kind: 'global' },
+    const report = await restoreGlobal(
       [collected('.agentnomad/programs.json', '{"programs":[]}')],
-      answer('skip').resolve,
+      'skip',
     );
     expect(report).toEqual({ written: [], skipped: [], backups: [], warnings: [] });
     expect(await readdir(base)).toEqual([]);
@@ -188,11 +204,7 @@ describe('restorer: existing files', () => {
 
   it('overwrite backs the old file up first', async () => {
     await writeTestFile(join(base, 'CLAUDE.md'), 'mine');
-    const report = await restorer().restore(
-      { kind: 'global' },
-      [collected('CLAUDE.md', 'theirs')],
-      answer('overwrite').resolve,
-    );
+    const report = await restoreGlobal([collected('CLAUDE.md', 'theirs')], 'overwrite');
     expect(await readText(join(base, 'CLAUDE.md'))).toBe('theirs');
     expect(await readText(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('mine');
     expect(report.backups).toEqual([`CLAUDE.md.agentnomad-backup-${STAMP}`]);
@@ -201,11 +213,7 @@ describe('restorer: existing files', () => {
   it('never replaces an earlier backup made in the same second (T45)', async () => {
     await writeTestFile(join(base, 'CLAUDE.md'), 'first');
     await writeTestFile(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`), 'older backup');
-    const report = await restorer().restore(
-      { kind: 'global' },
-      [collected('CLAUDE.md', 'second')],
-      answer('overwrite').resolve,
-    );
+    const report = await restoreGlobal([collected('CLAUDE.md', 'second')], 'overwrite');
     expect(report.backups).toEqual([`CLAUDE.md.agentnomad-backup-${STAMP}-2`]);
     expect(await readText(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('older backup');
     expect(await readText(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}-2`))).toBe('first');
@@ -216,10 +224,9 @@ describe('restorer: existing files', () => {
       join(base, 'settings.json'),
       JSON.stringify({ theme: 'light', model: 'opus' }),
     );
-    await restorer().restore(
-      { kind: 'global' },
+    await restoreGlobal(
       [collected('settings.json', JSON.stringify({ theme: 'dark', effortLevel: 'high' }))],
-      answer('merge').resolve,
+      'merge',
     );
     expect(JSON.parse(await readText(join(base, 'settings.json')))).toEqual({
       theme: 'dark',
@@ -230,11 +237,7 @@ describe('restorer: existing files', () => {
 
   it('merge keeps a different text file and puts the pulled one next to it', async () => {
     await writeTestFile(join(base, 'CLAUDE.md'), 'mine');
-    const report = await restorer().restore(
-      { kind: 'global' },
-      [collected('CLAUDE.md', 'theirs')],
-      answer('merge').resolve,
-    );
+    const report = await restoreGlobal([collected('CLAUDE.md', 'theirs')], 'merge');
     expect(await readText(join(base, 'CLAUDE.md'))).toBe('mine');
     expect(await readText(join(base, `CLAUDE.md.agentnomad-incoming-${STAMP}`))).toBe('theirs');
     expect(report.written).toEqual([`CLAUDE.md.agentnomad-incoming-${STAMP}`]);
@@ -244,11 +247,7 @@ describe('restorer: existing files', () => {
     const real = join(root, 'dotfiles', 'CLAUDE.md');
     await writeTestFile(real, 'mine');
     await symlink(real, join(base, 'CLAUDE.md'));
-    const report = await restorer().restore(
-      { kind: 'global' },
-      [collected('CLAUDE.md', 'theirs')],
-      answer('overwrite').resolve,
-    );
+    const report = await restoreGlobal([collected('CLAUDE.md', 'theirs')], 'overwrite');
     expect((await lstat(join(base, 'CLAUDE.md'))).isSymbolicLink()).toBe(true);
     expect(await readText(real)).toBe('theirs');
     expect(await readText(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`))).toBe('mine');
@@ -260,21 +259,13 @@ describe('restorer: existing files', () => {
     const real = join(root, 'dotfiles', 'claude.json');
     await writeTestFile(real, '{"diffTool":"auto"}');
     await symlink(real, join(home, '.claude.json'));
-    await restorer().restore(
-      { kind: 'global' },
-      [collected('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
-      answer('merge').resolve,
-    );
+    await restoreGlobal([collected('.agentnomad/claude.json', '{"diffTool":"terminal"}')], 'merge');
     expect((await lstat(join(home, '.claude.json'))).isSymbolicLink()).toBe(true);
     expect(await readJson(real)).toEqual({ diffTool: 'terminal' });
   });
 
   it('leaves no temporary files behind', async () => {
-    await restorer().restore(
-      { kind: 'global' },
-      [collected('rules/a.md', 'a')],
-      answer('skip').resolve,
-    );
+    await restoreGlobal([collected('rules/a.md', 'a')], 'skip');
     expect(await readdir(join(base, 'rules'))).toEqual(['a.md']);
   });
 });
@@ -315,7 +306,7 @@ describe('restorer: ~/.claude.json', () => {
 
   it('never replaces the file, even when the answer is overwrite', async () => {
     await writeTestFile(join(home, '.claude.json'), JSON.stringify(existingJson));
-    await restorer().restore({ kind: 'global' }, [incoming], answer('overwrite').resolve);
+    await restoreGlobal([incoming], 'overwrite');
     expect((await readJson(join(home, '.claude.json')))['oauthAccount']).toEqual(
       existingJson.oauthAccount,
     );
@@ -323,7 +314,7 @@ describe('restorer: ~/.claude.json', () => {
 
   it('skip leaves it alone', async () => {
     await writeTestFile(join(home, '.claude.json'), JSON.stringify(existingJson));
-    await restorer().restore({ kind: 'global' }, [incoming], answer('skip').resolve);
+    await restoreGlobal([incoming], 'skip');
     expect(JSON.parse(await readText(join(home, '.claude.json')))).toEqual(existingJson);
   });
 
@@ -387,7 +378,7 @@ describe('restorer: ~/.claude.json', () => {
         oauthAccount: { emailAddress: 'attacker@example.com' },
       }),
     );
-    const report = await restorer().restore({ kind: 'global' }, [forged], answer('merge').resolve);
+    const report = await restoreGlobal([forged], 'merge');
     const after = await readJson(join(home, '.claude.json'));
     expect(after['projects']).toEqual(existingJson.projects);
     expect(after['oauthAccount']).toEqual(existingJson.oauthAccount);
@@ -402,7 +393,7 @@ describe('restorer: ~/.claude.json', () => {
 
   it('writes nothing when the bundle holds none of the keys it restores', async () => {
     const forged = collected('.agentnomad/claude.json', JSON.stringify({ projects: {} }));
-    const report = await restorer().restore({ kind: 'global' }, [forged], answer('merge').resolve);
+    const report = await restoreGlobal([forged], 'merge');
     await expect(stat(join(home, '.claude.json'))).rejects.toThrow();
     expect(report.written).toEqual([]);
   });
@@ -432,7 +423,7 @@ describe('restorer: ~/.claude.json', () => {
   });
 
   it('creates it when missing, readable only by this user', async () => {
-    await restorer().restore({ kind: 'global' }, [incoming], answer('skip').resolve);
+    await restoreGlobal([incoming], 'skip');
     expect((await readJson(join(home, '.claude.json')))['diffTool']).toBe('terminal');
     if (posix) expect((await stat(join(home, '.claude.json'))).mode & 0o777).toBe(0o600);
   });
@@ -450,14 +441,13 @@ describe('restorer: ~/.claude.json', () => {
 describe('restorer: home files', () => {
   it('puts tool settings and hook scripts back in the home folder', async () => {
     const hook = { Stop: [{ hooks: [{ type: 'command', command: '~/scripts/notify.sh' }] }] };
-    await restorer().restore(
-      { kind: 'global' },
+    await restoreGlobal(
       [
         collected('settings.json', JSON.stringify({ hooks: hook })),
         collected('.agentnomad/home/.config/ccstatusline/settings.json', '{"lines":[]}'),
         collected('.agentnomad/home/scripts/notify.sh', 'echo hi\n', true),
       ],
-      answer('skip').resolve,
+      'skip',
     );
     expect(await readText(join(home, '.config', 'ccstatusline', 'settings.json'))).toBe(
       '{"lines":[]}',
@@ -467,10 +457,9 @@ describe('restorer: home files', () => {
 
   it('skips a home script no hook runs, e.g. one for the Windows Startup folder (T38)', async () => {
     const startup = 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/update.bat';
-    const report = await restorer().restore(
-      { kind: 'global' },
+    const report = await restoreGlobal(
       [collected(`.agentnomad/home/${startup}`, 'echo pwned\n')],
-      answer('merge').resolve,
+      'merge',
     );
     expect(report.written).toEqual([]);
     expect(report.skipped).toEqual([`.agentnomad/home/${startup}`]);
@@ -481,10 +470,9 @@ describe('restorer: home files', () => {
 describe('restorer: one bad entry never stops the rest (T43)', () => {
   it('skips an entry it cannot write, with a warning, and writes the others', async () => {
     await writeTestFile(join(base, 'skills', 'deploy'), 'a file where the bundle has a folder');
-    const report = await restorer().restore(
-      { kind: 'global' },
+    const report = await restoreGlobal(
       [collected('skills/deploy/SKILL.md', 'x'), collected('skills/review/SKILL.md', 'ok')],
-      answer('overwrite').resolve,
+      'overwrite',
     );
     expect(report.skipped).toEqual(['skills/deploy/SKILL.md']);
     expect(report.warnings[0]).toMatch(/^Skipped "skills\/deploy\/SKILL.md": /);
@@ -507,10 +495,9 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
   });
 
   it('a broken .agentnomad/claude.json is skipped, not fatal', async () => {
-    const report = await restorer().restore(
-      { kind: 'global' },
+    const report = await restoreGlobal(
       [collected('.agentnomad/claude.json', '{not json'), collected('rules/a.md', 'a')],
-      answer('skip').resolve,
+      'skip',
     );
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
     expect(await readText(join(base, 'rules', 'a.md'))).toBe('a');
@@ -519,10 +506,9 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
   it.runIf(process.platform === 'win32' || process.platform === 'darwin')(
     'writes only the first of two names this OS sees as one file',
     async () => {
-      const report = await restorer().restore(
-        { kind: 'global' },
+      const report = await restoreGlobal(
         [collected('rules/Notes.md', 'upper'), collected('rules/notes.md', 'lower')],
-        answer('overwrite').resolve,
+        'overwrite',
       );
       expect(report.written).toEqual(['rules/Notes.md']);
       expect(report.skipped).toEqual(['rules/notes.md']);
@@ -568,15 +554,8 @@ describe('restorer: auto memory folder chosen by project settings (T43)', () => 
     ['~/.claude', "inside Claude Code's own folder"],
     ['~/', 'your home folder itself'],
   ])('refuses %s', async (dir, reason) => {
-    await writeTestFile(
-      join(project, '.claude', 'settings.json'),
-      JSON.stringify({ autoMemoryDirectory: dir }),
-    );
-    const report = await restorer().restore(
-      { kind: 'project', projectDir: project },
-      [memory],
-      answer('skip').resolve,
-    );
+    await setMemoryDirectory(join(project, '.claude', 'settings.json'), dir);
+    const report = await restoreProject([memory], 'skip');
     expect(report.skipped).toContain('.agentnomad/auto-memory/MEMORY.md');
     expect(report.warnings.join('\n')).toContain(reason);
     expect(report.written).not.toContain('.agentnomad/auto-memory/MEMORY.md');
@@ -584,29 +563,15 @@ describe('restorer: auto memory folder chosen by project settings (T43)', () => 
 
   it('refuses a folder outside the home folder', async () => {
     const outside = join(root, 'elsewhere');
-    await writeTestFile(
-      join(project, '.claude', 'settings.json'),
-      JSON.stringify({ autoMemoryDirectory: outside }),
-    );
-    const report = await restorer().restore(
-      { kind: 'project', projectDir: project },
-      [memory],
-      answer('skip').resolve,
-    );
+    await setMemoryDirectory(join(project, '.claude', 'settings.json'), outside);
+    const report = await restoreProject([memory], 'skip');
     expect(report.warnings.join('\n')).toContain('it is outside your home folder');
     await expect(stat(outside)).rejects.toThrow();
   });
 
   it('uses a folder in the home folder', async () => {
-    await writeTestFile(
-      join(project, '.claude', 'settings.json'),
-      JSON.stringify({ autoMemoryDirectory: '~/notes/my-app' }),
-    );
-    await restorer().restore(
-      { kind: 'project', projectDir: project },
-      [memory],
-      answer('skip').resolve,
-    );
+    await setMemoryDirectory(join(project, '.claude', 'settings.json'), '~/notes/my-app');
+    await restoreProject([memory], 'skip');
     expect(await readText(join(home, 'notes', 'my-app', 'MEMORY.md'))).toBe('remember');
   });
 });
@@ -652,7 +617,7 @@ describe('restorer: per-OS fixes', () => {
       collected('hooks/check.py', 'print("a")\r\n'),
       collected('hooks/run.cmd', '@echo off\n'),
     ];
-    const first = await restorer().restore({ kind: 'global' }, incoming, answer('skip').resolve);
+    const first = await restoreGlobal(incoming, 'skip');
     expect([...first.written].sort()).toEqual(['hooks/check.py', 'hooks/run.cmd', 'settings.json']);
     const { questions, resolve } = answer('merge');
     const second = await restorer().restore({ kind: 'global' }, incoming, resolve);
@@ -678,15 +643,14 @@ describe('restorer: per-OS fixes', () => {
       { type: 'command', command: '~/.claude/hooks/a.sh' },
       { type: 'command', command: 'sh ~/.claude/hooks/b.sh' },
     ];
-    await restorer().restore(
-      { kind: 'global' },
+    await restoreGlobal(
       [
         collected('settings.json', JSON.stringify({ hooks: { Stop: [{ hooks }] } })),
         collected('hooks/a.sh', 'echo a\n', true),
         collected('hooks/b.sh', '#!/bin/sh\necho b\n'),
         collected('CLAUDE.md', 'x'),
       ],
-      answer('skip').resolve,
+      'skip',
     );
     expect((await stat(join(base, 'hooks', 'a.sh'))).mode & 0o111).not.toBe(0);
     expect((await stat(join(base, 'hooks', 'b.sh'))).mode & 0o111).not.toBe(0);
@@ -696,11 +660,7 @@ describe('restorer: per-OS fixes', () => {
   it.runIf(posix)('an overwritten file keeps its own permissions', async () => {
     await writeTestFile(join(base, 'CLAUDE.md'), 'mine');
     await chmod(join(base, 'CLAUDE.md'), 0o600);
-    await restorer().restore(
-      { kind: 'global' },
-      [collected('CLAUDE.md', 'theirs')],
-      answer('overwrite').resolve,
-    );
+    await restoreGlobal([collected('CLAUDE.md', 'theirs')], 'overwrite');
     expect((await stat(join(base, 'CLAUDE.md'))).mode & 0o777).toBe(0o600);
   });
 
@@ -715,23 +675,17 @@ describe('restorer: per-OS fixes', () => {
       },
     });
     const otherOs = posix ? 'win32' : 'linux';
-    const report = await restorer().restore(
-      { kind: 'global' },
-      [collected('settings.json', settings)],
-      answer('skip').resolve,
-      { sourceOs: otherOs },
-    );
+    const report = await restoreGlobal([collected('settings.json', settings)], 'skip', {
+      sourceOs: otherOs,
+    });
     const expected = posix ? 'powershell -File C:/hooks/notify.ps1' : '~/.claude/hooks/check.sh';
     expect(report.warnings).toEqual([
       `This hook or status line came from ${otherOs} and will likely not run here: ${expected}`,
     ]);
     // Nothing to warn about from the same OS.
-    const same = await restorer().restore(
-      { kind: 'global' },
-      [collected('settings.json', settings)],
-      answer('skip').resolve,
-      { sourceOs: process.platform === 'darwin' ? 'darwin' : posix ? 'linux' : 'win32' },
-    );
+    const same = await restoreGlobal([collected('settings.json', settings)], 'skip', {
+      sourceOs: process.platform === 'darwin' ? 'darwin' : posix ? 'linux' : 'win32',
+    });
     expect(same.warnings).toEqual([]);
   });
 
@@ -739,16 +693,11 @@ describe('restorer: per-OS fixes', () => {
     const command = posix
       ? 'powershell -File C:/hooks/notify.ps1\nagentnomad: restore complete'
       : '~/.claude/hooks/check.sh\nagentnomad: restore complete';
-    const settings = JSON.stringify({
-      hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] },
-    });
+    const settings = JSON.stringify(stopHook(command));
     const otherOs = posix ? 'win32' : 'linux';
-    const report = await restorer().restore(
-      { kind: 'global' },
-      [collected('settings.json', settings)],
-      answer('skip').resolve,
-      { sourceOs: otherOs },
-    );
+    const report = await restoreGlobal([collected('settings.json', settings)], 'skip', {
+      sourceOs: otherOs,
+    });
     expect(report.warnings).toEqual([
       `This hook or status line came from ${otherOs} and will likely not run here: ${command.replace('\n', '\\u{000a}')}`,
     ]);
@@ -756,10 +705,9 @@ describe('restorer: per-OS fixes', () => {
   });
 
   it('flags commands by what they run', () => {
-    const json = (command: string) => JSON.stringify({ statusLine: { type: 'command', command } });
-    expect(hooksForOtherOs(json('pwsh ./x.ps1'), 'linux')).toHaveLength(1);
-    expect(hooksForOtherOs(json('bash ~/x.sh'), 'win32')).toHaveLength(1);
-    expect(hooksForOtherOs(json('ccstatusline'), 'win32')).toEqual([]);
+    expect(hooksForOtherOs(statusLine('pwsh ./x.ps1'), 'linux')).toHaveLength(1);
+    expect(hooksForOtherOs(statusLine('bash ~/x.sh'), 'win32')).toHaveLength(1);
+    expect(hooksForOtherOs(statusLine('ccstatusline'), 'win32')).toEqual([]);
   });
 
   it('flags a hook in exec form by its args (BUG-01)', () => {
@@ -787,15 +735,14 @@ describe('restorer: hooks in exec form and compound commands (BUG-01, SEC-01)', 
         ],
       },
     });
-    const report = await restorer().restore(
-      { kind: 'global' },
+    const report = await restoreGlobal(
       [
         collected('settings.json', settings),
         collected('hooks/check.js', 'check'),
         collected('.agentnomad/home/tools/stop.sh', 'stop'),
         collected('.agentnomad/home/tools/notify.sh', 'notify'),
       ],
-      answer('skip').resolve,
+      'skip',
     );
     expect(report.skipped).toEqual([]);
     expect(await readText(join(base, 'hooks', 'check.js'))).toBe('check');
@@ -806,14 +753,10 @@ describe('restorer: hooks in exec form and compound commands (BUG-01, SEC-01)', 
 
 describe('restorer: project scripts', () => {
   const settings = (command: string) =>
-    collected(
-      '.claude/settings.json',
-      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
-    );
+    collected('.claude/settings.json', JSON.stringify(stopHook(command)));
 
   it('restores a script outside .claude/ only when a project hook runs it', async () => {
-    const report = await restorer().restore(
-      { kind: 'project', projectDir: project },
+    const report = await restoreProject(
       [
         settings('python scripts/check.py && "$CLAUDE_PROJECT_DIR"/tools/lint.sh'),
         collected('scripts/check.py', 'print(1)'),
@@ -821,7 +764,7 @@ describe('restorer: project scripts', () => {
         collected('src/evil.ts', 'SECRET'),
         collected('.claude/hooks/any.sh', 'ok'),
       ],
-      answer('skip').resolve,
+      'skip',
     );
     expect(report.written).toEqual([
       '.claude/hooks/any.sh',
@@ -861,10 +804,7 @@ describe('restorer: what pull asks before writing (T61)', () => {
 
   it('reviews runnable entries and knows the variables that redirect Claude Code', () => {
     const r = restorer();
-    const settings = collected(
-      'settings.json',
-      JSON.stringify({ statusLine: { type: 'command', command: 'ccstatusline' } }),
-    );
+    const settings = collected('settings.json', statusLine('ccstatusline'));
     expect(r.reviewRunnable([settings], []).map((entry) => entry.label)).toEqual(['status line']);
     expect(r.reviewRunnable([settings], [settings])).toEqual([]);
     expect(r.isRedirectVariable('ANTHROPIC_BASE_URL')).toBe(true);
@@ -879,7 +819,7 @@ describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
     const command = `${join(source, 'scripts', 'a.sh')} --fix`;
     await writeTestFile(
       join(source, '.claude', 'settings.json'),
-      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
+      JSON.stringify(stopHook(command)),
     );
     await writeTestFile(join(source, 'scripts', 'a.sh'), 'echo hi');
     const files = await collect(false, {}, source);
@@ -899,11 +839,7 @@ describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
 describe('restorer: a path with a line break stays on one warning line (review 6 SEC-02)', () => {
   it('shows the line break as \\u{000a}', async () => {
     const path = 'not-synced\n✔ Restored settings.json';
-    const report = await restorer().restore(
-      { kind: 'global' },
-      [collected(path, 'x')],
-      answer('skip').resolve,
-    );
+    const report = await restoreGlobal([collected(path, 'x')], 'skip');
     expect(report.skipped).toEqual([path]);
     expect(report.warnings).toHaveLength(1);
     expect(report.warnings[0]).toMatch(
@@ -930,11 +866,7 @@ describe('restorer: a path with a line break stays on one warning line (review 6
   it.runIf(posix)('keeps a real write error on one line', async () => {
     // A file where the entry needs a folder: the write fails and its error quotes the path.
     await writeTestFile(join(base, 'skills', 'deploy'), 'a file, not a folder');
-    const report = await restorer().restore(
-      { kind: 'global' },
-      [collected('skills/deploy/a\nb.md', 'x')],
-      answer('skip').resolve,
-    );
+    const report = await restoreGlobal([collected('skills/deploy/a\nb.md', 'x')], 'skip');
     expect(report.warnings).toHaveLength(1);
     expect(report.warnings[0]).toMatch(/^Skipped "skills\/deploy\/a\\u\{000a\}b\.md": /);
     expect(report.warnings[0]).not.toContain('\n');
@@ -942,9 +874,6 @@ describe('restorer: a path with a line break stays on one warning line (review 6
 });
 
 describe('restorer: hooks for another OS, by what they run (review 6 UX-02)', () => {
-  const statusLine = (command: string) =>
-    JSON.stringify({ statusLine: { type: 'command', command } });
-
   it.each([
     ['echo "use bash here"', 'win32'],
     ['git log -1 --format="%s by sh"', 'win32'],

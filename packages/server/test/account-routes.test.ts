@@ -1,3 +1,4 @@
+import { AUTH_KEY_BYTES } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { type TestApp, useTestApp } from './support/app.ts';
@@ -13,7 +14,7 @@ import {
 } from './support/fixtures.ts';
 
 /** Each test user has its own auth key (derived from their password in real life). */
-const authKeyOf = (username: string) => b64(bytes(32, username.length));
+const authKeyOf = (username: string) => b64(bytes(AUTH_KEY_BYTES, username.length));
 
 let t: TestApp;
 useTestApp((app) => (t = app));
@@ -78,7 +79,7 @@ describe('DELETE /account', () => {
   it('refuses a stolen session token without the auth key, deleting nothing', async () => {
     const token = await register('ahmed');
     await pushGlobal(token);
-    const res = await deleteAccount(token, { authKey: b64(bytes(32, 99)) });
+    const res = await deleteAccount(token, { authKey: b64(bytes(AUTH_KEY_BYTES, 99)) });
     expect(res.status).toBe(401);
     expect(await errorCode(res)).toBe('unauthorized');
     expect(await rowsOf('ahmed')).toEqual({ users: 1, sessions: 1, bundles: 1, files: 1 });

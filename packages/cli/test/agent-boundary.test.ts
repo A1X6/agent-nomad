@@ -209,9 +209,12 @@ function depsFor(
 
 const newSeen = (): Seen => ({ collected: [], followUps: [] });
 
+/** A fresh server in memory, as the API client sees it. */
+const newServer = () => fakeBundleServer('2026-10-03T12:00:00Z').api;
+
 /** PC A pushes its Example CLI setup, the prompts library included by flag. */
 async function pushed() {
-  const server = fakeBundleServer('2026-10-03T12:00:00Z').api;
+  const server = newServer();
   const a = machine('laptop');
   await writeTestFile(join(a.base, 'settings.toml'), 'theme = "dark"\n');
   await writeTestFile(join(a.base, 'hooks', 'check.sh'), 'echo ok\n');
@@ -226,7 +229,7 @@ async function pushed() {
 
 describe('a second agent goes through push and pull from its adapter alone (T61)', () => {
   it('push asks the agent’s own questions and collects its optional part', async () => {
-    const server = fakeBundleServer('2026-10-03T12:00:00Z').api;
+    const server = newServer();
     const a = machine('laptop');
     await writeTestFile(join(a.base, 'settings.toml'), 'theme = "dark"\n');
     const seen = newSeen();
@@ -284,7 +287,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
   });
 
   it('push offers the values its MCP servers use, from the agent’s own files (ARCH-01)', async () => {
-    const server = fakeBundleServer('2026-10-03T12:00:00Z').api;
+    const server = newServer();
     const a = machine('laptop');
     await writeTestFile(
       join(a.base, 'mcp.json'),

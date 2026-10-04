@@ -1,12 +1,9 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { STRONG } from './fakes.ts';
-import { createPasswordChecker, loadZxcvbnChecker, type PasswordChecker } from '../src/index.ts';
+import { STRONG, useZxcvbnChecker, zxcvbn } from './fakes.ts';
+import { createPasswordChecker } from '../src/index.ts';
 
-let zxcvbn: PasswordChecker;
-beforeAll(async () => {
-  zxcvbn = await loadZxcvbnChecker();
-});
+useZxcvbnChecker();
 
 describe('password policy', () => {
   it.each([

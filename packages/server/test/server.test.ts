@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { createDatabasePool, createServerFromEnv } from '../src/server.ts';
 import { memoryLogger } from './support/fixtures.ts';
 
+const url = 'postgresql://user:hunter2@ep-example.eu-central-1.aws.neon.tech/neondb';
+
 describe('createServerFromEnv', () => {
   const secret = Buffer.alloc(32, 7).toString('base64');
-  const url = 'postgresql://user:hunter2@ep-example.eu-central-1.aws.neon.tech/neondb';
 
   it('refuses to start without valid settings, never printing their values', async () => {
     await expect(
@@ -41,10 +42,7 @@ describe('createServerFromEnv', () => {
 describe('database pool errors (BUG-02)', () => {
   it('logs an error from an idle connection instead of crashing the process', async () => {
     const { logger, errors } = memoryLogger();
-    const pool = createDatabasePool(
-      'postgresql://user:hunter2@ep-example.eu-central-1.aws.neon.tech/neondb',
-      logger,
-    );
+    const pool = createDatabasePool(url, logger);
     // With no listener, Node throws an emitted 'error'; with one, emit returns normally.
     expect(() => pool.emit('error', new Error('connection dropped'))).not.toThrow();
     expect(errors.map((entry) => entry.event)).toEqual(['pool_error']);

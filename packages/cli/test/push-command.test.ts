@@ -1,8 +1,10 @@
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
+import { BUNDLE_FORMAT_VERSION, GLOBAL_SCOPE_KEY } from '@agentnomad/contracts';
 import {
   createGzipBundleCodec,
+  DATA_KEY_BYTES,
   decryptProjectName,
   openBundle,
   scopeKeyFor,
@@ -23,12 +25,12 @@ import {
   useDataKey,
   useTempDir,
 } from './fakes.ts';
+import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
   AnswerNeededError,
   CLAUDE_ENV_REFERENCES,
   createAgentRegistry,
-  createClaudeCodeAdapter,
   createNoTerminalPrompter,
   createPushApplier,
   createPushCommand,
@@ -133,6 +135,13 @@ function setup(
 
 const noFlags = { global: false, yes: false };
 
+/** A server holding the global setup, saved once from another PC: the laptop. */
+async function savedFromLaptop() {
+  const server = fakeBundleServer();
+  await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+  return server;
+}
+
 /** What the server received, decrypted with the owner's key. */
 async function received(
   server: ReturnType<typeof fakeBundleServer>,
@@ -142,7 +151,7 @@ async function received(
   const entry = storedOn(server, scopeKey);
   if (!entry) throw new Error('nothing stored');
   const plain = openBundle(crypto, entry.upload.ciphertext, dataKey, {
-    formatVersion: 1,
+    formatVersion: BUNDLE_FORMAT_VERSION,
     agent: 'claude-code',
     scopeKey,
   });
@@ -246,12 +255,7 @@ describe('agentnomad push', () => {
 
   describe('claude.ai skills (T42)', () => {
     // Claude Code's own optional part (its texts), with what this fake PC has.
-    const claudePart = createClaudeCodeAdapter({
-      env: { PATH: '' },
-      homedir: HOME,
-      platform: process.platform,
-      isClaudeRunning: () => Promise.resolve(false),
-    }).optionalParts?.[0];
+    const claudePart = claudeCodeAdapter(HOME).optionalParts?.[0];
 
     function withAccountSkills(names: string[], problem: string | null = null) {
       const seen: boolean[] = [];
@@ -382,8 +386,7 @@ describe('agentnomad push', () => {
   });
 
   it('asks before replacing a newer copy from another PC; no keeps it', async () => {
-    const server = fakeBundleServer();
-    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    const server = await savedFromLaptop();
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
 
     // The desktop never pulled, so it only knows "nothing saved yet".
@@ -397,8 +400,7 @@ describe('agentnomad push', () => {
   });
 
   it('--yes never overwrites a newer copy', async () => {
-    const server = fakeBundleServer();
-    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    const server = await savedFromLaptop();
     const desktop = setup([], { server, pc: 'desktop' });
     await expect(desktop.command.push({ global: true, yes: true })).rejects.toThrow(
       'Not saved:\n  - the Claude Code global setup: a newer copy exists',
@@ -409,11 +411,10 @@ describe('agentnomad push', () => {
   });
 
   it('without a terminal, push finds a newer copy on the server before uploading (T46)', async () => {
-    const server = fakeBundleServer();
-    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    const server = await savedFromLaptop();
     // The desktop pulled revision 1; then the laptop saved revision 2.
     const desktop = setup([], { server, pc: 'desktop', prompter: createNoTerminalPrompter() });
-    await desktop.state.setRevision('claude-code', 'global', 1);
+    await desktop.state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 1);
     await setup([], { server, pc: 'laptop' }).command.push({
       global: true,
       yes: true,
@@ -427,8 +428,7 @@ describe('agentnomad push', () => {
   });
 
   it('replaces the newer copy when the user says yes, and remembers the new revision', async () => {
-    const server = fakeBundleServer();
-    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    const server = await savedFromLaptop();
     const desktop = setup(['global', false, true], { server, pc: 'desktop' });
     await desktop.command.push(noFlags);
     const saved = await received(server, { kind: 'global' });
@@ -487,8 +487,7 @@ describe('agentnomad push', () => {
   });
 
   it('--yes skips a newer copy, saves the other setups, then exits with code 1 (BUG-03)', async () => {
-    const server = fakeBundleServer();
-    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    const server = await savedFromLaptop();
     const desktop = setup([], { server, pc: 'desktop' });
     const pushed = desktop.command.push({ global: true, project: 'my-app', yes: true });
     await expect(pushed).rejects.toBeInstanceOf(SetupsNotDoneError);
@@ -501,12 +500,11 @@ describe('agentnomad push', () => {
   });
 
   it('a partial last pull names no cause it cannot know, such as a kept file (UX-01)', async () => {
-    const server = fakeBundleServer();
-    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    const server = await savedFromLaptop();
     // The note a pull leaves when it kept a differing file as it was; state.json does not
     // say why a pull was partial, so push must not blame declined commands.
     const desktop = setup([], { server, pc: 'desktop' });
-    await desktop.state.setRevision('claude-code', 'global', 1, { partial: true });
+    await desktop.state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 1, { partial: true });
 
     await expect(desktop.command.push({ global: true, yes: true, memory: false })).rejects.toThrow(
       'Not saved:\n  - the Claude Code global setup: its last pull here did not restore everything',
@@ -539,8 +537,7 @@ describe('agentnomad push', () => {
   });
 
   it('the plan step asks every question and uploads nothing; apply uploads and asks nothing (T59)', async () => {
-    const server = fakeBundleServer();
-    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    const server = await savedFromLaptop();
     const desktop = setup(['global', false, true], { server, pc: 'desktop' });
     const keys = { secrets: loggedIn(), crypto, dataKey };
 
@@ -582,14 +579,14 @@ describe('agentnomad push', () => {
   });
 
   describe('the data key is wiped on every path (BP-01)', () => {
-    /** Every 32-byte array zeroed with fill(0) while `run` ran. */
+    /** Every data-key-sized (32-byte) array zeroed with fill(0) while `run` ran. */
     async function wipedKeys(run: () => Promise<unknown>): Promise<Uint8Array[]> {
       const fill = vi.spyOn(Uint8Array.prototype, 'fill');
       try {
         await run().catch(() => undefined);
         return fill.mock.calls.flatMap((call, index) => {
           const array = fill.mock.contexts[index] as Uint8Array;
-          return call[0] === 0 && array.length === 32 ? [array] : [];
+          return call[0] === 0 && array.length === DATA_KEY_BYTES ? [array] : [];
         });
       } finally {
         fill.mockRestore();
@@ -616,8 +613,7 @@ describe('agentnomad push', () => {
     });
 
     it('Ctrl+C at the last question, after the key was used', async () => {
-      const server = fakeBundleServer();
-      await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+      const server = await savedFromLaptop();
       // "What to save?" and memory are answered; "replace the newer copy?" is cancelled.
       const t = setup([], { server, pc: 'desktop', prompter: cancelling(['global', false]) });
       await expect(t.command.push(noFlags)).rejects.toBeInstanceOf(PromptCancelledError);

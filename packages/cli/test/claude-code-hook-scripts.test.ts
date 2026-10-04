@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { stopHook } from './claude-code-project-fixtures.ts';
 import { projectHookScripts } from '../src/index.ts';
 
 // The rules read no file, so this folder need not exist.
@@ -16,9 +17,7 @@ describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
     ['$HOME/a.sh', []],
     ['../outside/a.sh', []],
   ])('reads %s', (word, expected) => {
-    const settings = JSON.stringify({
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: word }] }] },
-    });
+    const settings = JSON.stringify(stopHook(word));
     expect(
       projectHookScripts(settings, { projectDir: project, platform: process.platform }).map(
         (script) => script.bundlePath,

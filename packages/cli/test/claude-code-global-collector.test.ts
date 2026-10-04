@@ -8,10 +8,11 @@ import {
   collectSkipped,
   globalCollector,
   home,
+  stopHook,
   syncedSetup,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
-import { paths, text, withTempDir, writeTestFile } from './fakes.ts';
+import { linkFolder, paths, text, withTempDir, writeTestFile } from './fakes.ts';
 import {
   ACCOUNT_SKILLS_PREFIX,
   ClaudeJsonError,
@@ -28,6 +29,10 @@ const collector = (customConfigDir = false, baseDir = base) =>
 async function collect(includeMemory = false): Promise<readonly CollectedFile[]> {
   return collector().collect({ kind: 'global' }, { includeMemory });
 }
+
+/** Writes `settings` as the settings file `file` of the test's ~/.claude. */
+const writeSettings = (settings: object, file = 'settings.json') =>
+  writeTestFile(join(base, file), JSON.stringify(settings));
 
 /** A ~/.claude with every kind of file a real one has. */
 async function realisticSetup(): Promise<void> {
@@ -108,23 +113,7 @@ describe('global collector: what is taken', () => {
   it('never takes skills/synced/, even through a link or a hook', async () => {
     await writeTestFile(join(base, 'skills', 'synced', 'a', 'SKILL.md'));
     await writeTestFile(join(base, 'skills', 'synced', 'a', 'helper.sh'));
-    await writeTestFile(
-      join(base, 'settings.json'),
-      JSON.stringify({
-        hooks: {
-          Stop: [
-            {
-              hooks: [
-                {
-                  type: 'command',
-                  command: `bash ${join(base, 'skills', 'synced', 'a', 'helper.sh')}`,
-                },
-              ],
-            },
-          ],
-        },
-      }),
-    );
+    await writeSettings(stopHook(`bash ${join(base, 'skills', 'synced', 'a', 'helper.sh')}`));
     const files = paths(await collect(true));
     expect(files.some((path) => path.startsWith('skills/synced'))).toBe(false);
   });
@@ -219,7 +208,7 @@ describe('global collector: ~/.claude.json', () => {
 
 describe('global collector: hook and status line scripts', () => {
   async function withSettings(settings: object): Promise<readonly CollectedFile[]> {
-    await writeTestFile(join(base, 'settings.json'), JSON.stringify(settings));
+    await writeSettings(settings);
     return collect();
   }
   const hook = (command: string) => ({
@@ -342,11 +331,7 @@ describe('global collector: a link into a folder for keys (T45)', () => {
   it('is never followed, and push is told why', async () => {
     await writeTestFile(join(home, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
     await mkdir(join(base, 'skills'), { recursive: true });
-    await symlink(
-      join(home, '.ssh'),
-      join(base, 'skills', 'keys'),
-      process.platform === 'win32' ? 'junction' : 'dir',
-    );
+    await linkFolder(join(home, '.ssh'), join(base, 'skills', 'keys'));
     const { found: files, skipped } = await collectSkipped(collector(), { kind: 'global' });
     expect(paths(files).some((path) => path.startsWith('skills/keys'))).toBe(false);
     expect(skipped).toEqual(['skills/keys: it links into a folder for keys and logins']);
@@ -355,10 +340,7 @@ describe('global collector: a link into a folder for keys (T45)', () => {
 
 describe('global collector: programs the status line and hooks need', () => {
   const statusLine = (command: string) =>
-    writeTestFile(
-      join(base, 'settings.json'),
-      JSON.stringify({ statusLine: { type: 'command', command } }),
-    );
+    writeSettings({ statusLine: { type: 'command', command } });
   const npmInfo = (command: string) =>
     Promise.resolve({ command, npm: { package: command, version: '2.2.22' } });
 
@@ -391,14 +373,7 @@ describe('global collector: programs the status line and hooks need', () => {
   });
 
   it('records a program that is not from npm without install details', async () => {
-    await writeTestFile(
-      join(base, 'settings.json'),
-      JSON.stringify({
-        hooks: {
-          Stop: [{ hooks: [{ type: 'command', command: 'terminal-notifier -message done' }] }],
-        },
-      }),
-    );
+    await writeSettings(stopHook('terminal-notifier -message done'));
     const files = await collectWith((command) => Promise.resolve({ command, npm: null }));
     expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
       programs: [{ command: 'terminal-notifier', npm: null }],
@@ -406,17 +381,14 @@ describe('global collector: programs the status line and hooks need', () => {
   });
 
   it('leaves out, and says so, a program pull would refuse (BUG-01)', async () => {
-    await writeTestFile(
-      join(base, 'settings.json'),
-      JSON.stringify({
-        hooks: {
-          Stop: [
-            { hooks: [{ type: 'command', command: '_tool --x' }] },
-            { hooks: [{ type: 'command', command: 'terminal-notifier -message done' }] },
-          ],
-        },
-      }),
-    );
+    await writeSettings({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: '_tool --x' }] },
+          { hooks: [{ type: 'command', command: 'terminal-notifier -message done' }] },
+        ],
+      },
+    });
     const { found: files, skipped } = await collectSkipped(
       globalCollector({ findProgram: (command) => Promise.resolve({ command, npm: null }) }),
       { kind: 'global' },
@@ -428,10 +400,8 @@ describe('global collector: programs the status line and hooks need', () => {
   });
 
   it('records the programs of every settings file in the one programs.json (T86)', async () => {
-    const hook = (command: string) =>
-      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } });
-    await writeTestFile(join(base, 'settings.json'), hook('terminal-notifier -message done'));
-    await writeTestFile(join(base, 'settings.local.json'), hook('ccstatusline --hook'));
+    await writeSettings(stopHook('terminal-notifier -message done'));
+    await writeSettings(stopHook('ccstatusline --hook'), 'settings.local.json');
     // A second settings file the data file does not list (yet).
     const files = await collectWith(npmInfo, ['settings.json', 'settings.local.json']);
     expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({

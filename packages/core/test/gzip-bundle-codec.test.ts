@@ -1,9 +1,10 @@
-import type { Bundle } from '@agentnomad/contracts';
+import { BUNDLE_FORMAT_VERSION, type Bundle } from '@agentnomad/contracts';
 import { gzipSync, strToU8 } from 'fflate';
 import { describe, expect, it } from 'vitest';
 
 import {
   BundleFormatError,
+  HOME_PLACEHOLDER,
   MAX_DECOMPRESSED_BUNDLE_BYTES,
   createGzipBundleCodec,
 } from '../src/index.ts';
@@ -11,7 +12,7 @@ import {
 const codec = createGzipBundleCodec();
 
 const bundle: Bundle = {
-  formatVersion: 1,
+  formatVersion: BUNDLE_FORMAT_VERSION,
   agent: 'claude-code',
   scope: { kind: 'project', name: 'my-saas-app' },
   sourceOs: 'darwin',
@@ -21,7 +22,7 @@ const bundle: Bundle = {
     {
       path: 'settings.json',
       encoding: 'utf8',
-      content: '{"hooks":{"cmd":"{{HOME}}/.claude/hook.sh"}}',
+      content: `{"hooks":{"cmd":"${HOME_PLACEHOLDER}/.claude/hook.sh"}}`,
       executable: false,
     },
     {

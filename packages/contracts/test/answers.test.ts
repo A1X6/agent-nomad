@@ -12,21 +12,12 @@ import {
   PutBundleResponseSchema,
   SessionResponseSchema,
 } from '../src/index.ts';
-import { kdfParams, token } from './fixtures.ts';
+import { kdfParams, summary as item, token } from './fixtures.ts';
 
 /** Base64 of 16 and 72 zero bytes. */
 const salt = 'A'.repeat(22) + '==';
 const wrapped = 'A'.repeat(96);
 const session = { sessionToken: token, expiresAt: '2026-12-24T00:00:00Z' };
-const item = {
-  agent: 'claude-code',
-  scopeKey: 'global',
-  nameEnc: null,
-  revision: 3,
-  formatVersion: 1,
-  sizeBytes: 2048,
-  updatedAt: '2026-09-24T13:00:00Z',
-};
 
 type Answer = keyof typeof ClientAnswerSchemas;
 

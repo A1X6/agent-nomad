@@ -1,38 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { fileManagedSettings } from './claude-code-plugin-fixtures.ts';
+import {
+  fakeManagedSystem as fakeSystem,
+  fileManagedSettings,
+} from './claude-code-plugin-fixtures.ts';
+import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import { recordingReporter } from './fakes.ts';
 import {
   createAgentRegistry,
   createAgentsCommand,
-  createClaudeCodeAdapter,
   detectManagedSettings,
   explainPluginFailure,
   managedSettingsDir,
   managedSettingsNotice,
   parseRegSettings,
-  type ManagedSettingsSystem,
 } from '../src/index.ts';
-
-interface FakePc {
-  platform: NodeJS.Platform;
-  env?: Record<string, string>;
-  files?: Record<string, string>;
-  dirs?: Record<string, string[]>;
-  registry?: Partial<Record<'HKLM' | 'HKCU', string>>;
-}
-
-function fakeSystem(pc: FakePc): ManagedSettingsSystem {
-  return {
-    platform: pc.platform,
-    env: pc.env ?? {},
-    baseDir: pc.platform === 'win32' ? 'C:\\Users\\a\\.claude' : '/home/a/.claude',
-    readText: (path) => Promise.resolve(pc.files?.[path] ?? null),
-    exists: (path) => Promise.resolve(path in (pc.files ?? {})),
-    listDir: (path) => Promise.resolve(pc.dirs?.[path] ?? []),
-    readRegistry: (hive) => Promise.resolve(pc.registry?.[hive] ?? null),
-  };
-}
 
 const policy = JSON.stringify({
   strictKnownMarketplaces: [{ source: 'github', repo: 'acme/plugins' }],
@@ -197,11 +179,8 @@ describe('warnings (T31 done-when)', () => {
 
   it('agentnomad agents shows the notice, from the adapter’s inspector (SOLID-01)', async () => {
     const { reporter, lines: reported } = recordingReporter();
-    const adapter = createClaudeCodeAdapter({
-      env: { PATH: '' },
-      homedir: '/nowhere',
+    const adapter = claudeCodeAdapter('/nowhere', {
       platform: 'linux',
-      isClaudeRunning: () => Promise.resolve(false),
       managedSystem: fakeSystem({
         platform: 'linux',
         files: { '/etc/claude-code/managed-settings.json': policy },

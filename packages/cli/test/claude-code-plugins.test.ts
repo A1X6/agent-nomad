@@ -9,9 +9,10 @@ import {
   projectDestination,
   readCurrentPlugins,
   readPluginManifest,
+  type PluginManifestInput,
 } from '../src/index.ts';
 
-import { putJson, realisticPlugins } from './claude-code-plugin-fixtures.ts';
+import { installedPluginsFile, putJson, realisticPlugins } from './claude-code-plugin-fixtures.ts';
 import {
   base,
   globalCollector,
@@ -22,14 +23,14 @@ import {
 
 useProjectFolders('agentnomad-plugins-');
 
+/** The plugin list a push of `scope` saves from the test's `~/.claude`. */
+const manifestFor = (scope: PluginManifestInput['scope'] = { kind: 'global' }) =>
+  readPluginManifest({ baseDir: base, platform: process.platform, scope });
+
 describe('plugin list on push', () => {
   it('saves user plugins with addable marketplaces, and says what was left out', async () => {
     await realisticPlugins(home, project);
-    const manifest = await readPluginManifest({
-      baseDir: base,
-      platform: process.platform,
-      scope: { kind: 'global' },
-    });
+    const manifest = await manifestFor();
     expect(manifest).toEqual({
       marketplaces: [
         { name: 'brag', add: 'latent-spaces/brag' },
@@ -55,11 +56,7 @@ describe('plugin list on push', () => {
 
   it('a project push saves only that project’s plugins', async () => {
     await realisticPlugins(home, project);
-    const manifest = await readPluginManifest({
-      baseDir: base,
-      platform: process.platform,
-      scope: { kind: 'project', projectDir: project },
-    });
+    const manifest = await manifestFor({ kind: 'project', projectDir: project });
     expect(manifest?.plugins).toEqual([
       { id: 'team-lint@company', scope: 'project', commandSource: false },
     ]);
@@ -67,13 +64,7 @@ describe('plugin list on push', () => {
   });
 
   it('nothing to save without installed plugins', async () => {
-    expect(
-      await readPluginManifest({
-        baseDir: base,
-        platform: process.platform,
-        scope: { kind: 'global' },
-      }),
-    ).toBeNull();
+    expect(await manifestFor()).toBeNull();
   });
 
   it('the global collector adds .agentnomad/plugins.json, which restore never writes', async () => {
@@ -156,7 +147,7 @@ describe('marketplace sources: only the forms push writes (T44)', () => {
 
 describe('push saves only what pull accepts (BUG-01)', () => {
   it('leaves out, with why, a marketplace URL or plugin name pull would refuse', async () => {
-    await putJson(join(base, 'plugins', 'installed_plugins.json'), {
+    await putJson(installedPluginsFile(base), {
       plugins: {
         'ok@plain': [{ scope: 'user' }],
         'tool@encoded': [{ scope: 'user' }],
@@ -169,11 +160,7 @@ describe('push saves only what pull accepts (BUG-01)', () => {
       encoded: { source: { source: 'url', url: 'https://host/my%20market.json' } },
       query: { source: { source: 'url', url: 'https://host/m.json?a=1&b=2' } },
     });
-    const saved = await readPluginManifest({
-      baseDir: base,
-      platform: process.platform,
-      scope: { kind: 'global' },
-    });
+    const saved = await manifestFor();
     expect(saved?.plugins.map((plugin) => plugin.id)).toEqual(['ok@plain']);
     expect(saved?.skipped).toEqual([
       { what: 'tool@encoded', reason: 'its marketplace address has characters pull refuses' },
@@ -186,21 +173,17 @@ describe('push saves only what pull accepts (BUG-01)', () => {
 
 describe('one reader of installed_plugins.json (BUG-03)', () => {
   it('counts a project install whose path is written another way as installed', async () => {
-    await putJson(join(base, 'plugins', 'installed_plugins.json'), {
+    await putJson(installedPluginsFile(base), {
       plugins: { 'lint@company': [{ scope: 'project', projectPath: `${project}${sep}` }] },
     });
     const current = await readCurrentPlugins(base, process.platform, project);
     expect(current.installed.has('lint@company|project')).toBe(true);
-    const saved = await readPluginManifest({
-      baseDir: base,
-      platform: process.platform,
-      scope: { kind: 'project', projectDir: project },
-    });
+    const saved = await manifestFor({ kind: 'project', projectDir: project });
     expect(saved?.skipped.map((entry) => entry.what)).toEqual(['lint@company']);
   });
 
   it.runIf(process.platform === 'win32')('ignores the case of a Windows path', async () => {
-    await putJson(join(base, 'plugins', 'installed_plugins.json'), {
+    await putJson(installedPluginsFile(base), {
       plugins: {
         'lint@company': [{ scope: 'project', projectPath: project.toUpperCase() }],
       },

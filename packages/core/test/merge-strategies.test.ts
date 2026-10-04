@@ -107,18 +107,21 @@ describe('json merge: combine by key, incoming wins', () => {
   });
 
   it('keeps a file with a number JSON cannot hold exactly, side by side (T45)', () => {
-    const existing = strToU8('{"id": 12345678901234567890}');
-    const incoming = strToU8('{"theme": "dark"}');
-    const writes = jsonMerge.resolve({ path: 'x.json', existing, incoming });
+    const writes = jsonMerge.resolve(
+      conflict('x.json', '{"id": 12345678901234567890}', '{"theme": "dark"}'),
+    );
     expect(writes.map((write) => write.path)).toEqual([`x.json${INCOMING_MARKER}${STAMP}`]);
   });
 
   it('keeps a file with a number too large for JSON to hold at all, side by side', () => {
-    const existing = strToU8('{"limit": 1e400}');
-    const incoming = strToU8('{"theme": "dark"}');
-    const writes = jsonMerge.resolve({ path: 'x.json', existing, incoming });
+    const forward = conflict('x.json', '{"limit": 1e400}', '{"theme": "dark"}');
+    const writes = jsonMerge.resolve(forward);
     expect(writes.map((write) => write.path)).toEqual([`x.json${INCOMING_MARKER}${STAMP}`]);
-    const reversed = jsonMerge.resolve({ path: 'x.json', existing: incoming, incoming: existing });
+    const reversed = jsonMerge.resolve({
+      ...forward,
+      existing: forward.incoming,
+      incoming: forward.existing,
+    });
     expect(reversed.map((write) => write.path)).toEqual([`x.json${INCOMING_MARKER}${STAMP}`]);
   });
 

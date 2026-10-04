@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { chmod, lstat, mkdir, readdir, stat, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -203,14 +203,28 @@ describe('writing the profile', () => {
   let dir: string;
   useTempDir('agentnomad-env-', (temp) => (dir = temp));
 
-  const bashrc = (path: string, now?: () => Date) =>
-    createShellProfileWriter({ path, kind: 'posix', label: '~/.bashrc' }, now);
+  const profileWriter = (path: string, now?: () => Date) =>
+    createShellProfileWriter({ path, kind: 'posix', label: `~/${basename(path)}` }, now);
+
+  /** A fake PowerShell that records each call and answers with the user variables in `stored`. */
+  const recordingPowerShell = (stored: Record<string, string> = {}) => {
+    const calls: { script: string; env: Readonly<Record<string, string>> }[] = [];
+    const writer = createWindowsEnvWriter((script, env) => {
+      calls.push({ script, env });
+      const asked = (env['AGENTNOMAD_ENV_NAMES'] ?? '').split('\n');
+      const found = Object.entries(stored).filter(([name]) => asked.includes(name));
+      return Promise.resolve(
+        Buffer.from(JSON.stringify(Object.fromEntries(found)), 'utf8').toString('base64'),
+      );
+    });
+    return { calls, writer };
+  };
 
   it('never replaces a profile it cannot read (T46)', async () => {
     const profile = join(dir, '.bashrc');
     await mkdir(profile);
     // The read's error, not the later rename onto a folder (EPERM on Windows); nothing written.
-    await expect(bashrc(profile).write({ TOKEN: 'abc' })).rejects.toMatchObject({
+    await expect(profileWriter(profile).write({ TOKEN: 'abc' })).rejects.toMatchObject({
       code: 'EISDIR',
     });
     expect(await readdir(dir)).toEqual(['.bashrc']);
@@ -226,7 +240,7 @@ describe('writing the profile', () => {
       await writeFile(profile, PROFILE);
       await chmod(profile, 0);
       try {
-        await expect(bashrc(profile).write({ TOKEN: 'abc' })).rejects.toMatchObject({
+        await expect(profileWriter(profile).write({ TOKEN: 'abc' })).rejects.toMatchObject({
           code: 'EACCES',
         });
       } finally {
@@ -243,25 +257,21 @@ describe('writing the profile', () => {
     await writeFile(real, 'alias ll="ls -l"\n');
     const profile = join(dir, '.bashrc');
     await symlink(real, profile);
-    await createShellProfileWriter({ path: profile, kind: 'posix', label: '~/.bashrc' }).write({
-      TOKEN: 'abc',
-    });
+    await profileWriter(profile).write({ TOKEN: 'abc' });
     expect((await lstat(profile)).isSymbolicLink()).toBe(true);
     expect(await readText(real)).toContain("export TOKEN='abc'");
   });
 
   it.runIf(posix)('a new profile is readable only by this user (T46)', async () => {
     const profile = join(dir, '.profile');
-    await createShellProfileWriter({ path: profile, kind: 'posix', label: '~/.profile' }).write({
-      TOKEN: 'abc',
-    });
+    await profileWriter(profile).write({ TOKEN: 'abc' });
     expect((await stat(profile)).mode & 0o777).toBe(0o600);
   });
 
   it('backs the profile up before changing it', async () => {
     const profile = join(dir, '.bashrc');
     await writeFile(profile, 'alias ll="ls -l"\n');
-    const writer = bashrc(profile, () => new Date('2026-09-25T12:00:00Z'));
+    const writer = profileWriter(profile, () => new Date('2026-09-25T12:00:00Z'));
     const { backup } = await writer.write({ TOKEN: 'abc' });
     expect(backup).toBe(`${profile}.agentnomad-backup-20260925T120000Z`);
     expect(await readText(backup ?? '')).toBe('alias ll="ls -l"\n');
@@ -271,7 +281,7 @@ describe('writing the profile', () => {
   it('two writes in the same second keep both backups (review 6 BUG-01)', async () => {
     const profile = join(dir, '.bashrc');
     await writeFile(profile, 'alias ll="ls -l"\n');
-    const writer = bashrc(profile, () => new Date('2026-09-25T12:00:00Z'));
+    const writer = profileWriter(profile, () => new Date('2026-09-25T12:00:00Z'));
     const first = await writer.write({ TOKEN: 'abc' });
     const second = await writer.write({ TOKEN: 'new' });
     expect(first.backup).toBe(`${profile}.agentnomad-backup-20260925T120000Z`);
@@ -284,9 +294,7 @@ describe('writing the profile', () => {
   it.runIf(posix)('a new shell really gets the value (second machine)', async () => {
     const profile = join(dir, '.bashrc');
     const value = `ghp_it's $HOME "x" \\ y`;
-    await createShellProfileWriter({ path: profile, kind: 'posix', label: '~/.bashrc' }).write({
-      GITHUB_TOKEN: value,
-    });
+    await profileWriter(profile).write({ GITHUB_TOKEN: value });
     const shell = spawnSync('sh', ['-c', `. "${profile}" && printf %s "$GITHUB_TOKEN"`], {
       encoding: 'utf8',
     });
@@ -297,10 +305,7 @@ describe('writing the profile', () => {
     const profile = join(dir, '.zshrc');
     await writeFile(profile, 'alias ll="ls -l"\n');
     let clock = 0;
-    const writer = createShellProfileWriter(
-      { path: profile, kind: 'posix', label: '~/.zshrc' },
-      () => new Date(Date.UTC(2026, 9, 3, 12, 0, clock++)),
-    );
+    const writer = profileWriter(profile, () => new Date(Date.UTC(2026, 9, 3, 12, 0, clock++)));
     expect(await writer.current(['TOKEN'])).toEqual(new Map());
     expect((await writer.write({ TOKEN: 'abc', OTHER: 'x' })).backup).not.toBeNull();
     expect(await writer.current(['TOKEN', 'MISSING'])).toEqual(new Map([['TOKEN', 'abc']]));
@@ -316,25 +321,12 @@ describe('writing the profile', () => {
   });
 
   it('a missing profile has no values yet (T56)', async () => {
-    const writer = createShellProfileWriter({
-      path: join(dir, 'none', '.zshrc'),
-      kind: 'posix',
-      label: '~/.zshrc',
-    });
+    const writer = profileWriter(join(dir, 'none', '.zshrc'));
     expect(await writer.current(['TOKEN'])).toEqual(new Map());
   });
 
   it('Windows: reads user variables back and leaves one that already has the value (T56)', async () => {
-    const calls: { script: string; env: Readonly<Record<string, string>> }[] = [];
-    const stored: Record<string, string> = { GITHUB_TOKEN: 'ghp_secret', API_KEY: 'old' };
-    const writer = createWindowsEnvWriter((script, env) => {
-      calls.push({ script, env });
-      const asked = (env['AGENTNOMAD_ENV_NAMES'] ?? '').split('\n');
-      const found = Object.entries(stored).filter(([name]) => asked.includes(name));
-      return Promise.resolve(
-        Buffer.from(JSON.stringify(Object.fromEntries(found)), 'utf8').toString('base64'),
-      );
-    });
+    const { calls, writer } = recordingPowerShell({ GITHUB_TOKEN: 'ghp_secret', API_KEY: 'old' });
     expect(await writer.current(['GITHUB_TOKEN', 'NOPE'])).toEqual(
       new Map([['GITHUB_TOKEN', 'ghp_secret']]),
     );
@@ -363,12 +355,8 @@ describe('writing the profile', () => {
   );
 
   it('Windows: sets user variables with the value never on the command line', async () => {
-    const calls: { script: string; env: Readonly<Record<string, string>> }[] = [];
-    const writer = createWindowsEnvWriter((script, env) => {
-      calls.push({ script, env });
-      // The read before writing finds no user variables.
-      return Promise.resolve(Buffer.from('{}').toString('base64'));
-    });
+    // The read before writing finds no user variables.
+    const { calls, writer } = recordingPowerShell();
     await writer.write({ GITHUB_TOKEN: 'ghp_secret' });
     expect(calls).toHaveLength(2);
     expect(calls[0]?.env).toEqual({ AGENTNOMAD_ENV_NAMES: 'GITHUB_TOKEN' });
@@ -381,11 +369,7 @@ describe('writing the profile', () => {
   });
 
   it('Windows: sets several user variables with one PowerShell, not one each (PERF-02)', async () => {
-    const calls: { script: string; env: Readonly<Record<string, string>> }[] = [];
-    const writer = createWindowsEnvWriter((script, env) => {
-      calls.push({ script, env });
-      return Promise.resolve(Buffer.from('{}').toString('base64'));
-    });
+    const { calls, writer } = recordingPowerShell();
     await writer.write({ A_TOKEN: 'one', B_TOKEN: 'two', C_TOKEN: 'three' });
     // One read, then one write for all three.
     expect(calls).toHaveLength(2);
@@ -402,11 +386,7 @@ describe('writing the profile', () => {
   });
 
   it('Windows: writes nothing when every variable already has its value', async () => {
-    const calls: string[] = [];
-    const writer = createWindowsEnvWriter((script) => {
-      calls.push(script);
-      return Promise.resolve(Buffer.from('{"A_TOKEN":"one"}').toString('base64'));
-    });
+    const { calls, writer } = recordingPowerShell({ A_TOKEN: 'one' });
     await writer.write({ A_TOKEN: 'one' });
     expect(calls).toHaveLength(1);
   });
@@ -426,6 +406,8 @@ describe('restoring values on pull', () => {
   const recordingWriter = () =>
     fakeEnvWriter({ where: '~/.zshrc', backup: '/home/a/.zshrc.agentnomad-backup-x' });
   const section = { variables: { GITHUB_TOKEN: 'ghp_secret', API_KEY: 'key-1' } };
+  /** A prompter for runs that must not ask anything. */
+  const neverAsks = { confirm: () => Promise.reject(new Error('must not ask')) };
   /** Records each question with its default, and answers with the default. */
   const defaultAnswers = () => {
     const asked: [string, boolean | undefined][] = [];
@@ -482,7 +464,7 @@ describe('restoring values on pull', () => {
         ...writer,
         current: () => Promise.resolve(new Map(Object.entries(section.variables))),
       },
-      prompter: { confirm: () => Promise.reject(new Error('must not ask')) },
+      prompter: neverAsks,
       reporter: recordingReporter().reporter,
     });
     expect(result).toEqual({ added: [], alreadySet: ['API_KEY', 'GITHUB_TOKEN'], declined: false });
@@ -514,7 +496,7 @@ describe('restoring values on pull', () => {
       section: redirects,
       env: {},
       writer: first.writer,
-      prompter: { confirm: () => Promise.reject(new Error('must not ask')) },
+      prompter: neverAsks,
       reporter,
       assumeYes: true,
     });
@@ -546,7 +528,7 @@ describe('restoring values on pull', () => {
       section: redirects,
       env: {},
       writer: third.writer,
-      prompter: { confirm: () => Promise.reject(new Error('must not ask')) },
+      prompter: neverAsks,
       reporter,
       assumeYes: true,
       allowCommands: true,
@@ -568,7 +550,7 @@ describe('restoring values on pull', () => {
         section: loaders,
         env: {},
         writer,
-        prompter: { confirm: () => Promise.reject(new Error('must not ask')) },
+        prompter: neverAsks,
         reporter,
         assumeYes: true,
       });
@@ -585,7 +567,7 @@ describe('restoring values on pull', () => {
         section: loaders,
         env: {},
         writer,
-        prompter: { confirm: () => Promise.reject(new Error('must not ask')) },
+        prompter: neverAsks,
         reporter: quiet().reporter,
         assumeYes: true,
         allowCommands: true,

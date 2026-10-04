@@ -76,8 +76,13 @@ describe('claude.ai skills (T42): reading and saving', () => {
   });
 });
 
+/** A claude.ai skill as push saves it, holding `content` as it is. */
+const accountSkill = (name: string, content: string) =>
+  collected(`${ACCOUNT_SKILLS_PREFIX}${name}/SKILL.md`, content);
+
+/** A saved claude.ai skill with its name in the frontmatter, then `body`. */
 const saved = (name: string, body: string) =>
-  collected(`${ACCOUNT_SKILLS_PREFIX}${name}/SKILL.md`, `---\nname: ${name}\n---\n${body}\n`);
+  accountSkill(name, `---\nname: ${name}\n---\n${body}\n`);
 
 describe('claude.ai skills (T42): what pull may add', () => {
   it('skips a skill this PC already syncs or a local name, marks ones that run commands', () => {
@@ -215,14 +220,12 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 });
 
 describe('account skills use the same detector (T44)', () => {
-  const skill = (name: string, body: string) =>
-    collected(`.agentnomad/account-skills/${name}/SKILL.md`, body);
   it('marks ! blocks and frontmatter hooks, not KEY=!`cmd`', () => {
     const plan = planAccountSkills(
       [
-        skill('blocky', '```!\ndate\n```'),
-        skill('hooked', '---\nhooks:\n  Stop: []\n---\n'),
-        skill('plain', 'KEY=!`cmd` is shown as text'),
+        accountSkill('blocky', '```!\ndate\n```'),
+        accountSkill('hooked', '---\nhooks:\n  Stop: []\n---\n'),
+        accountSkill('plain', 'KEY=!`cmd` is shown as text'),
       ],
       { syncedNames: new Set(), localNames: new Set() },
     );

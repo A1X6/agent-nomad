@@ -7,9 +7,11 @@ import { useTempDir, writeTestFile } from './fakes.ts';
 import type { Collector, ScopeTarget } from '../src/agents/adapter.ts';
 import type { GlobalCollectorOptions } from '../src/agents/claude-code/global-collector.ts';
 import {
+  createClaudeCodeAdapter,
   createClaudeCodeGlobalCollector,
   createClaudeCodeProjectCollector,
   projectDirName,
+  type ClaudeCodeAdapterOptions,
 } from '../src/index.ts';
 
 /**
@@ -54,6 +56,31 @@ export const globalCollector = (overrides: Partial<GlobalCollectorOptions> = {})
     customConfigDir: false,
     ...overrides,
   });
+
+/**
+ * The real Claude Code adapter for `homedir`: no programs on PATH and Claude Code not
+ * running, unless `overrides` say otherwise.
+ */
+export const claudeCodeAdapter = (
+  homedir: string,
+  overrides: Partial<ClaudeCodeAdapterOptions> = {},
+) =>
+  createClaudeCodeAdapter({
+    env: { PATH: '' },
+    homedir,
+    platform: process.platform,
+    isClaudeRunning: () => Promise.resolve(false),
+    ...overrides,
+  });
+
+/** Claude Code settings with one Stop hook that runs `command`. */
+export const stopHook = (command: string) => ({
+  hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] },
+});
+
+/** Writes `settingsFile` with autoMemoryDirectory set to `dir`. */
+export const setMemoryDirectory = (settingsFile: string, dir: string) =>
+  writeTestFile(settingsFile, JSON.stringify({ autoMemoryDirectory: dir }));
 
 /** The project collector, which takes auto memory as `.agentnomad/auto-memory/`. */
 export function collect(includeMemory = false, env: Record<string, string> = {}, dir = project) {

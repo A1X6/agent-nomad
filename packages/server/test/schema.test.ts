@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { Database } from '../src/db/database.ts';
 import { bundleBlobs, bundles, sessions, users } from '../src/db/schema.ts';
 import { migrationsFolder, type TestDatabase, useTestDatabase } from './support/database.ts';
-import { bytes, newSession, newUser } from './support/fixtures.ts';
+import { bundleRow, bytes, newSession, newUser } from './support/fixtures.ts';
 
 let database: TestDatabase;
 let db: Database;
@@ -129,27 +129,15 @@ describe('bundles and bundle_blobs', () => {
     return blob;
   }
 
-  const meta = (userId: string, blobId: string) => ({
-    userId,
-    agent: 'claude-code',
-    scopeKey: 'global',
-    nameEnc: null,
-    contentHash: bytes(32),
-    formatVersion: 1,
-    revision: 1,
-    sizeBytes: 100,
-    blobId,
-  });
-
   it('allow one saved setup per user, agent and scope', async () => {
     const user = await insertUser();
-    await db.insert(bundles).values(meta(user.id, (await insertBlob(user.id)).id));
+    await db.insert(bundles).values(bundleRow(user.id, (await insertBlob(user.id)).id));
     await expect(
-      db.insert(bundles).values(meta(user.id, (await insertBlob(user.id)).id)),
+      db.insert(bundles).values(bundleRow(user.id, (await insertBlob(user.id)).id)),
     ).rejects.toThrow();
     await db
       .insert(bundles)
-      .values({ ...meta(user.id, (await insertBlob(user.id)).id), agent: 'codex' });
+      .values({ ...bundleRow(user.id, (await insertBlob(user.id)).id), agent: 'codex' });
   });
 
   it('give every stored file its own random id', async () => {
@@ -162,7 +150,7 @@ describe('bundles and bundle_blobs', () => {
   it('refuse to delete the file a setup points to', async () => {
     const user = await insertUser();
     const blob = await insertBlob(user.id);
-    await db.insert(bundles).values(meta(user.id, blob.id));
+    await db.insert(bundles).values(bundleRow(user.id, blob.id));
     await expect(db.delete(bundleBlobs).where(eq(bundleBlobs.id, blob.id))).rejects.toThrow();
   });
 
@@ -170,15 +158,15 @@ describe('bundles and bundle_blobs', () => {
     const owner = await insertUser('owner');
     const other = await insertUser('other');
     const blob = await insertBlob(owner.id);
-    await expect(db.insert(bundles).values(meta(other.id, blob.id))).rejects.toThrow();
+    await expect(db.insert(bundles).values(bundleRow(other.id, blob.id))).rejects.toThrow();
   });
 
   it('refuse to point two setups at the same file', async () => {
     const user = await insertUser();
     const blob = await insertBlob(user.id);
-    await db.insert(bundles).values(meta(user.id, blob.id));
+    await db.insert(bundles).values(bundleRow(user.id, blob.id));
     await expect(
-      db.insert(bundles).values({ ...meta(user.id, blob.id), agent: 'codex' }),
+      db.insert(bundles).values({ ...bundleRow(user.id, blob.id), agent: 'codex' }),
     ).rejects.toThrow();
   });
 
@@ -192,7 +180,7 @@ describe('bundles and bundle_blobs', () => {
     const user = await insertUser();
     const blob = await insertBlob(user.id);
     await expect(
-      db.insert(bundles).values({ ...meta(user.id, blob.id), ...override }),
+      db.insert(bundles).values({ ...bundleRow(user.id, blob.id), ...override }),
     ).rejects.toThrow();
   });
 
@@ -200,7 +188,7 @@ describe('bundles and bundle_blobs', () => {
     const user = await insertUser();
     const blob = await insertBlob(user.id);
     await insertBlob(user.id); // a leftover file no setup points to
-    await db.insert(bundles).values(meta(user.id, blob.id));
+    await db.insert(bundles).values(bundleRow(user.id, blob.id));
     await db.insert(sessions).values(newSession(user.id, 't'));
 
     await db.delete(users).where(eq(users.id, user.id));

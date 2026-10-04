@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { stopHook } from './claude-code-project-fixtures.ts';
 import { useTempDir, writeTestFile } from './fakes.ts';
 import { findUnknownEntries } from '../src/index.ts';
 
@@ -37,7 +38,7 @@ describe('unknown-file check (T32 done-when)', () => {
     await writeFile(
       join(base, 'settings.json'),
       JSON.stringify({
-        hooks: { Stop: [{ hooks: [{ type: 'command', command: '~/.claude/hooks/check.sh' }] }] },
+        ...stopHook('~/.claude/hooks/check.sh'),
         statusLine: { type: 'command', command: 'bash ~/.claude/bin/status.sh' },
       }),
     );
