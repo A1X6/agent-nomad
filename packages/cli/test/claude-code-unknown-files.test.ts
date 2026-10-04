@@ -1,22 +1,18 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { writeTestFile } from './fakes.ts';
+import { useTempDir, writeTestFile } from './fakes.ts';
 import { findUnknownEntries } from '../src/index.ts';
 
 let root: string;
 let base: string;
 let project: string;
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'agentnomad-unknown-'));
+useTempDir('agentnomad-unknown-', (dir) => {
+  root = dir;
   base = join(root, '.claude');
   project = join(root, 'app');
-});
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
 });
 
 const input = () => ({ baseDir: base, platform: process.platform });

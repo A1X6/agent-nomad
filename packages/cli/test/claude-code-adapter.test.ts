@@ -1,8 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   collected,
@@ -10,6 +8,7 @@ import {
   readText,
   recordingReporter,
   scriptedPrompter,
+  useTempDir,
   writeTestFile,
 } from './fakes.ts';
 import {
@@ -25,12 +24,7 @@ import {
 /** The Claude Code adapter's own steps; its parts have their own test files. */
 
 let home: string;
-beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), 'agentnomad-adapter-plan-'));
-});
-afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
-});
+useTempDir('agentnomad-adapter-plan-', (dir) => (home = dir));
 
 /** Answers every conflict question the same way. */
 const answer = (choice: ConflictChoice) => () => Promise.resolve(choice);

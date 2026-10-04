@@ -1,30 +1,29 @@
-import { chmod, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { base, home, syncedSetup, useProjectFolders } from './claude-code-project-fixtures.ts';
-import { paths, text, writeTestFile } from './fakes.ts';
+import {
+  base,
+  collectSkipped,
+  globalCollector,
+  home,
+  syncedSetup,
+  useProjectFolders,
+} from './claude-code-project-fixtures.ts';
+import { paths, text, withTempDir, writeTestFile } from './fakes.ts';
 import {
   ACCOUNT_SKILLS_PREFIX,
   ClaudeJsonError,
   type ProgramInfo,
-  createClaudeCodeGlobalCollector,
   type CollectedFile,
 } from '../src/index.ts';
 
 const posix = process.platform !== 'win32';
 useProjectFolders('agentnomad-home-');
 
-function collector(customConfigDir = false, baseDir = base) {
-  return createClaudeCodeGlobalCollector({
-    baseDir,
-    homedir: home,
-    platform: process.platform,
-    customConfigDir,
-  });
-}
+const collector = (customConfigDir = false, baseDir = base) =>
+  globalCollector({ customConfigDir, baseDir });
 
 async function collect(includeMemory = false): Promise<readonly CollectedFile[]> {
   return collector().collect({ kind: 'global' }, { includeMemory });
@@ -311,8 +310,7 @@ describe('global collector: hook and status line scripts', () => {
   });
 
   it('ignores programs on PATH, missing files and files outside home', async () => {
-    const outside = await mkdtemp(join(tmpdir(), 'agentnomad-outside-'));
-    try {
+    await withTempDir('agentnomad-outside-', async (outside) => {
       await writeTestFile(join(outside, 'tool.sh'));
       const files = await withSettings({
         statusLine: { type: 'command', command: 'ccstatusline' },
@@ -323,9 +321,7 @@ describe('global collector: hook and status line scripts', () => {
         },
       });
       expect(paths(files)).toEqual(['settings.json']);
-    } finally {
-      await rm(outside, { recursive: true, force: true });
-    }
+    });
   });
 });
 
@@ -351,11 +347,7 @@ describe('global collector: a link into a folder for keys (T45)', () => {
       join(base, 'skills', 'keys'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const skipped: string[] = [];
-    const files = await collector().collect(
-      { kind: 'global' },
-      { includeMemory: false, onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`) },
-    );
+    const { found: files, skipped } = await collectSkipped(collector(), { kind: 'global' });
     expect(paths(files).some((path) => path.startsWith('skills/keys'))).toBe(false);
     expect(skipped).toEqual(['skills/keys: it links into a folder for keys and logins']);
   });
@@ -374,11 +366,7 @@ describe('global collector: programs the status line and hooks need', () => {
     findProgram?: (command: string) => Promise<ProgramInfo | null>,
     globalFiles?: readonly string[],
   ) {
-    return createClaudeCodeGlobalCollector({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      customConfigDir: false,
+    return globalCollector({
       ...(findProgram && { findProgram }),
       ...(globalFiles && { globalFiles }),
     }).collect({ kind: 'global' }, { includeMemory: false });
@@ -429,16 +417,9 @@ describe('global collector: programs the status line and hooks need', () => {
         },
       }),
     );
-    const skipped: string[] = [];
-    const files = await createClaudeCodeGlobalCollector({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      customConfigDir: false,
-      findProgram: (command) => Promise.resolve({ command, npm: null }),
-    }).collect(
+    const { found: files, skipped } = await collectSkipped(
+      globalCollector({ findProgram: (command) => Promise.resolve({ command, npm: null }) }),
       { kind: 'global' },
-      { includeMemory: false, onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`) },
     );
     expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
       programs: [{ command: 'terminal-notifier', npm: null }],

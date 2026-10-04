@@ -1,8 +1,9 @@
-import { copyFile, link, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { copyFile, link, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+
+import { useTempDir } from './fakes.ts';
 
 import {
   claudeConfigDir,
@@ -203,12 +204,7 @@ describe('helpers', () => {
  */
 describe('real PC', () => {
   let dir: string;
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'agentnomad-detect-'));
-  });
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
+  useTempDir('agentnomad-detect-', (temp) => (dir = temp));
 
   it('finds and runs `claude` from PATH and sees the config folder', async () => {
     const bin = join(dir, 'bin');

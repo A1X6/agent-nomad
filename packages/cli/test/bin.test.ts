@@ -1,22 +1,16 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+
+import { useTempDir } from './fakes.ts';
 
 const cliRoot = fileURLToPath(new URL('..', import.meta.url));
 
 // A temp home and an empty PATH: the child never sees this PC's ~/.claude or its `claude` (QA-01).
 // The machine-wide managed-settings paths are still read; they do not depend on the env.
 let home: string;
-beforeAll(() => {
-  home = mkdtempSync(join(tmpdir(), 'agentnomad-bin-'));
-});
-afterAll(() => {
-  rmSync(home, { recursive: true, force: true });
-});
+useTempDir('agentnomad-bin-', (dir) => (home = dir));
 
 // Windows needs SystemRoot to start Node.
 const systemRoot = process.env['SystemRoot'];

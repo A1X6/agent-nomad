@@ -1,11 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, readdir, rm, stat, writeFile, chmod } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readdir, stat, writeFile, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { readJson } from './fakes.ts';
+import { readJson, useTempDir } from './fakes.ts';
 import {
   configDir,
   createFileStore,
@@ -22,12 +21,7 @@ const posix = process.platform !== 'win32';
 const SERVER = 'agentnomad-api.onrender.com';
 
 let dir: string;
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'agentnomad-secrets-'));
-});
-afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
-});
+useTempDir('agentnomad-secrets-', (temp) => (dir = temp));
 
 /** A keychain in memory, recording which accounts were used. */
 function memoryKeychain() {
@@ -53,6 +47,21 @@ const noKeychain: KeychainEntryFactory = () => {
 describe('file store', () => {
   const path = () => join(dir, 'agentnomad', 'secrets.json');
   const store = (server = SERVER) => createFileStore({ path: path(), server });
+
+  /** A file store as on Windows, recording the files it gives only this user access to. */
+  function windowsStore() {
+    const restricted: string[] = [];
+    const store = createFileStore({
+      path: join(dir, 'secrets.json'),
+      server: SERVER,
+      platform: 'win32',
+      restrictAccess: (file) => {
+        restricted.push(file);
+        return Promise.resolve();
+      },
+    });
+    return { store, restricted };
+  }
 
   it('keeps, returns and forgets secrets', async () => {
     const secrets = store();
@@ -125,16 +134,7 @@ describe('file store', () => {
   });
 
   it('on Windows, gives only this user access to the file (T46)', async () => {
-    const restricted: string[] = [];
-    const store = createFileStore({
-      path: join(dir, 'secrets.json'),
-      server: SERVER,
-      platform: 'win32',
-      restrictAccess: (file) => {
-        restricted.push(file);
-        return Promise.resolve();
-      },
-    });
+    const { store, restricted } = windowsStore();
     await store.setMany({ 'data-key': 'key' });
     expect(restricted).toHaveLength(1);
     // The temporary file, before it takes the real name (the shared atomic write's name, T62).
@@ -142,16 +142,7 @@ describe('file store', () => {
   });
 
   it('saves a whole login with one file write (PERF-02)', async () => {
-    const restricted: string[] = [];
-    const store = createFileStore({
-      path: join(dir, 'secrets.json'),
-      server: SERVER,
-      platform: 'win32',
-      restrictAccess: (file) => {
-        restricted.push(file);
-        return Promise.resolve();
-      },
-    });
+    const { store, restricted } = windowsStore();
     await store.setMany({ 'session-token': 'token', 'data-key': 'key' });
     expect(restricted).toHaveLength(1);
     expect(await store.get('session-token')).toBe('token');
@@ -186,6 +177,13 @@ describe('createSecretStore', () => {
     homedir: dir,
     env: { APPDATA: join(dir, 'AppData'), XDG_CONFIG_HOME: join(dir, 'xdg') },
   });
+  /** The plain-text file the store falls back to, read on its own. */
+  const fileStore = () =>
+    createFileStore({
+      path: join(configDir(input()), 'secrets.json'),
+      server: SERVER,
+      restrictAccess: () => Promise.resolve(),
+    });
 
   it('uses the keychain when it works', async () => {
     const store = await createSecretStore({ ...input(), keychain: memoryKeychain().factory });
@@ -213,11 +211,7 @@ describe('createSecretStore', () => {
     expect(await store.get('session-token')).toBe('token');
     expect(await store.get('data-key')).toBe('key');
     // And the plain-text copy is gone.
-    const file = createFileStore({
-      path: join(configDir(input()), 'secrets.json'),
-      server: SERVER,
-      restrictAccess: () => Promise.resolve(),
-    });
+    const file = fileStore();
     expect(await file.get('data-key')).toBeNull();
   });
 
@@ -242,11 +236,7 @@ describe('createSecretStore', () => {
     expect(await store.get('session-token')).toBe('new-token');
     expect(await store.get('data-key')).toBe('new-key');
     expect(ended).toEqual(['old-token']);
-    const file = createFileStore({
-      path: join(configDir(input()), 'secrets.json'),
-      server: SERVER,
-      restrictAccess: () => Promise.resolve(),
-    });
+    const file = fileStore();
     expect(await file.get('session-token')).toBeNull();
     expect(await file.get('data-key')).toBeNull();
   });

@@ -3,7 +3,6 @@ import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
-  createClaudeCodeGlobalCollector,
   globalDestination,
   marketplaceAddArgument,
   PluginManifestSchema,
@@ -13,7 +12,13 @@ import {
 } from '../src/index.ts';
 
 import { putJson, realisticPlugins } from './claude-code-plugin-fixtures.ts';
-import { base, home, project, useProjectFolders } from './claude-code-project-fixtures.ts';
+import {
+  base,
+  globalCollector,
+  home,
+  project,
+  useProjectFolders,
+} from './claude-code-project-fixtures.ts';
 
 useProjectFolders('agentnomad-plugins-');
 
@@ -73,12 +78,7 @@ describe('plugin list on push', () => {
 
   it('the global collector adds .agentnomad/plugins.json, which restore never writes', async () => {
     await realisticPlugins(home, project);
-    const files = await createClaudeCodeGlobalCollector({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      customConfigDir: false,
-    }).collect({ kind: 'global' }, { includeMemory: false });
+    const files = await globalCollector().collect({ kind: 'global' }, { includeMemory: false });
     expect(files.map((file) => file.path)).toEqual(['.agentnomad/plugins.json']);
     expect(globalDestination('.agentnomad/plugins.json', new Set())).toEqual({ kind: 'metadata' });
     expect(projectDestination('.agentnomad/plugins.json')).toEqual({ kind: 'metadata' });

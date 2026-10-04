@@ -1,21 +1,17 @@
 import { spawnSync } from 'node:child_process';
-import {
-  chmod,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readdir,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, lstat, mkdir, readdir, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { collected, collectedJson, fakeEnvWriter, readText, recordingReporter } from './fakes.ts';
+import {
+  collected,
+  collectedJson,
+  fakeEnvWriter,
+  readText,
+  recordingReporter,
+  useTempDir,
+} from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
   isRedirectVariable,
@@ -205,15 +201,10 @@ describe('shell profile block', () => {
 
 describe('writing the profile', () => {
   let dir: string;
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'agentnomad-env-'));
-  });
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
+  useTempDir('agentnomad-env-', (temp) => (dir = temp));
 
-  const bashrc = (path: string) =>
-    createShellProfileWriter({ path, kind: 'posix', label: '~/.bashrc' });
+  const bashrc = (path: string, now?: () => Date) =>
+    createShellProfileWriter({ path, kind: 'posix', label: '~/.bashrc' }, now);
 
   it('never replaces a profile it cannot read (T46)', async () => {
     const profile = join(dir, '.bashrc');
@@ -270,10 +261,7 @@ describe('writing the profile', () => {
   it('backs the profile up before changing it', async () => {
     const profile = join(dir, '.bashrc');
     await writeFile(profile, 'alias ll="ls -l"\n');
-    const writer = createShellProfileWriter(
-      { path: profile, kind: 'posix', label: '~/.bashrc' },
-      () => new Date('2026-09-25T12:00:00Z'),
-    );
+    const writer = bashrc(profile, () => new Date('2026-09-25T12:00:00Z'));
     const { backup } = await writer.write({ TOKEN: 'abc' });
     expect(backup).toBe(`${profile}.agentnomad-backup-20260925T120000Z`);
     expect(await readText(backup ?? '')).toBe('alias ll="ls -l"\n');
@@ -283,10 +271,7 @@ describe('writing the profile', () => {
   it('two writes in the same second keep both backups (review 6 BUG-01)', async () => {
     const profile = join(dir, '.bashrc');
     await writeFile(profile, 'alias ll="ls -l"\n');
-    const writer = createShellProfileWriter(
-      { path: profile, kind: 'posix', label: '~/.bashrc' },
-      () => new Date('2026-09-25T12:00:00Z'),
-    );
+    const writer = bashrc(profile, () => new Date('2026-09-25T12:00:00Z'));
     const first = await writer.write({ TOKEN: 'abc' });
     const second = await writer.write({ TOKEN: 'new' });
     expect(first.backup).toBe(`${profile}.agentnomad-backup-20260925T120000Z`);
@@ -441,6 +426,17 @@ describe('restoring values on pull', () => {
   const recordingWriter = () =>
     fakeEnvWriter({ where: '~/.zshrc', backup: '/home/a/.zshrc.agentnomad-backup-x' });
   const section = { variables: { GITHUB_TOKEN: 'ghp_secret', API_KEY: 'key-1' } };
+  /** Records each question with its default, and answers with the default. */
+  const defaultAnswers = () => {
+    const asked: [string, boolean | undefined][] = [];
+    const prompter = {
+      confirm: (message: string, initial?: boolean) => {
+        asked.push([message, initial]);
+        return Promise.resolve(initial ?? false);
+      },
+    };
+    return { asked, prompter };
+  };
 
   it('adds only missing variables, after asking, and never shows values', async () => {
     const { writer, written } = recordingWriter();
@@ -528,19 +524,14 @@ describe('restoring values on pull', () => {
     expect(lines.join('\n')).toContain('--allow-commands');
     expect(lines.join('\n')).not.toContain('http://p');
 
-    const asked: [string, boolean | undefined][] = [];
+    const { asked, prompter } = defaultAnswers();
     const second = recordingWriter();
     await restoreEnvValues({
       isRedirectVariable,
       section: redirects,
       env: {},
       writer: second.writer,
-      prompter: {
-        confirm: (message, initial) => {
-          asked.push([message, initial]);
-          return Promise.resolve(initial ?? false);
-        },
-      },
+      prompter,
       reporter,
     });
     expect(asked[1]).toEqual([
@@ -606,18 +597,13 @@ describe('restoring values on pull', () => {
 
     it('asks about them separately, defaulting to no', async () => {
       const { writer, written } = recordingWriter();
-      const asked: [string, boolean | undefined][] = [];
+      const { asked, prompter } = defaultAnswers();
       await restoreEnvValues({
         isRedirectVariable,
         section: loaders,
         env: {},
         writer,
-        prompter: {
-          confirm: (message, initial) => {
-            asked.push([message, initial]);
-            return Promise.resolve(initial ?? false);
-          },
-        },
+        prompter,
         reporter: quiet().reporter,
       });
       expect(asked).toEqual([

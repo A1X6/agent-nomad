@@ -1,24 +1,19 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import type { BundleSummary } from '@agentnomad/contracts';
-import {
-  createSodiumCryptoService,
-  encryptProjectName,
-  scopeKeyFor,
-  type CryptoService,
-} from '@agentnomad/core';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { encryptProjectName, scopeKeyFor } from '@agentnomad/core';
+import { describe, expect, it } from 'vitest';
 
 import {
+  crypto,
   CWD,
+  dataKey,
   fakeAdapter,
   fakeApi,
   localStateIn,
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
+  useDataKey,
+  useTempDir,
 } from './fakes.ts';
 
 import {
@@ -31,21 +26,13 @@ import {
 
 const NOW = new Date('2026-09-25T12:00:00Z');
 
-let crypto: CryptoService;
-let dataKey: Uint8Array;
-beforeAll(async () => {
-  crypto = await createSodiumCryptoService();
-  dataKey = crypto.randomBytes(32);
-});
+useDataKey();
 
 let dir: string;
 let state: LocalState;
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'agentnomad-cmds-'));
+useTempDir('agentnomad-cmds-', (temp) => {
+  dir = temp;
   state = localStateIn(dir);
-});
-afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
 });
 
 const claude = fakeAdapter('claude-code', 'Claude Code', {

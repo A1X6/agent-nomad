@@ -1,6 +1,9 @@
 import type { BundleParams, BundleSummary } from '@agentnomad/contracts';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { afterEach, beforeAll, beforeEach } from 'vitest';
 
 // Module paths, not the package index: the agent boundary test uses these fakes and must
 // not load any agent's adapter.
@@ -39,6 +42,51 @@ export const paths = (files: readonly CollectedFile[]) => files.map((file) => fi
 /** The text of the collected file at `path` (empty when there is none). */
 export const text = (files: readonly CollectedFile[], path: string) =>
   new TextDecoder().decode(files.find((file) => file.path === path)?.content);
+
+const makeTempDir = (prefix: string): Promise<string> => mkdtemp(join(tmpdir(), prefix));
+const removeTempDir = (dir: string): Promise<void> => rm(dir, { recursive: true, force: true });
+
+/**
+ * The one temporary-folder hook of the CLI tests (review 9 DUP-01): a fresh folder named
+ * `prefix` plus random letters before each test of the calling file or `describe`, handed to
+ * `use`, and removed after the test.
+ */
+export function useTempDir(prefix: string, use: (dir: string) => void): void {
+  let dir: string | undefined;
+  beforeEach(async () => {
+    dir = await makeTempDir(prefix);
+    use(dir);
+  });
+  afterEach(async () => {
+    if (dir !== undefined) await removeTempDir(dir);
+  });
+}
+
+/** Runs `use` in a fresh temporary folder of its own, removed afterwards even when it fails. */
+export async function withTempDir(
+  prefix: string,
+  use: (dir: string) => Promise<void>,
+): Promise<void> {
+  const dir = await makeTempDir(prefix);
+  try {
+    await use(dir);
+  } finally {
+    await removeTempDir(dir);
+  }
+}
+
+// The real crypto service and a data key, made by `useDataKey` before the tests of the
+// calling file. Live bindings, as in claude-code-project-fixtures.ts.
+export let crypto: CryptoService;
+export let dataKey: Uint8Array;
+
+/** Makes the real crypto service and a random 32-byte data key once for the calling file. */
+export function useDataKey(): void {
+  beforeAll(async () => {
+    crypto = await createSodiumCryptoService();
+    dataKey = crypto.randomBytes(32);
+  });
+}
 
 /**
  * Writes a file in a test's temporary folder, creating its folders first. The content

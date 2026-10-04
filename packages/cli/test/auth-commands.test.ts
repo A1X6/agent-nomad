@@ -5,14 +5,12 @@ import {
   type RegisterRequest,
   WRONG_PASSWORD_MESSAGE,
 } from '@agentnomad/contracts';
-import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { CryptoService } from '@agentnomad/core';
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  crypto as realCrypto,
   fakeApi,
   localStateIn,
   memorySecrets,
@@ -20,6 +18,9 @@ import {
   recordingReporter,
   scriptedPrompter,
   STRONG,
+  useDataKey,
+  useTempDir,
+  withTempDir,
 } from './fakes.ts';
 
 import {
@@ -39,10 +40,9 @@ import {
 /** Answered by typing: no flags. */
 const ASK = { yes: false, passwordStdin: false };
 
-let realCrypto: CryptoService;
+useDataKey();
 let zxcvbn: PasswordChecker;
 beforeAll(async () => {
-  realCrypto = await createSodiumCryptoService();
   zxcvbn = await loadZxcvbnChecker();
 });
 
@@ -378,8 +378,7 @@ describe('login', () => {
     const server = fakeServer();
     await setup(registerAnswers('alice'), { server }).commands.register(ASK);
     await setup(registerAnswers('bob'), { server }).commands.register(ASK);
-    const dir = await mkdtemp(join(tmpdir(), 'agentnomad-auth-'));
-    try {
+    await withTempDir('agentnomad-auth-', async (dir) => {
       const state = localStateIn(dir);
       const secrets = memorySecrets();
       const pc = (answers: (string | boolean)[]) =>
@@ -402,9 +401,7 @@ describe('login', () => {
       await pc([]).logout();
       await pc(registerAnswers('carol')).register(ASK);
       expect(await state.knownRevisions()).toEqual({});
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    });
   });
 
   it('a wrong password saves nothing', async () => {
@@ -806,16 +803,11 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
 });
 
 describe('agentnomad account delete, logged in with a local state', () => {
-  let dir: string;
   let state: LocalState;
   let dataKey: Uint8Array;
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'agentnomad-account-'));
-    state = localStateIn(dir);
+  useTempDir('agentnomad-account-', (dir) => (state = localStateIn(dir)));
+  beforeEach(() => {
     dataKey = realCrypto.randomBytes(32);
-  });
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
   });
 
   function account(
