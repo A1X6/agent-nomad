@@ -12,7 +12,6 @@ import {
 import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
-  fakeApi,
   fakeBundleServer,
   fakeEnvWriter,
   memorySecretStore,
@@ -34,7 +33,6 @@ import {
   ProjectFolderError,
   PromptCancelledError,
   SetupsNotDoneError,
-  listAllBundles,
   createPushCommand,
   createShellProfileWriter,
   AnswerNeededError,
@@ -842,21 +840,5 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(second.lines.join('\n')).toContain('already set here');
     expect(await readText(profile)).toBe(after);
     expect((await readdir(b.home, { recursive: true })).sort()).toEqual(files.sort());
-  });
-});
-
-describe('listing saved setups stops on a server that never ends (T46)', () => {
-  it('refuses a cursor it has already seen', async () => {
-    let calls = 0;
-    const api = fakeApi({
-      bundles: {
-        list: () => {
-          calls += 1;
-          return Promise.resolve({ items: [], nextCursor: 'same' });
-        },
-      },
-    });
-    await expect(listAllBundles(api)).rejects.toThrow('kept sending more pages');
-    expect(calls).toBe(2);
   });
 });

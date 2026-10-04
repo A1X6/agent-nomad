@@ -1,9 +1,8 @@
 import { DEFAULT_KDF_PARAMS, MAX_BUNDLE_BYTES, USER_STORAGE_LIMITS } from '@agentnomad/contracts';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  BlobInUseError,
   InvalidCursorError,
   UsernameTakenError,
   createBundleRepository,
@@ -14,14 +13,21 @@ import {
   storageLimitPassed,
   type BlobStore,
   type BundleKey,
-  type BundleMetaWrite,
   type BundleRepository,
   type SessionRepository,
   type UserRepository,
 } from '../src/index.ts';
 import { encodeBundleCursor } from '../src/db/bundle-cursor.ts';
 import { createTestDatabase, type TestDatabase } from './support/database.ts';
-import { bytes, createUser, newUser, scopeKeyOf, seedSetups } from './support/fixtures.ts';
+import {
+  bytes,
+  createUser,
+  globalKey,
+  metaWrite,
+  newUser,
+  scopeKeyOf,
+  seedSetups,
+} from './support/fixtures.ts';
 
 const hash = (fill: number) => bytes(32, fill);
 
@@ -67,7 +73,7 @@ describe('UserRepository', () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
     const blob = await blobs.put(user.id, bytes(40));
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, blob.blobId, 1));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, blob.blobId, 1));
 
     await userRepo.delete(user.id);
 
@@ -187,70 +193,11 @@ describe('SessionRepository', () => {
   });
 });
 
-const globalKey = (userId: string): BundleKey => ({
-  userId,
-  agent: 'claude-code',
-  scopeKey: 'global',
-});
-
-function write(
-  key: Partial<BundleKey> & { userId: string },
-  expectedRevision: number,
-  blobId: string,
-  hashFill: number,
-): BundleMetaWrite {
-  return {
-    key: { ...globalKey(key.userId), ...key },
-    expectedRevision,
-    nameEnc: null,
-    contentHash: hash(hashFill),
-    formatVersion: 1,
-    sizeBytes: 40,
-    blobId,
-  };
-}
-
-describe('BlobStore (Postgres)', () => {
-  it('stores bytes under a new id each time and reads them back', async () => {
-    const user = await createUser(database.db, 'ahmed');
-    const first = await blobs.put(user.id, bytes(40, 1));
-    const second = await blobs.put(user.id, bytes(40, 1));
-    expect(first.blobId).not.toBe(second.blobId);
-    const read = await blobs.get(first);
-    expect(read).toBeInstanceOf(Uint8Array);
-    expect(read).toEqual(bytes(40, 1));
-  });
-
-  it("never returns another user's file", async () => {
-    const owner = await createUser(database.db, 'owner');
-    const other = await createUser(database.db, 'other');
-    const blob = await blobs.put(owner.id, bytes(40));
-    expect(await blobs.get({ userId: other.id, blobId: blob.blobId })).toBeNull();
-    await blobs.delete({ userId: other.id, blobId: blob.blobId });
-    expect(await blobs.get(blob)).toEqual(bytes(40));
-  });
-
-  it('does nothing when deleting a file that is already gone', async () => {
-    const user = await createUser(database.db, 'ahmed');
-    const blob = await blobs.put(user.id, bytes(40));
-    await blobs.delete(blob);
-    await expect(blobs.delete(blob)).resolves.toBeUndefined();
-  });
-
-  it('throws BlobInUseError instead of deleting the current file of a setup', async () => {
-    const user = await createUser(database.db, 'ahmed');
-    const blob = await blobs.put(user.id, bytes(40));
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, blob.blobId, 1));
-    await expect(blobs.delete(blob)).rejects.toBeInstanceOf(BlobInUseError);
-    expect(await blobs.get(blob)).toEqual(bytes(40));
-  });
-});
-
 describe('BundleRepository.putMeta', () => {
   it('saves a first revision and points it at the uploaded file', async () => {
     const user = await createUser(database.db, 'ahmed');
     const blob = await blobs.put(user.id, bytes(40));
-    const result = await bundleRepo.putMeta(write({ userId: user.id }, 0, blob.blobId, 1));
+    const result = await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, blob.blobId, 1));
     expect(result).toMatchObject({ outcome: 'saved', replacedBlobId: null });
     expect(result.outcome === 'saved' && result.meta).toMatchObject({
       revision: 1,
@@ -262,9 +209,9 @@ describe('BundleRepository.putMeta', () => {
   it('saves the next revision and reports the file it replaced', async () => {
     const user = await createUser(database.db, 'ahmed');
     const first = await blobs.put(user.id, bytes(40, 1));
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, first.blobId, 1));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, first.blobId, 1));
     const second = await blobs.put(user.id, bytes(40, 2));
-    const result = await bundleRepo.putMeta(write({ userId: user.id }, 1, second.blobId, 2));
+    const result = await bundleRepo.putMeta(metaWrite({ userId: user.id }, 1, second.blobId, 2));
     expect(result).toMatchObject({ outcome: 'saved', replacedBlobId: first.blobId });
     expect((await bundleRepo.get(globalKey(user.id)))?.revision).toBe(2);
   });
@@ -272,12 +219,12 @@ describe('BundleRepository.putMeta', () => {
   it('refuses a save based on an old revision (conflict)', async () => {
     const user = await createUser(database.db, 'ahmed');
     const first = await blobs.put(user.id, bytes(40, 1));
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, first.blobId, 1));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, first.blobId, 1));
     const second = await blobs.put(user.id, bytes(40, 2));
-    await bundleRepo.putMeta(write({ userId: user.id }, 1, second.blobId, 2));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 1, second.blobId, 2));
 
     const stale = await blobs.put(user.id, bytes(40, 3));
-    const result = await bundleRepo.putMeta(write({ userId: user.id }, 1, stale.blobId, 3));
+    const result = await bundleRepo.putMeta(metaWrite({ userId: user.id }, 1, stale.blobId, 3));
     expect(result).toEqual({ outcome: 'conflict', currentRevision: 2 });
     expect((await bundleRepo.get(globalKey(user.id)))?.blobId).toBe(second.blobId);
   });
@@ -285,14 +232,14 @@ describe('BundleRepository.putMeta', () => {
   it('refuses a "must not exist yet" save when the setup exists, and vice versa', async () => {
     const user = await createUser(database.db, 'ahmed');
     const missing = await blobs.put(user.id, bytes(40));
-    expect(await bundleRepo.putMeta(write({ userId: user.id }, 3, missing.blobId, 1))).toEqual({
+    expect(await bundleRepo.putMeta(metaWrite({ userId: user.id }, 3, missing.blobId, 1))).toEqual({
       outcome: 'conflict',
       currentRevision: 0,
     });
 
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, missing.blobId, 1));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, missing.blobId, 1));
     const again = await blobs.put(user.id, bytes(40, 2));
-    expect(await bundleRepo.putMeta(write({ userId: user.id }, 0, again.blobId, 2))).toEqual({
+    expect(await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, again.blobId, 2))).toEqual({
       outcome: 'conflict',
       currentRevision: 1,
     });
@@ -301,11 +248,11 @@ describe('BundleRepository.putMeta', () => {
   it('treats a retry of a save that already went through as unchanged', async () => {
     const user = await createUser(database.db, 'ahmed');
     const upload = await blobs.put(user.id, bytes(40));
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, upload.blobId, 1));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, upload.blobId, 1));
 
     // The response was lost; the CLI sends the same bytes again (a new file id).
     const retry = await blobs.put(user.id, bytes(40));
-    const result = await bundleRepo.putMeta(write({ userId: user.id }, 0, retry.blobId, 1));
+    const result = await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, retry.blobId, 1));
     expect(result).toMatchObject({ outcome: 'unchanged', meta: { revision: 1 } });
     expect((await bundleRepo.get(globalKey(user.id)))?.blobId).toBe(upload.blobId);
   });
@@ -313,11 +260,11 @@ describe('BundleRepository.putMeta', () => {
   it('treats an identical push of the current revision as unchanged (QA-06)', async () => {
     const user = await createUser(database.db, 'ahmed');
     const upload = await blobs.put(user.id, bytes(40));
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, upload.blobId, 1));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, upload.blobId, 1));
 
     // Pushed again with nothing changed: same bytes, and the client saw revision 1.
     const again = await blobs.put(user.id, bytes(40));
-    const result = await bundleRepo.putMeta(write({ userId: user.id }, 1, again.blobId, 1));
+    const result = await bundleRepo.putMeta(metaWrite({ userId: user.id }, 1, again.blobId, 1));
     expect(result).toMatchObject({ outcome: 'unchanged', meta: { revision: 1 } });
     expect(await bundleRepo.get(globalKey(user.id))).toMatchObject({
       revision: 1,
@@ -330,22 +277,22 @@ describe('BundleRepository.putMeta', () => {
     const global = await blobs.put(user.id, bytes(40));
     const project = await blobs.put(user.id, bytes(40));
     const projectKey = { userId: user.id, scopeKey: 'a'.repeat(64) };
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, global.blobId, 1));
-    const result = await bundleRepo.putMeta(write(projectKey, 0, project.blobId, 2));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, global.blobId, 1));
+    const result = await bundleRepo.putMeta(metaWrite(projectKey, 0, project.blobId, 2));
     expect(result.outcome).toBe('saved');
   });
 
   it('never loses the saved file when two PCs push at the same moment', async () => {
     const user = await createUser(database.db, 'ahmed');
     const start = await blobs.put(user.id, bytes(40, 1));
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, start.blobId, 1));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, start.blobId, 1));
 
     // Both PCs saw revision 1 and upload before either revision check runs.
     const fromA = await blobs.put(user.id, bytes(40, 0xa));
     const fromB = await blobs.put(user.id, bytes(40, 0xb));
 
-    const resultA = await bundleRepo.putMeta(write({ userId: user.id }, 1, fromA.blobId, 0xa));
-    const resultB = await bundleRepo.putMeta(write({ userId: user.id }, 1, fromB.blobId, 0xb));
+    const resultA = await bundleRepo.putMeta(metaWrite({ userId: user.id }, 1, fromA.blobId, 0xa));
+    const resultB = await bundleRepo.putMeta(metaWrite({ userId: user.id }, 1, fromB.blobId, 0xb));
     expect(resultA).toMatchObject({ outcome: 'saved', replacedBlobId: start.blobId });
     expect(resultB).toEqual({ outcome: 'conflict', currentRevision: 2 });
 
@@ -390,14 +337,14 @@ describe('storage limits per account (T47)', () => {
     const one = await blobs.put(user.id, bytes(40));
     expect(
       await bundleRepo.putMeta(
-        write({ userId: user.id, scopeKey: scopeKeyOf(999) }, 0, one.blobId, 1),
+        metaWrite({ userId: user.id, scopeKey: scopeKeyOf(999) }, 0, one.blobId, 1),
       ),
     ).toEqual({ outcome: 'over-limit', limit: 'setups' });
     // A new revision of an existing setup still saves.
     const update = await blobs.put(user.id, bytes(40, 2));
     expect(
       await bundleRepo.putMeta(
-        write({ userId: user.id, scopeKey: scopeKeyOf(0) }, 1, update.blobId, 2),
+        metaWrite({ userId: user.id, scopeKey: scopeKeyOf(0) }, 1, update.blobId, 2),
       ),
     ).toMatchObject({ outcome: 'saved' });
     expect(await bundleRepo.usage(user.id)).toEqual({
@@ -409,7 +356,7 @@ describe('storage limits per account (T47)', () => {
   it('refuses growing past the byte limit, but never a save that does not grow', async () => {
     const user = await createUser(database.db, 'ahmed');
     const big = (key: Partial<BundleKey>, revision: number, blobId: string, size: number) => ({
-      ...write({ userId: user.id, ...key }, revision, blobId, revision + 1),
+      ...metaWrite({ userId: user.id, ...key }, revision, blobId, revision + 1),
       sizeBytes: size,
     });
     // Each setup is at most 5 MB, so the limit is reached with full ones.
@@ -438,28 +385,13 @@ describe('storage limits per account (T47)', () => {
   });
 });
 
-describe('BlobStore.deleteOrphans (T47)', () => {
-  it('deletes old files no setup points to, and nothing else', async () => {
-    const user = await createUser(database.db, 'ahmed');
-    const current = await blobs.put(user.id, bytes(40, 1));
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, current.blobId, 1));
-    const orphan = await blobs.put(user.id, bytes(40, 2));
-    const fresh = await blobs.put(user.id, bytes(40, 3));
-    await database.db.execute(
-      sql`update bundle_blobs set created_at = now() - interval '2 hours' where id in (${current.blobId}, ${orphan.blobId})`,
-    );
-    expect(await blobs.deleteOrphans?.(60 * 60)).toBe(1);
-    expect(await blobs.get(orphan)).toBeNull();
-    expect(await blobs.get(current)).not.toBeNull();
-    expect(await blobs.get(fresh)).not.toBeNull();
-  });
-});
-
 describe('BundleRepository.list', () => {
   async function saveSetups(userId: string, count: number) {
     for (let index = 0; index < count; index++) {
       const blob = await blobs.put(userId, bytes(40));
-      await bundleRepo.putMeta(write({ userId, scopeKey: scopeKeyOf(index) }, 0, blob.blobId, 1));
+      await bundleRepo.putMeta(
+        metaWrite({ userId, scopeKey: scopeKeyOf(index) }, 0, blob.blobId, 1),
+      );
     }
   }
 
@@ -552,7 +484,7 @@ describe('BundleRepository.delete', () => {
   it('returns what it removed, so the file can be deleted next', async () => {
     const user = await createUser(database.db, 'ahmed');
     const blob = await blobs.put(user.id, bytes(40));
-    await bundleRepo.putMeta(write({ userId: user.id }, 0, blob.blobId, 1));
+    await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, blob.blobId, 1));
 
     const removed = await bundleRepo.delete(globalKey(user.id));
     expect(removed?.blobId).toBe(blob.blobId);

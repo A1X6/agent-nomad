@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { createServerFromEnv } from '../src/server.ts';
+import { createDatabasePool, createServerFromEnv } from '../src/server.ts';
+import { memoryLogger } from './support/fixtures.ts';
 
 describe('createServerFromEnv', () => {
   const secret = Buffer.alloc(32, 7).toString('base64');
@@ -34,5 +35,21 @@ describe('createServerFromEnv', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('x-request-id')).toBeTruthy();
     await server.close();
+  });
+});
+
+describe('database pool errors (BUG-02)', () => {
+  it('logs an error from an idle connection instead of crashing the process', async () => {
+    const { logger, errors } = memoryLogger();
+    const pool = createDatabasePool(
+      'postgresql://user:hunter2@ep-example.eu-central-1.aws.neon.tech/neondb',
+      logger,
+    );
+    // With no listener, Node throws an emitted 'error'; with one, emit returns normally.
+    expect(() => pool.emit('error', new Error('connection dropped'))).not.toThrow();
+    expect(errors.map((entry) => entry.event)).toEqual(['pool_error']);
+    expect(errors[0]?.fields).toMatchObject({ errorMessage: 'connection dropped' });
+    expect(JSON.stringify(errors)).not.toContain('hunter2');
+    await pool.end();
   });
 });

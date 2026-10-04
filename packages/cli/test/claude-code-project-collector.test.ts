@@ -1,52 +1,21 @@
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { writeTestFile } from './fakes.ts';
 import {
-  createClaudeCodeProjectCollector,
-  projectDirName,
-  type CollectedFile,
-} from '../src/index.ts';
+  collect,
+  home,
+  memoryDir,
+  options,
+  project,
+  root,
+  useProjectFolders,
+} from './claude-code-project-fixtures.ts';
+import { paths, text, writeTestFile } from './fakes.ts';
+import { createClaudeCodeProjectCollector } from '../src/index.ts';
 
-let root: string;
-let home: string;
-let base: string;
-let project: string;
-
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'agentnomad-project-'));
-  home = join(root, 'home');
-  base = join(home, '.claude');
-  project = join(root, 'work', 'my-app');
-  await mkdir(base, { recursive: true });
-  await mkdir(project, { recursive: true });
-});
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
-});
-
-const options = (env: Record<string, string> = {}) => ({
-  baseDir: base,
-  homedir: home,
-  platform: process.platform,
-  env,
-});
-
-function collect(includeMemory = false, env: Record<string, string> = {}, dir = project) {
-  return createClaudeCodeProjectCollector(options(env)).collect(
-    { kind: 'project', projectDir: dir },
-    { includeMemory },
-  );
-}
-const paths = (files: readonly CollectedFile[]) => files.map((file) => file.path);
-const text = (files: readonly CollectedFile[], path: string) =>
-  new TextDecoder().decode(files.find((file) => file.path === path)?.content);
-
-/** The folder Claude Code keeps this project's auto memory in. */
-const memoryDir = (repo = project) => join(base, 'projects', projectDirName(repo), 'memory');
+useProjectFolders('agentnomad-project-');
 
 async function realisticProject(): Promise<void> {
   for (const file of [

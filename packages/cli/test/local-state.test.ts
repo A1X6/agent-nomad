@@ -6,19 +6,14 @@ import { ProjectNameSchema } from '@agentnomad/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as z from 'zod';
 
+import { CWD, localStateIn } from './fakes.ts';
 import { createLocalState, type LocalState } from '../src/index.ts';
-
-const CWD = process.platform === 'win32' ? 'C:\\code\\my-app' : '/code/my-app';
 
 let dir: string;
 let state: LocalState;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'agentnomad-state-'));
-  state = createLocalState({
-    path: join(dir, 'state.json'),
-    server: 's',
-    platform: process.platform,
-  });
+  state = localStateIn(dir);
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });

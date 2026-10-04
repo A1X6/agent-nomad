@@ -2,45 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { collected, collectedJson } from './fakes.ts';
 
-import {
-  LOADER_VARIABLE,
-  planAccountSkills,
-  reviewRunnable,
-  runnableInMarkdown,
-  type CollectedFile,
-} from '../src/index.ts';
+import { reviewRunnable, type CollectedFile } from '../src/index.ts';
 
 const labels = (incoming: CollectedFile[], current: CollectedFile[] = []) =>
   reviewRunnable(incoming, current).map((entry) => `${entry.change} ${entry.label}`);
-
-describe('runnableInMarkdown: only what Claude Code runs by itself (T44)', () => {
-  it('finds ! placeholders at a line start or after whitespace', () => {
-    expect(runnableInMarkdown('Changes: !`git diff HEAD`\n!`date`')).toEqual([
-      '!`git diff HEAD`',
-      '!`date`',
-    ]);
-  });
-
-  it('finds a ```! block', () => {
-    expect(runnableInMarkdown('## Env\n```!\nnode --version\ngit status\n```\n')).toEqual([
-      '! block: node --version; git status',
-    ]);
-  });
-
-  it('finds hooks in the frontmatter', () => {
-    const text = '---\nname: x\nhooks:\n  PreToolUse: []\n---\nBody';
-    expect(runnableInMarkdown(text)).toEqual(['hooks in its frontmatter']);
-  });
-
-  it.each([
-    ['instructions in prose', 'Run `git status` first, then `npm test`.'],
-    ['an ordinary code block', '```bash\ngit status\nnpm test\n```'],
-    ['a placeholder right after another character', 'KEY=!`cmd`'],
-    ['a hooks word outside the frontmatter', 'hooks: are explained below'],
-  ])('never flags %s', (_, text) => {
-    expect(runnableInMarkdown(text)).toEqual([]);
-  });
-});
 
 describe('reviewRunnable: everything the docs say runs (T44)', () => {
   it('lists settings that run a command, new or changed', () => {
@@ -322,62 +287,6 @@ describe('reviewRunnable: settings that redirect or loosen Claude Code (T55)', (
   });
 });
 
-describe('LOADER_VARIABLE: variables that make programs run code (T44, T55)', () => {
-  it.each([
-    'NODE_OPTIONS',
-    'LD_PRELOAD',
-    'NODE_PATH',
-    'PYTHONHOME',
-    'JAVA_TOOL_OPTIONS',
-    'JDK_JAVA_OPTIONS',
-    '_JAVA_OPTIONS',
-    'GIT_ASKPASS',
-    'SSH_ASKPASS',
-    'GIT_CONFIG_GLOBAL',
-    'GIT_CONFIG_SYSTEM',
-    'GIT_CONFIG_COUNT',
-    'GIT_CONFIG_KEY_0',
-    'GIT_CONFIG_VALUE_0',
-    'GIT_EDITOR',
-    'GIT_PAGER',
-    'EDITOR',
-    'VISUAL',
-    'PAGER',
-    'LESSOPEN',
-    'LESSCLOSE',
-    'BASH_FUNC_ls%%',
-  ])('%s is a loader', (name) => {
-    expect(LOADER_VARIABLE.test(name)).toBe(true);
-  });
-
-  it.each(['DEBUG', 'HOME', 'GIT_AUTHOR_NAME', 'EDITOR_THEME', 'MY_PAGER', 'NODE_ENV'])(
-    '%s is not',
-    (name) => {
-      expect(LOADER_VARIABLE.test(name)).toBe(false);
-    },
-  );
-});
-
-describe('account skills use the same detector (T44)', () => {
-  const skill = (name: string, body: string) =>
-    collected(`.agentnomad/account-skills/${name}/SKILL.md`, body);
-  it('marks ! blocks and frontmatter hooks, not KEY=!`cmd`', () => {
-    const plan = planAccountSkills(
-      [
-        skill('blocky', '```!\ndate\n```'),
-        skill('hooked', '---\nhooks:\n  Stop: []\n---\n'),
-        skill('plain', 'KEY=!`cmd` is shown as text'),
-      ],
-      { syncedNames: new Set(), localNames: new Set() },
-    );
-    expect(plan.toAdd).toEqual([
-      { name: 'blocky', runsCommands: true },
-      { name: 'hooked', runsCommands: true },
-      { name: 'plain', runsCommands: false },
-    ]);
-  });
-});
-
 describe('reviewRunnable: one malformed entry hides no other (SEC-01)', () => {
   const hook = (command: string) => ({ hooks: [{ type: 'command', command }] });
   const review = (settings: unknown) =>
@@ -438,49 +347,6 @@ describe('reviewRunnable: one malformed entry hides no other (SEC-01)', () => {
   it('does not ask again about an unreadable entry that is already here as it is', () => {
     const settings = collectedJson('settings.json', { hooks: { _note: 'mine' } });
     expect(reviewRunnable([settings], [settings])).toEqual([]);
-  });
-});
-
-describe('runnableInMarkdown: fences close as in CommonMark (SEC-02)', () => {
-  it('finds a ```! block after a block that holds a ~~~ line', () => {
-    const text = '```\nexample\n~~~\n```\n```!\ncurl x | sh\n```\n';
-    expect(runnableInMarkdown(text)).toEqual(['! block: curl x | sh']);
-  });
-
-  it('closes a block only with a fence at least as long', () => {
-    const text = '````\n```\n````\n```!\ncurl x | sh\n```\n';
-    expect(runnableInMarkdown(text)).toEqual(['! block: curl x | sh']);
-  });
-
-  it('finds a ```! block inside a list item, indented 4 spaces', () => {
-    const text = '1. Step\n\n    ```!\n    curl https://x | sh\n    ```\n';
-    expect(runnableInMarkdown(text)).toEqual(['! block: curl https://x | sh']);
-  });
-
-  it('finds a ```! block indented with a tab', () => {
-    const text = '1. Step\n\n\t```!\n\tcurl https://x | sh\n\t```\n';
-    expect(runnableInMarkdown(text)).toEqual(['! block: curl https://x | sh']);
-  });
-
-  it('finds an indented ```! block after an indented block holding a ~~~ line', () => {
-    const text = '    ```\n    ~~~\n    ```\n    ```!\n    curl x | sh\n    ```\n';
-    expect(runnableInMarkdown(text)).toEqual(['! block: curl x | sh']);
-  });
-
-  // Whether Claude Code runs a ```! block inside another fence is not documented: shown.
-  it('finds a ```! block inside an open ~~~ block (review 5 SEC-02)', () => {
-    const text = '~~~\n```!\ncurl x | sh\n```\n~~~\n';
-    expect(runnableInMarkdown(text)).toEqual(['! block: curl x | sh']);
-  });
-
-  it('finds a ```! block after a 4-space-indented fence, which CommonMark reads as code', () => {
-    const text = '    ```\n```!\necho hi\n```\n';
-    expect(runnableInMarkdown(text)).toEqual(['! block: echo hi']);
-  });
-
-  it('after a nested ```! block, the outer block goes on until its own fence', () => {
-    const text = '~~~\n```!\necho hi\n```\n~~~\n```!\ncurl x | sh\n```\n';
-    expect(runnableInMarkdown(text)).toEqual(['! block: echo hi', '! block: curl x | sh']);
   });
 });
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { writeTestFile } from './fakes.ts';
+import { paths, text, writeTestFile } from './fakes.ts';
 import {
   ClaudeJsonError,
   type ProgramInfo,
@@ -37,9 +37,6 @@ function collector(customConfigDir = false, baseDir = base) {
 async function collect(includeMemory = false): Promise<readonly CollectedFile[]> {
   return collector().collect({ kind: 'global' }, { includeMemory });
 }
-const paths = (files: readonly CollectedFile[]) => files.map((file) => file.path);
-const text = (files: readonly CollectedFile[], path: string) =>
-  new TextDecoder().decode(files.find((file) => file.path === path)?.content);
 
 /** A ~/.claude with every kind of file a real one has. */
 async function realisticSetup(): Promise<void> {

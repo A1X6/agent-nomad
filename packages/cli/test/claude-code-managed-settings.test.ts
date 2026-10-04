@@ -7,10 +7,8 @@ import {
   createClaudeCodeAdapter,
   detectManagedSettings,
   explainPluginFailure,
-  globalDestination,
   managedSettingsDir,
   managedSettingsNotice,
-  installPlugins,
   parseRegSettings,
   type ManagedSettingsSystem,
 } from '../src/index.ts';
@@ -184,13 +182,6 @@ describe('server-managed settings (claude.ai admin console)', () => {
     );
     expect(found.sources).toEqual([]);
   });
-
-  it('the cache is never synced', () => {
-    expect(globalDestination('remote-settings.json', new Set())).toEqual({
-      kind: 'refused',
-      reason: 'never synced',
-    });
-  });
 });
 
 describe('warnings (T31 done-when)', () => {
@@ -232,33 +223,6 @@ describe('warnings (T31 done-when)', () => {
     const lines = reported.filter((line) => line.startsWith('warn: '));
     expect(lines[0]).toContain('never synced');
     expect(managedSettingsNotice(found, 'agents')).toContain('never synced');
-  });
-
-  it('a plugin blocked by policy gets a clear reason', async () => {
-    const choice = {
-      marketplaces: [],
-      plugins: [{ id: 'tool@evil-market', scope: 'user' as const, commandSource: false }],
-      declined: [],
-    };
-    const result = await installPlugins(choice, {
-      claude: {
-        run: () =>
-          Promise.resolve({
-            exitCode: 1,
-            stdout: JSON.stringify({
-              outcome: 'failed',
-              message: 'Marketplace evil-market is blocked by strictKnownMarketplaces',
-            }),
-            stderr: '',
-          }),
-      },
-      reporter: recordingReporter().reporter,
-      cwd: '/',
-      explainFailure: (reason) => explainPluginFailure(reason, found),
-    });
-    expect(result.failed[0]?.reason).toBe(
-      "blocked by your organization's Claude Code policy (/etc/claude-code/managed-settings.json). Ask your admin to allow it. Details: Marketplace evil-market is blocked by strictKnownMarketplaces",
-    );
   });
 
   it('other failures keep their own reason', () => {

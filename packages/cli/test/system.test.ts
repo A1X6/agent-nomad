@@ -337,7 +337,7 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
 
   // No ClaudeCode policy key exists on the CI runners (or a developer PC without a
   // managed Claude Code), so the real `reg query` must find no value in either hive.
-  // What a value present is read as is tested on parseRegSettings (managed-settings.test.ts).
+  // What a value present is read as is tested on parseRegSettings (claude-code-managed-settings.test.ts).
   it.runIf(win32)('readRegistry answers null when the policy key is absent', async () => {
     const system = nodeManagedSettingsSystem(process.env, dir, 'win32');
     expect(await system.readRegistry('HKLM')).toBeNull();

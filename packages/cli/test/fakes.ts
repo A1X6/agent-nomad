@@ -1,15 +1,18 @@
 import type { BundleParams, BundleSummary } from '@agentnomad/contracts';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 
 // Module paths, not the package index: the agent boundary test uses these fakes and must
 // not load any agent's adapter.
-import type { CollectedFile } from '../src/agents/adapter.ts';
+import type { AgentAdapter, CollectedFile, DetectedAgent } from '../src/agents/adapter.ts';
 import type { ApiClient, BundleUpload } from '../src/api/api-client.ts';
 import { ApiError } from '../src/api/api-errors.ts';
 import type { EnvWriter } from '../src/env/shell-profile.ts';
 import { SECRET_NAMES, type SecretName, type SecretStore } from '../src/secrets/secret-store.ts';
+import { createLocalState, type LocalState } from '../src/state/local-state.ts';
 import type { Choice, Prompter, Reporter } from '../src/ui/prompter.ts';
+
+import { stubRestorer } from './stub-restorer.ts';
 
 /** Shared test fakes (DUP-01): one copy, so every test runs against the same behaviour. */
 
@@ -29,6 +32,13 @@ export const collected = (
 /** A collected file holding `value` as JSON. */
 export const collectedJson = (path: string, value: unknown): CollectedFile =>
   collected(path, JSON.stringify(value));
+
+/** The paths of collected files, in order. */
+export const paths = (files: readonly CollectedFile[]) => files.map((file) => file.path);
+
+/** The text of the collected file at `path` (empty when there is none). */
+export const text = (files: readonly CollectedFile[], path: string) =>
+  new TextDecoder().decode(files.find((file) => file.path === path)?.content);
 
 /**
  * Writes a file in a test's temporary folder, creating its folders first. The content
@@ -133,6 +143,47 @@ export function memorySecretStore(
     },
   };
 }
+
+/** A memory SecretStore and the map behind it. */
+export function memorySecrets(backend: SecretStore['backend'] = 'keychain') {
+  const saved = new Map<SecretName, string>();
+  return { store: memorySecretStore({ backend, saved }), saved };
+}
+
+/** A password the real password policy accepts. */
+export const STRONG = 'plum-garage-violin-47';
+
+/** A project folder for tests that never look inside it. */
+export const CWD = process.platform === 'win32' ? 'C:\\code\\my-app' : '/code/my-app';
+
+/** A local state kept in `state.json` in a test's temporary folder. */
+export const localStateIn = (dir: string): LocalState =>
+  createLocalState({
+    path: join(dir, 'state.json'),
+    server: 's',
+    platform: process.platform,
+  });
+
+/** An adapter whose detector reports `found`; it collects and restores nothing. */
+export const fakeAdapter = (
+  id: string,
+  displayName: string,
+  found: DetectedAgent,
+): AgentAdapter => ({
+  id,
+  displayName,
+  detector: { detect: () => Promise.resolve(found) },
+  collector: { collect: () => Promise.resolve([]) },
+  restorer: stubRestorer(),
+});
+
+/** What a detector reports for an installed agent, and for one that is not. */
+export const installedAgent: DetectedAgent = {
+  installed: true,
+  baseDir: '/home/a/.claude',
+  version: '2.1.282',
+};
+export const missingAgent: DetectedAgent = { installed: false, baseDir: null, version: null };
 
 /**
  * Answers questions from a script, in order, and throws when it runs out. A validator's

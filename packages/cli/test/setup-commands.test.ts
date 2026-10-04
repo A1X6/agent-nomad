@@ -11,22 +11,26 @@ import {
 } from '@agentnomad/core';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { fakeApi, memorySecretStore, recordingReporter, scriptedPrompter } from './fakes.ts';
+import {
+  CWD,
+  fakeApi,
+  localStateIn,
+  memorySecretStore,
+  recordingReporter,
+  scriptedPrompter,
+} from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 
 import {
   createAgentRegistry,
-  createLocalState,
   createSetupCommands,
   NotLoggedInError,
-  setupLabel,
   timeAgo,
   type AgentAdapter,
   type LocalState,
 } from '../src/index.ts';
 
 const NOW = new Date('2026-09-25T12:00:00Z');
-const CWD = process.platform === 'win32' ? 'C:\\code\\my-app' : '/code/my-app';
 
 let crypto: CryptoService;
 let dataKey: Uint8Array;
@@ -39,11 +43,7 @@ let dir: string;
 let state: LocalState;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'agentnomad-cmds-'));
-  state = createLocalState({
-    path: join(dir, 'state.json'),
-    server: 's',
-    platform: process.platform,
-  });
+  state = localStateIn(dir);
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -231,15 +231,6 @@ describe('agentnomad delete', () => {
     );
     expect(t.asked).toEqual([]);
     expect(server.deleted).toEqual([]);
-  });
-});
-
-describe('setup labels in messages (DUP-05)', () => {
-  it('names the global setup or the project, after the agent when given', () => {
-    expect(setupLabel('Claude Code', null)).toBe('Claude Code global setup');
-    expect(setupLabel('Claude Code', 'my-app')).toBe('Claude Code project "my-app"');
-    expect(setupLabel(null, null)).toBe('global setup');
-    expect(setupLabel(null, 'my-app')).toBe('project "my-app"');
   });
 });
 

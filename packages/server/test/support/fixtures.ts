@@ -12,9 +12,10 @@ import {
 import { eq } from 'drizzle-orm';
 
 import type { Database } from '../../src/db/database.ts';
-import type { NewUser, UserRecord } from '../../src/db/repositories.ts';
+import type { BundleKey, BundleMetaWrite, NewUser, UserRecord } from '../../src/db/repositories.ts';
 import { bundleBlobs, bundles, users } from '../../src/db/schema.ts';
 import { createUserRepository } from '../../src/db/user-repository.ts';
+import type { Logger } from '../../src/logging/logger.ts';
 import { postJson, type TestApp } from './app.ts';
 
 export const b64 = (data: Uint8Array) => Buffer.from(data).toString('base64');
@@ -188,4 +189,39 @@ export async function seedSetups(db: Database, username: string, count: number):
       blobId: file.id,
     })),
   );
+}
+
+/** The key of a user's global setup. */
+export const globalKey = (userId: string): BundleKey => ({
+  userId,
+  agent: 'claude-code',
+  scopeKey: 'global',
+});
+
+/** A setup save as the bundle service hands it to `putMeta`. */
+export function metaWrite(
+  key: Partial<BundleKey> & { userId: string },
+  expectedRevision: number,
+  blobId: string,
+  hashFill: number,
+): BundleMetaWrite {
+  return {
+    key: { ...globalKey(key.userId), ...key },
+    expectedRevision,
+    nameEnc: null,
+    contentHash: bytes(32, hashFill),
+    formatVersion: 1,
+    sizeBytes: 40,
+    blobId,
+  };
+}
+
+/** A Logger that keeps the errors it is given. */
+export function memoryLogger() {
+  const errors: { event: string; fields: Record<string, unknown> }[] = [];
+  const logger: Logger = {
+    info: () => undefined,
+    error: (event, fields = {}) => errors.push({ event, fields }),
+  };
+  return { logger, errors };
 }

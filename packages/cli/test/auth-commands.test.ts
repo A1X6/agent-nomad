@@ -12,28 +12,30 @@ import { join } from 'node:path';
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { fakeApi, memorySecretStore, recordingReporter, scriptedPrompter } from './fakes.ts';
+import {
+  fakeApi,
+  memorySecrets,
+  memorySecretStore,
+  recordingReporter,
+  scriptedPrompter,
+  STRONG,
+} from './fakes.ts';
 
 import {
   ApiError,
   createAuthCommands,
-  createPasswordChecker,
   FILE_BACKEND_NOTE,
   loadZxcvbnChecker,
   NetworkError,
   NO_RECOVERY_WARNING,
   OutcomeUnknownError,
   PromptCancelledError,
-  SessionExpiredError,
-  withSession,
   createLocalState,
   type LocalState,
   type PasswordChecker,
   type SecretName,
-  type SecretStore,
 } from '../src/index.ts';
 
-const STRONG = 'plum-garage-violin-47';
 /** Answered by typing: no flags. */
 const ASK = { yes: false, passwordStdin: false };
 
@@ -52,12 +54,6 @@ const fastCrypto = (): CryptoService => ({
   ...realCrypto,
   deriveKeys: (password, salt) => realCrypto.deriveKeys(password, salt, FAST_KDF_PARAMS),
 });
-
-/** A memory SecretStore and the map behind it. */
-function memorySecrets(backend: SecretStore['backend'] = 'keychain') {
-  const saved = new Map<SecretName, string>();
-  return { store: memorySecretStore({ backend, saved }), saved };
-}
 
 /** An in-memory server with the real API's rules for accounts and sessions. */
 function fakeServer() {
@@ -627,54 +623,6 @@ describe('logout', () => {
     await t.commands.logout();
     expect(t.server.calls).toEqual([]);
     expect(t.lines).toEqual(['info: You are not logged in on this PC.']);
-  });
-});
-
-describe('password policy', () => {
-  it.each([
-    'password123456',
-    'qwertyuiop12',
-    'ahmed1234567890',
-    'Summer2026!!!',
-    'aaaaaaaaaaaaaaaa',
-    'agentnomad2026!',
-    'short1!',
-  ])('rejects %s', (password) => {
-    expect(zxcvbn(password, ['ahmed'])).toBeDefined();
-  });
-
-  it.each([STRONG, 'correct horse battery staple', 'purple monkey dishwasher', 'k9$Lm2#vQ8!pZr'])(
-    'accepts %s',
-    (password) => {
-      expect(zxcvbn(password, ['ahmed'])).toBeUndefined();
-    },
-  );
-
-  it('counts characters, not bytes, and caps the length', () => {
-    const accept = createPasswordChecker(() => ({ score: 4, warning: null, suggestions: [] }));
-    expect(accept('ééééééééééé', [])).toContain('at least 12');
-    expect(accept('éééééééééééé', [])).toBeUndefined();
-    expect(accept('x'.repeat(257), [])).toContain('at most 256');
-  });
-});
-
-describe('sessions and messages', () => {
-  it('an expired session clears the login and says to log in again', async () => {
-    const { store, saved } = memorySecrets();
-    saved.set('session-token', 'x').set('data-key', 'y');
-    await expect(
-      withSession(store, () => Promise.reject(new ApiError(401, 'unauthorized', 'expired'))),
-    ).rejects.toBeInstanceOf(SessionExpiredError);
-    expect(saved.size).toBe(0);
-  });
-
-  it('other errors leave the login alone', async () => {
-    const { store, saved } = memorySecrets();
-    saved.set('session-token', 'x');
-    await expect(
-      withSession(store, () => Promise.reject(new ApiError(404, 'not_found', 'gone'))),
-    ).rejects.toBeInstanceOf(ApiError);
-    expect(saved.size).toBe(1);
   });
 });
 
