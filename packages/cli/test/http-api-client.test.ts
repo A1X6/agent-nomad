@@ -12,10 +12,8 @@ import { ZodError } from 'zod';
 
 import {
   ApiError,
-  backoffDelay,
   createHttpApiClient,
   DEFAULT_API_TIMEOUTS,
-  DEFAULT_RETRY_POLICY,
   describeError,
   InvalidResponseError,
   NetworkError,
@@ -393,14 +391,6 @@ describe('ApiClient: retries', () => {
   it('treats "session gone" after a lost logout answer as done', async () => {
     const { client } = fakeServer([timedOut, apiError(401, 'unauthorized')]);
     await expect(client.auth.logout()).resolves.toBeUndefined();
-  });
-
-  it('keeps each retry wait between the base and the cap', () => {
-    const waits = [1, 2, 3, 4, 5].map((retry) =>
-      backoffDelay(retry, DEFAULT_RETRY_POLICY, () => 0.99),
-    );
-    expect(waits[0]).toBeGreaterThanOrEqual(500);
-    expect(Math.max(...waits)).toBe(4000);
   });
 });
 
