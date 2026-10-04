@@ -4,6 +4,7 @@
  */
 import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
 import { RESERVED_DIR } from '../adapter.ts';
+import { settingsFilesIn } from './global-paths.ts';
 
 /** Files in the project root. `CLAUDE.local.md` is personal and usually gitignored. */
 export const PROJECT_ROOT_FILES: readonly string[] = DATA.project.rootFiles;
@@ -12,10 +13,9 @@ export const PROJECT_ROOT_FILES: readonly string[] = DATA.project.rootFiles;
 export const PROJECT_CLAUDE_FILES: readonly string[] = DATA.project.claudeFiles;
 
 /** The project's settings files (DUP-01): the shared one and the personal one. */
-export const PROJECT_SETTINGS_FILES: readonly string[] = [
-  '.claude/settings.json',
-  '.claude/settings.local.json',
-];
+export const PROJECT_SETTINGS_FILES: readonly string[] = settingsFilesIn(PROJECT_CLAUDE_FILES).map(
+  (name) => `.claude/${name}`,
+);
 
 /** Folders in `<project>/.claude/`, taken whole. */
 export const PROJECT_CLAUDE_FOLDERS: readonly string[] = DATA.project.claudeFolders;

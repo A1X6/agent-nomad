@@ -762,6 +762,26 @@ describe('restorer: per-OS fixes', () => {
     expect(same.warnings).toEqual([]);
   });
 
+  it('shows a hook command with a line break on one warning line (SEC-01)', async () => {
+    const command = posix
+      ? 'powershell -File C:/hooks/notify.ps1\nagentnomad: restore complete'
+      : '~/.claude/hooks/check.sh\nagentnomad: restore complete';
+    const settings = JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] },
+    });
+    const otherOs = posix ? 'win32' : 'linux';
+    const report = await restorer().restore(
+      { kind: 'global' },
+      [collected('settings.json', settings)],
+      answer('skip').resolve,
+      { sourceOs: otherOs },
+    );
+    expect(report.warnings).toEqual([
+      `This hook or status line came from ${otherOs} and will likely not run here: ${command.replace('\n', '\\u{000a}')}`,
+    ]);
+    expect(report.warnings.join('\n').split('\n')).toHaveLength(1);
+  });
+
   it('flags commands by what they run', () => {
     const json = (command: string) => JSON.stringify({ statusLine: { type: 'command', command } });
     expect(hooksForOtherOs(json('pwsh ./x.ps1'), 'linux')).toHaveLength(1);
