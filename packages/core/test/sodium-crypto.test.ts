@@ -1,8 +1,8 @@
-import { toHex, type KdfParams } from '@agentnomad/contracts';
+import { KDF_SALT_BYTES, toHex, type KdfParams } from '@agentnomad/contracts';
 import sodium from 'libsodium-wrappers-sumo';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DecryptionError } from '../src/index.ts';
+import { DATA_KEY_BYTES, DecryptionError } from '../src/index.ts';
 import { crypto, dataKey as key, useDataKey } from './fixtures.ts';
 
 const bytes = (...values: number[]): Uint8Array => new Uint8Array(values);
@@ -15,7 +15,7 @@ const params: KdfParams = {
   passes: 2,
   parallelism: 1,
 };
-const salt = new Uint8Array(16).map((_, index) => index);
+const salt = new Uint8Array(KDF_SALT_BYTES).map((_, index) => index);
 
 useDataKey();
 
@@ -128,7 +128,9 @@ describe('seal and open', () => {
     });
 
     it('a wrong key', () => {
-      expect(() => crypto.open(sealed(), crypto.randomBytes(32), aad)).toThrow(DecryptionError);
+      expect(() => crypto.open(sealed(), crypto.randomBytes(DATA_KEY_BYTES), aad)).toThrow(
+        DecryptionError,
+      );
     });
 
     it('different associated data', () => {
@@ -162,7 +164,9 @@ describe('hashes and randomness', () => {
     const first = crypto.keyedHash(message, key);
     expect(first).toHaveLength(32);
     expect(toHex(crypto.keyedHash(message, key))).toBe(toHex(first));
-    expect(toHex(crypto.keyedHash(message, crypto.randomBytes(32)))).not.toBe(toHex(first));
+    expect(toHex(crypto.keyedHash(message, crypto.randomBytes(DATA_KEY_BYTES)))).not.toBe(
+      toHex(first),
+    );
   });
 
   it('randomBytes returns the requested length and never repeats', () => {

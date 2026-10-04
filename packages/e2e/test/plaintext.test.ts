@@ -12,10 +12,11 @@ const request = (body: string, headers = ''): RecordedRequest => ({
   body: new TextEncoder().encode(body),
 });
 
+/** Text from a saved setup that must never reach the server readable. */
+const secret = 'Run the deploy script';
+
 /** The check itself must catch a leak in every form it claims to, or its passing means nothing. */
 describe('plaintext leak check', () => {
-  const secret = 'Run the deploy script';
-
   it.each([
     ['as is, in the body', request(`{"content":"${secret}"}`)],
     ['in a header', request('', `x-note: ${secret}`)],
@@ -38,7 +39,6 @@ describe('plaintext leak check', () => {
 
 /** T48: forms the first version of the check could not see. */
 describe('plaintext leak check: compressed, hex, escaped', () => {
-  const secret = 'Run the deploy script';
   const bundle = JSON.stringify({ files: [{ path: 'skills/a/SKILL.md', content: secret }] });
 
   it('finds a bundle that was only compressed, never encrypted', () => {

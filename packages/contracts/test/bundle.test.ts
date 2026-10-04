@@ -23,7 +23,7 @@ describe('project names are checked as they are stored, NFC-normalised (T45)', (
 });
 
 const validBundle: Bundle = {
-  formatVersion: 1,
+  formatVersion: BUNDLE_FORMAT_VERSION,
   agent: 'claude-code',
   scope: { kind: 'global' },
   sourceOs: 'win32',
