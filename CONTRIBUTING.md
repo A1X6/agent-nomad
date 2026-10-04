@@ -139,6 +139,8 @@ open, such as a chat or an option letter from a discussion.
   - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
     `putJson`, `realisticPlugins`) and managed settings (`fakeManagedSystem` with
     `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`).
+  - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
+    other parts (`stubRestorer`).
   - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`
     or `createTestDatabase` and `migrationsFolder` in `database.ts`; `useTestApp` or
     `createTestApp`, `TEST_IP_HEADER` and `postJson` in `app.ts`). In `fixtures.ts`: values
