@@ -19,6 +19,7 @@ import {
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
   GLOBAL_MEMORY_FOLDERS,
+  GLOBAL_SETTINGS_FILES,
   HOME_SCRIPTS_PREFIX,
   NEVER_SYNCED,
   PLUGINS_BUNDLE_PATH,
@@ -162,8 +163,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         found.push(...(await files.walk(path.join(baseDir, name), name, isNeverSynced, seen)));
       }
 
-      const settings = found.find((file) => file.path === 'settings.json');
-      if (settings) {
+      for (const settings of found.filter((file) => GLOBAL_SETTINGS_FILES.includes(file.path))) {
         const text = new TextDecoder().decode(settings.content);
         found.push(
           ...(await hookScriptFiles(files, text)),

@@ -33,7 +33,7 @@ import {
   type MutableReport,
 } from './claude-json-merge.ts';
 import { pathWords, settingsCommands } from './settings-commands.ts';
-import { CLAUDE_JSON_BUNDLE_PATH, extensionOf } from './global-paths.ts';
+import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
 import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
 import { globalDestination, projectDestination, type RestoreDestination } from './restore-rules.ts';
 import { isRedirectVariable } from './reviewed-settings.ts';
@@ -281,13 +281,14 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
               )
           : [],
       );
-      const settings = incoming.find((entry) => entry.path === 'settings.json');
       const globalScripts = new Set(
-        settings
-          ? hookScripts(new TextDecoder().decode(settings.content), options).map(
+        incoming
+          .filter((entry) => GLOBAL_SETTINGS_FILES.includes(entry.path))
+          .flatMap((entry) =>
+            hookScripts(new TextDecoder().decode(entry.content), options).map(
               (script) => script.bundlePath,
-            )
-          : [],
+            ),
+          ),
       );
       const destinationOf = (path: string): RestoreDestination => {
         const windowsProblem = options.platform === 'win32' ? windowsNameProblem(path) : null;
@@ -413,14 +414,15 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       }
 
       if (context.sourceOs !== undefined && context.sourceOs !== os) {
-        const settingsPaths = target.kind === 'global' ? ['settings.json'] : PROJECT_SETTINGS_FILES;
+        const settingsPaths =
+          target.kind === 'global' ? GLOBAL_SETTINGS_FILES : PROJECT_SETTINGS_FILES;
         for (const file of incoming.filter((entry) => settingsPaths.includes(entry.path))) {
           for (const command of hooksForOtherOs(
             new TextDecoder().decode(file.content),
             options.platform,
           )) {
             report.warnings.push(
-              `This hook or status line came from ${context.sourceOs} and will likely not run here: ${command}`,
+              `This hook or status line came from ${context.sourceOs} and will likely not run here: ${printableLine(command)}`,
             );
           }
         }

@@ -9,6 +9,7 @@ import {
   GLOBAL_FOLDERS,
   GLOBAL_KNOWN_STATE,
   GLOBAL_MEMORY_FOLDERS,
+  GLOBAL_SETTINGS_FILES,
   IGNORED_COPY_PATTERNS,
   NEVER_SYNCED,
 } from './global-paths.ts';
@@ -38,18 +39,22 @@ export interface UnknownFilesInput {
 async function hookScriptNames(input: UnknownFilesInput): Promise<string[]> {
   if (input.homedir === undefined) return [];
   const path = pathsOf(input.platform);
-  const settings = await readFile(path.join(input.baseDir, 'settings.json'), 'utf8').catch(
-    () => null,
-  );
-  if (settings === null) return [];
-  return hookScripts(settings, {
-    homedir: input.homedir,
-    baseDir: input.baseDir,
-    platform: input.platform,
-  })
-    .map((script) => script.bundlePath)
-    .filter((bundlePath) => !bundlePath.startsWith(`${RESERVED_DIR}/`))
-    .map(topLevel);
+  const names: string[] = [];
+  for (const file of GLOBAL_SETTINGS_FILES) {
+    const settings = await readFile(path.join(input.baseDir, file), 'utf8').catch(() => null);
+    if (settings === null) continue;
+    names.push(
+      ...hookScripts(settings, {
+        homedir: input.homedir,
+        baseDir: input.baseDir,
+        platform: input.platform,
+      })
+        .map((script) => script.bundlePath)
+        .filter((bundlePath) => !bundlePath.startsWith(`${RESERVED_DIR}/`))
+        .map(topLevel),
+    );
+  }
+  return names;
 }
 
 /** The first part of a list entry: `skills/synced` → `skills`. */

@@ -70,7 +70,7 @@ When testing by hand, use a temporary home folder (set `HOME` and, on Windows,
 - **Validate every boundary** with the Zod schemas in `contracts` (API bodies and headers,
   files read back from disk).
 - **Small, focused modules with injected dependencies.** Composition roots
-  (`packages/cli/src/app.ts`, `packages/server/src/server.ts`) build the real services; the
+  (`packages/cli/src/app.ts`, `packages/server/src/api.ts`) build the real services; the
   rest receives them, so tests need no network, terminal or keychain.
 - **Agent-specific code stays in its adapter** (`packages/cli/src/agents/<agent>/`). See
   [docs/ADDING-AN-AGENT.md](docs/ADDING-AN-AGENT.md).
