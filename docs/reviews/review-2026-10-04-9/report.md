@@ -49,7 +49,7 @@ No bug, security, database or performance problem was found: every source file o
 
 ### READ-01 · Low · Two documents say less than the code does
 
-- [ ] **Where:** `docs/security/threat-model.md:5-6`; `docs/ARCHITECTURE.md:851`
+- [x] **Where:** `docs/security/threat-model.md:5-6`; `docs/ARCHITECTURE.md:851`
 - **Problem:** The threat model's header says "8 findings, all fixed on the `t38-security-review` branch", while its Findings section lists 52 and says it is updated through T84. The file reference describes `plaintext.ts` as searching "as text and base64 at any alignment"; the code also searches JSON-escaped, URL-encoded and hex forms, and what a body inflates to (gzip, zlib, raw deflate).
 - **Why it matters:** A reader of the header thinks the security review stopped at 8 findings; a reader of the file reference thinks the leak check is weaker than it is.
 - **Fix:** Make the header count match the Findings table and name where later findings were fixed; complete the `plaintext.ts` row.
@@ -58,7 +58,7 @@ No bug, security, database or performance problem was found: every source file o
 
 ### READ-02 · Low · Finding IDs in comments cannot be looked up
 
-- [ ] **Where:** 291 citations such as `(BUG-02)` or `(DB-01)` in `packages/**/*.ts`; `CONTRIBUTING.md` (no rule); `packages/cli/src/push/push-command.ts:65` ("carry-over D"); `packages/cli/test/claude-code-command-review.test.ts:173` ("decided: a")
+- [x] **Where:** 291 citations such as `(BUG-02)` or `(DB-01)` in `packages/**/*.ts`; `CONTRIBUTING.md` (no rule); `packages/cli/src/push/push-command.ts:65` ("carry-over D"); `packages/cli/test/claude-code-command-review.test.ts:173` ("decided: a")
 - **Problem:** Comments and test titles cite review finding IDs, but the same ID exists in every review (there are nine) and no document says how to find the review a citation means. Two references point at nothing a reader can open ("carry-over D", "decided: a").
 - **Why it matters:** A new developer cannot follow a citation to its reason without asking.
 - **Fix:** Add a short rule to `CONTRIBUTING.md`: what the IDs are, where the reviews live (`docs/reviews`), and how to find the one a line means (`git log -S '<ID>' -- <file>` gives the commit and task). Write the two unresolvable references in plain words. Do not rewrite the 291 citations.
@@ -83,7 +83,7 @@ No bug, security, database or performance problem was found: every source file o
 
 ### BP-01 · Low · Zod imported in two ways
 
-- [ ] **Where:** `packages/server/src/db/bundle-cursor.ts:1`, `packages/server/src/db/env.ts:1`, `packages/server/src/port.ts:1`, `packages/server/src/http/validate.ts:2`
+- [x] **Where:** `packages/server/src/db/bundle-cursor.ts:1`, `packages/server/src/db/env.ts:1`, `packages/server/src/port.ts:1`, `packages/server/src/http/validate.ts:2`
 - **Problem:** These four files use `import { z } from 'zod'`; the other 26 files that import Zod use `import * as z from 'zod'`.
 - **Why it matters:** Two patterns for one job; the next file copies whichever it sees.
 - **Fix:** Use `import * as z from 'zod'` (`import type * as z` in `validate.ts`) in the four files.
