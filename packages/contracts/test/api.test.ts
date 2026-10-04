@@ -9,6 +9,7 @@ import {
   DEFAULT_KDF_PARAMS,
   DeleteAccountRequestSchema,
   ErrorResponseSchema,
+  GLOBAL_SCOPE_KEY,
   GetBundleResponseHeadersSchema,
   KDF_SALT_BYTES,
   KdfParamsSchema,
@@ -157,14 +158,14 @@ describe('auth', () => {
 
 describe('bundles', () => {
   it.each([
-    { agent: 'claude-code', scopeKey: 'global' },
+    { agent: 'claude-code', scopeKey: GLOBAL_SCOPE_KEY },
     { agent: 'claude-code', scopeKey: sha256 },
   ])('accepts path params %j', (params) => {
     expect(ok(BundleParamsSchema, params)).toBe(true);
   });
 
   it.each([
-    { agent: 'Claude', scopeKey: 'global' },
+    { agent: 'Claude', scopeKey: GLOBAL_SCOPE_KEY },
     { agent: 'claude-code', scopeKey: 'my-project' },
     { agent: 'claude-code', scopeKey: 'A'.repeat(64) },
   ])('rejects path params %j', (params) => {

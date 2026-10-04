@@ -1,5 +1,6 @@
 import {
   ErrorResponseSchema,
+  GLOBAL_SCOPE_KEY,
   GetBundleResponseHeadersSchema,
   ListBundlesResponseSchema,
   MAX_BUNDLE_BYTES,
@@ -28,7 +29,7 @@ import {
 const pathOf = (scopeKey: string) => `/bundles/claude-code/${scopeKey}`;
 
 const PROJECT = 'a'.repeat(64);
-const GLOBAL_PATH = pathOf('global');
+const GLOBAL_PATH = pathOf(GLOBAL_SCOPE_KEY);
 const PROJECT_PATH = pathOf(PROJECT);
 
 let t: TestApp;

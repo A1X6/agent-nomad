@@ -7,7 +7,7 @@ import {
   type RegisterRequest,
   WRONG_PASSWORD_MESSAGE,
 } from '@agentnomad/contracts';
-import type { CryptoService } from '@agentnomad/core';
+import { DATA_KEY_BYTES, type CryptoService } from '@agentnomad/core';
 
 import { describe, expect, it } from 'vitest';
 
@@ -631,7 +631,7 @@ function secretTrackingCrypto(failDerive = false) {
     },
     randomBytes: (length) => {
       const bytes = base.randomBytes(length);
-      if (length === 32) handedOut.push(bytes);
+      if (length === DATA_KEY_BYTES) handedOut.push(bytes);
       return bytes;
     },
     open: (sealed, key, associatedData) => {
