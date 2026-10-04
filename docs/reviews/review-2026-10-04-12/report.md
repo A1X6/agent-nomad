@@ -35,7 +35,7 @@ One Low finding: DOC-01.
 
 ### DOC-01 · Low · Two documentation lists are each one name short
 
-- [ ] **Where:**
+- [x] **Where:**
   - `docs/ARCHITECTURE.md:659`: the file reference row for core's `crypto.ts` names everything the file exports (the six interfaces, `DerivedKeys` and `DecryptionError`) but not `AEAD_KEY_BYTES`, which T92 added there (`packages/core/src/crypto.ts:34`).
   - `CONTRIBUTING.md:119-152`: the Tests section says "Shared test helpers live in these files" and names every helper of `fakes.ts`, the two Claude Code fixture files, the server's `support/` and the core and contracts `fixtures.ts`, but not `packages/cli/test/stub-restorer.ts` and its `stubRestorer` (used by `fakes.ts:245`, `env.test.ts:615` and `push-command.test.ts:90`). `docs/ARCHITECTURE.md:637` does list that file as shared set-up.
 - **Problem:** Both lists read as complete, and each is missing one name. Other rows of the file reference name the constants their file holds (`TEMP_MARKER` at `:738`, `RESERVED_DIR` at `:768`).

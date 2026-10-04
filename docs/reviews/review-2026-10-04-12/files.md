@@ -350,7 +350,7 @@ Architecture, roadmap, the agent guide, the threat model and earlier review repo
 | File                               | Lines | What it does                                                                                      | Verdict | Findings |
 | ---------------------------------- | ----- | ------------------------------------------------------------------------------------------------- | ------- | -------- |
 | `docs/ADDING-AN-AGENT.md`          | 340   | Step-by-step guide to writing a new agent adapter, with sample code against the real helpers.     | clean   | —        |
-| `docs/ARCHITECTURE.md`             | 871   | How the system works (keys, bundle, commands, adapters, server, CI) and a file-by-file reference. | minor   | DOC-01   |
+| `docs/ARCHITECTURE.md`             | 871   | How the system works (keys, bundle, commands, adapters, server, CI) and a file-by-file reference. | fixed   | DOC-01   |
 | `docs/decisions/0001-libraries.md` | 69    | Decision record for the crypto, CLI, prompt and keychain libraries.                               | clean   | —        |
 | `docs/ROADMAP.md`                  | 159   | Stages: v1, more agents, data-only agents, claude.ai items, v2 conversion, later ideas.           | clean   | —        |
 | `docs/security/threat-model.md`    | 177   | Threats, defences, tests, past security findings and accepted risks.                              | clean   | —        |
@@ -374,7 +374,7 @@ Workspace config, lint, format, test and deploy settings, README, license, secur
 | `.gitignore`          | 17    | Ignores builds, coverage, env files, release output and brag output.                                                           | clean   | —        |
 | `.prettierignore`     | 5     | Keeps Prettier off builds, coverage, the lockfile and Drizzle snapshots.                                                       | clean   | —        |
 | `.prettierrc.json`    | 4     | Prettier style: single quotes, width 100.                                                                                      | clean   | —        |
-| `CONTRIBUTING.md`     | 211   | Set-up, scripts, code and test rules (with the shared test helpers and named constants), PR flow, drift handling and releases. | minor   | DOC-01   |
+| `CONTRIBUTING.md`     | 211   | Set-up, scripts, code and test rules (with the shared test helpers and named constants), PR flow, drift handling and releases. | fixed   | DOC-01   |
 | `eslint.config.js`    | 113   | Strict type-checked ESLint, Prettier last, and the import-boundary rules (commands vs agents, agent vs agent, pure modules).   | clean   | —        |
 | `knip.json`           | 16    | Unused-code check: extra entry points per workspace, entry exports included.                                                   | clean   | —        |
 | `LICENSE`             | 21    | MIT license text.                                                                                                              | clean   | —        |
