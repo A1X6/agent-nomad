@@ -366,7 +366,8 @@ split like a shell, and a word that carries a command line (`bash -c "a.sh; true
 `a.sh&&b`). The review shows an exec-form hook with each `args` element quoted and compares
 it by its words, so a text moved between one argument and a shell command line is shown as
 new. The "will likely not run here" warning for a setup from another OS looks only at a
-command's program and the scripts it runs, and shows the command as written.
+command's program and the scripts it runs, and shows the command as written, with line breaks
+escaped.
 
 **Restore rules** (`restore-rules.ts`): a file is written only if a collector could have
 produced it. A home-folder file must be a known tool's settings or a script the setup's
