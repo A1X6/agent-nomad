@@ -1,5 +1,9 @@
-import type { BundleParams, BundleSummary } from '@agentnomad/contracts';
-import { createSodiumCryptoService, type CryptoService } from '@agentnomad/core';
+import {
+  BUNDLE_FORMAT_VERSION,
+  type BundleParams,
+  type BundleSummary,
+} from '@agentnomad/contracts';
+import { createSodiumCryptoService, DATA_KEY_BYTES, type CryptoService } from '@agentnomad/core';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -10,9 +14,10 @@ import { afterEach, beforeAll, beforeEach } from 'vitest';
 import type { AgentAdapter, CollectedFile, DetectedAgent } from '../src/agents/adapter.ts';
 import type { ApiClient, BundleUpload } from '../src/api/api-client.ts';
 import { ApiError } from '../src/api/api-errors.ts';
+import { loadZxcvbnChecker, type PasswordChecker } from '../src/auth/password-policy.ts';
 import type { EnvWriter } from '../src/env/shell-profile.ts';
 import { SECRET_NAMES, type SecretName, type SecretStore } from '../src/secrets/secret-store.ts';
-import { createLocalState, type LocalState } from '../src/state/local-state.ts';
+import { createLocalState, STATE_FILE, type LocalState } from '../src/state/local-state.ts';
 import type { Choice, Prompter, Reporter } from '../src/ui/prompter.ts';
 
 import { stubRestorer } from './stub-restorer.ts';
@@ -80,11 +85,22 @@ export async function withTempDir(
 export let crypto: CryptoService;
 export let dataKey: Uint8Array;
 
-/** Makes the real crypto service and a random 32-byte data key once for the calling file. */
+/** Makes the real crypto service and a random data key once for the calling file. */
 export function useDataKey(): void {
   beforeAll(async () => {
     crypto = await createSodiumCryptoService();
-    dataKey = crypto.randomBytes(32);
+    dataKey = crypto.randomBytes(DATA_KEY_BYTES);
+  });
+}
+
+// The real password checker (zxcvbn), loaded by `useZxcvbnChecker` before the tests of the
+// calling file. A live binding, like `crypto` and `dataKey`.
+export let zxcvbn: PasswordChecker;
+
+/** Loads the real password checker once for the calling file. */
+export function useZxcvbnChecker(): void {
+  beforeAll(async () => {
+    zxcvbn = await loadZxcvbnChecker();
   });
 }
 
@@ -205,7 +221,7 @@ export const STRONG = 'plum-garage-violin-47';
 export const CWD = process.platform === 'win32' ? 'C:\\code\\my-app' : '/code/my-app';
 
 /** A local state kept in `file` (`state.json` by default) in a test's temporary folder. */
-export const localStateIn = (dir: string, file = 'state.json'): LocalState =>
+export const localStateIn = (dir: string, file = STATE_FILE): LocalState =>
   createLocalState({
     path: join(dir, file),
     server: 's',
@@ -339,7 +355,7 @@ export function fakeBundleServer(updatedAt = '2026-09-25T12:00:00Z') {
             scopeKey: entry.params.scopeKey,
             nameEnc: entry.upload.nameEnc ?? null,
             revision: entry.revision,
-            formatVersion: 1,
+            formatVersion: BUNDLE_FORMAT_VERSION,
             sizeBytes: entry.upload.ciphertext.byteLength,
             updatedAt,
           })),
@@ -352,7 +368,7 @@ export function fakeBundleServer(updatedAt = '2026-09-25T12:00:00Z') {
           ciphertext: entry.upload.ciphertext,
           revision: entry.revision,
           contentSha256: entry.upload.contentSha256,
-          formatVersion: 1,
+          formatVersion: BUNDLE_FORMAT_VERSION,
           nameEnc: entry.upload.nameEnc ?? null,
         });
       },

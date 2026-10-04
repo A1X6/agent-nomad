@@ -2,8 +2,14 @@ import { createHash } from 'node:crypto';
 
 import {
   API_HEADERS,
+  AUTH_KEY_BYTES,
+  BUNDLE_FORMAT_VERSION,
   DEFAULT_KDF_PARAMS,
+  GLOBAL_SCOPE_KEY,
+  KDF_SALT_BYTES,
+  MAX_BUNDLE_BYTES,
   PutBundleRequestHeadersSchema,
+  WRAPPED_DATA_KEY_BYTES,
   type BundleParams,
   type PutBundleRequestHeaders,
 } from '@agentnomad/contracts';
@@ -27,11 +33,11 @@ import { CLI_VERSION } from '../src/version.ts';
 
 const BASE = new URL('https://api.test');
 const TOKEN = 'a'.repeat(43);
-const SALT = Buffer.alloc(16, 1).toString('base64');
-const AUTH_KEY = Buffer.alloc(32, 2).toString('base64');
-const WRAPPED = Buffer.alloc(72, 3).toString('base64');
+const SALT = Buffer.alloc(KDF_SALT_BYTES, 1).toString('base64');
+const AUTH_KEY = Buffer.alloc(AUTH_KEY_BYTES, 2).toString('base64');
+const WRAPPED = Buffer.alloc(WRAPPED_DATA_KEY_BYTES, 3).toString('base64');
 const SESSION = { sessionToken: TOKEN, expiresAt: '2026-12-24T00:00:00Z' };
-const PARAMS: BundleParams = { agent: 'claude-code', scopeKey: 'global' };
+const PARAMS: BundleParams = { agent: 'claude-code', scopeKey: GLOBAL_SCOPE_KEY };
 
 const sha256Hex = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -43,6 +49,19 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 const apiError = (status: number, code: string, headers: Record<string, string> = {}) =>
   json({ error: { code, message: `server says ${code}` } }, status, headers);
 const health = () => json({ status: 'ok' });
+/** An empty list of saved setups. */
+const noSetups = () => json({ items: [], nextCursor: null });
+/** The answer to a first upload. */
+const savedFirst = () => json({ revision: 1, updatedAt: '2026-09-25T10:00:00Z' });
+/** A download of `bytes` at revision 3, its hash taken of `hashed` (`bytes` unless damaged). */
+const download = (bytes: Uint8Array, hashed = bytes) =>
+  new Response(bytes, {
+    headers: {
+      [API_HEADERS.revision]: '3',
+      [API_HEADERS.contentSha256]: sha256Hex(hashed),
+      [API_HEADERS.formatVersion]: String(BUNDLE_FORMAT_VERSION),
+    },
+  });
 const empty = (status: number) => new Response(null, { status });
 const networkDown = () => Promise.reject(new TypeError('fetch failed'));
 const timedOut = () =>
@@ -114,7 +133,7 @@ function upload(bytes = new Uint8Array([1, 2, 3, 4])) {
     ciphertext: bytes,
     expectedRevision: 0,
     contentSha256: sha256Hex(bytes),
-    formatVersion: 1,
+    formatVersion: BUNDLE_FORMAT_VERSION,
   };
 }
 
@@ -132,7 +151,7 @@ describe('ApiClient: requests and answers', () => {
   });
 
   it('sends the session token only as a Bearer header', async () => {
-    const { client, apiCalls } = fakeServer([json({ items: [], nextCursor: null })]);
+    const { client, apiCalls } = fakeServer([noSetups()]);
     await client.bundles.list({ cursor: 'abc', limit: 10 });
 
     const [call] = apiCalls();
@@ -163,10 +182,10 @@ describe('ApiClient: requests and answers', () => {
   it('accepts answers with fields it does not know, at any level (ARCH-03)', async () => {
     const item = {
       agent: 'claude-code',
-      scopeKey: 'global',
+      scopeKey: GLOBAL_SCOPE_KEY,
       nameEnc: null,
       revision: 3,
-      formatVersion: 1,
+      formatVersion: BUNDLE_FORMAT_VERSION,
       sizeBytes: 2048,
       updatedAt: '2026-09-24T13:00:00Z',
     };
@@ -211,7 +230,7 @@ describe('ApiClient: requests and answers', () => {
   });
 
   it('sends its version in x-an-client on every request, health check included', async () => {
-    const { client, calls } = fakeServer([json({ items: [], nextCursor: null })]);
+    const { client, calls } = fakeServer([noSetups()]);
     await client.bundles.list();
     expect(calls.map((call) => call.url.pathname)).toEqual(['/health', '/bundles']);
     for (const call of calls) {
@@ -239,9 +258,7 @@ describe('ApiClient: requests and answers', () => {
 
 describe('ApiClient: bundles', () => {
   it('uploads raw bytes with the revision, hash and format headers', async () => {
-    const { client, apiCalls } = fakeServer([
-      json({ revision: 1, updatedAt: '2026-09-25T10:00:00Z' }),
-    ]);
+    const { client, apiCalls } = fakeServer([savedFirst()]);
     const bundle = { ...upload(), nameEnc: 'bmFtZQ==' };
     expect(await client.bundles.put(PARAMS, bundle)).toEqual({
       revision: 1,
@@ -275,15 +292,7 @@ describe('ApiClient: bundles', () => {
 
   it('downloads a bundle and checks it against its SHA-256', async () => {
     const bytes = new Uint8Array([9, 8, 7]);
-    const { client } = fakeServer([
-      new Response(bytes, {
-        headers: {
-          [API_HEADERS.revision]: '3',
-          [API_HEADERS.contentSha256]: sha256Hex(bytes),
-          [API_HEADERS.formatVersion]: '1',
-        },
-      }),
-    ]);
+    const { client } = fakeServer([download(bytes)]);
     expect(await client.bundles.get(PARAMS)).toEqual({
       ciphertext: bytes,
       revision: 3,
@@ -294,21 +303,13 @@ describe('ApiClient: bundles', () => {
   });
 
   it('rejects a download damaged on the way', async () => {
-    const { client } = fakeServer([
-      new Response(new Uint8Array([1, 2, 3]), {
-        headers: {
-          [API_HEADERS.revision]: '3',
-          [API_HEADERS.contentSha256]: sha256Hex(new Uint8Array([1, 2, 4])),
-          [API_HEADERS.formatVersion]: '1',
-        },
-      }),
-    ]);
+    const { client } = fakeServer([download(new Uint8Array([1, 2, 3]), new Uint8Array([1, 2, 4]))]);
     await expect(client.bundles.get(PARAMS)).rejects.toThrow('damaged');
   });
 
   it('rejects an answer larger than any bundle', async () => {
     const { client } = fakeServer([
-      new Response(null, { headers: { 'content-length': String(6 * 1024 * 1024) } }),
+      new Response(null, { headers: { 'content-length': String(MAX_BUNDLE_BYTES + 1024 * 1024) } }),
     ]);
     await expect(client.bundles.get(PARAMS)).rejects.toBeInstanceOf(InvalidResponseError);
   });
@@ -316,11 +317,7 @@ describe('ApiClient: bundles', () => {
 
 describe('ApiClient: retries', () => {
   it('retries network errors and timeouts with growing waits, then succeeds', async () => {
-    const { client, apiCalls, waits } = fakeServer([
-      networkDown,
-      timedOut,
-      json({ items: [], nextCursor: null }),
-    ]);
+    const { client, apiCalls, waits } = fakeServer([networkDown, timedOut, noSetups()]);
     await client.bundles.list();
     expect(apiCalls()).toHaveLength(3);
     expect(waits).toEqual([500, 1000]);
@@ -335,11 +332,7 @@ describe('ApiClient: retries', () => {
   });
 
   it('retries 502/503/504 from the host', async () => {
-    const { client, apiCalls } = fakeServer([
-      empty(502),
-      empty(503),
-      json({ items: [], nextCursor: null }),
-    ]);
+    const { client, apiCalls } = fakeServer([empty(502), empty(503), noSetups()]);
     await client.bundles.list();
     expect(apiCalls()).toHaveLength(3);
   });
@@ -358,10 +351,7 @@ describe('ApiClient: retries', () => {
   });
 
   it('resends the same bytes and hash when an upload is retried', async () => {
-    const { client, apiCalls } = fakeServer([
-      networkDown,
-      json({ revision: 1, updatedAt: '2026-09-25T10:00:00Z' }),
-    ]);
+    const { client, apiCalls } = fakeServer([networkDown, savedFirst()]);
     const bundle = upload(new Uint8Array([5, 6, 7]));
     await client.bundles.put(PARAMS, bundle);
 
@@ -469,59 +459,52 @@ describe('ApiClient: rate limits', () => {
     const { client, waits } = fakeServer([
       new Response(null, { status: 503, headers: { 'retry-after': '3' } }),
       new Response(null, { status: 503, headers: { 'retry-after': '60' } }),
-      json({ items: [], nextCursor: null }),
+      noSetups(),
     ]);
     await client.bundles.list();
     expect(waits).toEqual([3000, 4000]);
   });
 });
 
+/** The timeouts (ms) asked of AbortSignal.timeout while `run` runs. */
+async function timeoutsAskedDuring(run: () => Promise<void>): Promise<number[]> {
+  const seen: number[] = [];
+  const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+  AbortSignal.timeout = (ms: number) => {
+    seen.push(ms);
+    return realTimeout(ms);
+  };
+  try {
+    await run();
+  } finally {
+    AbortSignal.timeout = realTimeout;
+  }
+  return seen;
+}
+
 describe('ApiClient: waking the free server', () => {
   it('checks /health once before the first request', async () => {
-    const { client, calls } = fakeServer([
-      json({ items: [], nextCursor: null }),
-      json({ items: [], nextCursor: null }),
-    ]);
+    const { client, calls } = fakeServer([noSetups(), noSetups()]);
     await client.bundles.list();
     await client.bundles.list();
     expect(calls.map((call) => call.url.pathname)).toEqual(['/health', '/bundles', '/bundles']);
   });
 
   it('gives the first health check the long wake-up timeout', async () => {
-    const seen: number[] = [];
-    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
-    const spy = (ms: number) => {
-      seen.push(ms);
-      return realTimeout(ms);
-    };
-    AbortSignal.timeout = spy;
-    try {
-      const { client } = fakeServer([json({ items: [], nextCursor: null })]);
+    const seen = await timeoutsAskedDuring(async () => {
+      const { client } = fakeServer([noSetups()]);
       await client.bundles.list();
-    } finally {
-      AbortSignal.timeout = realTimeout;
-    }
+    });
     expect(seen).toEqual([90_000, 30_000]);
   });
 
   it('gives uploads time by size and downloads time for the largest setup', async () => {
-    const seen: number[] = [];
-    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
-    AbortSignal.timeout = (ms: number) => {
-      seen.push(ms);
-      return realTimeout(ms);
-    };
     const bytes = new Uint8Array(1024 * 1024);
-    try {
-      const { client } = fakeServer([
-        json({ revision: 1, updatedAt: '2026-09-25T10:00:00Z' }),
-        apiError(404, 'not_found'),
-      ]);
+    const seen = await timeoutsAskedDuring(async () => {
+      const { client } = fakeServer([savedFirst(), apiError(404, 'not_found')]);
       await client.bundles.put(PARAMS, upload(bytes));
       await client.bundles.get(PARAMS).catch(() => undefined);
-    } finally {
-      AbortSignal.timeout = realTimeout;
-    }
+    });
     // health, 1 MB upload (60 s + 30 s), download (60 s + 5 × 30 s)
     expect(seen).toEqual([90_000, 90_000, 210_000]);
   });
@@ -534,7 +517,7 @@ describe('ApiClient: waking the free server', () => {
   it('tells the user when the server is slow to wake, and when it is up', async () => {
     const events: string[] = [];
     let wake: (response: Response) => void = () => undefined;
-    const { client } = fakeServer([json({ items: [], nextCursor: null })], {
+    const { client } = fakeServer([noSetups()], {
       health: [() => new Promise<Response>((resolve) => (wake = resolve))],
       // The notice timer fires at once in this test.
       sleep: () => Promise.resolve(),
@@ -553,7 +536,7 @@ describe('ApiClient: waking the free server', () => {
 
   it('says nothing when the server answers quickly', async () => {
     const events: string[] = [];
-    const { client } = fakeServer([json({ items: [], nextCursor: null })], {
+    const { client } = fakeServer([noSetups()], {
       wakeUp: { onWaking: () => events.push('waking'), onAwake: () => events.push('awake') },
     });
     await client.bundles.list();

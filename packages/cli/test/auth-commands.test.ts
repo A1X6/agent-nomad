@@ -1,5 +1,6 @@
 import {
   DEFAULT_KDF_PARAMS,
+  KDF_SALT_BYTES,
   type KdfParams,
   type LoginRequest,
   type RegisterRequest,
@@ -7,10 +8,11 @@ import {
 } from '@agentnomad/contracts';
 import type { CryptoService } from '@agentnomad/core';
 
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   crypto as realCrypto,
+  dataKey,
   fakeApi,
   localStateIn,
   memorySecrets,
@@ -20,20 +22,20 @@ import {
   STRONG,
   useDataKey,
   useTempDir,
+  useZxcvbnChecker,
   withTempDir,
+  zxcvbn,
 } from './fakes.ts';
 
 import {
   ApiError,
   createAuthCommands,
   FILE_BACKEND_NOTE,
-  loadZxcvbnChecker,
   NetworkError,
   NO_RECOVERY_WARNING,
   OutcomeUnknownError,
   PromptCancelledError,
   type LocalState,
-  type PasswordChecker,
   type SecretName,
 } from '../src/index.ts';
 
@@ -41,10 +43,7 @@ import {
 const ASK = { yes: false, passwordStdin: false };
 
 useDataKey();
-let zxcvbn: PasswordChecker;
-beforeAll(async () => {
-  zxcvbn = await loadZxcvbnChecker();
-});
+useZxcvbnChecker();
 
 /** The cheapest Argon2id settings the server allows, so tests stay fast. */
 const FAST_KDF_PARAMS: KdfParams = { ...DEFAULT_KDF_PARAMS, memoryKiB: 19_456, passes: 2 };
@@ -79,7 +78,7 @@ function fakeServer() {
         calls.push('prelogin');
         const user = users.get(username);
         return Promise.resolve({
-          kdfSalt: user?.kdfSalt ?? Buffer.alloc(16, 7).toString('base64'),
+          kdfSalt: user?.kdfSalt ?? Buffer.alloc(KDF_SALT_BYTES, 7).toString('base64'),
           kdfParams: user?.kdfParams ?? DEFAULT_KDF_PARAMS,
         });
       },
@@ -184,6 +183,13 @@ const registerAnswers = (username = 'ahmed', password = STRONG) => [
   password,
 ];
 
+/** "ahmed" registered, and so logged in, on a fresh fake server. */
+async function registeredAhmed() {
+  const t = setup(registerAnswers());
+  await t.commands.register(ASK);
+  return t;
+}
+
 describe('register', () => {
   it('creates the account, shows the no-recovery warning and saves the login', async () => {
     const t = setup(registerAnswers());
@@ -237,8 +243,7 @@ describe('register', () => {
   });
 
   it('passes on "username taken" and saves nothing', async () => {
-    const server = fakeServer();
-    await setup(registerAnswers(), { server }).commands.register(ASK);
+    const { server } = await registeredAhmed();
     const t = setup(registerAnswers(), { server });
     await expect(t.commands.register(ASK)).rejects.toMatchObject({ code: 'username_taken' });
     expect(t.secrets.saved.size).toBe(0);
@@ -253,8 +258,7 @@ describe('register', () => {
 
 describe('already logged in', () => {
   it('keeps the current login when the user says no', async () => {
-    const t = setup(registerAnswers());
-    await t.commands.register(ASK);
+    const t = await registeredAhmed();
     const before = new Map(t.secrets.saved);
 
     const again = setup([false], { server: t.server, secrets: t.secrets });
@@ -264,8 +268,7 @@ describe('already logged in', () => {
   });
 
   it('logs out first when the user says yes', async () => {
-    const t = setup(registerAnswers());
-    await t.commands.register(ASK);
+    const t = await registeredAhmed();
     const again = setup([true, ...registerAnswers('second')], {
       server: t.server,
       secrets: t.secrets,
@@ -283,8 +286,7 @@ describe('already logged in: the current login stays until the new one works (UX
 
   /** "ahmed" registered and logged in on this PC; returns what is saved here now. */
   async function loggedInAsAhmed() {
-    const t = setup(registerAnswers());
-    await t.commands.register(ASK);
+    const t = await registeredAhmed();
     t.server.calls.length = 0;
     return { server: t.server, secrets: t.secrets, before: new Map(t.secrets.saved) };
   }
@@ -360,9 +362,8 @@ describe('already logged in: the current login stays until the new one works (UX
 
 describe('login', () => {
   it('unlocks the same data key on another PC with the same password', async () => {
-    const server = fakeServer();
-    const first = setup(registerAnswers(), { server });
-    await first.commands.register(ASK);
+    const first = await registeredAhmed();
+    const { server } = first;
 
     const otherPc = setup(['ahmed', STRONG], { server });
     await otherPc.commands.login(ASK);
@@ -405,8 +406,7 @@ describe('login', () => {
   });
 
   it('a wrong password saves nothing', async () => {
-    const server = fakeServer();
-    await setup(registerAnswers(), { server }).commands.register(ASK);
+    const { server } = await registeredAhmed();
     const t = setup(['ahmed', 'plum-garage-violin-99'], { server });
     await expect(t.commands.login(ASK)).rejects.toThrow('Wrong username or password');
     expect(t.secrets.saved.size).toBe(0);
@@ -418,8 +418,7 @@ describe('login: a data key that does not unlock (T66)', () => {
 
   /** "ahmed" registered, then his saved data key damaged, so login succeeds but unlocking fails. */
   async function lockedAccount() {
-    const server = fakeServer();
-    await setup(registerAnswers(), { server }).commands.register(ASK);
+    const { server } = await registeredAhmed();
     damageWrappedKey(server);
     server.calls.length = 0;
     return server;
@@ -469,8 +468,7 @@ describe('login: a data key that does not unlock (T66)', () => {
   });
 
   it('a normal login never logs out', async () => {
-    const server = fakeServer();
-    await setup(registerAnswers(), { server }).commands.register(ASK);
+    const { server } = await registeredAhmed();
     const t = setup(['ahmed', STRONG], { server });
     await t.commands.login(ASK);
     expect(server.calls).toEqual(['register', 'prelogin', 'login']);
@@ -556,8 +554,7 @@ describe('from a script (--username, --password-stdin, --yes)', () => {
 
 describe('logout', () => {
   it('ends the session on the server and forgets it here', async () => {
-    const t = setup(registerAnswers());
-    await t.commands.register(ASK);
+    const t = await registeredAhmed();
     const out = setup([], { server: t.server, secrets: t.secrets });
     await out.commands.logout();
     expect(t.server.sessions.size).toBe(0);
@@ -566,8 +563,7 @@ describe('logout', () => {
   });
 
   it('still logs out this PC when the server cannot be reached', async () => {
-    const t = setup(registerAnswers());
-    await t.commands.register(ASK);
+    const t = await registeredAhmed();
     t.server.failLogout(new NetworkError('unreachable', 'Could not reach the server.'));
     const out = setup([], { server: t.server, secrets: t.secrets });
     await out.commands.logout();
@@ -589,8 +585,7 @@ describe('logout', () => {
       ],
     ];
     for (const [failure, reason] of failures) {
-      const t = setup(registerAnswers());
-      await t.commands.register(ASK);
+      const t = await registeredAhmed();
       t.server.failLogout(failure);
       const out = setup([], { server: t.server, secrets: t.secrets });
       await out.commands.logout();
@@ -602,8 +597,7 @@ describe('logout', () => {
   });
 
   it('quietly logs out when the server session had already expired', async () => {
-    const t = setup(registerAnswers());
-    await t.commands.register(ASK);
+    const t = await registeredAhmed();
     t.server.sessions.clear();
     const out = setup([], { server: t.server, secrets: t.secrets });
     await out.commands.logout();
@@ -656,14 +650,6 @@ const failingSave = () => {
 };
 
 describe('secret arrays are wiped on every path (BP-01)', () => {
-  /** A PC already holding a login for "ahmed", to log in again or delete the account. */
-  async function registered() {
-    const server = fakeServer();
-    const first = setup(registerAnswers(), { server });
-    await first.commands.register(ASK);
-    return { server, secrets: first.secrets };
-  }
-
   describe('register', () => {
     it('on success: both derived keys and the data key', async () => {
       const keys = secretTrackingCrypto();
@@ -673,8 +659,7 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
     });
 
     it('on an error from the server, from saving the login or from deriving the keys', async () => {
-      const server = fakeServer();
-      await setup(registerAnswers(), { server }).commands.register(ASK);
+      const { server } = await registeredAhmed();
       const taken = secretTrackingCrypto();
       await expect(
         setup(registerAnswers(), { server, crypto: taken.crypto }).commands.register(ASK),
@@ -713,7 +698,7 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
 
   describe('login', () => {
     it('on success: both derived keys and the unlocked data key', async () => {
-      const { server } = await registered();
+      const { server } = await registeredAhmed();
       const keys = secretTrackingCrypto();
       await setup(['ahmed', STRONG], { server, crypto: keys.crypto }).commands.login(ASK);
       expect(keys.handedOut).toHaveLength(3);
@@ -721,7 +706,7 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
     });
 
     it('on a wrong password, a data key that does not unlock, or a login not saved', async () => {
-      const { server } = await registered();
+      const { server } = await registeredAhmed();
       const wrong = secretTrackingCrypto();
       await expect(
         setup(['ahmed', 'plum-garage-violin-99'], { server, crypto: wrong.crypto }).commands.login(
@@ -763,7 +748,7 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
 
   describe('account delete', () => {
     it('on success: both derived keys', async () => {
-      const { server, secrets } = await registered();
+      const { server, secrets } = await registeredAhmed();
       const keys = secretTrackingCrypto();
       const t = setup(['ahmed', STRONG], { server, secrets, crypto: keys.crypto });
       await t.commands.accountDelete(ASK);
@@ -773,7 +758,7 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
     });
 
     it('on a wrong password', async () => {
-      const { server, secrets } = await registered();
+      const { server, secrets } = await registeredAhmed();
       const keys = secretTrackingCrypto();
       const t = setup(['ahmed', 'plum-garage-violin-99'], {
         server,
@@ -788,7 +773,7 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
     });
 
     it('on a cancelled question: no key is made', async () => {
-      const { server, secrets } = await registered();
+      const { server, secrets } = await registeredAhmed();
       const keys = secretTrackingCrypto();
       const t = setup(['ahmed', new PromptCancelledError()], {
         server,
@@ -804,11 +789,7 @@ describe('secret arrays are wiped on every path (BP-01)', () => {
 
 describe('agentnomad account delete, logged in with a local state', () => {
   let state: LocalState;
-  let dataKey: Uint8Array;
   useTempDir('agentnomad-account-', (dir) => (state = localStateIn(dir)));
-  beforeEach(() => {
-    dataKey = realCrypto.randomBytes(32);
-  });
 
   function account(
     answers: unknown[],
@@ -824,7 +805,7 @@ describe('agentnomad account delete, logged in with a local state', () => {
       auth: {
         prelogin: () =>
           Promise.resolve({
-            kdfSalt: Buffer.alloc(16, 1).toString('base64'),
+            kdfSalt: Buffer.alloc(KDF_SALT_BYTES, 1).toString('base64'),
             kdfParams: FAST_KDF_PARAMS,
           }),
         deleteAccount: (request) => {
@@ -849,7 +830,7 @@ describe('agentnomad account delete, logged in with a local state', () => {
 
   it('asks for the username and password, deletes, and cleans up this PC', async () => {
     await state.setRevision('claude-code', 'global', 3);
-    const t = account(['ahmed', 'plum-garage-violin-47'], () => Promise.resolve());
+    const t = account(['ahmed', STRONG], () => Promise.resolve());
     await t.run({ yes: true, passwordStdin: false });
     expect(t.asked).toEqual(['Type your username to confirm', 'Password']);
     expect(Buffer.from(t.sent[0] ?? '', 'base64')).toHaveLength(32);
@@ -861,7 +842,7 @@ describe('agentnomad account delete, logged in with a local state', () => {
   });
 
   it('from a script: username and password by flags, confirmed with --yes', async () => {
-    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
+    const t = account([], () => Promise.resolve(), STRONG);
     await t.run({ yes: true, passwordStdin: true, username: 'ahmed' });
     expect(t.asked).toEqual([]);
     expect(t.sent).toHaveLength(1);
@@ -869,7 +850,7 @@ describe('agentnomad account delete, logged in with a local state', () => {
   });
 
   it('from a script without --yes: refuses, deleting nothing', async () => {
-    const t = account([], () => Promise.resolve(), 'plum-garage-violin-47');
+    const t = account([], () => Promise.resolve(), STRONG);
     await expect(t.run({ yes: false, passwordStdin: true, username: 'ahmed' })).rejects.toThrow(
       'Nothing was deleted. Add --yes to confirm deleting the account.',
     );

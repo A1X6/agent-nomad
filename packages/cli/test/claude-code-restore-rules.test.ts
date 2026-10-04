@@ -12,6 +12,11 @@ import {
 // The rules read no file, so these folders need not exist.
 const home = resolve('/home/a');
 const base = join(home, '.claude');
+const context = { homedir: home, baseDir: base, platform: process.platform };
+
+/** The bundle paths of the scripts the hooks and status line in `settings` run. */
+const scriptsRunBy = (settings: string) =>
+  new Set(hookScripts(settings, context).map((script) => script.bundlePath));
 
 describe('restore rules: refuses what a collector never produces', () => {
   it.each([
@@ -54,7 +59,6 @@ describe('restore rules: refuses what a collector never produces', () => {
     const settings = JSON.stringify({
       hooks: { Stop: [{ hooks: [{ type: 'command', command: `~/${startup}` }] }] },
     });
-    const context = { homedir: home, baseDir: base, platform: process.platform };
     expect(hookScripts(settings, context)).toEqual([]);
     expect(
       globalDestination(`.agentnomad/home/${startup}`, new Set([`.agentnomad/home/${startup}`])),
@@ -66,11 +70,7 @@ describe('restore rules: refuses what a collector never produces', () => {
       statusLine: { type: 'command', command: '~/scripts/statusline.sh' },
       hooks: { Stop: [{ hooks: [{ type: 'command', command: 'bash $HOME/tools/stop.sh' }] }] },
     });
-    const scripts = new Set(
-      hookScripts(settings, { homedir: home, baseDir: base, platform: process.platform }).map(
-        (script) => script.bundlePath,
-      ),
-    );
+    const scripts = scriptsRunBy(settings);
     expect(scripts).toEqual(
       new Set(['.agentnomad/home/scripts/statusline.sh', '.agentnomad/home/tools/stop.sh']),
     );
@@ -127,11 +127,7 @@ describe('restore rules: refuses what a collector never produces', () => {
         ],
       },
     });
-    const scripts = new Set(
-      hookScripts(settings, { homedir: home, baseDir: base, platform: process.platform }).map(
-        (script) => script.bundlePath,
-      ),
-    );
+    const scripts = scriptsRunBy(settings);
     expect(scripts).toEqual(new Set(['hooks/check.sh']));
     expect(globalDestination('hooks/check.sh', scripts)).toEqual({
       kind: 'target',

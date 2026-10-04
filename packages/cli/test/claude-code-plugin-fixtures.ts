@@ -5,6 +5,10 @@ import type { ManagedSettings } from '../src/index.ts';
 
 /** Plugin files shared by the plugin and plugin sync tests (review 7 READ-01). */
 
+/** Claude Code's list of installed plugins in the base folder `base`. */
+export const installedPluginsFile = (base: string) =>
+  join(base, 'plugins', 'installed_plugins.json');
+
 export const putJson = (path: string, value: unknown) => writeTestFile(path, JSON.stringify(value));
 
 /**
@@ -16,7 +20,7 @@ export async function realisticPlugins(home: string, project: string): Promise<v
   const install = (scope: string, extra: object = {}) => [
     { scope, installPath: 'x', version: '1.0.0', installedAt: '2026-09-21T00:00:00Z', ...extra },
   ];
-  await putJson(join(base, 'plugins', 'installed_plugins.json'), {
+  await putJson(installedPluginsFile(base), {
     version: 2,
     plugins: {
       'brag@brag': install('user'),
