@@ -156,10 +156,10 @@ export const STRONG = 'plum-garage-violin-47';
 /** A project folder for tests that never look inside it. */
 export const CWD = process.platform === 'win32' ? 'C:\\code\\my-app' : '/code/my-app';
 
-/** A local state kept in `state.json` in a test's temporary folder. */
-export const localStateIn = (dir: string): LocalState =>
+/** A local state kept in `file` (`state.json` by default) in a test's temporary folder. */
+export const localStateIn = (dir: string, file = 'state.json'): LocalState =>
   createLocalState({
-    path: join(dir, 'state.json'),
+    path: join(dir, file),
     server: 's',
     platform: process.platform,
   });

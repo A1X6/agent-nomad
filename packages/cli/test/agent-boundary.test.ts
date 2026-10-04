@@ -21,13 +21,13 @@ import type {
 import type { ApiClient } from '../src/api/api-client.ts';
 import { createPullCommand } from '../src/pull/pull-command.ts';
 import { createPushCommand } from '../src/push/push-command.ts';
-import { createLocalState } from '../src/state/local-state.ts';
 import { AnswerNeededError, createNoTerminalPrompter } from '../src/ui/no-terminal-prompter.ts';
 import type { Prompter } from '../src/ui/prompter.ts';
 import {
   exists,
   fakeBundleServer,
   fakeEnvWriter,
+  localStateIn,
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
@@ -199,11 +199,7 @@ function depsFor(
   seen: Seen,
 ) {
   const { reporter, lines } = recordingReporter();
-  const state = createLocalState({
-    path: join(pc.home, 'state.json'),
-    server: 's',
-    platform: process.platform,
-  });
+  const state = localStateIn(pc.home);
   const deps = {
     prompter,
     reporter,

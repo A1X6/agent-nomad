@@ -14,6 +14,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   fakeApi,
+  localStateIn,
   memorySecrets,
   memorySecretStore,
   recordingReporter,
@@ -30,7 +31,6 @@ import {
   NO_RECOVERY_WARNING,
   OutcomeUnknownError,
   PromptCancelledError,
-  createLocalState,
   type LocalState,
   type PasswordChecker,
   type SecretName,
@@ -380,11 +380,7 @@ describe('login', () => {
     await setup(registerAnswers('bob'), { server }).commands.register(ASK);
     const dir = await mkdtemp(join(tmpdir(), 'agentnomad-auth-'));
     try {
-      const state = createLocalState({
-        path: join(dir, 'state.json'),
-        server: 's',
-        platform: process.platform,
-      });
+      const state = localStateIn(dir);
       const secrets = memorySecrets();
       const pc = (answers: (string | boolean)[]) =>
         setup(answers, { server, secrets, localState: state }).commands;
@@ -815,11 +811,7 @@ describe('agentnomad account delete, logged in with a local state', () => {
   let dataKey: Uint8Array;
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'agentnomad-account-'));
-    state = createLocalState({
-      path: join(dir, 'state.json'),
-      server: 's',
-      platform: process.platform,
-    });
+    state = localStateIn(dir);
     dataKey = realCrypto.randomBytes(32);
   });
   afterEach(async () => {

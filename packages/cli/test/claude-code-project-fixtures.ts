@@ -7,8 +7,8 @@ import { afterEach, beforeEach } from 'vitest';
 import { createClaudeCodeProjectCollector, projectDirName } from '../src/index.ts';
 
 /**
- * Set-up shared by the Claude Code project collector and auto memory tests (review 7
- * DUP-02). Kept out of fakes.ts, which must not load any agent's adapter.
+ * Set-up shared by the Claude Code project collector, auto memory and restorer tests (review 7
+ * DUP-02, review 8 DUP-01). Kept out of fakes.ts, which must not load any agent's adapter.
  */
 
 // A temporary home (with `.claude`) and project, made by `useProjectFolders` before each

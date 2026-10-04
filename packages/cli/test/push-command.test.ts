@@ -17,6 +17,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it, v
 import {
   collected,
   fakeBundleServer,
+  localStateIn,
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
@@ -28,7 +29,6 @@ import {
   CLAUDE_ENV_REFERENCES,
   createAgentRegistry,
   createClaudeCodeAdapter,
-  createLocalState,
   createNoTerminalPrompter,
   createPushApplier,
   createPushCommand,
@@ -65,7 +65,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function fakeAdapter(
+function collectingAdapter(
   options: {
     global?: CollectedFile[];
     project?: CollectedFile[];
@@ -115,15 +115,11 @@ function setup(
   const server = options.server ?? fakeBundleServer();
   const script = scriptedPrompter(answers);
   const { reporter, lines } = recordingReporter();
-  const state = createLocalState({
-    path: join(dir, `${options.pc ?? 'this-pc'}.json`),
-    server: 'api.test',
-    platform: process.platform,
-  });
+  const state = localStateIn(dir, `${options.pc ?? 'this-pc'}.json`);
   // What apply gets: everything but the prompter.
   const applyDeps: PushApplyDeps = {
     reporter,
-    registry: () => createAgentRegistry([options.adapter ?? fakeAdapter()]),
+    registry: () => createAgentRegistry([options.adapter ?? collectingAdapter()]),
     secrets: () => Promise.resolve(options.secrets ?? loggedIn()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
@@ -195,7 +191,7 @@ describe('agentnomad push', () => {
 
   it('never sends a readable byte of the setup', async () => {
     const t = setup(['global', false], {
-      adapter: fakeAdapter({ global: [collected('CLAUDE.md', 'SECRET-PLAN-XYZ')] }),
+      adapter: collectingAdapter({ global: [collected('CLAUDE.md', 'SECRET-PLAN-XYZ')] }),
     });
     await t.command.push(noFlags);
     const sent = t.server.puts
@@ -263,7 +259,7 @@ describe('agentnomad push', () => {
 
     function withAccountSkills(names: string[], problem: string | null = null) {
       const seen: boolean[] = [];
-      const base = fakeAdapter();
+      const base = collectingAdapter();
       if (claudePart === undefined) throw new Error('no account skills part');
       const adapter: AgentAdapter = {
         ...base,
@@ -342,7 +338,7 @@ describe('agentnomad push', () => {
     [false, false],
   ])('--memory=%s answers the memory question from a script', async (memory, expected) => {
     const seen: boolean[] = [];
-    const base = fakeAdapter();
+    const base = collectingAdapter();
     const adapter: AgentAdapter = {
       ...base,
       collector: {
@@ -447,7 +443,7 @@ describe('agentnomad push', () => {
   });
 
   it('shows unknown-file and managed-settings notices, and offers env values', async () => {
-    const adapter = fakeAdapter({
+    const adapter = collectingAdapter({
       global: [
         collected(
           '.mcp.json',
@@ -472,7 +468,7 @@ describe('agentnomad push', () => {
 
   it('keeps binary files byte for byte', async () => {
     const png = collected('skills/logo.png', new Uint8Array([0x89, 0x50, 0, 255, 1]));
-    const t = setup(['global', false], { adapter: fakeAdapter({ global: [png] }) });
+    const t = setup(['global', false], { adapter: collectingAdapter({ global: [png] }) });
     await t.command.push(noFlags);
     const { bundle } = await received(t.server, { kind: 'global' });
     expect(bundle.files[0]).toEqual({
@@ -645,7 +641,7 @@ describe('agentnomad push', () => {
 
     it('an error while collecting', async () => {
       const adapter: AgentAdapter = {
-        ...fakeAdapter(),
+        ...collectingAdapter(),
         collector: { collect: () => Promise.reject(new Error('disk gone')) },
       };
       const t = setup([], { adapter });
