@@ -11,6 +11,7 @@ import {
 } from './claude-code-project-fixtures.ts';
 import {
   collected,
+  paths,
   readText,
   recordingReporter,
   scriptedPrompter,
@@ -46,7 +47,7 @@ describe('claude.ai skills (T42): reading and saving', () => {
     await syncedSetup();
     const files = createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES });
     const collected = await collectAccountSkills(files, await readSyncedSkills(files.path, base));
-    expect(collected.map((file) => file.path).sort()).toEqual([
+    expect(paths(collected).sort()).toEqual([
       `${ACCOUNT_SKILLS_PREFIX}my-skill/SKILL.md`,
       `${ACCOUNT_SKILLS_PREFIX}my-skill/reference/notes.md`,
     ]);
@@ -104,10 +105,7 @@ describe('claude.ai skills (T42): what pull may add', () => {
       { name: 'local-one', reason: 'you already have a local skill with this name' },
       { name: 'Synced-Here', reason: 'this PC already gets it from claude.ai' },
     ]);
-    expect(plan.files.map((file) => file.path)).toEqual([
-      'skills/mine/SKILL.md',
-      'skills/runner/SKILL.md',
-    ]);
+    expect(paths(plan.files)).toEqual(['skills/mine/SKILL.md', 'skills/runner/SKILL.md']);
   });
 });
 

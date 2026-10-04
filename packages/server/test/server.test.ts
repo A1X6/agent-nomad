@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDatabasePool, createServerFromEnv } from '../src/server.ts';
-import { memoryLogger } from './support/fixtures.ts';
+import { b64, bytes, memoryLogger } from './support/fixtures.ts';
 
 const url = 'postgresql://user:hunter2@ep-example.eu-central-1.aws.neon.tech/neondb';
 
 describe('createServerFromEnv', () => {
-  const secret = Buffer.alloc(32, 7).toString('base64');
+  const secret = b64(bytes(32, 7));
 
   it('refuses to start without valid settings, never printing their values', async () => {
     await expect(

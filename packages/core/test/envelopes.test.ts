@@ -6,6 +6,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import {
+  AEAD_KEY_BYTES,
   DATA_KEY_BYTES,
   DecryptionError,
   openBundle,
@@ -21,15 +22,21 @@ useDataKey();
 describe('data key wrapping', () => {
   it('wraps to exactly the size the API expects and unwraps again', () => {
     const dataKey = crypto.randomBytes(DATA_KEY_BYTES);
-    const passwordKey = crypto.randomBytes(32);
+    const passwordKey = crypto.randomBytes(AEAD_KEY_BYTES);
     const wrapped = wrapDataKey(crypto, dataKey, passwordKey);
     expect(wrapped).toHaveLength(WRAPPED_DATA_KEY_BYTES);
     expect(unwrapDataKey(crypto, wrapped, passwordKey)).toEqual(dataKey);
   });
 
   it('cannot be unwrapped with the wrong password key', () => {
-    const wrapped = wrapDataKey(crypto, crypto.randomBytes(DATA_KEY_BYTES), crypto.randomBytes(32));
-    expect(() => unwrapDataKey(crypto, wrapped, crypto.randomBytes(32))).toThrow(DecryptionError);
+    const wrapped = wrapDataKey(
+      crypto,
+      crypto.randomBytes(DATA_KEY_BYTES),
+      crypto.randomBytes(AEAD_KEY_BYTES),
+    );
+    expect(() => unwrapDataKey(crypto, wrapped, crypto.randomBytes(AEAD_KEY_BYTES))).toThrow(
+      DecryptionError,
+    );
   });
 
   it('cannot be opened as if it were a bundle', () => {

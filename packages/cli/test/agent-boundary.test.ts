@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
+import { GLOBAL_SCOPE_KEY } from '@agentnomad/contracts';
 import { createGzipBundleCodec } from '@agentnomad/core';
 import { describe, expect, it } from 'vitest';
 
@@ -265,7 +266,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
     expect(seen.followUps).toHaveLength(1);
     expect(seen.followUps[0]?.writtenFirst).toBe(true);
     expect('prompter' in (seen.followUps[0]?.context ?? {})).toBe(false);
-    expect(await t.state.revisionOf('example', 'global')).not.toBeNull();
+    expect(await t.state.revisionOf('example', GLOBAL_SCOPE_KEY)).not.toBeNull();
   });
 
   it('without a terminal, the agent’s open question stops pull before anything is written', async () => {
@@ -283,7 +284,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
     ).rejects.toBeInstanceOf(AnswerNeededError);
     expect(await exists(b.base)).toBe(false);
     expect(seen.followUps).toEqual([]);
-    expect(await t.state.revisionOf('example', 'global')).toBeNull();
+    expect(await t.state.revisionOf('example', GLOBAL_SCOPE_KEY)).toBeNull();
   });
 
   it('push offers the values its MCP servers use, from the agent’s own files (ARCH-01)', async () => {

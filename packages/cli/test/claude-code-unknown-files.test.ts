@@ -1,6 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { BACKUP_MARKER } from '@agentnomad/core';
 import { describe, expect, it } from 'vitest';
 
 import { stopHook } from './claude-code-project-fixtures.ts';
@@ -72,7 +73,7 @@ describe('unknown-file check (T32 done-when)', () => {
     await writeTestFile(join(base, 'state', 'x'));
     await writeTestFile(join(base, 'chrome', 'x'));
     await writeTestFile(join(base, 'settings.json.bak'));
-    await writeTestFile(join(base, 'CLAUDE.md.agentnomad-backup-20260925T120000Z'));
+    await writeTestFile(join(base, `CLAUDE.md${BACKUP_MARKER}20260925T120000Z`));
     await writeTestFile(join(base, '.claude.json'));
     expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([]);
   });

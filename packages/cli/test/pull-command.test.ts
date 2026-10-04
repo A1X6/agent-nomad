@@ -13,6 +13,7 @@ import {
   fakeEnvWriter,
   localStateIn,
   memorySecretStore,
+  paths,
   readText,
   recordingReporter,
   revisionOn,
@@ -722,7 +723,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const adapter: AgentAdapter = {
       ...base,
       planRestore: (context) => {
-        followUps.push(context.files.map((file) => file.path));
+        followUps.push(paths(context.files));
         if (!base.planRestore) throw new Error('no plan step');
         return base.planRestore(context);
       },

@@ -1,6 +1,7 @@
-import { chmod, mkdir, symlink } from 'node:fs/promises';
+import { chmod, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { BACKUP_MARKER, INCOMING_MARKER } from '@agentnomad/core';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -16,6 +17,7 @@ import { linkFolder, paths, text, withTempDir, writeTestFile } from './fakes.ts'
 import {
   ACCOUNT_SKILLS_PREFIX,
   ClaudeJsonError,
+  TEMP_MARKER,
   type ProgramInfo,
   type CollectedFile,
 } from '../src/index.ts';
@@ -74,8 +76,8 @@ async function realisticSetup(): Promise<void> {
   await writeTestFile(join(base, 'skills', 'deploy', '.git', 'HEAD'));
   await writeTestFile(join(base, 'skills', 'deploy', 'node_modules', 'x', 'index.js'));
   await writeTestFile(join(base, 'skills', 'deploy', '.DS_Store'));
-  await writeTestFile(join(base, 'rules', 'style.md.agentnomad-backup-20260925T120000Z'));
-  await writeTestFile(join(base, 'rules', 'style.md.agentnomad-incoming-20260925T120000Z'));
+  await writeTestFile(join(base, 'rules', `style.md${BACKUP_MARKER}20260925T120000Z`));
+  await writeTestFile(join(base, 'rules', `style.md${INCOMING_MARKER}20260925T120000Z`));
   // Opt-in memory:
   await writeTestFile(join(base, 'agent-memory', 'reviewer', 'MEMORY.md'));
 }
@@ -128,7 +130,7 @@ describe('global collector: what is taken', () => {
 
   it('skips a temporary file an interrupted write left (BUG-03)', async () => {
     await writeTestFile(join(base, 'skills', 'x', 'SKILL.md'));
-    await writeTestFile(join(base, 'skills', 'x', '.SKILL.md.agentnomad-tmp-0a1b2c3d'));
+    await writeTestFile(join(base, 'skills', 'x', `.SKILL.md${TEMP_MARKER}0a1b2c3d`));
     expect(paths(await collect())).toEqual(['skills/x/SKILL.md']);
   });
 
@@ -303,11 +305,7 @@ describe('global collector: hook and status line scripts', () => {
       await writeTestFile(join(outside, 'tool.sh'));
       const files = await withSettings({
         statusLine: { type: 'command', command: 'ccstatusline' },
-        hooks: {
-          Stop: [
-            { hooks: [{ type: 'command', command: `~/missing.sh; ${join(outside, 'tool.sh')}` }] },
-          ],
-        },
+        ...stopHook(`~/missing.sh; ${join(outside, 'tool.sh')}`),
       });
       expect(paths(files)).toEqual(['settings.json']);
     });
@@ -319,8 +317,8 @@ describe.runIf(posix)('global collector: links', () => {
     const dotfiles = join(home, 'dotfiles', 'my-skill');
     await writeTestFile(join(dotfiles, 'SKILL.md'), 'linked');
     await mkdir(join(base, 'skills'));
-    await symlink(dotfiles, join(base, 'skills', 'my-skill'));
-    await symlink(join(base, 'skills'), join(base, 'skills', 'loop'));
+    await linkFolder(dotfiles, join(base, 'skills', 'my-skill'));
+    await linkFolder(join(base, 'skills'), join(base, 'skills', 'loop'));
     const files = await collect();
     expect(text(files, 'skills/my-skill/SKILL.md')).toBe('linked');
     expect(paths(files).some((path) => path.includes('loop/loop'))).toBe(false);

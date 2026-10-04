@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { BACKUP_MARKER } from '@agentnomad/core';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -44,7 +45,7 @@ async function realisticProject(): Promise<void> {
   );
   await writeTestFile(join(project, '.claude', 'worktrees', 'wt', 'CLAUDE.md'), 'SECRET worktree');
   await writeTestFile(join(project, '.claude', 'skills', 'test', 'node_modules', 'x.js'));
-  await writeTestFile(join(project, '.claude', 'rules', 'a.md.agentnomad-backup-20260925T120000Z'));
+  await writeTestFile(join(project, '.claude', 'rules', `a.md${BACKUP_MARKER}20260925T120000Z`));
   await writeTestFile(join(project, '.claude', 'unknown.json'));
   // Opt-in:
   await writeTestFile(join(project, '.claude', 'agent-memory', 'reviewer', 'MEMORY.md'));

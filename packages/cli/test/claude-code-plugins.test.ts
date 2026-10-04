@@ -13,6 +13,7 @@ import {
 } from '../src/index.ts';
 
 import { installedPluginsFile, putJson, realisticPlugins } from './claude-code-plugin-fixtures.ts';
+import { paths } from './fakes.ts';
 import {
   base,
   globalCollector,
@@ -70,7 +71,7 @@ describe('plugin list on push', () => {
   it('the global collector adds .agentnomad/plugins.json, which restore never writes', async () => {
     await realisticPlugins(home, project);
     const files = await globalCollector().collect({ kind: 'global' }, { includeMemory: false });
-    expect(files.map((file) => file.path)).toEqual(['.agentnomad/plugins.json']);
+    expect(paths(files)).toEqual(['.agentnomad/plugins.json']);
     expect(globalDestination('.agentnomad/plugins.json', new Set())).toEqual({ kind: 'metadata' });
     expect(projectDestination('.agentnomad/plugins.json')).toEqual({ kind: 'metadata' });
   });

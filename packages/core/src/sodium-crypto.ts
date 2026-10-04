@@ -6,8 +6,7 @@ import {
 } from '@agentnomad/contracts';
 import sodium from 'libsodium-wrappers-sumo';
 
-import { DecryptionError, type CryptoService, type DerivedKeys } from './crypto.ts';
-import { DATA_KEY_BYTES } from './envelopes.ts';
+import { AEAD_KEY_BYTES, DecryptionError, type CryptoService, type DerivedKeys } from './crypto.ts';
 
 /** Keyed hash output size. Part of the stored format: scope keys are this hash in hex. */
 const HASH_BYTES = 32;
@@ -56,7 +55,7 @@ function deriveKeys(password: string, salt: Uint8Array, params: KdfParams): Deri
     return {
       authKey: sodium.crypto_kdf_derive_from_key(AUTH_KEY_BYTES, AUTH_KEY_ID, KDF_CONTEXT, master),
       passwordKey: sodium.crypto_kdf_derive_from_key(
-        AUTH_KEY_BYTES,
+        AEAD_KEY_BYTES,
         PASSWORD_KEY_ID,
         KDF_CONTEXT,
         master,
@@ -68,7 +67,7 @@ function deriveKeys(password: string, salt: Uint8Array, params: KdfParams): Deri
 }
 
 function seal(plaintext: Uint8Array, key: Uint8Array, associatedData: Uint8Array): Uint8Array {
-  requireLength('Key', key, DATA_KEY_BYTES);
+  requireLength('Key', key, AEAD_KEY_BYTES);
   const nonce = sodium.randombytes_buf(NONCE_BYTES);
   const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
     plaintext,
@@ -84,7 +83,7 @@ function seal(plaintext: Uint8Array, key: Uint8Array, associatedData: Uint8Array
 }
 
 function open(sealed: Uint8Array, key: Uint8Array, associatedData: Uint8Array): Uint8Array {
-  requireLength('Key', key, DATA_KEY_BYTES);
+  requireLength('Key', key, AEAD_KEY_BYTES);
   if (sealed.length < NONCE_BYTES + TAG_BYTES) throw new DecryptionError();
   try {
     return sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(

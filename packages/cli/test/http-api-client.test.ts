@@ -160,9 +160,9 @@ describe('ApiClient: requests and answers', () => {
   });
 
   it('refuses before any request when not logged in', async () => {
-    const { client, calls } = fakeServer([], { getSessionToken: () => Promise.resolve(null) });
+    const { client, apiCalls } = fakeServer([], { getSessionToken: () => Promise.resolve(null) });
     await expect(client.bundles.list()).rejects.toBeInstanceOf(NotLoggedInError);
-    expect(calls.filter((call) => call.url.pathname !== '/health')).toHaveLength(0);
+    expect(apiCalls()).toHaveLength(0);
   });
 
   it('turns an API error into ApiError with its code and currentRevision', async () => {

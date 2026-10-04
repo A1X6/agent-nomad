@@ -8,6 +8,7 @@ import {
   collect,
   globalCollector,
   home,
+  memoryDir,
   project,
   root,
   setMemoryDirectory,
@@ -16,10 +17,10 @@ import {
 } from './claude-code-project-fixtures.ts';
 import { collected, readJson, readText, writeTestFile } from './fakes.ts';
 import {
+  CLAUDE_JSON_BUNDLE_PATH,
   createClaudeCodeRestorer,
   hooksForOtherOs,
   lineEndingsFor,
-  projectDirName,
   sameForRestore,
   type ClaudeCodeRestorer,
   type CollectedFile,
@@ -117,16 +118,14 @@ describe('restorer: round trip', () => {
     const source = join(root, 'other-pc', 'my-app');
     await writeTestFile(join(source, 'CLAUDE.md'), 'project rules');
     await writeTestFile(join(source, '.claude', 'settings.local.json'), '{}');
-    const sourceMemory = join(base, 'projects', projectDirName(source), 'memory');
+    const sourceMemory = memoryDir(source);
     await writeTestFile(join(sourceMemory, 'MEMORY.md'), 'remember this');
     const collected = await collect(true, {}, source);
 
     await restoreProject(collected, 'skip');
     expect(await readText(join(project, 'CLAUDE.md'))).toBe('project rules');
     // Memory lands in this folder's own memory directory.
-    expect(
-      await readText(join(base, 'projects', projectDirName(project), 'memory', 'MEMORY.md')),
-    ).toBe('remember this');
+    expect(await readText(join(memoryDir(), 'MEMORY.md'))).toBe('remember this');
   });
 });
 
@@ -228,7 +227,7 @@ describe('restorer: existing files', () => {
       [collected('settings.json', JSON.stringify({ theme: 'dark', effortLevel: 'high' }))],
       'merge',
     );
-    expect(JSON.parse(await readText(join(base, 'settings.json')))).toEqual({
+    expect(await readJson(join(base, 'settings.json'))).toEqual({
       theme: 'dark',
       model: 'opus',
       effortLevel: 'high',
@@ -259,7 +258,7 @@ describe('restorer: existing files', () => {
     const real = join(root, 'dotfiles', 'claude.json');
     await writeTestFile(real, '{"diffTool":"auto"}');
     await symlink(real, join(home, '.claude.json'));
-    await restoreGlobal([collected('.agentnomad/claude.json', '{"diffTool":"terminal"}')], 'merge');
+    await restoreGlobal([collected(CLAUDE_JSON_BUNDLE_PATH, '{"diffTool":"terminal"}')], 'merge');
     expect((await lstat(join(home, '.claude.json'))).isSymbolicLink()).toBe(true);
     expect(await readJson(real)).toEqual({ diffTool: 'terminal' });
   });
@@ -272,7 +271,7 @@ describe('restorer: existing files', () => {
 
 describe('restorer: ~/.claude.json', () => {
   const incoming = collected(
-    '.agentnomad/claude.json',
+    CLAUDE_JSON_BUNDLE_PATH,
     JSON.stringify({ mcpServers: { github: { command: 'gh-mcp' } }, diffTool: 'terminal' }),
   );
   const existingJson = {
@@ -296,7 +295,7 @@ describe('restorer: ~/.claude.json', () => {
         },
       ],
     ]);
-    expect(JSON.parse(await readText(join(home, '.claude.json')))).toEqual({
+    expect(await readJson(join(home, '.claude.json'))).toEqual({
       ...existingJson,
       mcpServers: { local: { command: 'local-mcp' }, github: { command: 'gh-mcp' } },
       diffTool: 'terminal',
@@ -315,7 +314,7 @@ describe('restorer: ~/.claude.json', () => {
   it('skip leaves it alone', async () => {
     await writeTestFile(join(home, '.claude.json'), JSON.stringify(existingJson));
     await restoreGlobal([incoming], 'skip');
-    expect(JSON.parse(await readText(join(home, '.claude.json')))).toEqual(existingJson);
+    expect(await readJson(join(home, '.claude.json'))).toEqual(existingJson);
   });
 
   it('asks nothing when the keys are already there', async () => {
@@ -369,7 +368,7 @@ describe('restorer: ~/.claude.json', () => {
   it('restores only the servers and preferences, never projects or account state (T43)', async () => {
     await writeTestFile(join(home, '.claude.json'), JSON.stringify(existingJson));
     const forged = collected(
-      '.agentnomad/claude.json',
+      CLAUDE_JSON_BUNDLE_PATH,
       JSON.stringify({
         mcpServers: { github: { command: 'gh-mcp' } },
         projects: {
@@ -392,7 +391,7 @@ describe('restorer: ~/.claude.json', () => {
   });
 
   it('writes nothing when the bundle holds none of the keys it restores', async () => {
-    const forged = collected('.agentnomad/claude.json', JSON.stringify({ projects: {} }));
+    const forged = collected(CLAUDE_JSON_BUNDLE_PATH, JSON.stringify({ projects: {} }));
     const report = await restoreGlobal([forged], 'merge');
     await expect(stat(join(home, '.claude.json'))).rejects.toThrow();
     expect(report.written).toEqual([]);
@@ -440,10 +439,9 @@ describe('restorer: ~/.claude.json', () => {
 
 describe('restorer: home files', () => {
   it('puts tool settings and hook scripts back in the home folder', async () => {
-    const hook = { Stop: [{ hooks: [{ type: 'command', command: '~/scripts/notify.sh' }] }] };
     await restoreGlobal(
       [
-        collected('settings.json', JSON.stringify({ hooks: hook })),
+        collected('settings.json', JSON.stringify(stopHook('~/scripts/notify.sh'))),
         collected('.agentnomad/home/.config/ccstatusline/settings.json', '{"lines":[]}'),
         collected('.agentnomad/home/scripts/notify.sh', 'echo hi\n', true),
       ],
@@ -486,7 +484,7 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
       isClaudeRunning: () => Promise.reject('the process list was empty'),
     }).restore(
       { kind: 'global' },
-      [collected('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
+      [collected(CLAUDE_JSON_BUNDLE_PATH, '{"diffTool":"terminal"}')],
       answer('merge').resolve,
     );
     expect(report.warnings).toEqual([
@@ -496,7 +494,7 @@ describe('restorer: one bad entry never stops the rest (T43)', () => {
 
   it('a broken .agentnomad/claude.json is skipped, not fatal', async () => {
     const report = await restoreGlobal(
-      [collected('.agentnomad/claude.json', '{not json'), collected('rules/a.md', 'a')],
+      [collected(CLAUDE_JSON_BUNDLE_PATH, '{not json'), collected('rules/a.md', 'a')],
       'skip',
     );
     expect(report.skipped).toEqual(['.agentnomad/claude.json']);
@@ -784,7 +782,7 @@ describe('restorer: what pull asks before writing (T61)', () => {
         collected('rules/b.md', 'theirs'),
         collected('rules/a.md', 'same'),
         collected('new.md', 'new'),
-        collected('.agentnomad/claude.json', '{"diffTool":"terminal"}'),
+        collected(CLAUDE_JSON_BUNDLE_PATH, '{"diffTool":"terminal"}'),
         // Saved from Windows with CRLF; this PC keeps it with LF: the same script (T53).
         collected('hooks/run.sh', 'echo ok\r\n'),
       ],
@@ -855,7 +853,7 @@ describe('restorer: a path with a line break stays on one warning line (review 6
       isClaudeRunning: () => Promise.reject(new Error("open 'a\n✔ Restored settings.json'")),
     }).restore(
       { kind: 'global' },
-      [collected('.agentnomad/claude.json', '{"diffTool":"terminal"}')],
+      [collected(CLAUDE_JSON_BUNDLE_PATH, '{"diffTool":"terminal"}')],
       answer('merge').resolve,
     );
     expect(report.warnings).toEqual([
