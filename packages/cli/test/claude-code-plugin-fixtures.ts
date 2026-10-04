@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 
 import { writeTestFile } from './fakes.ts';
+import type { ManagedSettings } from '../src/index.ts';
 
 /** Plugin files shared by the plugin and plugin sync tests (review 7 READ-01). */
 
@@ -52,3 +53,11 @@ export async function realisticPlugins(root: string): Promise<void> {
     },
   );
 }
+
+/** Managed settings from a file that limit plugins and MCP servers, as the warnings show them. */
+export const fileManagedSettings: ManagedSettings = {
+  sources: [{ kind: 'file', where: '/etc/claude-code/managed-settings.json' }],
+  keys: ['allowedMcpServers', 'strictKnownMarketplaces'],
+  restrictsPlugins: true,
+  restrictsMcpServers: true,
+};

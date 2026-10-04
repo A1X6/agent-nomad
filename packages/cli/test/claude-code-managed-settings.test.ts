@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { fileManagedSettings } from './claude-code-plugin-fixtures.ts';
 import { recordingReporter } from './fakes.ts';
 import {
   createAgentRegistry,
@@ -185,12 +186,7 @@ describe('server-managed settings (claude.ai admin console)', () => {
 });
 
 describe('warnings (T31 done-when)', () => {
-  const found = {
-    sources: [{ kind: 'file' as const, where: '/etc/claude-code/managed-settings.json' }],
-    keys: ['allowedMcpServers', 'strictKnownMarketplaces'],
-    restrictsPlugins: true,
-    restrictsMcpServers: true,
-  };
+  const found = fileManagedSettings;
 
   it('push says they stay with this PC', () => {
     expect(managedSettingsNotice(found, 'push')).toBe(

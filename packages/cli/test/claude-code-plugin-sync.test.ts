@@ -4,7 +4,11 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { pluginProjectIn, realisticPlugins } from './claude-code-plugin-fixtures.ts';
+import {
+  fileManagedSettings,
+  pluginProjectIn,
+  realisticPlugins,
+} from './claude-code-plugin-fixtures.ts';
 import { recordingReporter, scriptedPrompter } from './fakes.ts';
 import {
   askPluginSync,
@@ -205,12 +209,7 @@ describe('plugin reinstall on pull', () => {
 });
 
 describe('warnings (T31 done-when)', () => {
-  const found = {
-    sources: [{ kind: 'file' as const, where: '/etc/claude-code/managed-settings.json' }],
-    keys: ['allowedMcpServers', 'strictKnownMarketplaces'],
-    restrictsPlugins: true,
-    restrictsMcpServers: true,
-  };
+  const found = fileManagedSettings;
 
   it('a plugin blocked by policy gets a clear reason', async () => {
     const choice = {
