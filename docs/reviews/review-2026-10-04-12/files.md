@@ -1,6 +1,6 @@
 # File Ledger — Agent Nomad — 2026-10-04 (review 12)
 
-280 files, 34,950 lines, at `dev` `310732c`. Verdicts at review time: 278 clean, 2 minor, 0 needs work, 0 rewrite. The earlier review records under `docs/reviews` are historical and out of scope: they are not listed here.
+280 files, 34,950 lines, at `dev` `744fa87`. Verdicts at review time: 278 clean, 2 minor, 0 needs work, 0 rewrite. The earlier review records under `docs/reviews` are historical and out of scope: they are not listed here.
 
 ## CLI: agent adapters (`packages/cli/src/agents`)
 
