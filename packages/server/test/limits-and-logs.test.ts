@@ -1,21 +1,22 @@
-import { API_HEADERS, ErrorResponseSchema } from '@agentnomad/contracts';
+import { API_HEADERS, AUTH_KEY_BYTES, ErrorResponseSchema } from '@agentnomad/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { RATE_LIMITS } from '../src/rate-limit/rate-limiter.ts';
-import { TEST_IP_HEADER, createTestApp, postJson, type TestApp } from './support/app.ts';
+import { TEST_IP_HEADER, createTestApp, type TestApp } from './support/app.ts';
 import {
+  authKey as goodKey,
   b64,
   bearer,
   bytes,
   deleteAccountRequest,
   errorCode,
   loginRequest,
+  preloginRequest,
   registerForToken,
   registerUser,
 } from './support/fixtures.ts';
 
-const goodKey = b64(bytes(32, 1));
-const badKey = b64(bytes(32, 2));
+const badKey = b64(bytes(AUTH_KEY_BYTES, 2));
 
 let t: TestApp;
 
@@ -38,6 +39,8 @@ const registerToken = (username: string, ip = '198.51.100.1') =>
 const login = (username: string, authKey: string, ip = '198.51.100.1') =>
   loginRequest(t.app, username, authKey, { headers: fromIp(ip) });
 
+const prelogin = (ip: string) => preloginRequest(t.app, 'ghost', fromIp(ip));
+
 async function expectRateLimited(res: Response) {
   expect(res.status).toBe(429);
   expect(await errorCode(res)).toBe('rate_limited');
@@ -46,8 +49,6 @@ async function expectRateLimited(res: Response) {
 
 describe('per-IP limits', () => {
   it(`allows ${String(RATE_LIMITS.authPerIp.limit)} auth requests a minute per IP, then 429`, async () => {
-    const prelogin = (ip: string) =>
-      t.app.request('/auth/prelogin', postJson({ username: 'ghost' }, fromIp(ip)));
     for (let index = 0; index < RATE_LIMITS.authPerIp.limit; index++) {
       expect((await prelogin('198.51.100.1')).status).toBe(200);
     }
@@ -66,8 +67,6 @@ describe('per-IP limits', () => {
 
 describe('per-IP limits count an IPv6 /64 as one visitor (T47)', () => {
   it('rotating addresses inside one /64 gives no fresh limit', async () => {
-    const prelogin = (ip: string) =>
-      t.app.request('/auth/prelogin', postJson({ username: 'ghost' }, fromIp(ip)));
     for (let index = 0; index < RATE_LIMITS.authPerIp.limit; index++) {
       expect((await prelogin(`2001:db8:0:1::${index.toString(16)}`)).status).toBe(200);
     }
@@ -183,7 +182,7 @@ describe('logging', () => {
 
   it('logs an unexpected error with its request id and hides it from the client', async () => {
     await t.database.close(); // every database call now fails
-    const res = await t.app.request('/auth/prelogin', postJson({ username: 'ahmed' }));
+    const res = await preloginRequest(t.app, 'ahmed');
     expect(res.status).toBe(500);
     const body = ErrorResponseSchema.parse(await res.json());
     expect(body.error).toEqual({

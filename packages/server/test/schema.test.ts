@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { Database } from '../src/db/database.ts';
 import { bundleBlobs, bundles, sessions, users } from '../src/db/schema.ts';
 import { migrationsFolder, type TestDatabase, useTestDatabase } from './support/database.ts';
-import { bytes, newSession, newUser } from './support/fixtures.ts';
+import { bundleRow, bytes, newSession, newUser } from './support/fixtures.ts';
 
 let database: TestDatabase;
 let db: Database;
@@ -129,17 +129,7 @@ describe('bundles and bundle_blobs', () => {
     return blob;
   }
 
-  const meta = (userId: string, blobId: string) => ({
-    userId,
-    agent: 'claude-code',
-    scopeKey: 'global',
-    nameEnc: null,
-    contentHash: bytes(32),
-    formatVersion: 1,
-    revision: 1,
-    sizeBytes: 100,
-    blobId,
-  });
+  const meta = (userId: string, blobId: string) => bundleRow(userId, blobId);
 
   it('allow one saved setup per user, agent and scope', async () => {
     const user = await insertUser();

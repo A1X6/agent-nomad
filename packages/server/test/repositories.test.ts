@@ -28,6 +28,7 @@ import {
   newUser,
   scopeKeyOf,
   seedSetups,
+  UNKNOWN_ID,
 } from './support/fixtures.ts';
 
 const hash = (fill: number) => bytes(32, fill);
@@ -58,7 +59,7 @@ describe('UserRepository', () => {
 
   it('returns null for an unknown user', async () => {
     expect(await userRepo.findByUsername('nobody')).toBeNull();
-    expect(await userRepo.findById('00000000-0000-4000-8000-000000000000')).toBeNull();
+    expect(await userRepo.findById(UNKNOWN_ID)).toBeNull();
   });
 
   it('deletes a user with their sessions, setups and files', async () => {
@@ -432,7 +433,7 @@ describe('BundleRepository.list', () => {
     '2026-09-25 10:00:00+05:60',
   ])('throws InvalidCursorError for the impossible time %j', async (updatedAt) => {
     const user = await createUser(database.db, 'ahmed');
-    const cursor = encodeBundleCursor({ updatedAt, id: '00000000-0000-4000-8000-000000000000' });
+    const cursor = encodeBundleCursor({ updatedAt, id: UNKNOWN_ID });
     await expect(bundleRepo.list(user.id, { limit: 3, cursor })).rejects.toBeInstanceOf(
       InvalidCursorError,
     );
@@ -442,7 +443,7 @@ describe('BundleRepository.list', () => {
     'accepts the real time %j',
     async (updatedAt) => {
       const user = await createUser(database.db, 'ahmed');
-      const cursor = encodeBundleCursor({ updatedAt, id: '00000000-0000-4000-8000-000000000000' });
+      const cursor = encodeBundleCursor({ updatedAt, id: UNKNOWN_ID });
       expect(await bundleRepo.list(user.id, { limit: 3, cursor })).toEqual({
         items: [],
         nextCursor: null,

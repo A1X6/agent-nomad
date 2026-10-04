@@ -18,6 +18,19 @@ import { findAutoMemory, projectDirName, repositoryRoot } from '../src/index.ts'
 
 useProjectFolders('agentnomad-auto-memory-');
 
+/** Writes `settingsFile` with autoMemoryDirectory set to `dir`. */
+const setMemoryDirectory = (settingsFile: string, dir: string) =>
+  writeTestFile(settingsFile, JSON.stringify({ autoMemoryDirectory: dir }));
+
+/** Moves the project's auto memory to ~/notes/my-app-memory (local settings); returns it. */
+async function notesMemory(): Promise<string> {
+  await setMemoryDirectory(
+    join(project, '.claude', 'settings.local.json'),
+    '~/notes/my-app-memory',
+  );
+  return join(home, 'notes', 'my-app-memory');
+}
+
 describe('auto memory location', () => {
   it('names the folder like Claude Code: every non-letter or digit becomes -', () => {
     expect(projectDirName('E:\\Projects\\agent-nomad')).toBe('E--Projects-agent-nomad');
@@ -51,11 +64,8 @@ describe('auto memory location', () => {
   });
 
   it('honours autoMemoryDirectory from the project settings', async () => {
-    await writeTestFile(
-      join(project, '.claude', 'settings.local.json'),
-      JSON.stringify({ autoMemoryDirectory: '~/notes/my-app-memory' }),
-    );
-    await writeTestFile(join(home, 'notes', 'my-app-memory', 'MEMORY.md'), 'custom');
+    const notes = await notesMemory();
+    await writeTestFile(join(notes, 'MEMORY.md'), 'custom');
     expect(await findAutoMemory({ ...options(), projectDir: project })).toEqual({
       kind: 'folder',
       dir: join(home, 'notes', 'my-app-memory'),
@@ -64,22 +74,16 @@ describe('auto memory location', () => {
   });
 
   it('takes only Markdown files from auto memory (T43)', async () => {
-    await writeTestFile(
-      join(project, '.claude', 'settings.local.json'),
-      JSON.stringify({ autoMemoryDirectory: '~/notes/my-app-memory' }),
-    );
-    await writeTestFile(join(home, 'notes', 'my-app-memory', 'MEMORY.md'), 'notes');
-    await writeTestFile(join(home, 'notes', 'my-app-memory', 'run.sh'), 'echo hi');
+    const notes = await notesMemory();
+    await writeTestFile(join(notes, 'MEMORY.md'), 'notes');
+    await writeTestFile(join(notes, 'run.sh'), 'echo hi');
     expect(paths(await collect(true)).filter((path) => path.includes('auto-memory'))).toEqual([
       '.agentnomad/auto-memory/MEMORY.md',
     ]);
   });
 
   it('never reads a memory folder that is a folder for keys (T43)', async () => {
-    await writeTestFile(
-      join(project, '.claude', 'settings.json'),
-      JSON.stringify({ autoMemoryDirectory: '~/.ssh' }),
-    );
+    await setMemoryDirectory(join(project, '.claude', 'settings.json'), '~/.ssh');
     await writeTestFile(join(home, '.ssh', 'notes.md'), 'secret');
     expect(await findAutoMemory({ ...options(), projectDir: project })).toEqual({
       kind: 'refused',
@@ -90,10 +94,7 @@ describe('auto memory location', () => {
   });
 
   it('skips a memory folder set in user settings, since every project shares it', async () => {
-    await writeTestFile(
-      join(base, 'settings.json'),
-      JSON.stringify({ autoMemoryDirectory: '~/all-memory' }),
-    );
+    await setMemoryDirectory(join(base, 'settings.json'), '~/all-memory');
     await writeTestFile(join(home, 'all-memory', 'MEMORY.md'), 'shared');
     expect((await findAutoMemory({ ...options(), projectDir: project })).kind).toBe('shared');
     expect(paths(await collect(true))).toEqual([]);

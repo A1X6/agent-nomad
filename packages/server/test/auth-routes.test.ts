@@ -1,4 +1,5 @@
 import {
+  AUTH_KEY_BYTES,
   DEFAULT_KDF_PARAMS,
   LoginResponseSchema,
   PreloginResponseSchema,
@@ -10,16 +11,18 @@ import { describe, expect, it } from 'vitest';
 import { SESSION_LIFETIME_MS } from '../src/auth/auth-service.ts';
 import { createTestApp, postJson, type TestApp, useTestApp } from './support/app.ts';
 import {
+  authKey,
   b64,
   bearer,
   bytes,
   errorCode,
+  loginRequest,
+  preloginRequest,
   registerForToken,
   registration,
 } from './support/fixtures.ts';
 
 const realKdf: KdfParams = { ...DEFAULT_KDF_PARAMS, memoryKiB: 131_072 };
-const authKey = b64(bytes(32, 1));
 
 const realRegistration = (username = 'ahmed') => registration(username, { kdfParams: realKdf });
 
@@ -27,6 +30,10 @@ let t: TestApp;
 useTestApp((app) => (t = app));
 
 const register = (username = 'ahmed') => registerForToken(t.app, username, { kdfParams: realKdf });
+
+/** The salt prelogin gives for `username`. */
+const saltFor = async (app: TestApp['app'], username: string) =>
+  PreloginResponseSchema.parse(await (await preloginRequest(app, username)).json()).kdfSalt;
 
 describe('every response', () => {
   it('health check answers ok', async () => {
@@ -64,7 +71,7 @@ describe('every response', () => {
 describe('POST /auth/prelogin', () => {
   it('returns the stored salt and settings for a real account', async () => {
     await register();
-    const res = await t.app.request('/auth/prelogin', postJson({ username: 'ahmed' }));
+    const res = await preloginRequest(t.app, 'ahmed');
     expect(PreloginResponseSchema.parse(await res.json())).toEqual({
       kdfSalt: realRegistration().kdfSalt,
       kdfParams: realKdf,
@@ -72,7 +79,7 @@ describe('POST /auth/prelogin', () => {
   });
 
   it('answers an unknown username exactly like a real one', async () => {
-    const res = await t.app.request('/auth/prelogin', postJson({ username: 'ghost' }));
+    const res = await preloginRequest(t.app, 'ghost');
     expect(res.status).toBe(200);
     const body = PreloginResponseSchema.parse(await res.json());
     expect(body.kdfParams).toEqual(DEFAULT_KDF_PARAMS);
@@ -80,26 +87,20 @@ describe('POST /auth/prelogin', () => {
   });
 
   it('gives the same fake salt every time, so repeating it reveals nothing', async () => {
-    const ask = async (username: string) =>
-      PreloginResponseSchema.parse(
-        await (await t.app.request('/auth/prelogin', postJson({ username }))).json(),
-      ).kdfSalt;
+    const ask = (username: string) => saltFor(t.app, username);
     expect(await ask('ghost')).toBe(await ask('ghost'));
     expect(await ask('ghost')).not.toBe(await ask('ghost2'));
   });
 
   it('bases fake salts on the server secret, so outsiders cannot compute them', async () => {
     const other = await createTestApp(bytes(32, 7));
-    const ask = async (app: TestApp) =>
-      PreloginResponseSchema.parse(
-        await (await app.app.request('/auth/prelogin', postJson({ username: 'ghost' }))).json(),
-      ).kdfSalt;
+    const ask = (app: TestApp) => saltFor(app.app, 'ghost');
     expect(await ask(t)).not.toBe(await ask(other));
     await other.database.close();
   });
 
   it('rejects an invalid username with 400', async () => {
-    const res = await t.app.request('/auth/prelogin', postJson({ username: 'NO' }));
+    const res = await preloginRequest(t.app, 'NO');
     expect(res.status).toBe(400);
     expect(await errorCode(res)).toBe('bad_request');
   });
@@ -173,10 +174,7 @@ describe('POST /auth/register', () => {
 describe('POST /auth/login', () => {
   it('returns a new session and the locked data key', async () => {
     await register();
-    const res = await t.app.request(
-      '/auth/login',
-      postJson({ username: 'ahmed', authKey, deviceName: 'desktop' }),
-    );
+    const res = await loginRequest(t.app, 'ahmed', authKey, { deviceName: 'desktop' });
     expect(res.status).toBe(200);
     const body = LoginResponseSchema.parse(await res.json());
     expect(body.wrappedDataKey).toBe(realRegistration().wrappedDataKey);
@@ -184,14 +182,8 @@ describe('POST /auth/login', () => {
 
   it('gives the same answer for a wrong password and an unknown user', async () => {
     await register();
-    const wrongKey = await t.app.request(
-      '/auth/login',
-      postJson({ username: 'ahmed', authKey: b64(bytes(32, 2)), deviceName: 'pc' }),
-    );
-    const unknownUser = await t.app.request(
-      '/auth/login',
-      postJson({ username: 'ghost', authKey, deviceName: 'pc' }),
-    );
+    const wrongKey = await loginRequest(t.app, 'ahmed', b64(bytes(AUTH_KEY_BYTES, 2)));
+    const unknownUser = await loginRequest(t.app, 'ghost', authKey);
     expect(wrongKey.status).toBe(401);
     expect(unknownUser.status).toBe(401);
     expect(await wrongKey.json()).toEqual(await unknownUser.json());
@@ -204,10 +196,7 @@ describe('POST /auth/login', () => {
     await t.database.client.query(
       "update sessions set last_used_at = now() - interval '31 days' where user_id in (select id from users)",
     );
-    const res = await t.app.request(
-      '/auth/login',
-      postJson({ username: 'ahmed', authKey, deviceName: 'desktop' }),
-    );
+    const res = await loginRequest(t.app, 'ahmed', authKey, { deviceName: 'desktop' });
     expect(res.status).toBe(200);
     const { rows } = await t.database.client.query<{ username: string }>(
       'select u.username from sessions s join users u on u.id = s.user_id order by 1',

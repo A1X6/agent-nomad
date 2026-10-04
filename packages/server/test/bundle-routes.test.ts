@@ -21,11 +21,15 @@ import {
   type PutSetupOptions,
   seedSetups,
   sha256Hex,
+  UNKNOWN_ID,
 } from './support/fixtures.ts';
 
+/** The path of the Claude Code setup with this scope key. */
+const pathOf = (scopeKey: string) => `/bundles/claude-code/${scopeKey}`;
+
 const PROJECT = 'a'.repeat(64);
-const GLOBAL_PATH = '/bundles/claude-code/global';
-const PROJECT_PATH = `/bundles/claude-code/${PROJECT}`;
+const GLOBAL_PATH = pathOf('global');
+const PROJECT_PATH = pathOf(PROJECT);
 
 let t: TestApp;
 useTestApp((app) => (t = app));
@@ -34,10 +38,25 @@ const register = (username = 'ahmed') => registerForToken(t.app, username);
 
 const put = (token: string, options: PutSetupOptions) => putSetup(t.app, token, options);
 
+/** A new project setup with its encrypted name, both filled with `fill`. */
+const putProject = (token: string, scopeKey: string, fill: number) =>
+  put(token, {
+    expected: 0,
+    body: bytes(64, fill),
+    path: pathOf(scopeKey),
+    nameEnc: bytes(40, fill),
+  });
+
 const as = (token: string, method = 'GET') => ({
   method,
   headers: bearer(token),
 });
+
+/** A page of `GET /bundles` for `token`, with this query. */
+const listPage = async (token: string, query = '') =>
+  ListBundlesResponseSchema.parse(
+    await (await t.app.request(`/bundles${query}`, as(token))).json(),
+  );
 
 async function error(res: Response) {
   return ErrorResponseSchema.parse(await res.json()).error;
@@ -69,9 +88,7 @@ describe('access', () => {
 
     expect((await t.app.request(GLOBAL_PATH, as(other))).status).toBe(404);
     expect((await t.app.request(GLOBAL_PATH, as(other, 'DELETE'))).status).toBe(404);
-    const list = ListBundlesResponseSchema.parse(
-      await (await t.app.request('/bundles', as(other))).json(),
-    );
+    const list = await listPage(other);
     expect(list.items).toEqual([]);
     expect((await t.app.request(GLOBAL_PATH, as(owner))).status).toBe(200);
   });
@@ -205,22 +222,14 @@ describe('GET /bundles', () => {
   it('lists metadata only, newest first, page by page', async () => {
     const token = await register();
     for (let index = 0; index < 5; index++) {
-      const scopeKey = scopeKeyOf(index);
-      await put(token, {
-        expected: 0,
-        body: bytes(64, index),
-        path: `/bundles/claude-code/${scopeKey}`,
-        nameEnc: bytes(40, index),
-      });
+      await putProject(token, scopeKeyOf(index), index);
     }
 
     const seen: string[] = [];
     let cursor: string | null = null;
     do {
       const query: string = cursor ? `?limit=2&cursor=${cursor}` : '?limit=2';
-      const page = ListBundlesResponseSchema.parse(
-        await (await t.app.request(`/bundles${query}`, as(token))).json(),
-      );
+      const page = await listPage(token, query);
       seen.push(...page.items.map((item) => item.scopeKey));
       expect(page.items.every((item) => item.nameEnc !== null && item.sizeBytes === 64)).toBe(true);
       cursor = page.nextCursor;
@@ -230,7 +239,7 @@ describe('GET /bundles', () => {
 
   // A well-formed cursor with an impossible time is refused like any bad cursor (BUG-07).
   const impossibleTime = Buffer.from(
-    JSON.stringify(['2026-13-45 99:99:99+00', '00000000-0000-4000-8000-000000000000']),
+    JSON.stringify(['2026-13-45 99:99:99+00', UNKNOWN_ID]),
   ).toString('base64url');
 
   it.each(['?cursor=bad-cursor', `?cursor=${impossibleTime}`, '?limit=0', '?limit=101'])(
@@ -269,13 +278,7 @@ describe('limits per account (T47)', () => {
     // All but the last straight into the database; the last one through the API (QA-12).
     const last = USER_STORAGE_LIMITS.maxSetups - 1;
     await seedSetups(t.database.db, 'ahmed', last);
-    const lastPath = `/bundles/claude-code/${scopeKeyOf(last)}`;
-    const atLimit = await put(token, {
-      expected: 0,
-      body: bytes(64, 1),
-      path: lastPath,
-      nameEnc: bytes(40, 1),
-    });
+    const atLimit = await putProject(token, scopeKeyOf(last), 1);
     expect(atLimit.status).toBe(200);
     const files = await fileCount();
     const res = await put(token, { expected: 0, body: bytes(64, 2) });

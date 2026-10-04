@@ -1,4 +1,4 @@
-import { fromHex } from '@agentnomad/contracts';
+import { BUNDLE_FORMAT_VERSION, fromHex } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -24,9 +24,18 @@ const input = (userId: string, fill = 1, expectedRevision = 0) => ({
   expectedRevision,
   ciphertext: bytes(64, fill),
   contentHash: fromHex(sha256Hex(bytes(64, fill))),
-  formatVersion: 1,
+  formatVersion: BUNDLE_FORMAT_VERSION,
   nameEnc: null,
 });
+
+/** The bundle service on the test database; `parts` replace its repository, store or logger. */
+const serviceWith = (parts: Partial<Parameters<typeof createBundleService>[0]>) =>
+  createBundleService({
+    bundles: createBundleRepository(database.db),
+    blobs: createPostgresBlobStore(database.db),
+    logError: () => undefined,
+    ...parts,
+  });
 
 describe('BundleService cleanup', () => {
   it('still succeeds when deleting the replaced file fails, and reports it', async () => {
@@ -37,11 +46,7 @@ describe('BundleService cleanup', () => {
       delete: () => Promise.reject(new Error('storage down')),
     };
     const logged: string[] = [];
-    const service = createBundleService({
-      bundles: createBundleRepository(database.db),
-      blobs: flaky,
-      logError: (message) => logged.push(message),
-    });
+    const service = serviceWith({ blobs: flaky, logError: (message) => logged.push(message) });
     const user = await createUser(database.db);
     const upload = (expectedRevision: number, fill: number) =>
       service.upload(input(user.id, fill, expectedRevision));
@@ -72,11 +77,7 @@ describe('BundleService upload', () => {
         return meta;
       },
     };
-    const service = createBundleService({
-      bundles: watched,
-      blobs: createPostgresBlobStore(database.db),
-      logError: () => undefined,
-    });
+    const service = serviceWith({ bundles: watched });
     const user = await createUser(database.db);
 
     await service.upload(input(user.id));
@@ -102,11 +103,7 @@ describe('BundleService upload', () => {
         ...real,
         putMeta: () => Promise.resolve({ outcome: 'over-limit', limit }),
       };
-      const service = createBundleService({
-        bundles: racing,
-        blobs: createPostgresBlobStore(database.db),
-        logError: () => undefined,
-      });
+      const service = serviceWith({ bundles: racing });
       const user = await createUser(database.db);
       const refused = service.upload(input(user.id));
       await expect(refused).rejects.toBeInstanceOf(StorageLimitError);
