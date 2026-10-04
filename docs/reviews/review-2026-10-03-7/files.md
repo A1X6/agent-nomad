@@ -2,13 +2,39 @@
 
 273 files, 38,565 lines, all read in full at `dev` `7cb74d9`. Verdicts: 257 clean, 16 minor, 0 needs work, 0 rewrite. Finding IDs refer to `report.md` in this folder.
 
+## After the fixes (T84 and T85)
+
+All 6 findings are fixed and merged into `dev`. The 16 files that had a `minor` verdict now read `fixed`; their finding IDs stay in the last column as the record. Rows, line counts and descriptions are as reviewed at `7cb74d9`. Files the fixes added or renamed since then:
+
+- added: `packages/cli/test/agents-command.test.ts`
+- added: `packages/cli/test/api-url.test.ts`
+- added: `packages/cli/test/claude-code-hook-scripts.test.ts`
+- added: `packages/cli/test/claude-code-plugin-fixtures.ts`
+- added: `packages/cli/test/claude-code-plugin-sync.test.ts`
+- added: `packages/cli/test/claude-code-project-fixtures.ts`
+- added: `packages/cli/test/claude-code-runnable-markdown.test.ts`
+- added: `packages/cli/test/loader-variables.test.ts`
+- added: `packages/cli/test/local-session.test.ts`
+- added: `packages/cli/test/password-policy.test.ts`
+- added: `packages/cli/test/registry.test.ts`
+- added: `packages/cli/test/saved-setups.test.ts`
+- added: `packages/cli/test/setup-outcomes.test.ts`
+- added: `packages/cli/test/transport.test.ts`
+- added: `packages/server/test/crash.test.ts`
+- added: `packages/server/test/postgres-blob-store.test.ts`
+- renamed: `packages/cli/test/managed-settings.test.ts` to `packages/cli/test/claude-code-managed-settings.test.ts`
+- renamed: `packages/cli/test/claude-code-running.test.ts` to `packages/cli/test/claude-code-running-claude.test.ts`
+- renamed: `packages/cli/test/api-client.test.ts` to `packages/cli/test/http-api-client.test.ts`
+- renamed: `packages/cli/test/no-terminal.test.ts` to `packages/cli/test/no-terminal-prompter.test.ts`
+- renamed: `packages/server/test/rate-limiter.test.ts` to `packages/server/test/postgres-rate-limiter.test.ts`
+
 ## CLI: agent adapters (`packages/cli/src/agents`)
 
 The adapter interface every agent implements, the registry, and the Claude Code adapter: what push collects, what pull may write, the review of anything that can run, plugins and programs. Push and pull call it only through `adapter.ts`.
 
 | File                                                            | Lines | What it does                                                                                                                                        | Verdict | Findings |
 | --------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------- |
-| `packages/cli/src/agents/adapter.ts`                            | 279   | Defines the adapter contract (detector, collector, restorer, inspector, optional parts, plan step) that push and pull use for any agent.            | minor   | READ-02  |
+| `packages/cli/src/agents/adapter.ts`                            | 279   | Defines the adapter contract (detector, collector, restorer, inspector, optional parts, plan step) that push and pull use for any agent.            | fixed   | READ-02  |
 | `packages/cli/src/agents/agents-command.ts`                     | 40    | Runs `agentnomad agents`: detects every registered agent and prints one line each, plus the agents' notices.                                        | clean   | —        |
 | `packages/cli/src/agents/claude-code/account-skills.ts`         | 155   | Reads the user's own claude.ai skills from `skills/synced/`, saves a copy, and plans which ones pull may add as local skills.                       | clean   | —        |
 | `packages/cli/src/agents/claude-code/after-restore.ts`          | 270   | Pull's Claude Code follow-up: asks about plugins, missing npm programs and claude.ai skills in the plan step, and installs them after writing.      | clean   | —        |
@@ -18,7 +44,7 @@ The adapter interface every agent implements, the registry, and the Claude Code 
 | `packages/cli/src/agents/claude-code/claude-json-merge.ts`      | 198   | Merges only the MCP servers and preference keys into `~/.claude.json`: backs it up first, never writes while Claude Code runs.                      | clean   | —        |
 | `packages/cli/src/agents/claude-code/command-review.ts`         | 339   | Lists what runs programs in an incoming setup (hooks, settings, MCP servers, scripts, `!` Markdown) that is new or changed on this PC.              | clean   | —        |
 | `packages/cli/src/agents/claude-code/detector.ts`               | 91    | Finds the `claude` command, its version and Claude Code's base folder.                                                                              | clean   | —        |
-| `packages/cli/src/agents/claude-code/env-files.ts`              | 25    | Lists which Claude Code files can hold `${VAR}` references, and the variables Claude Code sets itself.                                              | minor   | DUP-01   |
+| `packages/cli/src/agents/claude-code/env-files.ts`              | 25    | Lists which Claude Code files can hold `${VAR}` references, and the variables Claude Code sets itself.                                              | fixed   | DUP-01   |
 | `packages/cli/src/agents/claude-code/global-collector.ts`       | 193   | Collects the global setup: base-folder files and folders, hook scripts, tool settings, programs, `~/.claude.json` keys, plugins and account skills. | clean   | —        |
 | `packages/cli/src/agents/claude-code/global-paths.ts`           | 94    | Gives names and lookups to the data file's global lists, and defines the reserved bundle paths.                                                     | clean   | —        |
 | `packages/cli/src/agents/claude-code/hook-scripts.ts`           | 108   | Finds the scripts that global and project hooks run: what push collects and what pull allows back.                                                  | clean   | —        |
@@ -27,9 +53,9 @@ The adapter interface every agent implements, the registry, and the Claude Code 
 | `packages/cli/src/agents/claude-code/plugins.ts`                | 269   | Reads installed plugins and marketplaces into `plugins.json`, using the entry schemas that push and pull share.                                     | clean   | —        |
 | `packages/cli/src/agents/claude-code/programs.ts`               | 129   | Finds programs that hooks start and whether npm installed them; holds the `programs.json` entry schema.                                             | clean   | —        |
 | `packages/cli/src/agents/claude-code/project-collector.ts`      | 137   | Collects a project's setup: root files, `.claude/` files and folders, hook scripts, auto memory and plugins.                                        | clean   | —        |
-| `packages/cli/src/agents/claude-code/project-paths.ts`          | 36    | Gives names to the data file's project lists.                                                                                                       | minor   | DUP-01   |
+| `packages/cli/src/agents/claude-code/project-paths.ts`          | 36    | Gives names to the data file's project lists.                                                                                                       | fixed   | DUP-01   |
 | `packages/cli/src/agents/claude-code/restore-rules.ts`          | 139   | Decides where each bundle entry may be written, or why it is refused (global and project).                                                          | clean   | —        |
-| `packages/cli/src/agents/claude-code/restorer.ts`               | 431   | Writes a pulled setup: atomic writes, permissions, line endings, conflicts, case-folding, and warnings about hooks from another OS.                 | minor   | SEC-01   |
+| `packages/cli/src/agents/claude-code/restorer.ts`               | 431   | Writes a pulled setup: atomic writes, permissions, line endings, conflicts, case-folding, and warnings about hooks from another OS.                 | fixed   | SEC-01   |
 | `packages/cli/src/agents/claude-code/reviewed-settings.ts`      | 70    | Lists the settings keys and `env` names that the pull review watches, plus the drift watch list.                                                    | clean   | —        |
 | `packages/cli/src/agents/claude-code/runnable-markdown.ts`      | 60    | Finds what a skill, command or subagent Markdown file runs by itself (`!` placeholders, ` ```! ` blocks, frontmatter hooks).                        | clean   | —        |
 | `packages/cli/src/agents/claude-code/running-claude.ts`         | 139   | Checks whether Claude Code or the Claude app is running, from the process list.                                                                     | clean   | —        |
@@ -113,19 +139,19 @@ Unit and command tests for the CLI. They run against temporary folders and fake 
 | `packages/cli/test/agent-boundary.test.ts`                | 342   | Runs push and pull end to end with a made-up second agent built only from the adapter interface.                                                                 | clean   | —        |
 | `packages/cli/test/agent-registry.test.ts`                | 67    | Tests the agent registry, the `agents` command output, and (misfiled) the Claude Code adapter's detect/collect/restore.                                          | clean   | —        |
 | `packages/cli/test/api-client.test.ts`                    | 626   | Tests the HTTP API client against a fake fetch: requests, contract checks, retries, no-retry operations, rate limits, wake-up and timeouts, and `resolveApiUrl`. | clean   | —        |
-| `packages/cli/test/auth-commands.test.ts`                 | 977   | Tests register, login, logout, account delete, the password policy and key wiping against an in-memory account server.                                           | minor   | READ-01  |
+| `packages/cli/test/auth-commands.test.ts`                 | 977   | Tests register, login, logout, account delete, the password policy and key wiping against an in-memory account server.                                           | fixed   | READ-01  |
 | `packages/cli/test/bin.test.ts`                           | 72    | Runs the real `agentnomad` entry file in a child process with a temp home, plus one clack-prompter check.                                                        | clean   | —        |
 | `packages/cli/test/claude-code-account-skills.test.ts`    | 304   | Tests reading, saving and restoring the user's claude.ai-synced skills.                                                                                          | clean   | —        |
 | `packages/cli/test/claude-code-adapter.test.ts`           | 180   | Tests the adapter's plan step that asks to close Claude Code before `~/.claude.json` changes.                                                                    | clean   | —        |
 | `packages/cli/test/claude-code-after-restore.test.ts`     | 289   | Tests the post-pull follow-up: npm program installs, plugin reinstalls and warnings for unreadable saved lists.                                                  | clean   | —        |
 | `packages/cli/test/claude-code-claude-json-merge.test.ts` | 85    | Tests the standalone `~/.claude.json` merge.                                                                                                                     | clean   | —        |
-| `packages/cli/test/claude-code-command-review.test.ts`    | 551   | Tests what the pull review lists as runnable (hooks, settings, env, MCP servers, Markdown `!` blocks) and `printable`.                                           | minor   | READ-01  |
+| `packages/cli/test/claude-code-command-review.test.ts`    | 551   | Tests what the pull review lists as runnable (hooks, settings, env, MCP servers, Markdown `!` blocks) and `printable`.                                           | fixed   | READ-01  |
 | `packages/cli/test/claude-code-detector.test.ts`          | 239   | Tests finding Claude Code, its config folder and version on fake and real PCs.                                                                                   | clean   | —        |
 | `packages/cli/test/claude-code-drift.test.ts`             | 206   | Tests the weekly drift check: docs names, changelog filtering, report and inert Markdown.                                                                        | clean   | —        |
 | `packages/cli/test/claude-code-global-collector.test.ts`  | 455   | Tests what the global collector takes from `~/.claude` and `~/.claude.json`, hook scripts, links and program records.                                            | clean   | —        |
 | `packages/cli/test/claude-code-paths-data.test.ts`        | 26    | Tests the paths data file, the unknown-file check and the version-stamp notice.                                                                                  | clean   | —        |
 | `packages/cli/test/claude-code-plugins.test.ts`           | 445   | Tests the plugin manifest saved on push, its schema, and plugin reinstall on pull.                                                                               | clean   | —        |
-| `packages/cli/test/claude-code-project-collector.test.ts` | 237   | Tests what the project collector takes, link and size rules, auto-memory location and command splitting.                                                         | minor   | DUP-02   |
+| `packages/cli/test/claude-code-project-collector.test.ts` | 237   | Tests what the project collector takes, link and size rules, auto-memory location and command splitting.                                                         | fixed   | DUP-02   |
 | `packages/cli/test/claude-code-restorer.test.ts`          | 976   | Tests the Claude Code restorer: refused paths, conflicts, backups, `~/.claude.json` merge, home files, line endings, Windows names                               | clean   | —        |
 | `packages/cli/test/claude-code-running.test.ts`           | 71    | Tests which process command lines count as a running Claude Code                                                                                                 | clean   | —        |
 | `packages/cli/test/env.test.ts`                           | 726   | Tests `${VAR}` scanning, saving values on push, shell profile and Windows env writers, restoring values on pull, and `agentnomad env`                            | clean   | —        |
@@ -133,20 +159,20 @@ Unit and command tests for the CLI. They run against temporary folders and fake 
 | `packages/cli/test/fakes.test.ts`                         | 49    | Tests the shared test fakes that carry logic (the fake API and prompter).                                                                                        | clean   | —        |
 | `packages/cli/test/json.test.ts`                          | 29    | Tests `parseJsonWith` and `valueOrNull`                                                                                                                          | clean   | —        |
 | `packages/cli/test/local-state.test.ts`                   | 81    | Tests per-account revisions and unreadable state files in the local state store                                                                                  | clean   | —        |
-| `packages/cli/test/managed-settings.test.ts`              | 267   | Tests managed-settings detection per OS, the `reg query` parser, notices and policy-blocked plugin messages                                                      | minor   | READ-01  |
+| `packages/cli/test/managed-settings.test.ts`              | 267   | Tests managed-settings detection per OS, the `reg query` parser, notices and policy-blocked plugin messages                                                      | fixed   | READ-01  |
 | `packages/cli/test/no-terminal.test.ts`                   | 21    | Tests the no-terminal prompter and `--password-stdin` line reading                                                                                               | clean   | —        |
 | `packages/cli/test/program.test.ts`                       | 420   | Tests the CLI parser: help, version, routing, flag mapping, refusals and exit codes                                                                              | clean   | —        |
-| `packages/cli/test/pull-command.test.ts`                  | 862   | End-to-end style tests of pull (push on one fake PC, pull on another), plan/apply split, and bundle listing                                                      | minor   | READ-01  |
+| `packages/cli/test/pull-command.test.ts`                  | 862   | End-to-end style tests of pull (push on one fake PC, pull on another), plan/apply split, and bundle listing                                                      | fixed   | READ-01  |
 | `packages/cli/test/push-command.test.ts`                  | 662   | Tests push: encryption, project names, revisions, account skills, plan/apply split, data-key wiping                                                              | clean   | —        |
 | `packages/cli/test/secret-store.test.ts`                  | 316   | Tests the config folder, file store, keychain store, store selection and (opt-in) the real OS keychain                                                           | clean   | —        |
-| `packages/cli/test/setup-commands.test.ts`                | 257   | Tests `list`, `status`, `delete`, setup labels and time/size formatting                                                                                          | minor   | READ-01  |
+| `packages/cli/test/setup-commands.test.ts`                | 257   | Tests `list`, `status`, `delete`, setup labels and time/size formatting                                                                                          | fixed   | READ-01  |
 | `packages/cli/test/stub-restorer.ts`                      | 15    | A no-op restorer for tests about other parts                                                                                                                     | clean   | —        |
 | `packages/cli/test/system.test.ts`                        | 351   | Tests thin OS wrappers: program launching, process listing, icacls parsing, and the real programs on each OS                                                     | clean   | —        |
 | `packages/cli/test/ui.test.ts`                            | 48    | Tests the printable-text rules and the reporter output.                                                                                                          | clean   | —        |
 | `packages/cli/test/app.test.ts`                           | 12    | Tests the composition root: the registry, the handlers and services built only when first used.                                                                  | clean   | —        |
-| `packages/cli/test/claude-code-auto-memory.test.ts`       | 154   | Tests finding and collecting a project’s auto memory folder.                                                                                                     | minor   | DUP-02   |
+| `packages/cli/test/claude-code-auto-memory.test.ts`       | 154   | Tests finding and collecting a project’s auto memory folder.                                                                                                     | fixed   | DUP-02   |
 | `packages/cli/test/claude-code-programs.test.ts`          | 117   | Tests finding the programs hooks start and whether npm installed them.                                                                                           | clean   | —        |
-| `packages/cli/test/claude-code-restore-rules.test.ts`     | 169   | Tests where each bundle entry may go or why it is refused; also holds hook-script tests.                                                                         | minor   | READ-01  |
+| `packages/cli/test/claude-code-restore-rules.test.ts`     | 169   | Tests where each bundle entry may go or why it is refused; also holds hook-script tests.                                                                         | fixed   | READ-01  |
 | `packages/cli/test/claude-code-settings-commands.test.ts` | 93    | Tests reading commands from settings: words, exec form, nested command lines, `pathWords`.                                                                       | clean   | —        |
 | `packages/cli/test/claude-code-unknown-files.test.ts`     | 98    | Tests reporting files in Claude Code’s folder the data file does not know.                                                                                       | clean   | —        |
 | `packages/cli/test/config-dir.test.ts`                    | 30    | Tests agentnomad’s config folder per OS.                                                                                                                         | clean   | —        |
@@ -278,11 +304,11 @@ Route, service and repository tests on an in-process PGlite database.
 | `packages/server/test/auth-routes.test.ts`     | 270   | Health, headers, prelogin, register, login and session lifetime through the API.          | clean   | —        |
 | `packages/server/test/bundle-routes.test.ts`   | 334   | Bundle routes through the API: access, revisions, checks, list paging, delete, limits.    | clean   | —        |
 | `packages/server/test/bundle-service.test.ts`  | 132   | Bundle service: cleanup failure, parallel reads, over-limit sentences.                    | clean   | —        |
-| `packages/server/test/crash-logging.test.ts`   | 58    | Pool error listener and `exitOnCrash`.                                                    | minor   | READ-01  |
+| `packages/server/test/crash-logging.test.ts`   | 58    | Pool error listener and `exitOnCrash`.                                                    | fixed   | READ-01  |
 | `packages/server/test/env.test.ts`             | 51    | Settings checks, and that values are never printed.                                       | clean   | —        |
 | `packages/server/test/limits-and-logs.test.ts` | 201   | Per-IP and per-account limits, `describeError`, request logs, `createServerFromEnv`.      | clean   | —        |
-| `packages/server/test/rate-limiter.test.ts`    | 114   | Postgres rate limiter: counting, windows, reset, pseudonyms, prune and prune failure.     | minor   | READ-01  |
-| `packages/server/test/repositories.test.ts`    | 563   | User, session, blob and bundle repositories against PGlite, including limits and cursors. | minor   | READ-01  |
+| `packages/server/test/rate-limiter.test.ts`    | 114   | Postgres rate limiter: counting, windows, reset, pseudonyms, prune and prune failure.     | fixed   | READ-01  |
+| `packages/server/test/repositories.test.ts`    | 563   | User, session, blob and bundle repositories against PGlite, including limits and cursors. | fixed   | READ-01  |
 | `packages/server/test/schema.test.ts`          | 226   | Migrations, indexes, storage mode and table constraints.                                  | clean   | —        |
 | `packages/server/test/server-keys.test.ts`     | 44    | Auth-key hash and verify, and fake salts.                                                 | clean   | —        |
 | `packages/server/test/support/app.ts`          | 62    | Test API on PGlite through `createApi`, with a movable clock and captured logs.           | clean   | —        |
@@ -367,7 +393,7 @@ Workspace config, lint, format, test and deploy settings, README, license, secur
 | `.gitignore`          | 17    | Ignores builds, coverage, env files, release output and brag output.                                                         | clean   | —        |
 | `.prettierignore`     | 5     | Keeps Prettier off builds, coverage, the lockfile and Drizzle snapshots.                                                     | clean   | —        |
 | `.prettierrc.json`    | 4     | Prettier style: single quotes, width 100.                                                                                    | clean   | —        |
-| `CONTRIBUTING.md`     | 148   | Set-up, scripts, code and test rules, PR flow, drift handling and releases.                                                  | minor   | READ-03  |
+| `CONTRIBUTING.md`     | 148   | Set-up, scripts, code and test rules, PR flow, drift handling and releases.                                                  | fixed   | READ-03  |
 | `eslint.config.js`    | 113   | Strict type-checked ESLint, Prettier last, and the import-boundary rules (commands vs agents, agent vs agent, pure modules). | clean   | —        |
 | `knip.json`           | 16    | Unused-code check: extra entry points per workspace, entry exports included.                                                 | clean   | —        |
 | `LICENSE`             | 21    | MIT license text.                                                                                                            | clean   | —        |

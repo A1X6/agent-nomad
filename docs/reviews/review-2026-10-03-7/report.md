@@ -80,7 +80,7 @@ The code is in very good shape. All 15 findings of review 6 are fixed and each f
 
 ### DUP-02 · Low · The same test set-up helpers in two test files
 
-- [ ] **Where:** `packages/cli/test/claude-code-auto-memory.test.ts:16-52`, `packages/cli/test/claude-code-project-collector.test.ts:14-49`
+- [x] **Where:** `packages/cli/test/claude-code-auto-memory.test.ts:16-52`, `packages/cli/test/claude-code-project-collector.test.ts:14-49`
 - **Problem:** When T82 moved the auto memory tests to their own file, the set-up helpers (the temporary home and project, the collector factory) were copied, not shared.
 - **Why it matters:** A change to how a project collector is built for tests must be made twice. `CONTRIBUTING.md` says shared helpers live in `packages/cli/test/fakes.ts`.
 - **Fix:** Move the helpers both files use into `fakes.ts` (or a small `claude-code-project-fixtures.ts` next to the tests) and import them in both.
@@ -91,7 +91,7 @@ The code is in very good shape. All 15 findings of review 6 are fixed and each f
 
 ### READ-01 · Low · Some tests are still not in the file named after their module
 
-- [ ] **Where:**
+- [x] **Where:**
   - server: `packages/server/test/crash-logging.test.ts:18-32` tests `createDatabasePool` of `server.ts` (belongs in `server.test.ts`); the file itself tests `logging/crash.ts` and should be `crash.test.ts`; `rate-limiter.test.ts` tests `postgres-rate-limiter.ts`, next to the new `rate-limit.test.ts`, so the two names read alike; the `BlobStore` tests are in `repositories.test.ts`.
   - CLI: `claude-code-restore-rules.test.ts` holds `hook-scripts.ts` tests; `setup-commands.test.ts:237-244` tests `setupLabel` (`cli/setup-outcomes.ts`); `managed-settings.test.ts` has no `claude-code-` in front and also holds `installPlugins` and `globalDestination` tests; `claude-code-command-review.test.ts` holds `runnableInMarkdown`, `LOADER_VARIABLE` and account-skills tests; `pull-command.test.ts:848-862` tests `listAllBundles` (`pull/saved-setups.ts`); `auth-commands.test.ts:633-679` holds the password-policy and `withSession` tests.
 - **Problem:** Review 6 (READ-02) set the rule, now written in `CONTRIBUTING.md:97-98` and at the top of Part 2 of `ARCHITECTURE.md`: a module's tests go in the test file named after it. T82 moved most of them; these are what is left.
