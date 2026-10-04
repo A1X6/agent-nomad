@@ -2,17 +2,11 @@ import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  globalDestination,
-  hookScripts,
-  projectDestination,
-  projectHookScripts,
-} from '../src/index.ts';
+import { globalDestination, hookScripts, projectDestination } from '../src/index.ts';
 
 // The rules read no file, so these folders need not exist.
 const home = resolve('/home/a');
 const base = join(home, '.claude');
-const project = resolve('/work/my-app');
 
 describe('restore rules: refuses what a collector never produces', () => {
   it.each([
@@ -148,22 +142,11 @@ describe('restore rules: refuses what a collector never produces', () => {
   });
 });
 
-describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
-  it.each([
-    ['$CLAUDE_PROJECT_DIR/scripts/a.sh', ['scripts/a.sh']],
-    [`bash -c "bash -lc '$CLAUDE_PROJECT_DIR/scripts/a.sh arg; true'"`, ['scripts/a.sh']],
-    ['scripts\\a.sh', ['scripts/a.sh']],
-    ['~/a.sh', []],
-    ['$HOME/a.sh', []],
-    ['../outside/a.sh', []],
-  ])('reads %s', (word, expected) => {
-    const settings = JSON.stringify({
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: word }] }] },
+describe('server-managed settings (claude.ai admin console)', () => {
+  it('the cache is never synced', () => {
+    expect(globalDestination('remote-settings.json', new Set())).toEqual({
+      kind: 'refused',
+      reason: 'never synced',
     });
-    expect(
-      projectHookScripts(settings, { projectDir: project, platform: process.platform }).map(
-        (script) => script.bundlePath,
-      ),
-    ).toEqual(expected);
   });
 });

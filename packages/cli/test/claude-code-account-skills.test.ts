@@ -302,3 +302,23 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     );
   });
 });
+
+describe('account skills use the same detector (T44)', () => {
+  const skill = (name: string, body: string) =>
+    collected(`.agentnomad/account-skills/${name}/SKILL.md`, body);
+  it('marks ! blocks and frontmatter hooks, not KEY=!`cmd`', () => {
+    const plan = planAccountSkills(
+      [
+        skill('blocky', '```!\ndate\n```'),
+        skill('hooked', '---\nhooks:\n  Stop: []\n---\n'),
+        skill('plain', 'KEY=!`cmd` is shown as text'),
+      ],
+      { syncedNames: new Set(), localNames: new Set() },
+    );
+    expect(plan.toAdd).toEqual([
+      { name: 'blocky', runsCommands: true },
+      { name: 'hooked', runsCommands: true },
+      { name: 'plain', runsCommands: false },
+    ]);
+  });
+});
