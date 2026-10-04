@@ -57,7 +57,7 @@ The `agentnomad` command: the option parser, push and pull (plan, then apply), l
 | `packages/cli/src/auth/local-session.ts`          | 62    | Saves, reads and clears the session token and data key; turns a 401 into "session expired"                                                 | clean   | —        |
 | `packages/cli/src/auth/password-policy.ts`        | 71    | Password rules (12–256 graphemes, zxcvbn score 4) and the lazily loaded zxcvbn checker                                                     | clean   | —        |
 | `packages/cli/src/bin.ts`                         | 28    | The executable: picks the terminal or no-terminal prompter, runs the CLI, sets the exit code                                               | clean   | —        |
-| `packages/cli/src/cli/commands.ts`                | 75    | Option types for every command and the `CommandHandlers` interface                                                                         | minor   | READ-02  |
+| `packages/cli/src/cli/commands.ts`                | 75    | Option types for every command and the `CommandHandlers` interface                                                                         | fixed   | READ-02  |
 | `packages/cli/src/cli/error-messages.ts`          | 24    | The one-line message for a failed command (rate limits, server errors)                                                                     | clean   | —        |
 | `packages/cli/src/cli/flags.ts`                   | 43    | Validates `--agent`, `--project` and `--username` values for commander                                                                     | clean   | —        |
 | `packages/cli/src/cli/program.ts`                 | 272   | Every command, flag and help text on commander; maps flags to handler options                                                              | clean   | —        |
@@ -182,7 +182,7 @@ Zod schemas, limits and byte-encoding helpers shared by the CLI and the server. 
 
 | File                                       | Lines | What it does                                                                                                   | Verdict | Findings |
 | ------------------------------------------ | ----- | -------------------------------------------------------------------------------------------------------------- | ------- | -------- |
-| `packages/contracts/package.json`          | 22    | Contracts manifest (only Zod) with the source export condition.                                                | minor   | BP-01    |
+| `packages/contracts/package.json`          | 22    | Contracts manifest (only Zod) with the source export condition.                                                | fixed   | BP-01    |
 | `packages/contracts/src/api/answers.ts`    | 51    | Tolerant client forms of every API answer, built from the strict shapes.                                       | clean   | —        |
 | `packages/contracts/src/api/auth.ts`       | 95    | Username, Argon2id settings (bounds and defaults) and every auth request/answer schema.                        | clean   | —        |
 | `packages/contracts/src/api/bundles.ts`    | 106   | Scope keys, list query and answer, upload/download header schemas.                                             | clean   | —        |
@@ -204,7 +204,7 @@ Encryption, key derivation, the bundle format, path rules and merge strategies. 
 
 | File                                           | Lines | What it does                                                                                                      | Verdict | Findings |
 | ---------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------- | ------- | -------- |
-| `packages/core/package.json`                   | 24    | Core manifest (contracts, fflate, libsodium) with the source export condition.                                    | minor   | BP-01    |
+| `packages/core/package.json`                   | 24    | Core manifest (contracts, fflate, libsodium) with the source export condition.                                    | fixed   | BP-01    |
 | `packages/core/src/bundle-codec.ts`            | 23    | The `BundleCodec` interface and `BundleFormatError`.                                                              | clean   | —        |
 | `packages/core/src/crypto.ts`                  | 70    | The crypto interfaces and `DecryptionError`.                                                                      | clean   | —        |
 | `packages/core/src/envelopes.ts`               | 77    | Wraps the data key and seals/opens bundles bound to format version, agent and scope key.                          | clean   | —        |
@@ -326,7 +326,7 @@ SQL migrations (applied by hand), drizzle-kit settings, the env template and pac
 | `packages/server/drizzle/0004_session_last_used_at.sql`        | 1     | Adds `sessions.last_used_at` for the idle timeout.                                           | clean   | —        |
 | `packages/server/drizzle/0005_rate_limits.sql`                 | 7     | Creates `rate_limits` with its window index.                                                 | clean   | —        |
 | `packages/server/drizzle/0006_sessions_expires_at_idx.sql`     | 1     | Index on `sessions.expires_at` for the global expired-session prune.                         | clean   | —        |
-| `packages/server/package.json`                                 | 34    | Package manifest: source export condition, db scripts, pinned deps.                          | minor   | BP-01    |
+| `packages/server/package.json`                                 | 34    | Package manifest: source export condition, db scripts, pinned deps.                          | fixed   | BP-01    |
 | `packages/server/tsconfig.json`                                | 14    | TypeScript project for src, test and drizzle.config, referencing contracts.                  | clean   | —        |
 
 ## CI and automation (`.github`)
@@ -351,8 +351,8 @@ Architecture, roadmap, the agent guide, the threat model and earlier review repo
 | ---------------------------------- | ----- | ------------------------------------------------------------------------------------------------- | ------- | -------- |
 | `docs/ADDING-AN-AGENT.md`          | 340   | Step-by-step guide to writing a new agent adapter, with sample code against the real helpers.     | clean   | —        |
 | `docs/ARCHITECTURE.md`             | 871   | How the system works (keys, bundle, commands, adapters, server, CI) and a file-by-file reference. | clean   | —        |
-| `docs/decisions/0001-libraries.md` | 69    | Decision record for the crypto, CLI, prompt and keychain libraries.                               | minor   | READ-01  |
-| `docs/ROADMAP.md`                  | 159   | Stages: v1, more agents, data-only agents, claude.ai items, v2 conversion, later ideas.           | minor   | READ-01  |
+| `docs/decisions/0001-libraries.md` | 69    | Decision record for the crypto, CLI, prompt and keychain libraries.                               | fixed   | READ-01  |
+| `docs/ROADMAP.md`                  | 159   | Stages: v1, more agents, data-only agents, claude.ai items, v2 conversion, later ideas.           | fixed   | READ-01  |
 | `docs/security/threat-model.md`    | 177   | Threats, defences, tests, past security findings and accepted risks.                              | clean   | —        |
 
 ## Portfolio entry (`.a1x6`)

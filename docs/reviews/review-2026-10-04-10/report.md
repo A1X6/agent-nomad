@@ -37,7 +37,7 @@ All four are Low; none blocks a release. In order of value: BP-01, READ-01, DUP-
 
 ### READ-01 · Low · Docs point at "the PRD", which is not in the repository
 
-- [ ] **Where:** `docs/ROADMAP.md:47`; `docs/decisions/0001-libraries.md:22` and `:56`
+- [x] **Where:** `docs/ROADMAP.md:47`; `docs/decisions/0001-libraries.md:22` and `:56`
 - **Problem:** The roadmap says Claude Desktop is "Planned in the v1 PRD", and the library decision record says a choice "matches the PRD" and names "the PRD's user-only file fallback". The PRD lives outside the repository.
 - **Why it matters:** `CONTRIBUTING.md` ("Finding IDs and task numbers in comments") says never to point at something a reader cannot open. A contributor cannot check these claims.
 - **Fix:** Say the fact itself (for example "Planned as the first addition after Claude Code"; "one library, WASM preferred over native builds, as decided for v1"; "the user-only file fallback"), or link a document that is in the repository.
@@ -46,7 +46,7 @@ All four are Low; none blocks a release. In order of value: BP-01, READ-01, DUP-
 
 ### READ-02 · Low · Stale comment: "Commands are built in later tasks"
 
-- [ ] **Where:** `packages/cli/src/cli/commands.ts:59-62`
+- [x] **Where:** `packages/cli/src/cli/commands.ts:59-62`
 - **Problem:** The comment on the command handlers says "Commands are built in later tasks and plugged in here". Every command has been built since 1.0.
 - **Why it matters:** It tells a new reader the file is unfinished.
 - **Fix:** Reword to what is true now: the handlers are plugged in here, so parsing and help never depend on how a command works.
@@ -55,7 +55,7 @@ All four are Low; none blocks a release. In order of value: BP-01, READ-01, DUP-
 
 ### BP-01 · Low · `pnpm test` inside `contracts`, `core` or `server` also runs compiled test copies
 
-- [ ] **Where:** `packages/contracts/package.json:17`, `packages/core/package.json:17`, `packages/server/package.json:17`
+- [x] **Where:** `packages/contracts/package.json:17`, `packages/core/package.json:17`, `packages/server/package.json:17`
 - **Problem:** Their `test` script is a bare `vitest run`. Run from the package folder it uses no project config, so it also picks up the compiled tests that `tsc --build` leaves in `dist/` (verified in `core`: 17 files and 577 tests, among them stale `dist/test/*.test.js`) and resolves workspace packages to `dist` instead of source. The CLI package already does it right: `vitest run --root ../.. --project @agentnomad/cli`.
 - **Why it matters:** A developer who runs the tests of one package gets doubled, possibly stale results, against the root config's stated rule ("never the compiled copies").
 - **Fix:** Use the CLI's form in all three: `vitest run --root ../.. --project @agentnomad/<name>`. Run each once to confirm the file and test counts match that project's share of `pnpm test`.
