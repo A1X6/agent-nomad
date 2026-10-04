@@ -22,6 +22,8 @@ export const b64 = (data: Uint8Array) => Buffer.from(data).toString('base64');
 export const bytes = (length: number, fill = 7) => new Uint8Array(length).fill(fill);
 /** SHA-256 in hex, as the CLI sends it in `x-an-content-sha256`. */
 export const sha256Hex = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
+/** The header that signs a request in with `token`. */
+export const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 /** The project scope key numbered `index` (its hex, padded to 64 characters). */
 export const scopeKeyOf = (index: number) => index.toString(16).padStart(64, '0');
 
@@ -128,7 +130,7 @@ export function putSetup(
   options: PutSetupOptions,
 ): Promise<Response> {
   const headers: Record<string, string> = {
-    authorization: `Bearer ${token}`,
+    ...bearer(token),
     'content-type': options.contentType ?? 'application/octet-stream',
     'x-an-expected-revision': String(options.expected),
     'x-an-content-sha256': options.hash ?? sha256Hex(options.body),
@@ -158,7 +160,7 @@ export function deleteAccountRequest(
       body: JSON.stringify(body),
       headers: {
         'content-type': 'application/json',
-        ...(token !== null && { authorization: `Bearer ${token}` }),
+        ...(token !== null && bearer(token)),
       },
     }),
   );

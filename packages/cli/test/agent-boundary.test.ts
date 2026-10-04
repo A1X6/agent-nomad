@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, sep } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 import {
   createGzipBundleCodec,
@@ -29,6 +29,7 @@ import {
   fakeEnvWriter,
   localStateIn,
   memorySecretStore,
+  readText,
   recordingReporter,
   scriptedPrompter,
   writeTestFile,
@@ -157,8 +158,7 @@ function exampleAdapter(home: string, seen: Seen): AgentAdapter {
             skipped.push(file.path);
             continue;
           }
-          await mkdir(dirname(path), { recursive: true });
-          await writeFile(path, file.content);
+          await writeTestFile(path, file.content);
           written.push(file.path);
         }
         return { written, skipped, backups: [], warnings: [] };
@@ -268,8 +268,8 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
       'Example CLI: reinstall 1 extension?',
     ]);
     expect(t.lines.some((line) => line.includes('+ hook: hooks/check.sh'))).toBe(true);
-    expect(await readFile(join(b.base, 'settings.toml'), 'utf8')).toBe('theme = "dark"\n');
-    expect(await readFile(join(b.base, 'prompts', 'review.md'), 'utf8')).toBe('Review this.');
+    expect(await readText(join(b.base, 'settings.toml'))).toBe('theme = "dark"\n');
+    expect(await readText(join(b.base, 'prompts', 'review.md'))).toBe('Review this.');
     expect(seen.followUps).toHaveLength(1);
     expect(seen.followUps[0]?.writtenFirst).toBe(true);
     expect('prompter' in (seen.followUps[0]?.context ?? {})).toBe(false);

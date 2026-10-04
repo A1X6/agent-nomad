@@ -13,8 +13,6 @@ import {
   type CryptoService,
 } from '../src/index.ts';
 
-const bytes = (...values: number[]): Uint8Array => new Uint8Array(values);
-
 let crypto: CryptoService;
 let key: Uint8Array;
 
@@ -50,7 +48,7 @@ describe('bundle encryption is bound to its agent, scope and format', () => {
     agent: 'claude-code',
     scopeKey: 'a'.repeat(64),
   };
-  const plaintext = bytes(10, 20, 30);
+  const plaintext = Uint8Array.of(10, 20, 30);
 
   it('round-trips with the same context', () => {
     const sealed = sealBundle(crypto, plaintext, key, context);

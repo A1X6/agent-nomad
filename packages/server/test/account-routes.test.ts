@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestApp, type TestApp } from './support/app.ts';
 import {
   b64,
+  bearer,
   bytes,
   deleteAccountRequest,
   errorCode,
@@ -73,7 +74,7 @@ describe('DELETE /account', () => {
     await deleteAccount(token, { authKey: authKeyOf('ahmed') });
 
     const reuse = await t.app.request('/bundles', {
-      headers: { authorization: `Bearer ${token}` },
+      headers: bearer(token),
     });
     expect(reuse.status).toBe(401);
     expect((await login('ahmed')).status).toBe(401);

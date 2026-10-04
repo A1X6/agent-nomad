@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,7 +6,7 @@ import { ProjectNameSchema } from '@agentnomad/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as z from 'zod';
 
-import { CWD, localStateIn } from './fakes.ts';
+import { CWD, localStateIn, readText } from './fakes.ts';
 import { createLocalState, type LocalState } from '../src/index.ts';
 
 let dir: string;
@@ -48,7 +48,7 @@ describe('the revisions this PC knows belong to one account (T56)', () => {
       revisions: z.record(z.string(), z.int().min(1)),
     });
     const old = z.strictObject({ version: z.literal(1), servers: z.record(z.string(), server) });
-    const text = await readFile(join(dir, 'state.json'), 'utf8');
+    const text = await readText(join(dir, 'state.json'));
     expect(old.safeParse(JSON.parse(text)).success).toBe(true);
     expect(await state.projectNameFor('#account')).toBeNull();
   });

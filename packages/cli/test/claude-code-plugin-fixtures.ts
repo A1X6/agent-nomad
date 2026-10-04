@@ -1,14 +1,37 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { afterEach, beforeEach } from 'vitest';
 
 import { writeTestFile } from './fakes.ts';
 import type { ManagedSettings } from '../src/index.ts';
 
 /** Plugin files shared by the plugin and plugin sync tests (review 7 READ-01). */
 
+// A temporary root with `.claude` in it, made by `usePluginFolders` before each test (review 8
+// DUP-01). Live bindings: a test file that imports them sees each test's folders.
+export let root: string;
+export let base: string;
+
+/** Makes a fresh root before each test of the calling file and removes it after it. */
+export function usePluginFolders(prefix: string): void {
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), prefix));
+    base = join(root, '.claude');
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+}
+
 export const putJson = (path: string, value: unknown) => writeTestFile(path, JSON.stringify(value));
 
 /** The project the plugin manifests below install into. */
-export const pluginProjectIn = (root: string) => join(root, 'work', 'app');
+const pluginProjectIn = (root: string) => join(root, 'work', 'app');
+
+/** The project the plugin manifests install into, in this test's root. */
+export const pluginProject = () => pluginProjectIn(root);
 
 /** Manifests shaped like a real ~/.claude/plugins folder, in `<root>/.claude`. */
 export async function realisticPlugins(root: string): Promise<void> {

@@ -12,6 +12,7 @@ import { RATE_LIMITS } from '../src/rate-limit/rate-limiter.ts';
 import { createTestApp, type TestApp } from './support/app.ts';
 import {
   b64,
+  bearer,
   bytes,
   errorCode,
   putSetup,
@@ -42,7 +43,7 @@ const put = (token: string, options: PutSetupOptions) => putSetup(t.app, token, 
 
 const as = (token: string, method = 'GET') => ({
   method,
-  headers: { authorization: `Bearer ${token}` },
+  headers: bearer(token),
 });
 
 async function error(res: Response) {

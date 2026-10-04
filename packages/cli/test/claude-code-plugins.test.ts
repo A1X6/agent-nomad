@@ -1,8 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   createClaudeCodeGlobalCollector,
@@ -14,19 +12,16 @@ import {
   readPluginManifest,
 } from '../src/index.ts';
 
-import { pluginProjectIn, putJson, realisticPlugins } from './claude-code-plugin-fixtures.ts';
+import {
+  base,
+  pluginProject,
+  putJson,
+  realisticPlugins,
+  root,
+  usePluginFolders,
+} from './claude-code-plugin-fixtures.ts';
 
-let root: string;
-let base: string;
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'agentnomad-plugins-'));
-  base = join(root, '.claude');
-});
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
-});
-
-const project = () => pluginProjectIn(root);
+usePluginFolders('agentnomad-plugins-');
 
 describe('plugin list on push', () => {
   it('saves user plugins with addable marketplaces, and says what was left out', async () => {
@@ -64,7 +59,7 @@ describe('plugin list on push', () => {
     const manifest = await readPluginManifest({
       baseDir: base,
       platform: process.platform,
-      scope: { kind: 'project', projectDir: project() },
+      scope: { kind: 'project', projectDir: pluginProject() },
     });
     expect(manifest?.plugins).toEqual([
       { id: 'team-lint@company', scope: 'project', commandSource: false },
@@ -198,23 +193,25 @@ describe('push saves only what pull accepts (BUG-01)', () => {
 describe('one reader of installed_plugins.json (BUG-03)', () => {
   it('counts a project install whose path is written another way as installed', async () => {
     await putJson(join(base, 'plugins', 'installed_plugins.json'), {
-      plugins: { 'lint@company': [{ scope: 'project', projectPath: `${project()}${sep}` }] },
+      plugins: { 'lint@company': [{ scope: 'project', projectPath: `${pluginProject()}${sep}` }] },
     });
-    const current = await readCurrentPlugins(base, process.platform, project());
+    const current = await readCurrentPlugins(base, process.platform, pluginProject());
     expect(current.installed.has('lint@company|project')).toBe(true);
     const saved = await readPluginManifest({
       baseDir: base,
       platform: process.platform,
-      scope: { kind: 'project', projectDir: project() },
+      scope: { kind: 'project', projectDir: pluginProject() },
     });
     expect(saved?.skipped.map((entry) => entry.what)).toEqual(['lint@company']);
   });
 
   it.runIf(process.platform === 'win32')('ignores the case of a Windows path', async () => {
     await putJson(join(base, 'plugins', 'installed_plugins.json'), {
-      plugins: { 'lint@company': [{ scope: 'project', projectPath: project().toUpperCase() }] },
+      plugins: {
+        'lint@company': [{ scope: 'project', projectPath: pluginProject().toUpperCase() }],
+      },
     });
-    const current = await readCurrentPlugins(base, 'win32', project());
+    const current = await readCurrentPlugins(base, 'win32', pluginProject());
     expect(current.installed.has('lint@company|project')).toBe(true);
   });
 });

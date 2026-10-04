@@ -1,10 +1,15 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { collected, recordingReporter, scriptedPrompter, writeTestFile } from './fakes.ts';
+import { base, home, useProjectFolders } from './claude-code-project-fixtures.ts';
+import {
+  collected,
+  readText,
+  recordingReporter,
+  scriptedPrompter,
+  writeTestFile,
+} from './fakes.ts';
 
 import {
   ACCOUNT_SKILLS_PREFIX,
@@ -14,7 +19,6 @@ import {
   createClaudeCodeRestorer,
   createFileGatherer,
   pathsOf,
-  globalDestination,
   planAccountSkills,
   readSyncedSkills,
   SKIPPED_NAMES,
@@ -22,20 +26,9 @@ import {
   type ExecutableLookupSystem,
 } from '../src/index.ts';
 
-let root: string;
-let home: string;
-let base: string;
-const ACCOUNT = '00000000-0000-4000-8000-000000000000_11111111-1111-4111-8111-111111111111';
+useProjectFolders('agentnomad-account-skills-');
 
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'agentnomad-account-skills-'));
-  home = join(root, 'home');
-  base = join(home, '.claude');
-  await mkdir(base, { recursive: true });
-});
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
-});
+const ACCOUNT = '00000000-0000-4000-8000-000000000000_11111111-1111-4111-8111-111111111111';
 
 const synced = (...parts: string[]) => join(base, 'skills', 'synced', ACCOUNT, ...parts);
 
@@ -157,12 +150,6 @@ describe('claude.ai skills (T42): reading and saving', () => {
     );
     expect(withSkills.some((file) => file.path.startsWith('skills/synced'))).toBe(false);
   });
-
-  it("restore never writes them directly: they are left to pull's follow-up", () => {
-    expect(globalDestination(`${ACCOUNT_SKILLS_PREFIX}my-skill/SKILL.md`, new Set())).toEqual({
-      kind: 'metadata',
-    });
-  });
 });
 
 const saved = (name: string, body: string) =>
@@ -236,7 +223,7 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     const done = planned.then((followUp) => followUp({ reporter }));
     return { planned, done, asked: script.asked, lines };
   }
-  const skillFile = (name: string) => readFile(join(base, 'skills', name, 'SKILL.md'), 'utf8');
+  const skillFile = (name: string) => readText(join(base, 'skills', name, 'SKILL.md'));
 
   it('asks, and a yes writes them into ~/.claude/skills/<name>/', async () => {
     const t = run([saved('mine', 'Plain.')], {}, [true]);
