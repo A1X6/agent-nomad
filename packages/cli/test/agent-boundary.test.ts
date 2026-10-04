@@ -1,13 +1,8 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readdir, readFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
-import {
-  createGzipBundleCodec,
-  createSodiumCryptoService,
-  type CryptoService,
-} from '@agentnomad/core';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createGzipBundleCodec } from '@agentnomad/core';
+import { describe, expect, it } from 'vitest';
 
 import { createAgentRegistry } from '../src/agents/registry.ts';
 import type {
@@ -24,6 +19,8 @@ import { createPushCommand } from '../src/push/push-command.ts';
 import { AnswerNeededError, createNoTerminalPrompter } from '../src/ui/no-terminal-prompter.ts';
 import type { Prompter } from '../src/ui/prompter.ts';
 import {
+  crypto,
+  dataKey,
   exists,
   fakeBundleServer,
   fakeEnvWriter,
@@ -32,6 +29,8 @@ import {
   readText,
   recordingReporter,
   scriptedPrompter,
+  useDataKey,
+  useTempDir,
   writeTestFile,
 } from './fakes.ts';
 
@@ -41,20 +40,10 @@ import {
  * `agents/claude-code`; the registry holds only this agent.
  */
 
-let crypto: CryptoService;
-let dataKey: Uint8Array;
-beforeAll(async () => {
-  crypto = await createSodiumCryptoService();
-  dataKey = crypto.randomBytes(32);
-});
+useDataKey();
 
 let root: string;
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'agentnomad-boundary-'));
-});
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
-});
+useTempDir('agentnomad-boundary-', (dir) => (root = dir));
 
 /** What the Example CLI adapter saw, for the assertions. */
 interface Seen {

@@ -1,11 +1,16 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach } from 'vitest';
+import { beforeEach } from 'vitest';
 
-import { writeTestFile } from './fakes.ts';
-import { createClaudeCodeProjectCollector, projectDirName } from '../src/index.ts';
+import { useTempDir, writeTestFile } from './fakes.ts';
+import type { Collector, ScopeTarget } from '../src/agents/adapter.ts';
+import type { GlobalCollectorOptions } from '../src/agents/claude-code/global-collector.ts';
+import {
+  createClaudeCodeGlobalCollector,
+  createClaudeCodeProjectCollector,
+  projectDirName,
+} from '../src/index.ts';
 
 /**
  * The temporary home and project shared by the Claude Code tests that write real files (review
@@ -21,16 +26,15 @@ export let project: string;
 
 /** Makes fresh folders before each test of the calling file and removes them after it. */
 export function useProjectFolders(prefix: string): void {
-  beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), prefix));
+  useTempDir(prefix, (dir) => {
+    root = dir;
     home = join(root, 'home');
     base = join(home, '.claude');
     project = join(root, 'work', 'my-app');
+  });
+  beforeEach(async () => {
     await mkdir(base, { recursive: true });
     await mkdir(project, { recursive: true });
-  });
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
   });
 }
 
@@ -41,12 +45,35 @@ export const options = (env: Record<string, string> = {}) => ({
   env,
 });
 
+/** The global collector of the test's home; `overrides` change any of its options. */
+export const globalCollector = (overrides: Partial<GlobalCollectorOptions> = {}) =>
+  createClaudeCodeGlobalCollector({
+    baseDir: base,
+    homedir: home,
+    platform: process.platform,
+    customConfigDir: false,
+    ...overrides,
+  });
+
 /** The project collector, which takes auto memory as `.agentnomad/auto-memory/`. */
 export function collect(includeMemory = false, env: Record<string, string> = {}, dir = project) {
   return createClaudeCodeProjectCollector(options(env)).collect(
     { kind: 'project', projectDir: dir },
     { includeMemory },
   );
+}
+
+/** Collects `target` (the test's project by default), recording each "path: reason" left out. */
+export async function collectSkipped(
+  collector: Collector,
+  target: ScopeTarget = { kind: 'project', projectDir: project },
+) {
+  const skipped: string[] = [];
+  const found = await collector.collect(target, {
+    includeMemory: false,
+    onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`),
+  });
+  return { found, skipped };
 }
 
 /** The folder Claude Code keeps this project's auto memory in. */

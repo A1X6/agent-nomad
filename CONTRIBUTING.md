@@ -120,11 +120,16 @@ open, such as a chat or an option letter from a discussion.
   typed partial API client, an env writer, an adapter that only detects, a local state in a
   temporary folder, collected-file builders and readers, `writeTestFile` and the file readers
   `readText`, `readJson` and `exists`) live in `packages/cli/test/fakes.ts`, which loads no
-  agent's adapter. The Claude Code tests share their temporary home and project
-  (`useProjectFolders` in `claude-code-project-fixtures.ts`, with a claude.ai synced skills
-  folder) and their plugin files (`claude-code-plugin-fixtures.ts`) next to them. The
-  server's request builders (register, login, `putSetup`, account delete, the `bearer`
-  header), setup saves and a memory logger live in `packages/server/test/support/fixtures.ts`.
+  agent's adapter. So do the one temporary-folder hook of the CLI tests (`useTempDir`, or
+  `withTempDir` inside a single test; no test file calls `mkdtemp`) and the real crypto
+  service with a data key (`useDataKey`). The Claude Code tests share their temporary home
+  and project (`useProjectFolders` in `claude-code-project-fixtures.ts`, with a claude.ai
+  synced skills folder, the collectors and `collectSkipped`) and their plugin files
+  (`claude-code-plugin-fixtures.ts`) next to them. Core's and contracts' shared set-up is in
+  their `test/fixtures.ts`. The server's request builders (register, login, `putSetup`,
+  account delete, the `bearer` header), users, sessions, setup saves and a memory logger live
+  in `packages/server/test/support/fixtures.ts`; a fresh database or app for each test comes
+  from `useTestDatabase` (`support/database.ts`) or `useTestApp` (`support/app.ts`).
   Use them instead of a new copy.
 - A module's tests go in the test file named after it (see the file reference in
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), so they are found by name.

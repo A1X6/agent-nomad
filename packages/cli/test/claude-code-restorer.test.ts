@@ -3,11 +3,17 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { base, home, project, root, useProjectFolders } from './claude-code-project-fixtures.ts';
+import {
+  base,
+  collect,
+  globalCollector,
+  home,
+  project,
+  root,
+  useProjectFolders,
+} from './claude-code-project-fixtures.ts';
 import { collected, readJson, readText, writeTestFile } from './fakes.ts';
 import {
-  createClaudeCodeGlobalCollector,
-  createClaudeCodeProjectCollector,
   createClaudeCodeRestorer,
   hooksForOtherOs,
   lineEndingsFor,
@@ -68,11 +74,9 @@ describe('restorer: round trip', () => {
       join(sourceBase, 'skills', 'deploy', 'logo.png'),
       new Uint8Array([0, 255, 1, 254]),
     );
-    const collected = await createClaudeCodeGlobalCollector({
+    const collected = await globalCollector({
       baseDir: sourceBase,
       homedir: sourceHome,
-      platform: process.platform,
-      customConfigDir: false,
     }).collect({ kind: 'global' }, { includeMemory: false });
 
     const report = await restorer().restore({ kind: 'global' }, collected, answer('skip').resolve);
@@ -90,12 +94,7 @@ describe('restorer: round trip', () => {
     await writeTestFile(join(source, '.claude', 'settings.local.json'), '{}');
     const sourceMemory = join(base, 'projects', projectDirName(source), 'memory');
     await writeTestFile(join(sourceMemory, 'MEMORY.md'), 'remember this');
-    const collected = await createClaudeCodeProjectCollector({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      env: {},
-    }).collect({ kind: 'project', projectDir: source }, { includeMemory: true });
+    const collected = await collect(true, {}, source);
 
     await restorer().restore(
       { kind: 'project', projectDir: project },
@@ -883,12 +882,7 @@ describe('project hook scripts: one rule for push and pull (DUP-03)', () => {
       JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
     );
     await writeTestFile(join(source, 'scripts', 'a.sh'), 'echo hi');
-    const files = await createClaudeCodeProjectCollector({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      env: {},
-    }).collect({ kind: 'project', projectDir: source }, { includeMemory: false });
+    const files = await collect(false, {}, source);
     expect(files.map((entry) => entry.path)).toContain('scripts/a.sh');
 
     // Pulled into the same folder (a reinstalled PC), the script comes back.

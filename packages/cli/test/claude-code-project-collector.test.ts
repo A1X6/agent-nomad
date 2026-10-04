@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   collect,
+  collectSkipped,
   home,
   memoryDir,
   options,
@@ -146,11 +147,7 @@ describe('project collector: links and size (T45)', () => {
     await writeTestFile(join(home, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
     await mkdir(join(project, '.claude', 'skills'), { recursive: true });
     await linkFolder(join(home, '.ssh'), join(project, '.claude', 'skills', 'x'));
-    const skipped: string[] = [];
-    const found = await createClaudeCodeProjectCollector(options()).collect(
-      { kind: 'project', projectDir: project },
-      { includeMemory: false, onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`) },
-    );
+    const { found, skipped } = await collectSkipped(createClaudeCodeProjectCollector(options()));
     expect(paths(found).filter((path) => path.includes('skills'))).toEqual([]);
     expect(skipped).toEqual(['.claude/skills/x: it links to a place outside the project']);
   });
@@ -160,13 +157,8 @@ describe('project collector: links and size (T45)', () => {
     await writeTestFile(join(project, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
     await mkdir(join(project, '.claude', 'skills'), { recursive: true });
     await linkFolder(join(project, '.ssh'), join(project, '.claude', 'skills', 'x'));
-    const skipped: string[] = [];
-    const found = await createClaudeCodeProjectCollector({
-      ...options(),
-      homedir: project,
-    }).collect(
-      { kind: 'project', projectDir: project },
-      { includeMemory: false, onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`) },
+    const { found, skipped } = await collectSkipped(
+      createClaudeCodeProjectCollector({ ...options(), homedir: project }),
     );
     expect(paths(found).filter((path) => path.includes('skills'))).toEqual([]);
     expect(skipped).toEqual(['.claude/skills/x: it links into a folder for keys and logins']);
@@ -195,11 +187,7 @@ describe('project collector: links and size (T45)', () => {
       'x'.repeat(10 * 1024 * 1024 + 1),
     );
     await writeTestFile(join(project, '.claude', 'skills', 'big', 'SKILL.md'), 'small');
-    const skipped: string[] = [];
-    const found = await createClaudeCodeProjectCollector(options()).collect(
-      { kind: 'project', projectDir: project },
-      { includeMemory: false, onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`) },
-    );
+    const { found, skipped } = await collectSkipped(createClaudeCodeProjectCollector(options()));
     expect(paths(found)).toContain('.claude/skills/big/SKILL.md');
     expect(skipped).toEqual(['.claude/skills/big/data.bin: it is larger than 10 MB']);
   });

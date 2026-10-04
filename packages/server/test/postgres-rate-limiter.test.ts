@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createServerKeys } from '../src/auth/server-keys.ts';
 import { createPostgresRateLimiter } from '../src/rate-limit/postgres-rate-limiter.ts';
 import type { RateLimiter, RateLimitRule } from '../src/rate-limit/rate-limiter.ts';
-import { createTestDatabase, type TestDatabase } from './support/database.ts';
+import { type TestDatabase, useTestDatabase } from './support/database.ts';
 import { bytes } from './support/fixtures.ts';
 
 const rule: RateLimitRule = { name: 'test', limit: 3, windowSeconds: 60 };
@@ -15,8 +15,8 @@ let alsoPruned = 0;
 let pruneFails = false;
 let logged: string[] = [];
 
-beforeEach(async () => {
-  database = await createTestDatabase();
+useTestDatabase(async (made) => {
+  database = made;
   limiter = createPostgresRateLimiter({
     db: database.db,
     keys: await createServerKeys(bytes(32, 1)),
@@ -31,10 +31,6 @@ beforeEach(async () => {
   alsoPruned = 0;
   pruneFails = false;
   logged = [];
-});
-
-afterEach(async () => {
-  await database.close();
 });
 
 async function hits(count: number, subject = '203.0.113.7') {

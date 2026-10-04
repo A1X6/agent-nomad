@@ -8,7 +8,7 @@ import {
   type PutBundleRequestHeaders,
 } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
-import { ZodError } from 'zod';
+import * as z from 'zod';
 
 import {
   ApiError,
@@ -232,7 +232,7 @@ describe('ApiClient: requests and answers', () => {
     const { client, calls } = fakeServer([]);
     await expect(
       client.bundles.get({ agent: 'claude-code', scopeKey: '../../account' }),
-    ).rejects.toBeInstanceOf(ZodError);
+    ).rejects.toBeInstanceOf(z.ZodError);
     expect(calls).toHaveLength(0);
   });
 });

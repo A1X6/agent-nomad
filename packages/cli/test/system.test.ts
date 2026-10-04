@@ -1,10 +1,9 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { nodeManagedSettingsSystem } from '../src/agents/claude-code/managed-settings.ts';
 import { createProgramCli, type StartProgram } from '../src/agents/claude-code/plugin-sync.ts';
@@ -15,6 +14,7 @@ import {
 } from '../src/agents/claude-code/running-claude.ts';
 import { realPowerShell } from '../src/env/shell-profile.ts';
 import { aclPrincipals, principalsToRemove, windowsOwnerOnly } from '../src/secrets/file-store.ts';
+import { useTempDir } from './fakes.ts';
 
 const win32 = process.platform === 'win32';
 const posix = !win32;
@@ -217,15 +217,8 @@ describe('icacls output, parsed (every OS)', () => {
 // Real programs start slowly while the whole suite runs in parallel.
 describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
   let dir: string;
-
-  beforeEach(async () => {
-    // A space in the folder name, as in "C:\Program Files".
-    dir = await mkdtemp(join(tmpdir(), 'agentnomad system-'));
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
+  // A space in the folder name, as in "C:\Program Files".
+  useTempDir('agentnomad system-', (temp) => (dir = temp));
 
   it.runIf(win32)(
     'createProgramCli runs a real .cmd launcher and passes its arguments',

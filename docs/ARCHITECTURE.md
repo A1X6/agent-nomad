@@ -633,9 +633,10 @@ of these:
   `account-routes.test.ts`, `auth-routes.test.ts`, `bundle-routes.test.ts` and
   `limits-and-logs.test.ts`, and e2e's `cross-os.test.ts` (the steps of `steps.ts` against
   `local-server.ts`).
-- **Shared set-up, not tests:** `fakes.ts` (tested by `fakes.test.ts`), `stub-restorer.ts`,
-  `claude-code-project-fixtures.ts`, `claude-code-plugin-fixtures.ts`, and the server's
-  `support/` (`app.ts`, `database.ts`, `fixtures.ts`).
+- **Shared set-up, not tests:** `fakes.ts` (tested by `fakes.test.ts`; it also holds the CLI
+  tests' one temporary-folder hook and their crypto service and data key), `stub-restorer.ts`,
+  `claude-code-project-fixtures.ts`, `claude-code-plugin-fixtures.ts`, core's and contracts'
+  `fixtures.ts`, and the server's `support/` (`app.ts`, `database.ts`, `fixtures.ts`).
 
 ## `packages/contracts/src`
 

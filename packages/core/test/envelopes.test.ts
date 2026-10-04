@@ -1,25 +1,18 @@
 import { WRAPPED_DATA_KEY_BYTES } from '@agentnomad/contracts';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   DATA_KEY_BYTES,
   DecryptionError,
-  createSodiumCryptoService,
   openBundle,
   sealBundle,
   unwrapDataKey,
   wrapDataKey,
   type BundleContext,
-  type CryptoService,
 } from '../src/index.ts';
+import { crypto, dataKey as key, useDataKey } from './fixtures.ts';
 
-let crypto: CryptoService;
-let key: Uint8Array;
-
-beforeAll(async () => {
-  crypto = await createSodiumCryptoService();
-  key = crypto.randomBytes(DATA_KEY_BYTES);
-});
+useDataKey();
 
 describe('data key wrapping', () => {
   it('wraps to exactly the size the API expects and unwraps again', () => {

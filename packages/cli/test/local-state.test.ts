@@ -1,22 +1,18 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { ProjectNameSchema } from '@agentnomad/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 
-import { CWD, localStateIn, readText } from './fakes.ts';
+import { CWD, localStateIn, readText, useTempDir } from './fakes.ts';
 import { createLocalState, type LocalState } from '../src/index.ts';
 
 let dir: string;
 let state: LocalState;
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'agentnomad-state-'));
+useTempDir('agentnomad-state-', (temp) => {
+  dir = temp;
   state = localStateIn(dir);
-});
-afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
 });
 
 describe('the revisions this PC knows belong to one account (T56)', () => {

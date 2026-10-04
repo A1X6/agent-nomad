@@ -1,27 +1,27 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 import {
   createGzipBundleCodec,
-  createSodiumCryptoService,
   decryptProjectName,
   openBundle,
   scopeKeyFor,
   type BundleCodec,
-  type CryptoService,
 } from '@agentnomad/core';
-import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import {
   collected,
+  crypto,
+  dataKey,
   fakeBundleServer,
   localStateIn,
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
   storedOn,
+  useDataKey,
+  useTempDir,
 } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
@@ -49,21 +49,17 @@ const posix = process.platform !== 'win32';
 const HOME = posix ? '/home/ahmed' : 'C:\\Users\\ahmed';
 const PROJECT = posix ? '/home/ahmed/work/my-app' : 'C:\\Users\\ahmed\\work\\my-app';
 
-let crypto: CryptoService;
-let dataKey: Uint8Array;
-beforeAll(async () => {
-  crypto = await createSodiumCryptoService();
-  dataKey = crypto.randomBytes(32);
-});
+useDataKey();
 const loggedIn = () => memorySecretStore({ loggedIn: dataKey });
 
 let dir: string;
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'agentnomad-push-'));
-});
-afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
-});
+useTempDir('agentnomad-push-', (temp) => (dir = temp));
+
+// A codec that returns 6 MB at once, instead of compressing 6 MB for real (slow).
+const sixMegabyteCodec: BundleCodec = {
+  encode: () => Promise.resolve(new Uint8Array(6 * 1024 * 1024)),
+  decode: () => Promise.reject(new Error('not used')),
+};
 
 function collectingAdapter(
   options: {
@@ -480,12 +476,7 @@ describe('agentnomad push', () => {
   });
 
   it('refuses a setup over 5 MB with a clear message, uploading nothing', async () => {
-    // A codec that returns 6 MB at once, instead of compressing 6 MB for real (slow).
-    const codec: BundleCodec = {
-      encode: () => Promise.resolve(new Uint8Array(6 * 1024 * 1024)),
-      decode: () => Promise.reject(new Error('not used')),
-    };
-    const t = setup(['global', false], { codec });
+    const t = setup(['global', false], { codec: sixMegabyteCodec });
     await expect(t.command.push(noFlags)).rejects.toThrow(
       'Not saved:\n  - the Claude Code global setup: 6.0 MB, over the 5.0 MB limit',
     );
@@ -650,11 +641,7 @@ describe('agentnomad push', () => {
     });
 
     it('a setup not done, and a successful push', async () => {
-      const codec: BundleCodec = {
-        encode: () => Promise.resolve(new Uint8Array(6 * 1024 * 1024)),
-        decode: () => Promise.reject(new Error('not used')),
-      };
-      const tooBig = setup([], { codec });
+      const tooBig = setup([], { codec: sixMegabyteCodec });
       expect(
         (await wipedKeys(() => tooBig.command.push({ global: true, yes: true }))).length,
       ).toBeGreaterThanOrEqual(1);

@@ -1,6 +1,6 @@
 import { DEFAULT_KDF_PARAMS, MAX_BUNDLE_BYTES, USER_STORAGE_LIMITS } from '@agentnomad/contracts';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   InvalidCursorError,
@@ -18,12 +18,13 @@ import {
   type UserRepository,
 } from '../src/index.ts';
 import { encodeBundleCursor } from '../src/db/bundle-cursor.ts';
-import { createTestDatabase, type TestDatabase } from './support/database.ts';
+import { type TestDatabase, useTestDatabase } from './support/database.ts';
 import {
   bytes,
   createUser,
   globalKey,
   metaWrite,
+  newSession,
   newUser,
   scopeKeyOf,
   seedSetups,
@@ -37,16 +38,12 @@ let sessionRepo: SessionRepository;
 let bundleRepo: BundleRepository;
 let blobs: BlobStore;
 
-beforeEach(async () => {
-  database = await createTestDatabase();
+useTestDatabase((made) => {
+  database = made;
   userRepo = createUserRepository(database.db);
   sessionRepo = createSessionRepository(database.db);
   bundleRepo = createBundleRepository(database.db);
   blobs = createPostgresBlobStore(database.db);
-});
-
-afterEach(async () => {
-  await database.close();
 });
 
 describe('UserRepository', () => {
@@ -66,12 +63,7 @@ describe('UserRepository', () => {
 
   it('deletes a user with their sessions, setups and files', async () => {
     const user = await createUser(database.db, 'ahmed');
-    const session = await sessionRepo.create({
-      userId: user.id,
-      tokenHash: 'token',
-      deviceName: 'laptop',
-      expiresAt: new Date(Date.now() + 60_000),
-    });
+    const session = await sessionRepo.create(newSession(user.id, 'token'));
     const blob = await blobs.put(user.id, bytes(40));
     await bundleRepo.putMeta(metaWrite({ userId: user.id }, 0, blob.blobId, 1));
 
@@ -121,14 +113,12 @@ describe('UserRepository.createWithSession (DB-03)', () => {
 });
 
 describe('SessionRepository', () => {
+  const make = (userId: string, tokenHash: string, expiresInMs: number) =>
+    sessionRepo.create(newSession(userId, tokenHash, expiresInMs));
+
   it('finds a live session by its token hash and forgets it after delete', async () => {
     const user = await createUser(database.db, 'ahmed');
-    const session = await sessionRepo.create({
-      userId: user.id,
-      tokenHash: 'token',
-      deviceName: 'laptop',
-      expiresAt: new Date(Date.now() + 60_000),
-    });
+    const session = await sessionRepo.create(newSession(user.id, 'token'));
     expect(await sessionRepo.findByTokenHash('token')).toEqual(session);
     await sessionRepo.delete(session.id);
     expect(await sessionRepo.findByTokenHash('token')).toBeNull();
@@ -138,13 +128,6 @@ describe('SessionRepository', () => {
     const user = await createUser(database.db, 'ahmed');
     const other = await createUser(database.db, 'other');
     const day = 24 * 60 * 60 * 1000;
-    const make = (userId: string, tokenHash: string, expiresInMs: number) =>
-      sessionRepo.create({
-        userId,
-        tokenHash,
-        deviceName: 'laptop',
-        expiresAt: new Date(Date.now() + expiresInMs),
-      });
     await make(user.id, 'live', day);
     await make(user.id, 'expired', -1000);
     const idle = await make(user.id, 'idle', 60 * day);
@@ -163,13 +146,6 @@ describe('SessionRepository', () => {
   it("deletes every user's expired sessions, and nothing else (DB-02)", async () => {
     const one = await createUser(database.db, 'one');
     const two = await createUser(database.db, 'two');
-    const make = (userId: string, tokenHash: string, expiresInMs: number) =>
-      sessionRepo.create({
-        userId,
-        tokenHash,
-        deviceName: 'laptop',
-        expiresAt: new Date(Date.now() + expiresInMs),
-      });
     await make(one.id, 'one-live', 60_000);
     await make(one.id, 'one-expired', -1000);
     await make(two.id, 'two-expired', -1000);
@@ -183,12 +159,7 @@ describe('SessionRepository', () => {
 
   it('ignores an expired session', async () => {
     const user = await createUser(database.db, 'ahmed');
-    await sessionRepo.create({
-      userId: user.id,
-      tokenHash: 'old',
-      deviceName: 'laptop',
-      expiresAt: new Date(Date.now() - 1000),
-    });
+    await sessionRepo.create(newSession(user.id, 'old', -1000));
     expect(await sessionRepo.findByTokenHash('old')).toBeNull();
   });
 });

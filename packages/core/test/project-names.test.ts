@@ -1,25 +1,18 @@
 import { GLOBAL_SCOPE_KEY, MAX_NAME_ENC_BYTES, ScopeKeySchema, toHex } from '@agentnomad/contracts';
 import { strToU8 } from 'fflate';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   DATA_KEY_BYTES,
   DecryptionError,
-  createSodiumCryptoService,
   decryptProjectName,
   encryptProjectName,
   projectScopeKey,
   scopeKeyFor,
-  type CryptoService,
 } from '../src/index.ts';
+import { crypto, dataKey, useDataKey } from './fixtures.ts';
 
-let crypto: CryptoService;
-let dataKey: Uint8Array;
-
-beforeAll(async () => {
-  crypto = await createSodiumCryptoService();
-  dataKey = crypto.randomBytes(DATA_KEY_BYTES);
-});
+useDataKey();
 
 /** True when `needle` appears as a run of bytes inside `haystack`. */
 function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {

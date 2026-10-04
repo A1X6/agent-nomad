@@ -1,17 +1,14 @@
-import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // The global setup's scope key is this constant for every account (scopeKeyFor returns it).
 import { GLOBAL_SCOPE_KEY } from '@agentnomad/contracts';
-import {
-  createGzipBundleCodec,
-  createSodiumCryptoService,
-  type CryptoService,
-} from '@agentnomad/core';
-import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
+import { createGzipBundleCodec } from '@agentnomad/core';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
+  crypto,
+  dataKey,
   fakeBundleServer,
   fakeEnvWriter,
   localStateIn,
@@ -21,6 +18,8 @@ import {
   revisionOn,
   scriptedPrompter,
   storedOn,
+  useDataKey,
+  useTempDir,
   writeTestFile,
 } from './fakes.ts';
 import {
@@ -47,22 +46,13 @@ import {
   type Reporter,
   type SecretStore,
 } from '../src/index.ts';
+import type { AgentRestorePlan } from '../src/agents/adapter.ts';
 
-let crypto: CryptoService;
-let dataKey: Uint8Array;
-beforeAll(async () => {
-  crypto = await createSodiumCryptoService();
-  dataKey = crypto.randomBytes(32);
-});
+useDataKey();
 const loggedIn = (key = dataKey) => memorySecretStore({ loggedIn: key });
 
 let root: string;
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'agentnomad-pull-'));
-});
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
-});
+useTempDir('agentnomad-pull-', (dir) => (root = dir));
 
 /** One fake PC: its own home folder, project folder and local state. */
 function pc(name: string) {
@@ -155,6 +145,32 @@ function pullOn(
 const keysOf = (secrets = loggedIn()) => ({ secrets, crypto, dataKey });
 
 const none = { global: false, yes: false };
+
+/** The adapter's own plan step, with `restore` in place of its restore. */
+function withRestore(
+  base: AgentAdapter,
+  restore: AgentRestorePlan['restore'],
+): NonNullable<AgentAdapter['planRestore']> {
+  return async (context) => {
+    if (!base.planRestore) throw new Error('no plan step');
+    return { ...(await base.planRestore(context)), restore };
+  };
+}
+
+/** PC A with an MCP server that reads GITHUB_TOKEN; pushed with the token's value. */
+async function pushedEnvSetup() {
+  const server = fakeBundleServer();
+  const a = pc('laptop');
+  await writeTestFile(
+    join(a.home, '.claude.json'),
+    JSON.stringify({ mcpServers: { gh: { command: 'gh-mcp', env: { T: '${GITHUB_TOKEN}' } } } }),
+  );
+  await writeTestFile(join(a.base, 'CLAUDE.md'), 'x');
+  await pushFrom(a, server, ['global', false, ['GITHUB_TOKEN']], {
+    env: { GITHUB_TOKEN: 'ghp_secret' },
+  })(none);
+  return { server };
+}
 
 /** PC A with a global setup (a hook, a home path) and a project; pushed as "both". */
 async function pushedSetup() {
@@ -514,21 +530,15 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const base = claudeAdapter(b.home);
     const adapter: AgentAdapter = {
       ...base,
-      planRestore: async (context) => {
-        if (!base.planRestore) throw new Error('no plan step');
+      planRestore: withRestore(base, async (onConflict) => {
+        const choice = await onConflict('notes/extra.md', { overwriteAllowed: true });
         return {
-          ...(await base.planRestore(context)),
-          restore: async (onConflict) => {
-            const choice = await onConflict('notes/extra.md', { overwriteAllowed: true });
-            return {
-              written: [],
-              skipped: choice === 'skip' ? ['notes/extra.md'] : [],
-              backups: [],
-              warnings: [],
-            };
-          },
+          written: [],
+          skipped: choice === 'skip' ? ['notes/extra.md'] : [],
+          backups: [],
+          warnings: [],
         };
-      },
+      }),
     };
     const t = pullOn(b, server, [], { adapter });
     await expect(t.pull({ global: true, yes: false, allowCommands: true })).rejects.toThrow(
@@ -558,16 +568,10 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
           { path: 'asked.md\n  ~ hook: fake', question: { overwriteAllowed: true } },
         ],
       },
-      planRestore: async (context) => {
-        if (!base.planRestore) throw new Error('no plan step');
-        return {
-          ...(await base.planRestore(context)),
-          restore: async (onConflict) => {
-            await onConflict('left.md\nfake advice', { overwriteAllowed: true });
-            return { written: [], skipped: [], backups: [], warnings: [] };
-          },
-        };
-      },
+      planRestore: withRestore(base, async (onConflict) => {
+        await onConflict('left.md\nfake advice', { overwriteAllowed: true });
+        return { written: [], skipped: [], backups: [], warnings: [] };
+      }),
     };
     const t = pullOn(b, server, ['skip'], { adapter });
     await expect(t.pull({ global: true, yes: false, allowCommands: true })).rejects.toThrow(
@@ -725,16 +729,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('runs the agent’s follow-up and adds saved environment variables', async () => {
-    const server = fakeBundleServer();
-    const a = pc('laptop');
-    await writeTestFile(
-      join(a.home, '.claude.json'),
-      JSON.stringify({ mcpServers: { gh: { command: 'gh-mcp', env: { T: '${GITHUB_TOKEN}' } } } }),
-    );
-    await writeTestFile(join(a.base, 'CLAUDE.md'), 'x');
-    await pushFrom(a, server, ['global', false, ['GITHUB_TOKEN']], {
-      env: { GITHUB_TOKEN: 'ghp_secret' },
-    })(none);
+    const { server } = await pushedEnvSetup();
 
     const b = pc('desktop');
     const { writer, written } = fakeEnvWriter();
@@ -783,16 +778,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   });
 
   it('a second pull asks nothing and leaves the shell profile and its backups alone (T56)', async () => {
-    const server = fakeBundleServer();
-    const a = pc('laptop');
-    await writeTestFile(
-      join(a.home, '.claude.json'),
-      JSON.stringify({ mcpServers: { gh: { command: 'gh-mcp', env: { T: '${GITHUB_TOKEN}' } } } }),
-    );
-    await writeTestFile(join(a.base, 'CLAUDE.md'), 'x');
-    await pushFrom(a, server, ['global', false, ['GITHUB_TOKEN']], {
-      env: { GITHUB_TOKEN: 'ghp_secret' },
-    })(none);
+    const { server } = await pushedEnvSetup();
 
     // The terminal running the pulls never sees the profile: GITHUB_TOKEN stays unset there.
     const b = pc('desktop');

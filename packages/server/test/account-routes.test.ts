@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { createTestApp, type TestApp } from './support/app.ts';
+import { type TestApp, useTestApp } from './support/app.ts';
 import {
   b64,
   bearer,
@@ -16,14 +16,7 @@ import {
 const authKeyOf = (username: string) => b64(bytes(32, username.length));
 
 let t: TestApp;
-
-beforeEach(async () => {
-  t = await createTestApp();
-});
-
-afterEach(async () => {
-  await t.database.close();
-});
+useTestApp((app) => (t = app));
 
 const register = (username: string) =>
   registerForToken(t.app, username, { authKey: authKeyOf(username) });

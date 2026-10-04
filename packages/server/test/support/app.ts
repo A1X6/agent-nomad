@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
+import { afterEach, beforeEach } from 'vitest';
+
 import { createApi } from '../../src/api.ts';
 import type { AuthService } from '../../src/auth/auth-service.ts';
 import { createServerKeys } from '../../src/auth/server-keys.ts';
@@ -50,6 +52,18 @@ export async function createTestApp(serverSecret = TEST_SERVER_SECRET): Promise<
       now = date;
     },
   };
+}
+
+/** A fresh test app before each test of the calling file, handed to `use`, closed after it. */
+export function useTestApp(use: (t: TestApp) => void): void {
+  let t: TestApp | undefined;
+  beforeEach(async () => {
+    t = await createTestApp();
+    use(t);
+  });
+  afterEach(async () => {
+    await t?.database.close();
+  });
 }
 
 /** A JSON POST as the CLI sends it. */

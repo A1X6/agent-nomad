@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   BlobInUseError,
@@ -8,21 +8,17 @@ import {
   type BlobStore,
   type BundleRepository,
 } from '../src/index.ts';
-import { createTestDatabase, type TestDatabase } from './support/database.ts';
+import { type TestDatabase, useTestDatabase } from './support/database.ts';
 import { bytes, createUser, metaWrite } from './support/fixtures.ts';
 
 let database: TestDatabase;
 let bundleRepo: BundleRepository;
 let blobs: BlobStore;
 
-beforeEach(async () => {
-  database = await createTestDatabase();
+useTestDatabase((made) => {
+  database = made;
   bundleRepo = createBundleRepository(database.db);
   blobs = createPostgresBlobStore(database.db);
-});
-
-afterEach(async () => {
-  await database.close();
 });
 
 describe('BlobStore (Postgres)', () => {

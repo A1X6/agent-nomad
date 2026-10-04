@@ -12,18 +12,11 @@ import {
   PutBundleResponseSchema,
   SessionResponseSchema,
 } from '../src/index.ts';
+import { kdfParams, token } from './fixtures.ts';
 
 /** Base64 of 16 and 72 zero bytes. */
 const salt = 'A'.repeat(22) + '==';
 const wrapped = 'A'.repeat(96);
-const token = 'A'.repeat(43);
-const kdfParams = {
-  algorithm: 'argon2id',
-  version: 19,
-  memoryKiB: 65536,
-  passes: 3,
-  parallelism: 1,
-};
 const session = { sessionToken: token, expiresAt: '2026-12-24T00:00:00Z' };
 const item = {
   agent: 'claude-code',

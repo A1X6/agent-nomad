@@ -25,6 +25,7 @@ import {
   SessionResponseSchema,
   WRAPPED_DATA_KEY_BYTES,
 } from '../src/index.ts';
+import { kdfParams, token } from './fixtures.ts';
 
 /** Canonical base64 for `n` zero bytes (content is irrelevant, only the decoded length matters). */
 function b64(n: number): string {
@@ -34,14 +35,6 @@ function b64(n: number): string {
 }
 
 const sha256 = 'a'.repeat(64);
-const token = 'A'.repeat(43);
-const kdfParams = {
-  algorithm: 'argon2id',
-  version: 19,
-  memoryKiB: 65536,
-  passes: 3,
-  parallelism: 1,
-};
 
 const ok = (schema: { safeParse: (v: unknown) => { success: boolean } }, value: unknown) =>
   schema.safeParse(value).success;

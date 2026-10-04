@@ -143,8 +143,9 @@ describe('the Settings value in reg query output (QA-07)', () => {
 });
 
 describe('server-managed settings (claude.ai admin console)', () => {
-  it('are found through the copy Claude Code caches', async () => {
-    const found = await detectManagedSettings(
+  /** Settings from the admin console that block a marketplace, in Claude Code's cached copy. */
+  const blockingMarketplace = () =>
+    detectManagedSettings(
       fakeSystem({
         platform: 'linux',
         files: {
@@ -154,6 +155,9 @@ describe('server-managed settings (claude.ai admin console)', () => {
         },
       }),
     );
+
+  it('are found through the copy Claude Code caches', async () => {
+    const found = await blockingMarketplace();
     expect(found.sources).toEqual([
       { kind: 'remote', where: '/home/a/.claude/remote-settings.json' },
     ]);
@@ -162,16 +166,7 @@ describe('server-managed settings (claude.ai admin console)', () => {
   });
 
   it('a plugin they block names the admin console, not the cached file (UX-03)', async () => {
-    const found = await detectManagedSettings(
-      fakeSystem({
-        platform: 'linux',
-        files: {
-          '/home/a/.claude/remote-settings.json': JSON.stringify({
-            blockedMarketplaces: [{ source: 'github', repo: 'x/y' }],
-          }),
-        },
-      }),
-    );
+    const found = await blockingMarketplace();
     expect(explainPluginFailure('Marketplace y is blocked', found)).toBe(
       "blocked by your organization's Claude Code policy (the claude.ai admin console). Ask your admin to allow it. Details: Marketplace y is blocked",
     );

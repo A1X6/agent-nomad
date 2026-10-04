@@ -5,10 +5,10 @@ import {
   SessionResponseSchema,
   type KdfParams,
 } from '@agentnomad/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { SESSION_LIFETIME_MS } from '../src/auth/auth-service.ts';
-import { createTestApp, postJson, type TestApp } from './support/app.ts';
+import { createTestApp, postJson, type TestApp, useTestApp } from './support/app.ts';
 import {
   b64,
   bearer,
@@ -24,14 +24,7 @@ const authKey = b64(bytes(32, 1));
 const realRegistration = (username = 'ahmed') => registration(username, { kdfParams: realKdf });
 
 let t: TestApp;
-
-beforeEach(async () => {
-  t = await createTestApp();
-});
-
-afterEach(async () => {
-  await t.database.close();
-});
+useTestApp((app) => (t = app));
 
 const register = (username = 'ahmed') => registerForToken(t.app, username, { kdfParams: realKdf });
 

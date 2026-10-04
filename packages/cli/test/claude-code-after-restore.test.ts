@@ -25,6 +25,13 @@ const noPolicy: ManagedSettings = {
   restrictsMcpServers: false,
 };
 
+/** A saved `.agentnomad/plugins.json` with these marketplaces and plugins. */
+const savedPlugins = (marketplaces: object[], plugins: object[]) =>
+  collectedJson('.agentnomad/plugins.json', { marketplaces, plugins, skipped: [] });
+
+/** brag@brag, a user plugin whose marketplace builds it without running a command. */
+const brag = { id: 'brag@brag', scope: 'user', commandSource: false };
+
 /** The plan step (it asks), then the follow-up it returns (it gets no prompter). */
 function afterRestore(deps: {
   system: ExecutableLookupSystem;
@@ -146,11 +153,7 @@ describe('after a Claude Code restore', () => {
 
   it('reinstalls saved plugins with the claude command', async () => {
     const { cli, runs } = recordingCli();
-    const plugins = collectedJson('.agentnomad/plugins.json', {
-      marketplaces: [{ name: 'brag', add: 'latent-spaces/brag' }],
-      plugins: [{ id: 'brag@brag', scope: 'user', commandSource: false }],
-      skipped: [],
-    });
+    const plugins = savedPlugins([{ name: 'brag', add: 'latent-spaces/brag' }], [brag]);
     const t = context([plugins]);
     await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx);
     expect(runs).toEqual([
@@ -161,11 +164,7 @@ describe('after a Claude Code restore', () => {
 
   it('asks in the plan step and installs only in the follow-up (T61)', async () => {
     const { cli, runs } = recordingCli();
-    const plugins = collectedJson('.agentnomad/plugins.json', {
-      marketplaces: [],
-      plugins: [{ id: 'build@market', scope: 'user', commandSource: true }],
-      skipped: [],
-    });
+    const plugins = savedPlugins([], [{ id: 'build@market', scope: 'user', commandSource: true }]);
     const t = context([plugins, programs], [true, true, true]);
     const followUp = await createClaudeCodeAfterRestore({
       system: system(['/usr/bin/claude', '/usr/bin/npm']),
@@ -187,11 +186,7 @@ describe('after a Claude Code restore', () => {
   });
 
   it('explains a plugin blocked by the injected managed settings, never this PC’s (SOLID-01)', async () => {
-    const plugins = collectedJson('.agentnomad/plugins.json', {
-      marketplaces: [],
-      plugins: [{ id: 'brag@brag', scope: 'user', commandSource: false }],
-      skipped: [],
-    });
+    const plugins = savedPlugins([], [brag]);
     const blocked = (path: string): ProgramCli => ({
       run: (args) =>
         Promise.resolve({
@@ -210,11 +205,7 @@ describe('after a Claude Code restore', () => {
   });
 
   it('says so when Claude Code is not installed, instead of failing', async () => {
-    const plugins = collectedJson('.agentnomad/plugins.json', {
-      marketplaces: [],
-      plugins: [{ id: 'brag@brag', scope: 'user', commandSource: false }],
-      skipped: [],
-    });
+    const plugins = savedPlugins([], [brag]);
     const t = context([plugins]);
     await afterRestore({ system: system([]), cli: recordingCli().cli })(t.ctx);
     expect(t.lines[0]).toContain('the claude command was not found');
@@ -224,17 +215,13 @@ describe('after a Claude Code restore', () => {
 describe('pull says when saved plugins or programs cannot be read (BUG-01)', () => {
   it('offers the other plugins and names an entry it refuses', async () => {
     const { cli, runs } = recordingCli();
-    const plugins = collectedJson('.agentnomad/plugins.json', {
-      marketplaces: [
+    const plugins = savedPlugins(
+      [
         { name: 'brag', add: 'latent-spaces/brag' },
         { name: 'odd', add: 'https://host/my%20market.json' },
       ],
-      plugins: [
-        { id: 'brag@brag', scope: 'user', commandSource: false },
-        { id: '.x@brag', scope: 'user', commandSource: false },
-      ],
-      skipped: [],
-    });
+      [brag, { id: '.x@brag', scope: 'user', commandSource: false }],
+    );
     const t = context([plugins]);
     await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx);
     expect(runs).toEqual([
