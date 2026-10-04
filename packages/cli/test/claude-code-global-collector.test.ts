@@ -2,10 +2,12 @@ import { chmod, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
+import { base, home, syncedSetup, useProjectFolders } from './claude-code-project-fixtures.ts';
 import { paths, text, writeTestFile } from './fakes.ts';
 import {
+  ACCOUNT_SKILLS_PREFIX,
   ClaudeJsonError,
   type ProgramInfo,
   createClaudeCodeGlobalCollector,
@@ -13,17 +15,7 @@ import {
 } from '../src/index.ts';
 
 const posix = process.platform !== 'win32';
-let home: string;
-let base: string;
-
-beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), 'agentnomad-home-'));
-  base = join(home, '.claude');
-  await mkdir(base);
-});
-afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
-});
+useProjectFolders('agentnomad-home-');
 
 function collector(customConfigDir = false, baseDir = base) {
   return createClaudeCodeGlobalCollector({
@@ -378,13 +370,17 @@ describe('global collector: programs the status line and hooks need', () => {
   const npmInfo = (command: string) =>
     Promise.resolve({ command, npm: { package: command, version: '2.2.22' } });
 
-  function collectWith(findProgram?: (command: string) => Promise<ProgramInfo | null>) {
+  function collectWith(
+    findProgram?: (command: string) => Promise<ProgramInfo | null>,
+    globalFiles?: readonly string[],
+  ) {
     return createClaudeCodeGlobalCollector({
       baseDir: base,
       homedir: home,
       platform: process.platform,
       customConfigDir: false,
       ...(findProgram && { findProgram }),
+      ...(globalFiles && { globalFiles }),
     }).collect({ kind: 'global' }, { includeMemory: false });
   }
 
@@ -455,20 +451,35 @@ describe('global collector: programs the status line and hooks need', () => {
       JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } });
     await writeTestFile(join(base, 'settings.json'), hook('terminal-notifier -message done'));
     await writeTestFile(join(base, 'settings.local.json'), hook('ccstatusline --hook'));
-    const files = await createClaudeCodeGlobalCollector({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      customConfigDir: false,
-      findProgram: npmInfo,
-      // A second settings file the data file does not list (yet).
-      globalFiles: ['settings.json', 'settings.local.json'],
-    }).collect({ kind: 'global' }, { includeMemory: false });
+    // A second settings file the data file does not list (yet).
+    const files = await collectWith(npmInfo, ['settings.json', 'settings.local.json']);
     expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
       programs: [
         { command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } },
         { command: 'terminal-notifier', npm: { package: 'terminal-notifier', version: '2.2.22' } },
       ],
     });
+  });
+});
+
+describe('global collector: claude.ai skills (T42)', () => {
+  it('the global collector adds them only when asked', async () => {
+    await syncedSetup();
+    await writeTestFile(join(base, 'CLAUDE.md'), 'Notes');
+    const global = collector();
+    const plain = await global.collect({ kind: 'global' }, { includeMemory: false });
+    expect(
+      plain.some(
+        (file) => file.path.includes('synced') || file.path.startsWith(ACCOUNT_SKILLS_PREFIX),
+      ),
+    ).toBe(false);
+    const withSkills = await global.collect(
+      { kind: 'global' },
+      { includeMemory: false, include: new Set(['account-skills']) },
+    );
+    expect(withSkills.filter((file) => file.path.startsWith(ACCOUNT_SKILLS_PREFIX))).toHaveLength(
+      2,
+    );
+    expect(withSkills.some((file) => file.path.startsWith('skills/synced'))).toBe(false);
   });
 });

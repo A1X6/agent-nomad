@@ -2,7 +2,13 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { base, home, useProjectFolders } from './claude-code-project-fixtures.ts';
+import {
+  base,
+  home,
+  synced,
+  syncedSetup,
+  useProjectFolders,
+} from './claude-code-project-fixtures.ts';
 import {
   collected,
   readText,
@@ -15,7 +21,6 @@ import {
   ACCOUNT_SKILLS_PREFIX,
   collectAccountSkills,
   createClaudeCodeAfterRestore,
-  createClaudeCodeGlobalCollector,
   createClaudeCodeRestorer,
   createFileGatherer,
   pathsOf,
@@ -27,62 +32,6 @@ import {
 } from '../src/index.ts';
 
 useProjectFolders('agentnomad-account-skills-');
-
-const ACCOUNT = '00000000-0000-4000-8000-000000000000_11111111-1111-4111-8111-111111111111';
-
-const synced = (...parts: string[]) => join(base, 'skills', 'synced', ACCOUNT, ...parts);
-
-/** A synced folder as Claude Code 2.1.283 writes it: the user's skill, Anthropic's, an organization's. */
-async function syncedSetup(): Promise<void> {
-  await writeTestFile(join(base, 'skills', 'synced', `.bucket-${ACCOUNT}`), '');
-  await writeTestFile(synced('.last-complete-round'), '1');
-  await writeTestFile(synced('.staging', 'tmp'), 'partial');
-  await writeTestFile(
-    synced('manifest.json'),
-    JSON.stringify({
-      lastUpdated: 1,
-      skills: [
-        {
-          skillId: 'skill_01',
-          name: 'my-skill',
-          description: 'd',
-          source: 'plugin',
-          updatedAt: 't',
-          creatorType: 'user',
-        },
-        {
-          skillId: 'pdf',
-          name: 'pdf',
-          description: 'd',
-          source: 'anthropic',
-          updatedAt: 't',
-          creatorType: 'anthropic',
-        },
-        {
-          skillId: 'skill_02',
-          name: 'team-skill',
-          description: 'd',
-          source: 'org',
-          updatedAt: 't',
-          creatorType: 'organization',
-        },
-        {
-          skillId: 'skill_03',
-          name: 'synced',
-          description: 'd',
-          source: 'plugin',
-          updatedAt: 't',
-          creatorType: 'user',
-        },
-      ],
-    }),
-  );
-  await writeTestFile(synced('my-skill', 'SKILL.md'), '---\nname: my-skill\n---\nDo my thing.\n');
-  await writeTestFile(synced('my-skill', 'reference', 'notes.md'), 'Notes.\n');
-  await writeTestFile(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic PDF skill.\n');
-  await writeTestFile(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nOrg only.\n');
-  await writeTestFile(synced('synced', 'SKILL.md'), 'reserved name');
-}
 
 describe('claude.ai skills (T42): reading and saving', () => {
   it("finds only the user's own synced skills; every synced name is known", async () => {
@@ -124,31 +73,6 @@ describe('claude.ai skills (T42): reading and saving', () => {
     const found = await readSyncedSkills(pathsOf(process.platform), base);
     expect(found.own).toEqual([]);
     expect(found.problem).toContain('in a format agentnomad does not know');
-  });
-
-  it('the global collector adds them only when asked', async () => {
-    await syncedSetup();
-    await writeTestFile(join(base, 'CLAUDE.md'), 'Notes');
-    const collector = createClaudeCodeGlobalCollector({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      customConfigDir: false,
-    });
-    const plain = await collector.collect({ kind: 'global' }, { includeMemory: false });
-    expect(
-      plain.some(
-        (file) => file.path.includes('synced') || file.path.startsWith(ACCOUNT_SKILLS_PREFIX),
-      ),
-    ).toBe(false);
-    const withSkills = await collector.collect(
-      { kind: 'global' },
-      { includeMemory: false, include: new Set(['account-skills']) },
-    );
-    expect(withSkills.filter((file) => file.path.startsWith(ACCOUNT_SKILLS_PREFIX))).toHaveLength(
-      2,
-    );
-    expect(withSkills.some((file) => file.path.startsWith('skills/synced'))).toBe(false);
   });
 });
 

@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  base,
-  fileManagedSettings,
-  pluginProject,
-  realisticPlugins,
-  root,
-  usePluginFolders,
-} from './claude-code-plugin-fixtures.ts';
+import { fileManagedSettings, realisticPlugins } from './claude-code-plugin-fixtures.ts';
+import { base, home, project, useProjectFolders } from './claude-code-project-fixtures.ts';
 import { recordingReporter, scriptedPrompter } from './fakes.ts';
 import {
   askPluginSync,
@@ -21,7 +15,7 @@ import {
   type ProgramCli,
 } from '../src/index.ts';
 
-usePluginFolders('agentnomad-plugin-sync-');
+useProjectFolders('agentnomad-plugin-sync-');
 
 const savedManifest: PluginManifest = {
   marketplaces: [
@@ -188,8 +182,8 @@ describe('plugin reinstall on pull', () => {
   });
 
   it('reads what this PC already has', async () => {
-    await realisticPlugins(root);
-    const current = await readCurrentPlugins(base, process.platform, pluginProject());
+    await realisticPlugins(home, project);
+    const current = await readCurrentPlugins(base, process.platform, project);
     expect(current.marketplaces.has('brag')).toBe(true);
     expect(current.installed.has('brag@brag|user')).toBe(true);
     expect(current.installed.has('team-lint@company|project')).toBe(true);

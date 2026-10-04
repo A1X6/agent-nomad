@@ -12,20 +12,14 @@ import {
   readPluginManifest,
 } from '../src/index.ts';
 
-import {
-  base,
-  pluginProject,
-  putJson,
-  realisticPlugins,
-  root,
-  usePluginFolders,
-} from './claude-code-plugin-fixtures.ts';
+import { putJson, realisticPlugins } from './claude-code-plugin-fixtures.ts';
+import { base, home, project, useProjectFolders } from './claude-code-project-fixtures.ts';
 
-usePluginFolders('agentnomad-plugins-');
+useProjectFolders('agentnomad-plugins-');
 
 describe('plugin list on push', () => {
   it('saves user plugins with addable marketplaces, and says what was left out', async () => {
-    await realisticPlugins(root);
+    await realisticPlugins(home, project);
     const manifest = await readPluginManifest({
       baseDir: base,
       platform: process.platform,
@@ -55,11 +49,11 @@ describe('plugin list on push', () => {
   });
 
   it('a project push saves only that project’s plugins', async () => {
-    await realisticPlugins(root);
+    await realisticPlugins(home, project);
     const manifest = await readPluginManifest({
       baseDir: base,
       platform: process.platform,
-      scope: { kind: 'project', projectDir: pluginProject() },
+      scope: { kind: 'project', projectDir: project },
     });
     expect(manifest?.plugins).toEqual([
       { id: 'team-lint@company', scope: 'project', commandSource: false },
@@ -78,10 +72,10 @@ describe('plugin list on push', () => {
   });
 
   it('the global collector adds .agentnomad/plugins.json, which restore never writes', async () => {
-    await realisticPlugins(root);
+    await realisticPlugins(home, project);
     const files = await createClaudeCodeGlobalCollector({
       baseDir: base,
-      homedir: root,
+      homedir: home,
       platform: process.platform,
       customConfigDir: false,
     }).collect({ kind: 'global' }, { includeMemory: false });
@@ -193,14 +187,14 @@ describe('push saves only what pull accepts (BUG-01)', () => {
 describe('one reader of installed_plugins.json (BUG-03)', () => {
   it('counts a project install whose path is written another way as installed', async () => {
     await putJson(join(base, 'plugins', 'installed_plugins.json'), {
-      plugins: { 'lint@company': [{ scope: 'project', projectPath: `${pluginProject()}${sep}` }] },
+      plugins: { 'lint@company': [{ scope: 'project', projectPath: `${project}${sep}` }] },
     });
-    const current = await readCurrentPlugins(base, process.platform, pluginProject());
+    const current = await readCurrentPlugins(base, process.platform, project);
     expect(current.installed.has('lint@company|project')).toBe(true);
     const saved = await readPluginManifest({
       baseDir: base,
       platform: process.platform,
-      scope: { kind: 'project', projectDir: pluginProject() },
+      scope: { kind: 'project', projectDir: project },
     });
     expect(saved?.skipped.map((entry) => entry.what)).toEqual(['lint@company']);
   });
@@ -208,10 +202,10 @@ describe('one reader of installed_plugins.json (BUG-03)', () => {
   it.runIf(process.platform === 'win32')('ignores the case of a Windows path', async () => {
     await putJson(join(base, 'plugins', 'installed_plugins.json'), {
       plugins: {
-        'lint@company': [{ scope: 'project', projectPath: pluginProject().toUpperCase() }],
+        'lint@company': [{ scope: 'project', projectPath: project.toUpperCase() }],
       },
     });
-    const current = await readCurrentPlugins(base, 'win32', pluginProject());
+    const current = await readCurrentPlugins(base, 'win32', project);
     expect(current.installed.has('lint@company|project')).toBe(true);
   });
 });
