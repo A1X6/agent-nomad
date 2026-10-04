@@ -114,6 +114,8 @@ function chosenFolderProblem(dir: string, input: AutoMemoryInput): string | null
 export async function findAutoMemory(input: AutoMemoryInput): Promise<AutoMemoryLocation> {
   const path = pathsOf(input.platform);
   const claudeDir = path.join(input.projectDir, '.claude');
+  // Named here on purpose, not taken from the settings lists (DUP-01): the order is Claude
+  // Code's documented precedence (local, then shared, then the user file).
   for (const file of ['settings.local.json', 'settings.json']) {
     const dir = await configuredDirectory(path.join(claudeDir, file), input);
     if (dir === null) continue;

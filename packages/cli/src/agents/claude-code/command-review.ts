@@ -12,7 +12,12 @@ import {
   hookItems,
   pathWords,
 } from './settings-commands.ts';
-import { HOME_SCRIPTS_PREFIX, isScript, TOOL_CONFIG_FILES } from './global-paths.ts';
+import {
+  GLOBAL_SETTINGS_FILES,
+  HOME_SCRIPTS_PREFIX,
+  isScript,
+  TOOL_CONFIG_FILES,
+} from './global-paths.ts';
 import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 
@@ -151,7 +156,10 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
   const permissions = Json.safeParse(json['permissions']);
   const mode = permissions.success ? permissions.data['defaultMode'] : undefined;
   const loosening = typeof mode === 'string' ? LOOSENING_MODES[mode] : undefined;
-  if (loosening !== undefined && (!loosening.userOnly || file.path === 'settings.json')) {
+  if (
+    loosening !== undefined &&
+    (!loosening.userOnly || GLOBAL_SETTINGS_FILES.includes(file.path))
+  ) {
     entries.push(
       entry(file.path, 'setting permissions.defaultMode', `${String(mode)} (${loosening.note})`),
     );

@@ -36,7 +36,7 @@ export interface CollectedFile {
 }
 
 export interface CollectOptions {
-  /** Include opt-in memory folders (subagent and auto memory). */
+  /** Include the agent's memory (what `memoryDescription` names). */
   readonly includeMemory: boolean;
   /** The adapter's optional parts (their `OptionalPart.id`) to include, e.g. `account-skills`. */
   readonly include?: ReadonlySet<string>;

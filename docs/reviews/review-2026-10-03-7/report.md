@@ -60,7 +60,7 @@ The code is in very good shape. All 15 findings of review 6 are fixed and each f
 
 ### SEC-01 · Low · The other-OS warning prints a hook command with its real line breaks
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:418-425`
+- [x] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:418-425`
 - **Problem:** The warning "This hook or status line came from `<os>` and will likely not run here: `<command>`" appends the command as it is in the bundle. Review 6 (SEC-02) put the path, the reason and the error message of the other restore warnings through `printableLine`; this one was left out. The reporter still escapes escape sequences (`printable`), but not line breaks.
 - **Why it matters:** A command in a bundle that holds a line break prints the rest on a new line, which can look like a separate message from agentnomad. Nothing runs and nothing is hidden from the review list (that list already uses `printableLine`), so this is cosmetic, but it is the same rule as review 5 SEC-03 and review 6 SEC-02.
 - **Fix:** `${printableLine(command)}` in that message, with a test first: a hook command with `\n` gives one warning line. `ARCHITECTURE.md` section 7 says the warning "shows the command as written"; add "with line breaks escaped".
@@ -71,7 +71,7 @@ The code is in very good shape. All 15 findings of review 6 are fixed and each f
 
 ### DUP-01 · Low · The project settings file names are written again outside the data file
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/project-paths.ts:14-18`, `packages/cli/src/agents/claude-code/env-files.ts:8`, `packages/cli/src/agents/claude-code/restorer.ts:416`
+- [x] **Where:** `packages/cli/src/agents/claude-code/project-paths.ts:14-18`, `packages/cli/src/agents/claude-code/env-files.ts:8`, `packages/cli/src/agents/claude-code/restorer.ts:416`
 - **Problem:** `PROJECT_SETTINGS_FILES` (added for review 6 DUP-01) is a new literal list, `['.claude/settings.json', '.claude/settings.local.json']`. The same two names are already in the data file (`claude-code-paths.data.ts`, `project.claudeFiles`), which the docs call "the only file to change". `env-files.ts` and `restorer.ts` also write `'settings.json'` for the global file as a literal.
 - **Why it matters:** If Claude Code adds or renames a settings file, the data file is changed and these lists are missed, so hooks in the new file would not get the other-OS warning or the `${VAR}` scan. Small, because both names are stable.
 - **Fix:** Build `PROJECT_SETTINGS_FILES` from the data file (filter `PROJECT_CLAUDE_FILES` for names starting with `settings`, with `.claude/` in front), or add a `settingsFiles` list to the data file's schema for both scopes and use it in all three places. A test: every settings file in the data file is in the list.
@@ -102,7 +102,7 @@ The code is in very good shape. All 15 findings of review 6 are fixed and each f
 
 ### READ-02 · Low · Claude Code wording in the generic adapter interface
 
-- [ ] **Where:** `packages/cli/src/agents/adapter.ts:39`
+- [x] **Where:** `packages/cli/src/agents/adapter.ts:39`
 - **Problem:** The comment on `includeMemory` says "(subagent and auto memory)". Those are Claude Code's two kinds of memory; `adapter.ts` is the interface every agent implements, and each adapter already names its own memory through `memoryDescription`.
 - **Why it matters:** The author of a second adapter reads this as part of the contract. Tiny.
 - **Fix:** "Include the agent's memory (what `memoryDescription` names)."
@@ -111,7 +111,7 @@ The code is in very good shape. All 15 findings of review 6 are fixed and each f
 
 ### READ-03 · Low · Two documents name different server composition roots
 
-- [ ] **Where:** `CONTRIBUTING.md:72-74`, `docs/ARCHITECTURE.md` section 12 and the server file reference
+- [x] **Where:** `CONTRIBUTING.md:72-74`, `docs/ARCHITECTURE.md` section 12 and the server file reference
 - **Problem:** `CONTRIBUTING.md` says the composition roots are `packages/cli/src/app.ts` and `packages/server/src/server.ts`. `ARCHITECTURE.md` says `server/src/api.ts` (`createApi`) is the composition root and "the only wiring", and that `server.ts` only reads the settings, opens the pool and calls it. The code matches `ARCHITECTURE.md`.
 - **Why it matters:** A contributor adding a server service would look in the wrong file first.
 - **Fix:** In `CONTRIBUTING.md`, name `packages/server/src/api.ts`.
