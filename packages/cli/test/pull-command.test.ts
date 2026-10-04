@@ -682,22 +682,6 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(await t.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(false);
   });
 
-  it('without a terminal, push finds a newer copy on the server before uploading (T46)', async () => {
-    const { server, a } = await pushedSetup();
-    const b = pc('desktop');
-    await pullOn(b, server, []).pull({ global: true, yes: true, allowCommands: true });
-    await pushFrom(a, server, [])({ global: true, yes: true, memory: false });
-    expect(revisionOn(server, GLOBAL_SCOPE_KEY)).toBe(2);
-    await expect(
-      pushFrom(b, server, [], { prompter: createNoTerminalPrompter() })({
-        global: true,
-        yes: false,
-        memory: false,
-      }),
-    ).rejects.toBeInstanceOf(AnswerNeededError);
-    expect(revisionOn(server, GLOBAL_SCOPE_KEY)).toBe(2);
-  });
-
   it('says so when nothing is saved', async () => {
     const t = pullOn(pc('desktop'), fakeBundleServer(), []);
     await t.pull(none);

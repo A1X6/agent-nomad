@@ -24,10 +24,12 @@ import {
 } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
+  AnswerNeededError,
   CLAUDE_ENV_REFERENCES,
   createAgentRegistry,
   createClaudeCodeAdapter,
   createLocalState,
+  createNoTerminalPrompter,
   createPushApplier,
   createPushCommand,
   createPushPlanner,
@@ -412,6 +414,24 @@ describe('agentnomad push', () => {
     expect(desktop.script.asked).toEqual([]);
     expect(desktop.lines.some((line) => line.includes('Run `agentnomad pull` first'))).toBe(true);
     expect((await received(server, { kind: 'global' })).revision).toBe(1);
+  });
+
+  it('without a terminal, push finds a newer copy on the server before uploading (T46)', async () => {
+    const server = fakeBundleServer();
+    await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
+    // The desktop pulled revision 1; then the laptop saved revision 2.
+    const desktop = setup([], { server, pc: 'desktop', prompter: createNoTerminalPrompter() });
+    await desktop.state.setRevision('claude-code', 'global', 1);
+    await setup([], { server, pc: 'laptop' }).command.push({
+      global: true,
+      yes: true,
+      memory: false,
+    });
+    expect((await received(server, { kind: 'global' })).revision).toBe(2);
+    await expect(
+      desktop.command.push({ global: true, yes: false, memory: false }),
+    ).rejects.toBeInstanceOf(AnswerNeededError);
+    expect((await received(server, { kind: 'global' })).revision).toBe(2);
   });
 
   it('replaces the newer copy when the user says yes, and remembers the new revision', async () => {
