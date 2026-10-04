@@ -1,6 +1,6 @@
 # File Ledger — Agent Nomad — 2026-10-04 (review 8)
 
-288 files, 39,268 lines, at `dev` `dc37930`. Verdicts: 275 clean, 13 minor, 0 needs work, 0 rewrite. Finding IDs refer to `report.md` in this folder.
+288 files, 39,268 lines, at `dev` `dc37930`. Verdicts at review time: 275 clean, 13 minor, 0 needs work, 0 rewrite. All 13 are `fixed` since T86 and T87 (test files renamed or added there are listed in the next review's ledger). Finding IDs refer to `report.md` in this folder.
 
 ## CLI: agent adapters (`packages/cli/src/agents`)
 
@@ -19,7 +19,7 @@ The adapter interface every agent implements, the registry, and the Claude Code 
 | `packages/cli/src/agents/claude-code/command-review.ts`         | 347   | Lists what runs programs in an incoming setup (hooks, settings, MCP servers, scripts, `!` Markdown) that is new or changed on this PC.              | clean   | —        |
 | `packages/cli/src/agents/claude-code/detector.ts`               | 91    | Finds the `claude` command, its version and Claude Code's base folder.                                                                              | clean   | —        |
 | `packages/cli/src/agents/claude-code/env-files.ts`              | 25    | Lists which Claude Code files can hold `${VAR}` references, and the variables Claude Code sets itself.                                              | clean   | —        |
-| `packages/cli/src/agents/claude-code/global-collector.ts`       | 193   | Collects the global setup: base-folder files and folders, hook scripts, tool settings, programs, `~/.claude.json` keys, plugins and account skills. | minor   | BUG-01   |
+| `packages/cli/src/agents/claude-code/global-collector.ts`       | 193   | Collects the global setup: base-folder files and folders, hook scripts, tool settings, programs, `~/.claude.json` keys, plugins and account skills. | fixed   | BUG-01   |
 | `packages/cli/src/agents/claude-code/global-paths.ts`           | 97    | Gives names and lookups to the data file's global lists, and defines the reserved bundle paths.                                                     | clean   | —        |
 | `packages/cli/src/agents/claude-code/hook-scripts.ts`           | 108   | Finds the scripts that global and project hooks run: what push collects and what pull allows back.                                                  | clean   | —        |
 | `packages/cli/src/agents/claude-code/managed-settings.ts`       | 226   | Detects organization-managed Claude Code settings per OS and words the notice and plugin-failure reasons.                                           | clean   | —        |
@@ -110,8 +110,8 @@ Unit and command tests for the CLI. They run against temporary folders and fake 
 
 | File                                                      | Lines | What it does                                                                                                                          | Verdict | Findings        |
 | --------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------- | ------- | --------------- |
-| `packages/cli/test/agent-boundary.test.ts`                | 342   | Runs push and pull end to end with a made-up second agent built only from the adapter interface.                                      | minor   | DUP-01          |
-| `packages/cli/test/auth-commands.test.ts`                 | 925   | Tests register, login, logout, account delete, the password policy and key wiping against an in-memory account server.                | minor   | DUP-01          |
+| `packages/cli/test/agent-boundary.test.ts`                | 342   | Runs push and pull end to end with a made-up second agent built only from the adapter interface.                                      | fixed   | DUP-01          |
+| `packages/cli/test/auth-commands.test.ts`                 | 925   | Tests register, login, logout, account delete, the password policy and key wiping against an in-memory account server.                | fixed   | DUP-01          |
 | `packages/cli/test/bin.test.ts`                           | 72    | Runs the real `agentnomad` entry file in a child process with a temp home, plus one clack-prompter check.                             | clean   | —               |
 | `packages/cli/test/claude-code-account-skills.test.ts`    | 324   | Tests reading, saving and restoring the user's claude.ai-synced skills.                                                               | clean   | —               |
 | `packages/cli/test/claude-code-adapter.test.ts`           | 180   | Tests the adapter's plan step that asks to close Claude Code before `~/.claude.json` changes.                                         | clean   | —               |
@@ -124,17 +124,17 @@ Unit and command tests for the CLI. They run against temporary folders and fake 
 | `packages/cli/test/claude-code-paths-data.test.ts`        | 45    | Tests the paths data file, the unknown-file check and the version-stamp notice.                                                       | clean   | —               |
 | `packages/cli/test/claude-code-plugins.test.ts`           | 220   | Tests the plugin manifest saved on push, its schema, and plugin reinstall on pull.                                                    | clean   | —               |
 | `packages/cli/test/claude-code-project-collector.test.ts` | 206   | Tests what the project collector takes, link and size rules, auto-memory location and command splitting.                              | clean   | —               |
-| `packages/cli/test/claude-code-restorer.test.ts`          | 996   | Tests the Claude Code restorer: refused paths, conflicts, backups, `~/.claude.json` merge, home files, line endings, Windows names    | minor   | DUP-01          |
+| `packages/cli/test/claude-code-restorer.test.ts`          | 996   | Tests the Claude Code restorer: refused paths, conflicts, backups, `~/.claude.json` merge, home files, line endings, Windows names    | fixed   | DUP-01          |
 | `packages/cli/test/env.test.ts`                           | 726   | Tests `${VAR}` scanning, saving values on push, shell profile and Windows env writers, restoring values on pull, and `agentnomad env` | clean   | —               |
 | `packages/cli/test/fakes.ts`                              | 350   | Shared test fakes: partial API client, in-memory secret store, scripted prompter, recording reporter, revision-checking bundle server | clean   | —               |
 | `packages/cli/test/fakes.test.ts`                         | 49    | Tests the shared test fakes that carry logic (the fake API and prompter).                                                             | clean   | —               |
 | `packages/cli/test/json.test.ts`                          | 29    | Tests `parseJsonWith` and `valueOrNull`                                                                                               | clean   | —               |
 | `packages/cli/test/local-state.test.ts`                   | 76    | Tests per-account revisions and unreadable state files in the local state store                                                       | clean   | —               |
-| `packages/cli/test/program.test.ts`                       | 420   | Tests the CLI parser: help, version, routing, flag mapping, refusals and exit codes                                                   | minor   | READ-01         |
-| `packages/cli/test/pull-command.test.ts`                  | 844   | End-to-end style tests of pull (push on one fake PC, pull on another), plan/apply split, and bundle listing                           | minor   | READ-01, DUP-01 |
-| `packages/cli/test/push-command.test.ts`                  | 662   | Tests push: encryption, project names, revisions, account skills, plan/apply split, data-key wiping                                   | minor   | DUP-01          |
+| `packages/cli/test/program.test.ts`                       | 420   | Tests the CLI parser: help, version, routing, flag mapping, refusals and exit codes                                                   | fixed   | READ-01         |
+| `packages/cli/test/pull-command.test.ts`                  | 844   | End-to-end style tests of pull (push on one fake PC, pull on another), plan/apply split, and bundle listing                           | fixed   | READ-01, DUP-01 |
+| `packages/cli/test/push-command.test.ts`                  | 662   | Tests push: encryption, project names, revisions, account skills, plan/apply split, data-key wiping                                   | fixed   | DUP-01          |
 | `packages/cli/test/secret-store.test.ts`                  | 316   | Tests the config folder, file store, keychain store, store selection and (opt-in) the real OS keychain                                | clean   | —               |
-| `packages/cli/test/setup-commands.test.ts`                | 248   | Tests `list`, `status`, `delete`, setup labels and time/size formatting                                                               | minor   | DUP-01          |
+| `packages/cli/test/setup-commands.test.ts`                | 248   | Tests `list`, `status`, `delete`, setup labels and time/size formatting                                                               | fixed   | DUP-01          |
 | `packages/cli/test/stub-restorer.ts`                      | 15    | A no-op restorer for tests about other parts                                                                                          | clean   | —               |
 | `packages/cli/test/system.test.ts`                        | 351   | Tests thin OS wrappers: program launching, process listing, icacls parsing, and the real programs on each OS                          | clean   | —               |
 | `packages/cli/test/ui.test.ts`                            | 48    | Tests the printable-text rules and the reporter output.                                                                               | clean   | —               |
@@ -191,7 +191,7 @@ Zod schemas, limits and byte-encoding helpers shared by the CLI and the server. 
 | `packages/contracts/src/encoding.ts`       | 35    | Base64, hex and byte-compare helpers on web-standard APIs; strict `fromHex`.                                   | clean   | —        |
 | `packages/contracts/src/index.ts`          | 7     | Re-exports the contracts package.                                                                              | clean   | —        |
 | `packages/contracts/src/primitives.ts`     | 48    | Schema building blocks: sized base64, SHA-256 hex, timestamps, one-line text.                                  | clean   | —        |
-| `packages/contracts/test/answers.test.ts`  | 214   | Proves the client schemas drop unknown fields at every level but keep every bound.                             | minor   | READ-01  |
+| `packages/contracts/test/answers.test.ts`  | 214   | Proves the client schemas drop unknown fields at every level but keep every bound.                             | fixed   | READ-01  |
 | `packages/contracts/test/api.test.ts`      | 287   | Tests the API schemas: sizes, KDF bounds, usernames, register/login, params, headers, list query.              | clean   | —        |
 | `packages/contracts/test/bundle.test.ts`   | 193   | Tests the bundle schema and NFC project-name rules.                                                            | clean   | —        |
 | `packages/contracts/test/encoding.test.ts` | 38    | Round trips and invalid-hex cases for the encoding helpers.                                                    | clean   | —        |
@@ -215,11 +215,11 @@ Encryption, key derivation, the bundle format, path rules and merge strategies. 
 | `packages/core/src/paths.ts`                  | 58    | The `PathResolver` interface, `{{HOME}}`, `PathError`, `sourceOsOf`.                                              | clean   | —        |
 | `packages/core/src/project-names.ts`          | 74    | Scope keys (keyed hash of a project name) and encrypted project names.                                            | clean   | —        |
 | `packages/core/src/sodium-crypto.ts`          | 128   | The crypto service on libsodium: Argon2id with wiping, key split, XChaCha20-Poly1305, BLAKE2b, SHA-256.           | clean   | —        |
-| `packages/core/test/bundle-codec.test.ts`     | 124   | Codec round trip, determinism, rejections and both bomb guards.                                                   | minor   | READ-01  |
-| `packages/core/test/crypto.test.ts`           | 234   | Key-derivation vector, NFC, wiping, sealing, tampering, key wrapping and context binding.                         | minor   | READ-01  |
+| `packages/core/test/bundle-codec.test.ts`     | 124   | Codec round trip, determinism, rejections and both bomb guards.                                                   | fixed   | READ-01  |
+| `packages/core/test/crypto.test.ts`           | 234   | Key-derivation vector, NFC, wiping, sealing, tampering, key wrapping and context binding.                         | fixed   | READ-01  |
 | `packages/core/test/interfaces.test.ts`       | 15    | Type-only checks of the core interfaces (`expectTypeOf`).                                                         | clean   | —        |
 | `packages/core/test/merge-strategies.test.ts` | 226   | The three strategies, unsafe numbers, BOM, `__proto__`, and strategy selection.                                   | clean   | —        |
-| `packages/core/test/paths.test.ts`            | 291   | Path conversion, Windows names, `{{HOME}}` rewriting on every OS pair, home checks.                               | minor   | READ-01  |
+| `packages/core/test/paths.test.ts`            | 291   | Path conversion, Windows names, `{{HOME}}` rewriting on every OS pair, home checks.                               | fixed   | READ-01  |
 | `packages/core/test/project-names.test.ts`    | 145   | Scope keys, NFC, case, and project-name encryption bound to agent and scope.                                      | clean   | —        |
 | `packages/core/tsconfig.json`                 | 15    | Build settings for core (no Node types), referencing contracts.                                                   | clean   | —        |
 
@@ -357,7 +357,7 @@ Architecture, roadmap, the agent guide, the threat model and earlier review repo
 | `docs/reviews/review-2026-10-03-5/report.md` | 691   | Review 5 report, all 57 findings ticked.                                                                                                            | clean   | —        |
 | `docs/reviews/review-2026-10-03.md`          | 361   | First review pass, all findings ticked. Historical record.                                                                                          | clean   | —        |
 | `docs/ROADMAP.md`                            | 159   | Stages: v1, more agents, data-only agents, claude.ai items, v2 conversion, later ideas.                                                             | clean   | —        |
-| `docs/security/threat-model.md`              | 158   | Threats, defences, tests, past security findings and accepted risks.                                                                                | minor   | READ-02  |
+| `docs/security/threat-model.md`              | 158   | Threats, defences, tests, past security findings and accepted risks.                                                                                | fixed   | READ-02  |
 | `docs/reviews/review-2026-10-03-6/files.md`  | 385   | The file ledger of review 6, with the verdicts set to `fixed` after T80 to T83.                                                                     | clean   | —        |
 | `docs/reviews/review-2026-10-03-6/report.md` | 260   | The report of review 6: 15 Low findings, all ticked.                                                                                                | clean   | —        |
 | `docs/reviews/review-2026-10-03-7/files.md`  | 407   | The file ledger of review 7, with the verdicts set to `fixed` after T84 and T85.                                                                    | clean   | —        |

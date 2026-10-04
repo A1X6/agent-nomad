@@ -54,7 +54,7 @@ The code is in good health. Every finding of review 7 is fixed and the fixes hol
 
 ### DUP-01 · Low · Test set-up written again where a shared helper exists
 
-- [ ] **Where:**
+- [x] **Where:**
   - `packages/cli/test/claude-code-restorer.test.ts:36-51` makes the same temporary root, home, `.claude` and project folders as `useProjectFolders` in `claude-code-project-fixtures.ts:22-34`.
   - `createLocalState({ path: join(dir, 'state.json'), server: 's', platform })` is written by hand in `agent-boundary.test.ts:202-206`, `auth-commands.test.ts:383-387` and `:818-822`, `pull-command.test.ts:111-116`, `:138-142` and `:785-790`; `localStateIn(dir)` in `fakes.ts:160-165` does exactly this.
   - `setup-commands.test.ts:52-58` builds by hand the adapter that `fakeAdapter('claude-code', 'Claude Code', …)` in `fakes.ts` gives.
@@ -69,7 +69,7 @@ The code is in good health. Every finding of review 7 is fixed and the fixes hol
 
 ### READ-01 · Low · The test-file rule is not applied in `core` and `contracts`
 
-- [ ] **Where:**
+- [x] **Where:**
   - `packages/core/test/bundle-codec.test.ts` tests `gzip-bundle-codec.ts`.
   - `packages/core/test/crypto.test.ts` tests `sodium-crypto.ts` and, at `:168-213`, `envelopes.ts`.
   - `packages/core/test/paths.test.ts` tests `path-resolver.ts`.
