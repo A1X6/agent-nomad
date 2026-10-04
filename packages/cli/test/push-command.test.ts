@@ -435,7 +435,7 @@ describe('agentnomad push', () => {
     expect(saved.revision).toBe(2);
     // Encrypted again for the revision it became, not the one first tried (T38).
     expect(saved.bundle.revision).toBe(2);
-    expect(await desktop.state.revisionOf('claude-code', 'global')).toBe(2);
+    expect(await desktop.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBe(2);
   });
 
   it('shows unknown-file and managed-settings notices, and offers env values', async () => {

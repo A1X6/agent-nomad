@@ -116,21 +116,47 @@ open, such as a chat or an option letter from a discussion.
   folder, the real keychain or the hosted API. The one exception, the real OS keychain test
   in `packages/cli/test/secret-store.test.ts`, runs only with `AGENTNOMAD_TEST_REAL_KEYCHAIN=1`,
   which CI sets on every OS.
-- Shared test fakes (secret store, scripted prompter, recording reporter, bundle server, a
-  typed partial API client, an env writer, an adapter that only detects, a local state in a
-  temporary folder, collected-file builders and readers, `writeTestFile` and the file readers
-  `readText`, `readJson` and `exists`) live in `packages/cli/test/fakes.ts`, which loads no
-  agent's adapter. So do the one temporary-folder hook of the CLI tests (`useTempDir`, or
-  `withTempDir` inside a single test; no test file calls `mkdtemp`) and the real crypto
-  service with a data key (`useDataKey`). The Claude Code tests share their temporary home
-  and project (`useProjectFolders` in `claude-code-project-fixtures.ts`, with a claude.ai
-  synced skills folder, the collectors and `collectSkipped`) and their plugin files
-  (`claude-code-plugin-fixtures.ts`) next to them. Core's and contracts' shared set-up is in
-  their `test/fixtures.ts`. The server's request builders (register, login, `putSetup`,
-  account delete, the `bearer` header), users, sessions, setup saves and a memory logger live
-  in `packages/server/test/support/fixtures.ts`; a fresh database or app for each test comes
-  from `useTestDatabase` (`support/database.ts`) or `useTestApp` (`support/app.ts`).
-  Use them instead of a new copy.
+- Shared test helpers live in these files. Use them instead of a new copy, and name a new
+  one here in the same change:
+  - `packages/cli/test/fakes.ts`, which loads no agent's adapter: the one temporary-folder
+    hook of the CLI tests (`useTempDir`, or `withTempDir` inside a single test; no test file
+    calls `mkdtemp`); the real crypto service with a data key (`useDataKey`, then `crypto`
+    and `dataKey`) and the real password checker (`useZxcvbnChecker`, then `zxcvbn`);
+    collected files (`collected`, `collectedJson`, `paths`, `text`); files on disk
+    (`writeTestFile`, `linkFolder`, `readText`, `readJson`, `exists`); a secret store
+    (`memorySecretStore`, `memorySecrets`), a scripted prompter (`scriptedPrompter`), a
+    recording reporter (`recordingReporter`), an env writer (`fakeEnvWriter`), a typed
+    partial API client (`fakeApi`), a bundle server (`fakeBundleServer`, read with
+    `storedOn` and `revisionOn`), a local state in a temporary folder (`localStateIn`), an
+    adapter that only detects (`fakeAdapter`, with `installedAgent` and `missingAgent`),
+    a password the policy accepts (`STRONG`) and a project folder nobody looks in (`CWD`).
+  - `packages/cli/test/claude-code-project-fixtures.ts`: the Claude Code tests' temporary
+    home and project (`useProjectFolders`, then `root`, `home`, `base` and `project`), the
+    collectors (`options`, `globalCollector`, `collect`, `collectSkipped`), the real adapter
+    (`claudeCodeAdapter`), settings with one Stop hook (`stopHook`), an auto memory folder
+    (`setMemoryDirectory`, `memoryDir`) and a claude.ai synced skills folder (`synced`,
+    `syncedSetup`).
+  - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
+    `putJson`, `realisticPlugins`) and managed settings (`fakeManagedSystem` with
+    `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`).
+  - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`
+    or `createTestDatabase` and `migrationsFolder` in `database.ts`; `useTestApp` or
+    `createTestApp`, `TEST_IP_HEADER` and `postJson` in `app.ts`). In `fixtures.ts`: values
+    (`b64`, `bytes`, `sha256Hex`, `scopeKeyOf`, `UNKNOWN_ID`, `authKey`), requests as the
+    CLI sends them (`registration`, `registerUser`, `registerForToken`, `preloginRequest`,
+    `loginRequest`, `putSetup`, `deleteAccountRequest`, the `bearer` header) and their
+    `errorCode`, users and sessions (`newUser`, `createUser`, `newSession`), setups
+    (`bundleRow`, `globalKey`, `metaWrite`, `seedSetups`) and `memoryLogger`.
+  - `packages/core/test/fixtures.ts`: `useDataKey`, then `crypto` and `dataKey`.
+  - `packages/contracts/test/fixtures.ts`: a session `token`, the `kdfParams` as the wire
+    carries them and a bundle list `summary`.
+- Use a named constant instead of its value: `GLOBAL_SCOPE_KEY`, `BUNDLE_FORMAT_VERSION`,
+  `AUTH_KEY_BYTES`, `KDF_SALT_BYTES`, `WRAPPED_DATA_KEY_BYTES` and `MAX_BUNDLE_BYTES`
+  (contracts); `AEAD_KEY_BYTES`, `DATA_KEY_BYTES`, `BACKUP_MARKER`, `INCOMING_MARKER` and
+  `HOME_PLACEHOLDER` (core); `SECRETS_FILE`, `STATE_FILE`, `TEMP_MARKER`,
+  `CLAUDE_JSON_BUNDLE_PATH`, `BLOCK_START` and `BLOCK_END` (the CLI). A value an assertion
+  compares against stays written out, and so do the header names, sizes and settings that
+  pin the API format in the contracts tests and the server's `support/fixtures.ts`.
 - A module's tests go in the test file named after it (see the file reference in
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), so they are found by name.
 - Anything that touches paths runs on macOS, Linux and Windows in CI; write it so it passes

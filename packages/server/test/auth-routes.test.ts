@@ -54,10 +54,7 @@ describe('every response', () => {
       headers: { origin: 'https://evil.example', 'access-control-request-method': 'POST' },
     });
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
-    const post = await t.app.request(
-      '/auth/prelogin',
-      postJson({ username: 'ahmed' }, { origin: 'https://evil.example' }),
-    );
+    const post = await preloginRequest(t.app, 'ahmed', { origin: 'https://evil.example' });
     expect(post.headers.get('access-control-allow-origin')).toBeNull();
   });
 

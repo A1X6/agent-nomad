@@ -391,11 +391,11 @@ describe('login', () => {
       await state.rememberProject(dir, 'my-app');
       await pc([]).logout();
       await pc(['alice', STRONG]).login(ASK);
-      expect(await state.revisionOf('claude-code', 'global')).toBe(7);
+      expect(await state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBe(7);
 
       await pc([]).logout();
       await pc(['bob', STRONG]).login(ASK);
-      expect(await state.revisionOf('claude-code', 'global')).toBeNull();
+      expect(await state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBeNull();
       expect(await state.projectNameFor(dir)).toBe('my-app');
 
       // Registering a new account is a change of account too.

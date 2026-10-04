@@ -1,18 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import { readDatabaseEnv, readServerEnv } from '../src/db/env.ts';
+import { b64, bytes } from './support/fixtures.ts';
 
 const DATABASE_URL = 'postgresql://user:secret@ep-example.eu-central-1.aws.neon.tech/neondb';
 
 describe('readServerEnv', () => {
   it('accepts a 32-byte base64 SERVER_SECRET', () => {
-    const SERVER_SECRET = Buffer.alloc(32, 1).toString('base64');
+    const SERVER_SECRET = b64(bytes(32, 1));
     expect(readServerEnv({ DATABASE_URL, SERVER_SECRET }).SERVER_SECRET).toBe(SERVER_SECRET);
   });
 
   it.each([
     ['missing', undefined],
-    ['too short', Buffer.alloc(16, 1).toString('base64')],
+    ['too short', b64(bytes(16, 1))],
     ['not base64', 'this is not base64!'],
   ])('rejects a SERVER_SECRET that is %s, without printing it', (_, SERVER_SECRET) => {
     expect(() => readServerEnv({ DATABASE_URL, SERVER_SECRET })).toThrow(/SERVER_SECRET/);

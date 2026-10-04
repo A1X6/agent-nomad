@@ -1,9 +1,9 @@
 import type { AgentId, ScopeKey } from '@agentnomad/contracts';
 
-import { DecryptionError, type Aead } from './crypto.ts';
+import { AEAD_KEY_BYTES, DecryptionError, type Aead } from './crypto.ts';
 
 /** The random key that encrypts every bundle. Only ever stored wrapped by the password key. */
-export const DATA_KEY_BYTES = 32;
+export const DATA_KEY_BYTES = AEAD_KEY_BYTES;
 
 /** What a bundle's encryption is bound to. Opening it under any other context fails. */
 export interface BundleContext {

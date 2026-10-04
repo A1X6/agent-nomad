@@ -52,7 +52,7 @@ describe('shared sizes', () => {
 
 describe('routes and headers', () => {
   it('builds bundle paths', () => {
-    expect(API_ROUTES.bundle('claude-code', 'global')).toBe('/bundles/claude-code/global');
+    expect(API_ROUTES.bundle('claude-code', GLOBAL_SCOPE_KEY)).toBe('/bundles/claude-code/global');
   });
 
   it('uses lowercase header names (fetch and Hono normalise to lowercase)', () => {
@@ -192,7 +192,7 @@ describe('bundles', () => {
     ).toBe(false);
     expect(
       ok(ListBundlesResponseSchema, {
-        items: [{ ...item, scopeKey: 'global', nameEnc: null }],
+        items: [{ ...item, scopeKey: GLOBAL_SCOPE_KEY, nameEnc: null }],
         nextCursor: 'c1',
       }),
     ).toBe(true);

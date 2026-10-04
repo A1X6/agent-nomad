@@ -12,6 +12,7 @@ import {
   createSecretStore,
   keychainAccount,
   osKeychain,
+  SECRETS_FILE,
   SecretsFileError,
   type KeychainEntry,
   type KeychainEntryFactory,
@@ -45,14 +46,14 @@ const noKeychain: KeychainEntryFactory = () => {
 };
 
 describe('file store', () => {
-  const path = () => join(dir, 'agentnomad', 'secrets.json');
+  const path = () => join(dir, 'agentnomad', SECRETS_FILE);
   const store = (server = SERVER) => createFileStore({ path: path(), server });
 
   /** A file store as on Windows, recording the files it gives only this user access to. */
   function windowsStore() {
     const restricted: string[] = [];
     const store = createFileStore({
-      path: join(dir, 'secrets.json'),
+      path: join(dir, SECRETS_FILE),
       server: SERVER,
       platform: 'win32',
       restrictAccess: (file) => {
@@ -180,7 +181,7 @@ describe('createSecretStore', () => {
   /** The plain-text file the store falls back to, read on its own. */
   const fileStore = () =>
     createFileStore({
-      path: join(configDir(input()), 'secrets.json'),
+      path: join(configDir(input()), SECRETS_FILE),
       server: SERVER,
       restrictAccess: () => Promise.resolve(),
     });
@@ -194,7 +195,7 @@ describe('createSecretStore', () => {
     const store = await createSecretStore({ ...input(), keychain: noKeychain });
     expect(store.backend).toBe('file');
     await store.setMany({ 'session-token': 'x' });
-    const file = join(configDir(input()), 'secrets.json');
+    const file = join(configDir(input()), SECRETS_FILE);
     expect(await readJson(file)).toMatchObject({
       servers: { [SERVER]: { 'session-token': 'x' } },
     });

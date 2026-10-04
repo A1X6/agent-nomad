@@ -19,6 +19,7 @@ import {
   CLAUDE_ENV_REFERENCES,
   BLOCK_START,
   chooseEnvValues,
+  CLAUDE_JSON_BUNDLE_PATH,
   createEnvCommand,
   createShellProfileWriter,
   createWindowsEnvWriter,
@@ -69,7 +70,7 @@ describe('finding ${VAR} references', () => {
   it('reads ~/.claude.json servers and settings, and knows variables settings set', () => {
     const scan = scanEnvReferences(
       [
-        collectedJson('.agentnomad/claude.json', {
+        collectedJson(CLAUDE_JSON_BUNDLE_PATH, {
           mcpServers: { notion: { env: { NOTION_KEY: '${NOTION_KEY}' } } },
         }),
         collectedJson('settings.json', {
@@ -145,8 +146,8 @@ describe('saving values on push (opt-in)', () => {
 describe('shell profile block', () => {
   it.each([
     ['a NUL byte', 'abc\u0000def'],
-    ['the block end marker', 'x\n# <<< agentnomad env <<<\necho hi'],
-    ['the block start marker', '# >>> agentnomad env >>>'],
+    ['the block end marker', `x\n${BLOCK_END}\necho hi`],
+    ['the block start marker', BLOCK_START],
   ])('refuses a saved value with %s (T38)', (_, value) => {
     expect(EnvSectionSchema.safeParse({ variables: { TOKEN: value } }).success).toBe(false);
   });
@@ -622,7 +623,7 @@ describe('agentnomad env', () => {
         list: () => [
           adapter(
             [
-              collectedJson('.agentnomad/claude.json', {
+              collectedJson(CLAUDE_JSON_BUNDLE_PATH, {
                 mcpServers: { github: { env: { T: '${GITHUB_TOKEN}' } } },
               }),
             ],

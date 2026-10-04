@@ -30,6 +30,9 @@ export interface PasswordKdf {
   deriveKeys(password: string, salt: Uint8Array, params: KdfParams): Promise<DerivedKeys>;
 }
 
+/** Size of every key `Aead` takes: XChaCha20-Poly1305 uses 256-bit keys. */
+export const AEAD_KEY_BYTES = 32;
+
 /**
  * Authenticated encryption (XChaCha20-Poly1305 in T08). Used for bundles, project names
  * and wrapping the data key with the password key.

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   collected,
+  paths,
   readJson,
   readText,
   recordingReporter,
@@ -15,6 +16,7 @@ import { fakeManagedSystem } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import {
   AnswerNeededError,
+  CLAUDE_JSON_BUNDLE_PATH,
   createNoTerminalPrompter,
   type ConflictChoice,
   type Prompter,
@@ -30,7 +32,7 @@ useTempDir('agentnomad-adapter-plan-', (dir) => (home = dir));
 const answer = (choice: ConflictChoice) => () => Promise.resolve(choice);
 
 describe('Claude Code plan step: closing Claude Code before ~/.claude.json changes (T61)', () => {
-  const incoming = collected('.agentnomad/claude.json', '{"diffTool":"terminal"}');
+  const incoming = collected(CLAUDE_JSON_BUNDLE_PATH, '{"diffTool":"terminal"}');
   const noManagedSettings = fakeManagedSystem({ platform: 'linux' });
   const QUESTION =
     'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.';
@@ -47,7 +49,7 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
       return adapter.planRestore({
         target: { kind: 'global' },
         files: [incoming],
-        conflicts: new Map([['.agentnomad/claude.json', 'merge']]),
+        conflicts: new Map([[CLAUDE_JSON_BUNDLE_PATH, 'merge']]),
         conflictAnswer: undefined,
         prompter: prompter ?? script.prompter,
         reporter,
@@ -98,7 +100,7 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     expect(t.asked).toEqual([]);
     await writeTestFile(join(home, '.claude.json'), '{}');
     const declined = planStep([true], []);
-    await declined.plan({ conflicts: new Map([['.agentnomad/claude.json', 'skip']]) });
+    await declined.plan({ conflicts: new Map([[CLAUDE_JSON_BUNDLE_PATH, 'skip']]) });
     expect(declined.asked).toEqual([]);
   });
 
@@ -133,8 +135,8 @@ describe('Claude Code adapter', () => {
       { kind: 'project', projectDir: project },
       { includeMemory: false },
     );
-    expect(global.map((file) => file.path)).toEqual(['CLAUDE.md']);
-    expect(local.map((file) => file.path)).toEqual(['CLAUDE.md']);
+    expect(paths(global)).toEqual(['CLAUDE.md']);
+    expect(paths(local)).toEqual(['CLAUDE.md']);
     expect(new TextDecoder().decode(local[0]?.content)).toBe('project rules');
 
     const other = join(home, 'other-app');

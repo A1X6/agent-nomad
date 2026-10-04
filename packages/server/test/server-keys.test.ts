@@ -2,17 +2,18 @@ import { AUTH_KEY_BYTES } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { createServerKeys } from '../src/auth/server-keys.ts';
+import { bytes } from './support/fixtures.ts';
 
-const secret = new Uint8Array(32).fill(1);
-const otherSecret = new Uint8Array(32).fill(9);
-const authKey = new Uint8Array(AUTH_KEY_BYTES).fill(2);
+const secret = bytes(32, 1);
+const otherSecret = bytes(32, 9);
+const authKey = bytes(AUTH_KEY_BYTES, 2);
 
 describe('ServerKeys', () => {
   it('verifies an auth key against its own hash only', async () => {
     const keys = await createServerKeys(secret);
     const stored = await keys.hashAuthKey(authKey);
     expect(await keys.verifyAuthKey(authKey, stored)).toBe(true);
-    expect(await keys.verifyAuthKey(new Uint8Array(AUTH_KEY_BYTES).fill(3), stored)).toBe(false);
+    expect(await keys.verifyAuthKey(bytes(AUTH_KEY_BYTES, 3), stored)).toBe(false);
   });
 
   it('rejects a changed, empty or unknown-format stored hash', async () => {
