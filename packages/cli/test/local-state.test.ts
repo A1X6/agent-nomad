@@ -1,12 +1,12 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { ProjectNameSchema } from '@agentnomad/contracts';
+import { GLOBAL_SCOPE_KEY, ProjectNameSchema } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 
 import { CWD, localStateIn, readText, useTempDir } from './fakes.ts';
-import { createLocalState, type LocalState } from '../src/index.ts';
+import type { LocalState } from '../src/index.ts';
 
 let dir: string;
 let state: LocalState;
@@ -17,12 +17,12 @@ useTempDir('agentnomad-state-', (temp) => {
 
 describe('the revisions this PC knows belong to one account (T56)', () => {
   it('another account, or none stored, starts with no revisions but keeps project names', async () => {
-    await state.setRevision('claude-code', 'global', 7, { partial: true });
+    await state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 7, { partial: true });
     await state.rememberProject(CWD, 'my-app');
     // A state.json from before T56 knows no account: its revisions are not trusted.
     await state.useAccount('alice');
     expect(await state.knownRevisions()).toEqual({});
-    await state.setRevision('claude-code', 'global', 7, { partial: true });
+    await state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 7, { partial: true });
 
     await state.useAccount('alice');
     expect(await state.revisionOf('claude-code', 'global')).toBe(7);
@@ -37,7 +37,7 @@ describe('the revisions this PC knows belong to one account (T56)', () => {
   it('an older agentnomad still reads the file, and the account never shows as a project', async () => {
     await state.useAccount('alice');
     await state.rememberProject(CWD, 'my-app');
-    await state.setRevision('claude-code', 'global', 2);
+    await state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 2);
     // The state.json schema of agentnomad 1.0.3, which refuses unknown keys.
     const server = z.strictObject({
       projects: z.record(z.string(), ProjectNameSchema),
@@ -55,7 +55,7 @@ describe('a local state file that cannot be read (BUG-06)', () => {
     // A folder where the file should be: reading it fails with something other than ENOENT.
     const path = join(dir, 'unreadable.json');
     await mkdir(path);
-    const unreadable = createLocalState({ path, server: 's', platform: process.platform });
+    const unreadable = localStateIn(dir, 'unreadable.json');
     await expect(unreadable.projectNameFor(CWD)).rejects.toThrow(
       `Could not read agentnomad's local state file ${path}`,
     );

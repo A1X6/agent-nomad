@@ -1,5 +1,6 @@
 import {
   DEFAULT_KDF_PARAMS,
+  GLOBAL_SCOPE_KEY,
   KDF_SALT_BYTES,
   type KdfParams,
   type LoginRequest,
@@ -386,7 +387,7 @@ describe('login', () => {
         setup(answers, { server, secrets, localState: state }).commands;
 
       await pc(['alice', STRONG]).login(ASK);
-      await state.setRevision('claude-code', 'global', 7);
+      await state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 7);
       await state.rememberProject(dir, 'my-app');
       await pc([]).logout();
       await pc(['alice', STRONG]).login(ASK);
@@ -398,7 +399,7 @@ describe('login', () => {
       expect(await state.projectNameFor(dir)).toBe('my-app');
 
       // Registering a new account is a change of account too.
-      await state.setRevision('claude-code', 'global', 2);
+      await state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 2);
       await pc([]).logout();
       await pc(registerAnswers('carol')).register(ASK);
       expect(await state.knownRevisions()).toEqual({});
@@ -829,7 +830,7 @@ describe('agentnomad account delete, logged in with a local state', () => {
   }
 
   it('asks for the username and password, deletes, and cleans up this PC', async () => {
-    await state.setRevision('claude-code', 'global', 3);
+    await state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 3);
     const t = account(['ahmed', STRONG], () => Promise.resolve());
     await t.run({ yes: true, passwordStdin: false });
     expect(t.asked).toEqual(['Type your username to confirm', 'Password']);

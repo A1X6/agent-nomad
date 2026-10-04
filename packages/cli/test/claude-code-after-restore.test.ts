@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { noManagedSettings as noPolicy } from './claude-code-plugin-fixtures.ts';
 import { collected, collectedJson, recordingReporter, scriptedPrompter } from './fakes.ts';
 
 import {
@@ -18,16 +19,14 @@ const blockedByPolicy: ManagedSettings = {
   restrictsPlugins: true,
   restrictsMcpServers: false,
 };
-const noPolicy: ManagedSettings = {
-  sources: [],
-  keys: [],
-  restrictsPlugins: false,
-  restrictsMcpServers: false,
-};
 
 /** A saved `.agentnomad/plugins.json` with these marketplaces and plugins. */
 const savedPlugins = (marketplaces: object[], plugins: object[]) =>
   collectedJson('.agentnomad/plugins.json', { marketplaces, plugins, skipped: [] });
+
+/** A saved `.agentnomad/programs.json` with these programs. */
+const savedPrograms = (programs: object[]) =>
+  collectedJson('.agentnomad/programs.json', { programs });
 
 /** brag@brag, a user plugin whose marketplace builds it without running a command. */
 const brag = { id: 'brag@brag', scope: 'user', commandSource: false };
@@ -83,12 +82,10 @@ function recordingCli() {
   return { cli, runs };
 }
 
-const programs = collectedJson('.agentnomad/programs.json', {
-  programs: [
-    { command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } },
-    { command: 'terminal-notifier', npm: null },
-  ],
-});
+const programs = savedPrograms([
+  { command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } },
+  { command: 'terminal-notifier', npm: null },
+]);
 
 describe('after a Claude Code restore', () => {
   it('offers to install a missing npm program, and names the others', async () => {
@@ -143,9 +140,7 @@ describe('after a Claude Code restore', () => {
     'refuses a programs file that could smuggle arguments: %s',
     async (pkg) => {
       const { cli, runs } = recordingCli();
-      const bad = collectedJson('.agentnomad/programs.json', {
-        programs: [{ command: 'x', npm: { package: pkg, version: '1.0.0' } }],
-      });
+      const bad = savedPrograms([{ command: 'x', npm: { package: pkg, version: '1.0.0' } }]);
       await afterRestore({ system: system(['/usr/bin/npm']), cli })(context([bad]).ctx);
       expect(runs).toEqual([]);
     },
@@ -248,12 +243,10 @@ describe('pull says when saved plugins or programs cannot be read (BUG-01)', () 
 
   it('offers the other programs and names one it refuses', async () => {
     const { cli, runs } = recordingCli();
-    const saved = collectedJson('.agentnomad/programs.json', {
-      programs: [
-        { command: '_tool', npm: null },
-        { command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } },
-      ],
-    });
+    const saved = savedPrograms([
+      { command: '_tool', npm: null },
+      { command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } },
+    ]);
     const t = context([saved]);
     await afterRestore({ system: system(['/usr/bin/npm']), cli })(t.ctx);
     expect(runs).toEqual(['/usr/bin/npm install -g ccstatusline@2.2.22']);

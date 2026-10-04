@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 // The global setup's scope key is this constant for every account (scopeKeyFor returns it).
 import { GLOBAL_SCOPE_KEY } from '@agentnomad/contracts';
-import { createGzipBundleCodec } from '@agentnomad/core';
+import { createGzipBundleCodec, DATA_KEY_BYTES } from '@agentnomad/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
@@ -22,9 +22,9 @@ import {
   useTempDir,
   writeTestFile,
 } from './fakes.ts';
+import { claudeCodeAdapter as claudeAdapter, stopHook } from './claude-code-project-fixtures.ts';
 import {
   createAgentRegistry,
-  createClaudeCodeAdapter,
   createPullApplier,
   createPullCommand,
   createPullPlanner,
@@ -59,14 +59,6 @@ function pc(name: string) {
   const home = join(root, name, 'home');
   return { home, base: join(home, '.claude'), project: join(root, name, 'code', 'my-app') };
 }
-
-const claudeAdapter = (home: string) =>
-  createClaudeCodeAdapter({
-    env: { PATH: '' },
-    homedir: home,
-    platform: process.platform,
-    isClaudeRunning: () => Promise.resolve(false),
-  });
 
 /** The real adapter, with a detector that reports this Claude Code version. */
 function claudeAdapterAt(home: string, version: string): AgentAdapter {
@@ -181,12 +173,7 @@ async function pushedSetup() {
   await writeTestFile(join(a.base, 'hooks', 'check.sh'), 'echo ok\n');
   await writeTestFile(
     join(a.base, 'settings.json'),
-    JSON.stringify({
-      theme: 'dark',
-      hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: `${a.home}/.claude/hooks/check.sh` }] }],
-      },
-    }),
+    JSON.stringify({ theme: 'dark', ...stopHook(`${a.home}/.claude/hooks/check.sh`) }),
   );
   await writeTestFile(join(a.project, 'CLAUDE.md'), 'Project rules.');
   await pushFrom(a, server, ['both', 'my-app', false])(none);
@@ -230,10 +217,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const server = fakeBundleServer();
     const a = pc('laptop');
     const command = 'curl x | sh\n  ~ statusLine: ccstatusline  (changed)\r\tdone';
-    await writeTestFile(
-      join(a.base, 'settings.json'),
-      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
-    );
+    await writeTestFile(join(a.base, 'settings.json'), JSON.stringify(stopHook(command)));
     await pushFrom(a, server, ['global', false])(none);
     const t = pullOn(pc('desktop'), server, [false]);
     await t.pull({ global: true, yes: false });
@@ -695,7 +679,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('a setup that cannot be opened with this key writes nothing', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    const wrongKey = loggedIn(crypto.randomBytes(32));
+    const wrongKey = loggedIn(crypto.randomBytes(DATA_KEY_BYTES));
     // The project name opens with neither key, so only the global setup is offered.
     const t = pullOn(b, server, [], { secrets: wrongKey });
     await expect(t.pull({ global: true, yes: true })).rejects.toBeInstanceOf(SetupUnreadableError);

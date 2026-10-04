@@ -11,16 +11,13 @@ import {
   options,
   project,
   root,
+  setMemoryDirectory,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
 import { paths, text, writeTestFile } from './fakes.ts';
 import { findAutoMemory, projectDirName, repositoryRoot } from '../src/index.ts';
 
 useProjectFolders('agentnomad-auto-memory-');
-
-/** Writes `settingsFile` with autoMemoryDirectory set to `dir`. */
-const setMemoryDirectory = (settingsFile: string, dir: string) =>
-  writeTestFile(settingsFile, JSON.stringify({ autoMemoryDirectory: dir }));
 
 /** Moves the project's auto memory to ~/notes/my-app-memory (local settings); returns it. */
 async function notesMemory(): Promise<string> {

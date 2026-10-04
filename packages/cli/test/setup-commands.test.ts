@@ -1,4 +1,4 @@
-import type { BundleSummary } from '@agentnomad/contracts';
+import { BUNDLE_FORMAT_VERSION, GLOBAL_SCOPE_KEY, type BundleSummary } from '@agentnomad/contracts';
 import { encryptProjectName, scopeKeyFor } from '@agentnomad/core';
 import { describe, expect, it } from 'vitest';
 
@@ -50,32 +50,23 @@ function fakeServer() {
     ).toString('base64');
     return { scopeKey, nameEnc };
   };
+  const saved = (
+    where: { scopeKey: string; nameEnc: string | null },
+    revision: number,
+    sizeBytes: number,
+    updatedAt: string,
+  ): BundleSummary => ({
+    agent: 'claude-code',
+    ...where,
+    revision,
+    formatVersion: BUNDLE_FORMAT_VERSION,
+    sizeBytes,
+    updatedAt,
+  });
   const items: BundleSummary[] = [
-    {
-      agent: 'claude-code',
-      scopeKey: 'global',
-      nameEnc: null,
-      revision: 3,
-      formatVersion: 1,
-      sizeBytes: 5120,
-      updatedAt: '2026-09-25T10:00:00Z',
-    },
-    {
-      agent: 'claude-code',
-      ...project('my-app'),
-      revision: 5,
-      formatVersion: 1,
-      sizeBytes: 3000,
-      updatedAt: '2026-09-24T09:00:00Z',
-    },
-    {
-      agent: 'claude-code',
-      ...project('website'),
-      revision: 1,
-      formatVersion: 1,
-      sizeBytes: 900,
-      updatedAt: '2026-09-10T09:00:00Z',
-    },
+    saved({ scopeKey: GLOBAL_SCOPE_KEY, nameEnc: null }, 3, 5120, '2026-09-25T10:00:00Z'),
+    saved(project('my-app'), 5, 3000, '2026-09-24T09:00:00Z'),
+    saved(project('website'), 1, 900, '2026-09-10T09:00:00Z'),
   ];
   const deleted: string[] = [];
   const api = fakeApi({
@@ -145,7 +136,7 @@ describe('agentnomad list', () => {
 describe('agentnomad status', () => {
   it('compares this PC’s revisions with the server', async () => {
     const server = fakeServer();
-    await state.setRevision('claude-code', 'global', 3);
+    await state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 3);
     await state.setRevision('claude-code', server.keyOf('my-app'), 2);
     await state.setRevision('claude-code', 'f'.repeat(64), 4);
     await state.rememberProject(CWD, 'my-app');

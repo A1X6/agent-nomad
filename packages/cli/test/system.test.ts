@@ -220,6 +220,13 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
   // A space in the folder name, as in "C:\Program Files".
   useTempDir('agentnomad system-', (temp) => (dir = temp));
 
+  /** A `secret.json` holding `{}` in the test's folder. */
+  async function secretFile(): Promise<string> {
+    const file = join(dir, 'secret.json');
+    await writeFile(file, '{}');
+    return file;
+  }
+
   it.runIf(win32)(
     'createProgramCli runs a real .cmd launcher and passes its arguments',
     async () => {
@@ -290,8 +297,7 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
   });
 
   it.runIf(win32)('windowsOwnerOnly leaves only the current user on a temp file', async () => {
-    const file = join(dir, 'secret.json');
-    await writeFile(file, '{}');
+    const file = await secretFile();
     const icacls = (args: string[]) => promisify(execFile)('icacls', args, { encoding: 'utf8' });
     // What a GitHub runner's elevated account leaves on a new file: SYSTEM and
     // Administrators by name, not inherited.
@@ -305,16 +311,14 @@ describe('the real programs (run on this OS)', { timeout: 30_000 }, () => {
   });
 
   it.runIf(win32)('windowsOwnerOnly finds its tools through the injected SystemRoot', async () => {
-    const file = join(dir, 'secret.json');
-    await writeFile(file, '{}');
+    const file = await secretFile();
     await expect(
       windowsOwnerOnly({ SystemRoot: join(dir, 'no-windows-here') })(file),
     ).rejects.toThrow(/whoami\.exe failed/);
   });
 
   it.runIf(posix)('windowsOwnerOnly fails where there are no Windows tools', async () => {
-    const file = join(dir, 'secret.json');
-    await writeFile(file, '{}');
+    const file = await secretFile();
     await expect(windowsOwnerOnly(process.env)(file)).rejects.toThrow(/whoami\.exe failed/);
   });
 

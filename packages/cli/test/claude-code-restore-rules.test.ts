@@ -9,6 +9,8 @@ import {
   projectDestination,
 } from '../src/index.ts';
 
+import { stopHook } from './claude-code-project-fixtures.ts';
+
 // The rules read no file, so these folders need not exist.
 const home = resolve('/home/a');
 const base = join(home, '.claude');
@@ -56,9 +58,7 @@ describe('restore rules: refuses what a collector never produces', () => {
 
   it('global: a hook naming an autostart file does not make it restorable (T43)', () => {
     const startup = 'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/a.cmd';
-    const settings = JSON.stringify({
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: `~/${startup}` }] }] },
-    });
+    const settings = JSON.stringify(stopHook(`~/${startup}`));
     expect(hookScripts(settings, context)).toEqual([]);
     expect(
       globalDestination(`.agentnomad/home/${startup}`, new Set([`.agentnomad/home/${startup}`])),
@@ -68,7 +68,7 @@ describe('restore rules: refuses what a collector never produces', () => {
   it('global: a home script is restored only when a hook or the status line runs it', () => {
     const settings = JSON.stringify({
       statusLine: { type: 'command', command: '~/scripts/statusline.sh' },
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'bash $HOME/tools/stop.sh' }] }] },
+      ...stopHook('bash $HOME/tools/stop.sh'),
     });
     const scripts = scriptsRunBy(settings);
     expect(scripts).toEqual(

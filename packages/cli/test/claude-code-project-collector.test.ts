@@ -1,4 +1,4 @@
-import { mkdir, symlink } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ import {
   root,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
-import { paths, text, writeTestFile } from './fakes.ts';
+import { linkFolder, paths, text, writeTestFile } from './fakes.ts';
 import { createClaudeCodeProjectCollector } from '../src/index.ts';
 
 useProjectFolders('agentnomad-project-');
@@ -139,14 +139,15 @@ describe('project collector: what is taken', () => {
 });
 
 describe('project collector: links and size (T45)', () => {
-  /** A folder link; a junction on Windows, which needs no admin rights. */
-  const linkFolder = (target: string, path: string) =>
-    symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir');
+  /** Links the folder `target` into the project's skills as `name`. */
+  async function linkSkill(target: string, name = 'x'): Promise<void> {
+    await mkdir(join(project, '.claude', 'skills'), { recursive: true });
+    await linkFolder(target, join(project, '.claude', 'skills', name));
+  }
 
   it('never follows a link to a folder for keys outside the project, and says why', async () => {
     await writeTestFile(join(home, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
-    await mkdir(join(project, '.claude', 'skills'), { recursive: true });
-    await linkFolder(join(home, '.ssh'), join(project, '.claude', 'skills', 'x'));
+    await linkSkill(join(home, '.ssh'));
     const { found, skipped } = await collectSkipped(createClaudeCodeProjectCollector(options()));
     expect(paths(found).filter((path) => path.includes('skills'))).toEqual([]);
     expect(skipped).toEqual(['.claude/skills/x: it links to a place outside the project']);
@@ -155,8 +156,7 @@ describe('project collector: links and size (T45)', () => {
   it('never follows a link into a folder for keys inside the project (a project at home)', async () => {
     // The project is the home folder, so its .ssh is inside the project: the keys rule decides.
     await writeTestFile(join(project, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
-    await mkdir(join(project, '.claude', 'skills'), { recursive: true });
-    await linkFolder(join(project, '.ssh'), join(project, '.claude', 'skills', 'x'));
+    await linkSkill(join(project, '.ssh'));
     const { found, skipped } = await collectSkipped(
       createClaudeCodeProjectCollector({ ...options(), homedir: project }),
     );
@@ -166,18 +166,13 @@ describe('project collector: links and size (T45)', () => {
 
   it('never follows a link out of the project', async () => {
     await writeTestFile(join(root, 'elsewhere', 'SKILL.md'), 'not this project');
-    await mkdir(join(project, '.claude', 'skills'), { recursive: true });
-    await linkFolder(join(root, 'elsewhere'), join(project, '.claude', 'skills', 'x'));
+    await linkSkill(join(root, 'elsewhere'));
     expect(paths(await collect()).filter((path) => path.includes('skills'))).toEqual([]);
   });
 
   it('follows a link that stays inside the project', async () => {
     await writeTestFile(join(project, 'shared', 'review', 'SKILL.md'), 'review');
-    await mkdir(join(project, '.claude', 'skills'), { recursive: true });
-    await linkFolder(
-      join(project, 'shared', 'review'),
-      join(project, '.claude', 'skills', 'review'),
-    );
+    await linkSkill(join(project, 'shared', 'review'), 'review');
     expect(text(await collect(), '.claude/skills/review/SKILL.md')).toBe('review');
   });
 

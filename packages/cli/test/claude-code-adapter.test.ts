@@ -11,12 +11,12 @@ import {
   useTempDir,
   writeTestFile,
 } from './fakes.ts';
+import { fakeManagedSystem } from './claude-code-plugin-fixtures.ts';
+import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import {
   AnswerNeededError,
-  createClaudeCodeAdapter,
   createNoTerminalPrompter,
   type ConflictChoice,
-  type ManagedSettingsSystem,
   type Prompter,
   type RestorePlanContext,
 } from '../src/index.ts';
@@ -31,25 +31,14 @@ const answer = (choice: ConflictChoice) => () => Promise.resolve(choice);
 
 describe('Claude Code plan step: closing Claude Code before ~/.claude.json changes (T61)', () => {
   const incoming = collected('.agentnomad/claude.json', '{"diffTool":"terminal"}');
-  const noManagedSettings: ManagedSettingsSystem = {
-    platform: 'linux',
-    env: {},
-    baseDir: '/nowhere',
-    readText: () => Promise.resolve(null),
-    exists: () => Promise.resolve(false),
-    listDir: () => Promise.resolve([]),
-    readRegistry: () => Promise.resolve(null),
-  };
+  const noManagedSettings = fakeManagedSystem({ platform: 'linux' });
   const QUESTION =
     'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.';
 
   function planStep(running: boolean[], answers: string[], prompter?: Prompter) {
     const script = scriptedPrompter(answers);
     const { reporter } = recordingReporter({ levels: false });
-    const adapter = createClaudeCodeAdapter({
-      env: { PATH: '' },
-      homedir: home,
-      platform: process.platform,
+    const adapter = claudeCodeAdapter(home, {
       isClaudeRunning: () => Promise.resolve(running.shift() ?? false),
       managedSystem: noManagedSettings,
     });
@@ -122,13 +111,7 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
 });
 
 describe('Claude Code adapter', () => {
-  const adapter = (env: Record<string, string> = { PATH: '' }) =>
-    createClaudeCodeAdapter({
-      env,
-      homedir: home,
-      platform: process.platform,
-      isClaudeRunning: () => Promise.resolve(false),
-    });
+  const adapter = (env: Record<string, string> = { PATH: '' }) => claudeCodeAdapter(home, { env });
 
   it('is registered as claude-code / Claude Code', () => {
     expect(adapter()).toMatchObject({ id: 'claude-code', displayName: 'Claude Code' });

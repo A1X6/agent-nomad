@@ -4,7 +4,7 @@ import {
   type BundleSummary,
 } from '@agentnomad/contracts';
 import { createSodiumCryptoService, DATA_KEY_BYTES, type CryptoService } from '@agentnomad/core';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeAll, beforeEach } from 'vitest';
@@ -115,6 +115,10 @@ export async function writeTestFile(
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content);
 }
+
+/** Links the folder `target` at `path`: a junction on Windows, which needs no admin rights. */
+export const linkFolder = (target: string, path: string): Promise<void> =>
+  symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir');
 
 /** A file's text (UTF-8). */
 export const readText = (path: string): Promise<string> => readFile(path, 'utf8');
