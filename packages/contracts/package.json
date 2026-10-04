@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "tsc --build",
-    "test": "vitest run"
+    "test": "vitest run --root ../.. --project @agentnomad/contracts"
   },
   "dependencies": {
     "zod": "4.6.5"

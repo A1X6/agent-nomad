@@ -57,8 +57,8 @@ export interface CredentialOptions extends ConfirmOptions {
 }
 
 /**
- * What each command does (T20 routes to these). Commands are built in later tasks and plugged
- * in here, so parsing and help never depend on how a command works.
+ * What each command does (T20 routes to these). The handlers are plugged in here, so parsing
+ * and help never depend on how a command works.
  */
 export interface CommandHandlers {
   register(options: CredentialOptions): Promise<void>;
