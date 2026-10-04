@@ -5,6 +5,7 @@ import {
   API_ROUTES,
   AUTH_KEY_BYTES,
   BundleParamsSchema,
+  ClientVersionSchema,
   DEFAULT_KDF_PARAMS,
   DeleteAccountRequestSchema,
   ErrorResponseSchema,
@@ -62,6 +63,21 @@ describe('routes and headers', () => {
 
   it('uses lowercase header names (fetch and Hono normalise to lowercase)', () => {
     for (const name of Object.values(API_HEADERS)) expect(name).toBe(name.toLowerCase());
+  });
+});
+
+describe('client version header (ARCH-03)', () => {
+  it('is x-an-client', () => {
+    expect(API_HEADERS.client).toBe('x-an-client');
+  });
+
+  it('accepts release versions and refuses anything else', () => {
+    for (const version of ['1.0.3', '1.10.0', '2.0.0-beta.1']) {
+      expect(ClientVersionSchema.safeParse(version).success).toBe(true);
+    }
+    for (const version of ['', '1.0', 'v1.0.3', '1.0.3\nforged', '1.0.3 ' + 'x'.repeat(100)]) {
+      expect(ClientVersionSchema.safeParse(version).success).toBe(false);
+    }
   });
 });
 

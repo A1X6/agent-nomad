@@ -5,6 +5,7 @@ import { RATE_LIMITS } from '../src/rate-limit/rate-limiter.ts';
 import { TEST_IP_HEADER, createTestApp, postJson, type TestApp } from './support/app.ts';
 import {
   b64,
+  bearer,
   bytes,
   deleteAccountRequest,
   errorCode,
@@ -171,7 +172,7 @@ describe('logging', () => {
     const token = await registerToken('ahmed');
     await login('ahmed', goodKey);
     await t.app.request('/bundles?cursor=secret-cursor', {
-      headers: { authorization: `Bearer ${token}` },
+      headers: bearer(token),
     });
     const everything = JSON.stringify(t.logs);
     expect(everything).not.toContain(token);

@@ -93,11 +93,12 @@ When testing by hand, use a temporary home folder (set `HOME` and, on Windows,
   typed partial API client, an env writer, an adapter that only detects, a local state in a
   temporary folder, collected-file builders and readers, `writeTestFile` and the file readers
   `readText`, `readJson` and `exists`) live in `packages/cli/test/fakes.ts`, which loads no
-  agent's adapter. The Claude Code tests share their temporary project
-  (`claude-code-project-fixtures.ts`) and plugin files (`claude-code-plugin-fixtures.ts`)
-  next to them. The server's request builders (register, login, `putSetup`, account delete),
-  setup saves and a memory logger live in `packages/server/test/support/fixtures.ts`. Use
-  them instead of a new copy.
+  agent's adapter. The Claude Code tests share their temporary home and project
+  (`useProjectFolders` in `claude-code-project-fixtures.ts`, with a claude.ai synced skills
+  folder) and their plugin files (`claude-code-plugin-fixtures.ts`) next to them. The
+  server's request builders (register, login, `putSetup`, account delete, the `bearer`
+  header), setup saves and a memory logger live in `packages/server/test/support/fixtures.ts`.
+  Use them instead of a new copy.
 - A module's tests go in the test file named after it (see the file reference in
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), so they are found by name.
 - Anything that touches paths runs on macOS, Linux and Windows in CI; write it so it passes

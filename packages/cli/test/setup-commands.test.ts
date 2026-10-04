@@ -13,20 +13,19 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   CWD,
+  fakeAdapter,
   fakeApi,
   localStateIn,
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
 } from './fakes.ts';
-import { stubRestorer } from './stub-restorer.ts';
 
 import {
   createAgentRegistry,
   createSetupCommands,
   NotLoggedInError,
   timeAgo,
-  type AgentAdapter,
   type LocalState,
 } from '../src/index.ts';
 
@@ -49,13 +48,11 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-const claude: AgentAdapter = {
-  id: 'claude-code',
-  displayName: 'Claude Code',
-  detector: { detect: () => Promise.resolve({ installed: true, baseDir: null, version: null }) },
-  collector: { collect: () => Promise.resolve([]) },
-  restorer: stubRestorer(),
-};
+const claude = fakeAdapter('claude-code', 'Claude Code', {
+  installed: true,
+  baseDir: null,
+  version: null,
+});
 
 /** A server holding a global setup and two projects. */
 function fakeServer() {

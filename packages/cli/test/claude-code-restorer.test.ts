@@ -1,20 +1,9 @@
-import {
-  chmod,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, lstat, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
+import { base, home, project, root, useProjectFolders } from './claude-code-project-fixtures.ts';
 import { collected, readJson, readText, writeTestFile } from './fakes.ts';
 import {
   createClaudeCodeGlobalCollector,
@@ -33,22 +22,7 @@ const posix = process.platform !== 'win32';
 const NOW = new Date('2026-09-25T12:00:00.000Z');
 const STAMP = '20260925T120000Z';
 
-let root: string;
-let home: string;
-let base: string;
-let project: string;
-
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'agentnomad-restore-'));
-  home = join(root, 'home');
-  base = join(home, '.claude');
-  project = join(root, 'work', 'my-app');
-  await mkdir(base, { recursive: true });
-  await mkdir(project, { recursive: true });
-});
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
-});
+useProjectFolders('agentnomad-restore-');
 
 interface Setup {
   running?: boolean[];

@@ -5,7 +5,6 @@ import {
   mkdir,
   mkdtemp,
   readdir,
-  readFile,
   rm,
   stat,
   symlink,
@@ -16,7 +15,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { collected, collectedJson, fakeEnvWriter, recordingReporter } from './fakes.ts';
+import { collected, collectedJson, fakeEnvWriter, readText, recordingReporter } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
   isRedirectVariable,
@@ -242,7 +241,7 @@ describe('writing the profile', () => {
       } finally {
         await chmod(profile, 0o600);
       }
-      expect(await readFile(profile, 'utf8')).toBe(PROFILE);
+      expect(await readText(profile)).toBe(PROFILE);
       expect(await readdir(dir)).toEqual(['.bashrc']);
     },
   );
@@ -257,7 +256,7 @@ describe('writing the profile', () => {
       TOKEN: 'abc',
     });
     expect((await lstat(profile)).isSymbolicLink()).toBe(true);
-    expect(await readFile(real, 'utf8')).toContain("export TOKEN='abc'");
+    expect(await readText(real)).toContain("export TOKEN='abc'");
   });
 
   it.runIf(posix)('a new profile is readable only by this user (T46)', async () => {
@@ -277,8 +276,8 @@ describe('writing the profile', () => {
     );
     const { backup } = await writer.write({ TOKEN: 'abc' });
     expect(backup).toBe(`${profile}.agentnomad-backup-20260925T120000Z`);
-    expect(await readFile(backup ?? '', 'utf8')).toBe('alias ll="ls -l"\n');
-    expect(await readFile(profile, 'utf8')).toContain("export TOKEN='abc'");
+    expect(await readText(backup ?? '')).toBe('alias ll="ls -l"\n');
+    expect(await readText(profile)).toContain("export TOKEN='abc'");
   });
 
   it('two writes in the same second keep both backups (review 6 BUG-01)', async () => {
@@ -293,8 +292,8 @@ describe('writing the profile', () => {
     expect(first.backup).toBe(`${profile}.agentnomad-backup-20260925T120000Z`);
     expect(second.backup).toBe(`${profile}.agentnomad-backup-20260925T120000Z-2`);
     // The first backup still holds the profile as it was before agentnomad touched it.
-    expect(await readFile(first.backup ?? '', 'utf8')).toBe('alias ll="ls -l"\n');
-    expect(await readFile(second.backup ?? '', 'utf8')).toContain("export TOKEN='abc'");
+    expect(await readText(first.backup ?? '')).toBe('alias ll="ls -l"\n');
+    expect(await readText(second.backup ?? '')).toContain("export TOKEN='abc'");
   });
 
   it.runIf(posix)('a new shell really gets the value (second machine)', async () => {
@@ -320,10 +319,10 @@ describe('writing the profile', () => {
     expect(await writer.current(['TOKEN'])).toEqual(new Map());
     expect((await writer.write({ TOKEN: 'abc', OTHER: 'x' })).backup).not.toBeNull();
     expect(await writer.current(['TOKEN', 'MISSING'])).toEqual(new Map([['TOKEN', 'abc']]));
-    const before = await readFile(profile, 'utf8');
+    const before = await readText(profile);
     const modified = (await stat(profile)).mtimeMs;
     expect(await writer.write({ TOKEN: 'abc' })).toEqual({ backup: null });
-    expect(await readFile(profile, 'utf8')).toBe(before);
+    expect(await readText(profile)).toBe(before);
     expect((await stat(profile)).mtimeMs).toBe(modified);
     expect((await readdir(dir)).filter((name) => name.includes('backup'))).toHaveLength(1);
     // A changed value is still written, after a backup.

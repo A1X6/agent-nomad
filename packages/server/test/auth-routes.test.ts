@@ -9,7 +9,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SESSION_LIFETIME_MS } from '../src/auth/auth-service.ts';
 import { createTestApp, postJson, type TestApp } from './support/app.ts';
-import { b64, bytes, errorCode, registerForToken, registration } from './support/fixtures.ts';
+import {
+  b64,
+  bearer,
+  bytes,
+  errorCode,
+  registerForToken,
+  registration,
+} from './support/fixtures.ts';
 
 const realKdf: KdfParams = { ...DEFAULT_KDF_PARAMS, memoryKiB: 131_072 };
 const authKey = b64(bytes(32, 1));
@@ -27,8 +34,6 @@ afterEach(async () => {
 });
 
 const register = (username = 'ahmed') => registerForToken(t.app, username, { kdfParams: realKdf });
-
-const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
 describe('every response', () => {
   it('health check answers ok', async () => {
@@ -91,7 +96,7 @@ describe('POST /auth/prelogin', () => {
   });
 
   it('bases fake salts on the server secret, so outsiders cannot compute them', async () => {
-    const other = await createTestApp(new Uint8Array(32).fill(7));
+    const other = await createTestApp(bytes(32, 7));
     const ask = async (app: TestApp) =>
       PreloginResponseSchema.parse(
         await (await app.app.request('/auth/prelogin', postJson({ username: 'ghost' }))).json(),

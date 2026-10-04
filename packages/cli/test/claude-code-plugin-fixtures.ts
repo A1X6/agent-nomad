@@ -7,13 +7,12 @@ import type { ManagedSettings } from '../src/index.ts';
 
 export const putJson = (path: string, value: unknown) => writeTestFile(path, JSON.stringify(value));
 
-/** The project the plugin manifests below install into. */
-export const pluginProjectIn = (root: string) => join(root, 'work', 'app');
-
-/** Manifests shaped like a real ~/.claude/plugins folder, in `<root>/.claude`. */
-export async function realisticPlugins(root: string): Promise<void> {
-  const base = join(root, '.claude');
-  const project = () => pluginProjectIn(root);
+/**
+ * Manifests shaped like a real ~/.claude/plugins folder, in `<home>/.claude`, with the project
+ * plugins installed in `project`.
+ */
+export async function realisticPlugins(home: string, project: string): Promise<void> {
+  const base = join(home, '.claude');
   const install = (scope: string, extra: object = {}) => [
     { scope, installPath: 'x', version: '1.0.0', installedAt: '2026-09-21T00:00:00Z', ...extra },
   ];
@@ -23,8 +22,8 @@ export async function realisticPlugins(root: string): Promise<void> {
       'brag@brag': install('user'),
       'warp@claude-code-warp': install('user'),
       'mine@local-tools': install('user'),
-      'team-lint@company': install('project', { projectPath: project() }),
-      'other@company': install('project', { projectPath: join(root, 'elsewhere') }),
+      'team-lint@company': install('project', { projectPath: project }),
+      'other@company': install('project', { projectPath: join(home, 'elsewhere') }),
       'builder@company': install('user'),
       'notes@claudeai-organization-library': install('user'),
       'gone@deleted-market': install('user'),

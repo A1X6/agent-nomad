@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, readdir, readFile, rm, stat, writeFile, chmod } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat, writeFile, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { readJson } from './fakes.ts';
 import {
   configDir,
   createFileStore,
@@ -117,7 +118,7 @@ describe('file store', () => {
 
   it('stores readable JSON with one section per server', async () => {
     await store().setMany({ 'data-key': 'k' });
-    expect(JSON.parse(await readFile(path(), 'utf8'))).toEqual({
+    expect(await readJson(path())).toEqual({
       version: 1,
       servers: { [SERVER]: { 'data-key': 'k' } },
     });
@@ -196,7 +197,7 @@ describe('createSecretStore', () => {
     expect(store.backend).toBe('file');
     await store.setMany({ 'session-token': 'x' });
     const file = join(configDir(input()), 'secrets.json');
-    expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({
+    expect(await readJson(file)).toMatchObject({
       servers: { [SERVER]: { 'session-token': 'x' } },
     });
   });

@@ -2,7 +2,12 @@ import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { globalDestination, hookScripts, projectDestination } from '../src/index.ts';
+import {
+  ACCOUNT_SKILLS_PREFIX,
+  globalDestination,
+  hookScripts,
+  projectDestination,
+} from '../src/index.ts';
 
 // The rules read no file, so these folders need not exist.
 const home = resolve('/home/a');
@@ -147,6 +152,14 @@ describe('server-managed settings (claude.ai admin console)', () => {
     expect(globalDestination('remote-settings.json', new Set())).toEqual({
       kind: 'refused',
       reason: 'never synced',
+    });
+  });
+});
+
+describe('claude.ai skills (T42)', () => {
+  it("restore never writes them directly: they are left to pull's follow-up", () => {
+    expect(globalDestination(`${ACCOUNT_SKILLS_PREFIX}my-skill/SKILL.md`, new Set())).toEqual({
+      kind: 'metadata',
     });
   });
 });

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { createApp, createAppRegistry } from '../src/app.ts';
+import { createAppRegistry } from '../src/app.ts';
 import type { CommandHandlers } from '../src/cli/commands.ts';
 import type { PartFlags } from '../src/cli/program.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
@@ -14,7 +14,6 @@ import { formatSize } from '../src/ui/format-size.ts';
 import { AnswerNeededError } from '../src/ui/no-terminal-prompter.ts';
 import { PromptCancelledError } from '../src/ui/prompter.ts';
 import { CLI_VERSION } from '../src/version.ts';
-import { recordingReporter, scriptedPrompter } from './fakes.ts';
 
 interface Call {
   readonly command: string;
@@ -259,21 +258,6 @@ describe('routing and flags', () => {
     expect(messages[0]).toContain(
       '--account-skills or --no-account-skills, --prompts or --no-prompts, and --yes.',
     );
-  });
-
-  it('offers no part flags, and still runs, where the agents cannot be built (ARCH-02)', () => {
-    // A home folder of `/` makes the agents throw; only the commands that need them fail.
-    const { handlers, optionalParts } = createApp({
-      env: {},
-      platform: 'linux',
-      homedir: '/',
-      hostname: 'pc',
-      cwd: '/',
-      prompter: scriptedPrompter([]).prompter,
-      reporter: recordingReporter().reporter,
-    });
-    expect(optionalParts).toEqual([]);
-    expect(Object.keys(handlers)).toContain('login');
   });
 
   it('passes --merge to pull as the conflict choice', async () => {

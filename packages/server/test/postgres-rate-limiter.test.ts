@@ -4,6 +4,7 @@ import { createServerKeys } from '../src/auth/server-keys.ts';
 import { createPostgresRateLimiter } from '../src/rate-limit/postgres-rate-limiter.ts';
 import type { RateLimiter, RateLimitRule } from '../src/rate-limit/rate-limiter.ts';
 import { createTestDatabase, type TestDatabase } from './support/database.ts';
+import { bytes } from './support/fixtures.ts';
 
 const rule: RateLimitRule = { name: 'test', limit: 3, windowSeconds: 60 };
 
@@ -18,7 +19,7 @@ beforeEach(async () => {
   database = await createTestDatabase();
   limiter = createPostgresRateLimiter({
     db: database.db,
-    keys: await createServerKeys(new Uint8Array(32).fill(1)),
+    keys: await createServerKeys(bytes(32, 1)),
     shouldPrune: () => prune,
     alsoPrune: () => {
       alsoPruned++;

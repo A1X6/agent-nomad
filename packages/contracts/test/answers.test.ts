@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type * as z from 'zod';
 
 import {
-  API_HEADERS,
   ClientAnswerSchemas,
-  ClientVersionSchema,
   ErrorResponseSchema,
   HealthResponseSchema,
   ListBundlesResponseSchema,
@@ -195,20 +193,5 @@ describe('ClientAnswerSchemas: the CLI accepts answers with fields it does not k
     };
     for (const [name, schema] of Object.entries(ClientAnswerSchemas)) walk(schema, name);
     expect(strictPaths).toEqual([]);
-  });
-});
-
-describe('client version header (ARCH-03)', () => {
-  it('is x-an-client', () => {
-    expect(API_HEADERS.client).toBe('x-an-client');
-  });
-
-  it('accepts release versions and refuses anything else', () => {
-    for (const version of ['1.0.3', '1.10.0', '2.0.0-beta.1']) {
-      expect(ClientVersionSchema.safeParse(version).success).toBe(true);
-    }
-    for (const version of ['', '1.0', 'v1.0.3', '1.0.3\nforged', '1.0.3 ' + 'x'.repeat(100)]) {
-      expect(ClientVersionSchema.safeParse(version).success).toBe(false);
-    }
   });
 });
