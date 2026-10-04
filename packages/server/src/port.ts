@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 
 /** Render's default when PORT is not set. */
 const DEFAULT_PORT = 10_000;

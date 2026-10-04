@@ -1,5 +1,5 @@
 import { validator } from 'hono/validator';
-import type { z } from 'zod';
+import type * as z from 'zod';
 
 import { ApiError } from './errors.ts';
 
