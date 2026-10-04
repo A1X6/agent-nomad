@@ -36,7 +36,7 @@ Both are Low; neither blocks a release. In order of value: DUP-01, READ-01.
 
 ### DUP-01 · Low · Tests write out what a shared helper or named constant already provides
 
-- [ ] **Where:**
+- [x] **Where:**
   - The `stopHook(command)` helper (`packages/cli/test/claude-code-project-fixtures.ts:77`) builds settings with one Stop hook. Written out instead in `packages/cli/test/claude-code-command-review.test.ts:115`, `:131`, `:141`, `:383` (the file imports `stopHook` and uses it at `:356`) and `packages/cli/test/claude-code-restorer.test.ts:443-446` (imports it, uses it at `:136`).
   - `packages/cli/test/http-api-client.test.ts:165` filters the calls by hand although `fakeServer` returns `apiCalls()` for that (`:117`).
   - The global scope key is passed as the quoted `'global'` where `GLOBAL_SCOPE_KEY` exists and the lines next to it use it: `packages/cli/test/local-state.test.ts:28`, `:29`, `:32`, `:33`; `packages/cli/test/auth-commands.test.ts:394`, `:398`; `packages/cli/test/push-command.test.ts:438`; `packages/cli/test/agent-boundary.test.ts:268`, `:286`; `packages/contracts/test/api.test.ts:195`.
@@ -50,7 +50,7 @@ Both are Low; neither blocks a release. In order of value: DUP-01, READ-01.
 
 ### READ-01 · Low · Two key sizes in core are written with the name of another key
 
-- [ ] **Where:** `packages/core/src/sodium-crypto.ts:59`, `:71`, `:87`; `packages/core/test/envelopes.test.ts:24`, `:31`, `:32`
+- [x] **Where:** `packages/core/src/sodium-crypto.ts:59`, `:71`, `:87`; `packages/core/test/envelopes.test.ts:24`, `:31`, `:32`
 - **Problem:** `deriveKeys` sizes the password key with `AUTH_KEY_BYTES` (`:59`), and `seal` and `open` check every key they get against `DATA_KEY_BYTES` (`:71`, `:87`), also when the key is the password key that wraps the data key. All three are 32 bytes, so the code is correct, but there is no name for "the size of an encryption key", and the tests write `32` for the password key.
 - **Why it matters:** A reader of `deriveKeys` or `seal` sees a size named after a different key and has to work out that the names are borrowed. The constants are part of the stored key format, so they cannot change, but the borrowed names hide which size each line really means.
 - **Fix:** One named constant in core for the XChaCha20-Poly1305 key size (for example `AEAD_KEY_BYTES = 32`), used for the password key in `deriveKeys`, for the key check in `seal` and `open`, and to define `DATA_KEY_BYTES`. Use it in `envelopes.test.ts` for the password keys. No value changes; the reference vector in `sodium-crypto.test.ts` proves it.
