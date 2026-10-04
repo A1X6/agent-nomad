@@ -19,7 +19,7 @@ Argon2id benchmark (64 MiB, 3 passes, 1 lane, 32-byte key, Node 24.16, Windows x
 | @noble/hashes + @noble/ciphers 2.4.0 | 577 ms        | XChaCha20-Poly1305                              | 0                  | 1.3 MB       | yes     | Pure TypeScript, audited by an independent firm per README, very widely used. Argon2 in pure JS is ~4x slower.                                                                   |
 | hash-wasm 4.12.0 + WebCrypto         | 133 ms        | AES-256-GCM (WebCrypto)                         | 0                  | 2.0 MB       | yes     | Two sources to combine; last release 2024-11-19.                                                                                                                                 |
 
-**Recommendation: libsodium-wrappers-sumo 0.8.4.** It matches the PRD ("one library, WASM preferred over native builds"), works on Node 22 and 24 alike, keeps `core` free of Node APIs, and XChaCha20's 192-bit nonce makes random nonces safe without counting messages. **Runner-up:** Node built-in, if we are willing to require Node 24.7+.
+**Recommendation: libsodium-wrappers-sumo 0.8.4.** It matches what was decided for v1 (one library, WASM preferred over native builds), works on Node 22 and 24 alike, keeps `core` free of Node APIs, and XChaCha20's 192-bit nonce makes random nonces safe without counting messages. **Runner-up:** Node built-in, if we are willing to require Node 24.7+.
 
 Parameter note for T08: keep Argon2id **parallelism = 1** (libsodium's only mode) so every implementation above can reproduce the same key.
 
@@ -53,7 +53,7 @@ Parameter note for T08: keep Argon2id **parallelism = 1** (libsodium's only mode
 | cross-keychain       | 1.1.0   | 2025-10-07   | 42 K             | Small user base.                                                                                                                                                         |
 | keytar               | 7.9.0   | 2022-02-17   | 2.2 M            | **Archived** on GitHub (atom/node-keytar). Rejected.                                                                                                                     |
 
-**Recommendation: @napi-rs/keyring 2.1.0**, with one rule for T22: on Linux, pin the store to `secret-service`. Its automatic fallback is the kernel keyring, which is in memory only and is lost on reboot. When Secret Service is missing (servers, WSL, SSH), use the PRD's user-only file fallback instead.
+**Recommendation: @napi-rs/keyring 2.1.0**, with one rule for T22: on Linux, pin the store to `secret-service`. Its automatic fallback is the kernel keyring, which is in memory only and is lost on reboot. When Secret Service is missing (servers, WSL, SSH), fall back to a file only the user can read (`secrets.json` in the config folder, `packages/cli/src/secrets/file-store.ts`).
 
 ## Pinning
 
