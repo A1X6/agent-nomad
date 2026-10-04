@@ -1,5 +1,5 @@
 import { fromHex } from '@agentnomad/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   StorageLimitError,
@@ -10,17 +10,22 @@ import { createBundleRepository } from '../src/db/bundle-repository.ts';
 import type { BundleRepository } from '../src/db/repositories.ts';
 import type { BlobStore } from '../src/storage/blob-store.ts';
 import { createPostgresBlobStore } from '../src/storage/postgres-blob-store.ts';
-import { createTestDatabase, type TestDatabase } from './support/database.ts';
-import { bytes, createUser, sha256Hex } from './support/fixtures.ts';
+import { type TestDatabase, useTestDatabase } from './support/database.ts';
+import { bytes, createUser, globalKey, sha256Hex } from './support/fixtures.ts';
 
 let database: TestDatabase;
-
-beforeEach(async () => {
-  database = await createTestDatabase();
+useTestDatabase((made) => {
+  database = made;
 });
 
-afterEach(async () => {
-  await database.close();
+/** An upload of 64 bytes filled with `fill` to the user's global setup. */
+const input = (userId: string, fill = 1, expectedRevision = 0) => ({
+  key: globalKey(userId),
+  expectedRevision,
+  ciphertext: bytes(64, fill),
+  contentHash: fromHex(sha256Hex(bytes(64, fill))),
+  formatVersion: 1,
+  nameEnc: null,
 });
 
 describe('BundleService cleanup', () => {
@@ -39,14 +44,7 @@ describe('BundleService cleanup', () => {
     });
     const user = await createUser(database.db);
     const upload = (expectedRevision: number, fill: number) =>
-      service.upload({
-        key: { userId: user.id, agent: 'claude-code', scopeKey: 'global' },
-        expectedRevision,
-        ciphertext: bytes(64, fill),
-        contentHash: fromHex(sha256Hex(bytes(64, fill))),
-        formatVersion: 1,
-        nameEnc: null,
-      });
+      service.upload(input(user.id, fill, expectedRevision));
 
     await upload(0, 1);
     const second = await upload(1, 2);
@@ -56,15 +54,6 @@ describe('BundleService cleanup', () => {
 });
 
 describe('BundleService upload', () => {
-  const key = (userId: string) => ({ userId, agent: 'claude-code', scopeKey: 'global' });
-  const input = (userId: string, fill = 1) => ({
-    key: key(userId),
-    expectedRevision: 0,
-    ciphertext: bytes(64, fill),
-    contentHash: fromHex(sha256Hex(bytes(64, fill))),
-    formatVersion: 1,
-    nameEnc: null,
-  });
   it('reads the usage and the current setup at the same time (DB-01)', async () => {
     const real = createBundleRepository(database.db);
     const events: string[] = [];

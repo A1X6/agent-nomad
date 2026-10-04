@@ -12,7 +12,13 @@ import {
 import { eq } from 'drizzle-orm';
 
 import type { Database } from '../../src/db/database.ts';
-import type { BundleKey, BundleMetaWrite, NewUser, UserRecord } from '../../src/db/repositories.ts';
+import type {
+  BundleKey,
+  BundleMetaWrite,
+  NewSession,
+  NewUser,
+  UserRecord,
+} from '../../src/db/repositories.ts';
 import { bundleBlobs, bundles, users } from '../../src/db/schema.ts';
 import { createUserRepository } from '../../src/db/user-repository.ts';
 import type { Logger } from '../../src/logging/logger.ts';
@@ -39,6 +45,18 @@ export const newUser = (username: string): NewUser => ({
   kdfParams: DEFAULT_KDF_PARAMS,
   authHash: 'auth-hash',
   wrappedDataKey: bytes(WRAPPED_DATA_KEY_BYTES),
+});
+
+/** A session from a laptop that ends `expiresInMs` from now (a minute by default). */
+export const newSession = (
+  userId: string,
+  tokenHash: string,
+  expiresInMs = 60_000,
+): NewSession => ({
+  userId,
+  tokenHash,
+  deviceName: 'laptop',
+  expiresAt: new Date(Date.now() + expiresInMs),
 });
 
 /** Stores a user straight in the database (production only registers with a session). */

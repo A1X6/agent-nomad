@@ -2,24 +2,20 @@ import { DEFAULT_KDF_PARAMS, MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { Database } from '../src/db/database.ts';
 import { bundleBlobs, bundles, sessions, users } from '../src/db/schema.ts';
-import { createTestDatabase, migrationsFolder, type TestDatabase } from './support/database.ts';
-import { bytes, newUser } from './support/fixtures.ts';
+import { migrationsFolder, type TestDatabase, useTestDatabase } from './support/database.ts';
+import { bytes, newSession, newUser } from './support/fixtures.ts';
 
 let database: TestDatabase;
 let db: Database;
 
 /** A fresh, empty Postgres with every migration applied: what a new Neon branch gets. */
-beforeEach(async () => {
-  database = await createTestDatabase();
+useTestDatabase((made) => {
+  database = made;
   db = database.db;
-});
-
-afterEach(async () => {
-  await database.close();
 });
 
 async function rows<T>(query: string): Promise<T[]> {
@@ -117,12 +113,7 @@ describe('users', () => {
 describe('sessions', () => {
   it('rejects a duplicate token hash', async () => {
     const user = await insertUser();
-    const session = {
-      userId: user.id,
-      tokenHash: 'same',
-      deviceName: 'laptop',
-      expiresAt: new Date(Date.now() + 60_000),
-    };
+    const session = newSession(user.id, 'same');
     await db.insert(sessions).values(session);
     await expect(db.insert(sessions).values(session)).rejects.toThrow();
   });
@@ -210,12 +201,7 @@ describe('bundles and bundle_blobs', () => {
     const blob = await insertBlob(user.id);
     await insertBlob(user.id); // a leftover file no setup points to
     await db.insert(bundles).values(meta(user.id, blob.id));
-    await db.insert(sessions).values({
-      userId: user.id,
-      tokenHash: 't',
-      deviceName: 'laptop',
-      expiresAt: new Date(Date.now() + 60_000),
-    });
+    await db.insert(sessions).values(newSession(user.id, 't'));
 
     await db.delete(users).where(eq(users.id, user.id));
 

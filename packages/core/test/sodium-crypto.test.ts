@@ -1,13 +1,9 @@
 import { toHex, type KdfParams } from '@agentnomad/contracts';
 import sodium from 'libsodium-wrappers-sumo';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import {
-  DATA_KEY_BYTES,
-  DecryptionError,
-  createSodiumCryptoService,
-  type CryptoService,
-} from '../src/index.ts';
+import { DecryptionError } from '../src/index.ts';
+import { crypto, dataKey as key, useDataKey } from './fixtures.ts';
 
 const bytes = (...values: number[]): Uint8Array => new Uint8Array(values);
 
@@ -21,13 +17,7 @@ const params: KdfParams = {
 };
 const salt = new Uint8Array(16).map((_, index) => index);
 
-let crypto: CryptoService;
-let key: Uint8Array;
-
-beforeAll(async () => {
-  crypto = await createSodiumCryptoService();
-  key = crypto.randomBytes(DATA_KEY_BYTES);
-});
+useDataKey();
 
 /** Returns a copy of `data` with one bit flipped at `index`. */
 function flipBit(data: Uint8Array, index: number): Uint8Array {

@@ -6,10 +6,10 @@ import {
   PutBundleResponseSchema,
   USER_STORAGE_LIMITS,
 } from '@agentnomad/contracts';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RATE_LIMITS } from '../src/rate-limit/rate-limiter.ts';
-import { createTestApp, type TestApp } from './support/app.ts';
+import { type TestApp, useTestApp } from './support/app.ts';
 import {
   b64,
   bearer,
@@ -28,14 +28,7 @@ const GLOBAL_PATH = '/bundles/claude-code/global';
 const PROJECT_PATH = `/bundles/claude-code/${PROJECT}`;
 
 let t: TestApp;
-
-beforeEach(async () => {
-  t = await createTestApp();
-});
-
-afterEach(async () => {
-  await t.database.close();
-});
+useTestApp((app) => (t = app));
 
 const register = (username = 'ahmed') => registerForToken(t.app, username);
 
