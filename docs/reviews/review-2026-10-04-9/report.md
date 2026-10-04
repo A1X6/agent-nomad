@@ -67,7 +67,7 @@ No bug, security, database or performance problem was found: every source file o
 
 ### DUP-01 · Low · Test set-up repeated by hand
 
-- [ ] **Where:**
+- [x] **Where:**
   - A temporary folder made and removed by hand (`mkdtemp` and `rm` in hooks), although `useProjectFolders` exists in `packages/cli/test/claude-code-project-fixtures.ts`: `agent-boundary.test.ts:51-57`, `auth-commands.test.ts:381-407` and `:812-820`, `bin.test.ts:13-19`, `claude-code-adapter.test.ts:27-33`, `claude-code-detector.test.ts:205-211`, `claude-code-global-collector.test.ts:433-442`, `claude-code-unknown-files.test.ts:10-20`, `env.test.ts:207-214`, `local-state.test.ts:12-20`, `pull-command.test.ts:59-65`, `push-command.test.ts:60-66`, `secret-store.test.ts:24-30`, `setup-commands.test.ts:41-49`, `system.test.ts:219-228` (all in `packages/cli/test`).
   - The same crypto service and data key `beforeAll` in `pull-command.test.ts`, `push-command.test.ts`, `setup-commands.test.ts` and `agent-boundary.test.ts`.
   - `claude-code-restorer.test.ts:94-99` and `:887-892` build the project collector by hand; the fixture `collect()` does it.
