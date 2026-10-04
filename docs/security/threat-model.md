@@ -1,8 +1,9 @@
 # Threat model (T38)
 
-- **Reviewed:** 2026-09-26, updated through T84; first reviewed at the end of the v1 build (T01–T37), before the first release.
+- **Reviewed:** 2026-09-26, updated through T88; first reviewed at the end of the v1 build (T01–T37), before the first release.
 - **Covers:** the `agentnomad` CLI, the API server and its database, and the path in between.
-- **Result:** 8 findings, all fixed on the `t38-security-review` branch (see [Findings](#findings)); the
+- **Result:** 52 findings, all fixed (see [Findings](#findings)): 1–8 on the `t38-security-review` branch, 9–35 in
+  T43–T51 after the 1.0.2 code review, and 36–52 in T55–T84 after the later code reviews; each Fix names its task. The
   risks we accept are listed under [Accepted risks](#accepted-risks).
 
 ## What is protected

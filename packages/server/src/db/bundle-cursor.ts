@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 
 import { fromBase64Url, toBase64Url, utf8 } from '../encoding.ts';
 import { InvalidCursorError } from './repositories.ts';
