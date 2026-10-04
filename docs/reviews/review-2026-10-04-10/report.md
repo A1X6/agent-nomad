@@ -64,7 +64,7 @@ All four are Low; none blocks a release. In order of value: BP-01, READ-01, DUP-
 
 ### DUP-01 · Low · Test set-up still written out where a helper exists (left after T89)
 
-- [ ] **Where:**
+- [x] **Where:**
   - `packages/cli/test/env.test.ts`: `createShellProfileWriter({ path, kind: 'posix', label })` written out at `:247`, `:255`, `:288`, `:301`, `:320` although `bashrc()` (`:207`) builds it; the Windows `calls` recorder three times (`:329-338`, `:367-372`, `:385-389`)
   - `packages/cli/test/http-api-client.test.ts`: the `AbortSignal.timeout` spy twice (`:491-503`, `:508-523`)
   - `packages/cli/test/claude-code-plugins.test.ts`: `readPluginManifest({ baseDir: base, platform, scope })` five times (`:28-32`, `:58-62`, `:71-75`, `:172-176`, `:194-198`)
