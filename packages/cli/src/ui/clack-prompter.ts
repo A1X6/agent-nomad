@@ -23,7 +23,10 @@ const toOptions = <T extends string>(choices: readonly Choice<T>[]): clack.Optio
     ...(choice.hint !== undefined && { hint: printable(choice.hint) }),
   })) as clack.Option<T>[];
 
-/** The Prompter on @clack/prompts (T04 decision). Commands only see the Prompter interface. */
+/**
+ * The Prompter on @clack/prompts (T04, docs/decisions/0001-libraries.md). Commands only see
+ * the Prompter interface.
+ */
 export function createClackPrompter(): Prompter {
   return {
     async select(message, choices) {

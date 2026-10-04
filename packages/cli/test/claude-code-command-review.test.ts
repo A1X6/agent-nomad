@@ -170,7 +170,7 @@ describe('reviewRunnable: everything the docs say runs (T44)', () => {
     expect(labels([collected(path, 'a')], [collected(path, 'a')])).toEqual([]);
   });
 
-  it('shows new or changed skills, commands and subagents that run commands (decided: a)', () => {
+  it('shows new or changed skills, commands and subagents that run commands by themselves (T44)', () => {
     const runs = '---\nname: x\n---\nStatus: !`git status`';
     expect(
       labels([
