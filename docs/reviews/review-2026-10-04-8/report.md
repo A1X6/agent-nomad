@@ -43,7 +43,7 @@ The code is in good health. Every finding of review 7 is fixed and the fixes hol
 
 ### BUG-01 · Low · A second global settings file would lose the first file's programs
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/global-collector.ts:166-172` (the loop) and `:102-105` (where `programs()` adds `.agentnomad/programs.json`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/global-collector.ts:166-172` (the loop) and `:102-105` (where `programs()` adds `.agentnomad/programs.json`)
 - **Problem:** since T84 the collector loops over every file in `GLOBAL_SETTINGS_FILES` and calls `programs()` once per file. Each call adds its own `.agentnomad/programs.json` entry, and `uniqueByPath` then keeps only one of them.
 - **Why it matters:** today the data file lists one global settings file, so this cannot happen. The day a second one is listed (the reason the loop exists), the programs of one file are silently left out of the bundle, and pull no longer offers to install them.
 - **Fix:** gather the commands of every settings file first and call `programs()` once, or let `programs()` return the list and write the entry once after the loop. Add a test with two settings files.
@@ -84,7 +84,7 @@ The code is in good health. Every finding of review 7 is fixed and the fixes hol
 
 ### READ-02 · Low · The threat model does not record the review 7 security fix
 
-- [ ] **Where:** `docs/security/threat-model.md:3` ("updated through T83"), the row of threat 13 (`:48`, which cites T69 and T71 only) and the findings tables, which end at number 44 (`:128-132`)
+- [x] **Where:** `docs/security/threat-model.md:3` ("updated through T83"), the row of threat 13 (`:48`, which cites T69 and T71 only) and the findings tables, which end at number 44 (`:128-132`)
 - **Problem:** review 7's SEC-01 (the other-OS warning printed a hook command with its real line breaks; fixed in T84) has no row, while the same kind of finding, number 43, has one.
 - **Why it matters:** the document says it lists every finding and its fix; a reader checking threat 13 does not see that the warning line is covered too.
 - **Fix:** add finding 45 under a "review 7" heading, cite T84 in the row of threat 13, and change the header to "updated through T84".

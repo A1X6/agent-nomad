@@ -449,4 +449,26 @@ describe('global collector: programs the status line and hooks need', () => {
     });
     expect(skipped).toEqual(['program _tool: pull refuses its name or package']);
   });
+
+  it('records the programs of every settings file in the one programs.json (T86)', async () => {
+    const hook = (command: string) =>
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } });
+    await writeTestFile(join(base, 'settings.json'), hook('terminal-notifier -message done'));
+    await writeTestFile(join(base, 'settings.local.json'), hook('ccstatusline --hook'));
+    const files = await createClaudeCodeGlobalCollector({
+      baseDir: base,
+      homedir: home,
+      platform: process.platform,
+      customConfigDir: false,
+      findProgram: npmInfo,
+      // A second settings file the data file does not list (yet).
+      globalFiles: ['settings.json', 'settings.local.json'],
+    }).collect({ kind: 'global' }, { includeMemory: false });
+    expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
+      programs: [
+        { command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } },
+        { command: 'terminal-notifier', npm: { package: 'terminal-notifier', version: '2.2.22' } },
+      ],
+    });
+  });
 });
