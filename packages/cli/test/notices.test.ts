@@ -5,7 +5,7 @@ import { agentVersionNotice, compareVersions, unknownEntriesNotice } from '../sr
 describe('unknown entries notice', () => {
   it('says what was not saved and why', () => {
     expect(unknownEntriesNotice('Claude Code', ['hooks/', 'new-feature.json'])).toBe(
-      'Not saved, because agentnomad does not know these yet: hooks/, new-feature.json. A newer Claude Code may have added them; if they matter to you, update agentnomad.',
+      'Only these are left out, because agentnomad does not know them yet: hooks/, new-feature.json. A newer Claude Code may have added them; if they matter to you, update agentnomad.',
     );
     expect(unknownEntriesNotice('Claude Code', [])).toBeNull();
   });

@@ -72,6 +72,11 @@ describe('unknown-file check (T32 done-when)', () => {
     await writeTestFile(join(base, 'projects', 'C--x', 'a.jsonl'));
     await writeTestFile(join(base, 'state', 'x'));
     await writeTestFile(join(base, 'chrome', 'x'));
+    // T94: state files Claude Code 2.1.289 added.
+    await writeTestFile(join(base, 'daemon.lock'));
+    await writeTestFile(join(base, 'daemon.status.json'));
+    await writeTestFile(join(base, 'gh-pr-status-cache.json'));
+    await writeTestFile(join(base, 'mcp-needs-auth-cache.json'));
     await writeTestFile(join(base, 'settings.json.bak'));
     await writeTestFile(join(base, `CLAUDE.md${BACKUP_MARKER}20260925T120000Z`));
     await writeTestFile(join(base, '.claude.json'));

@@ -457,7 +457,11 @@ describe('agentnomad push', () => {
     expect(t.lines).toContain(
       'warn: Your organization manages some Claude Code settings on this PC.',
     );
-    expect(t.lines.some((line) => line.includes('does not know this yet: snippets/'))).toBe(true);
+    expect(
+      t.lines.some((line) =>
+        line.includes('Only this is left out, because agentnomad does not know it yet: snippets/.'),
+      ),
+    ).toBe(true);
     const { bundle } = await received(t.server, { kind: 'global' });
     expect(bundle.files.map((file) => file.path)).toContain('.agentnomad/env.json');
   });
