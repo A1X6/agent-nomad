@@ -46,7 +46,7 @@ export function unknownEntriesNotice(
 ): string | null {
   if (entries.length === 0) return null;
   return [
-    `Not saved, because agentnomad does not know ${entries.length === 1 ? 'this' : 'these'} yet: ${entries.join(', ')}.`,
+    `Only ${entries.length === 1 ? 'this is' : 'these are'} left out, because agentnomad does not know ${entries.length === 1 ? 'it' : 'them'} yet: ${entries.join(', ')}.`,
     `A newer ${displayName} may have added them; if they matter to you, update agentnomad.`,
   ].join(' ');
 }
