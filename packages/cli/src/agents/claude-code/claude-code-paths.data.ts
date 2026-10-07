@@ -14,7 +14,7 @@ const RAW = {
    * The newest Claude Code these lists were checked against (T41). The weekly drift check
    * reports changelog entries of newer versions; bump this after reviewing them.
    */
-  reviewedVersion: '2.1.283',
+  reviewedVersion: '2.1.292',
 
   global: {
     /** Single files in the base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -70,7 +70,11 @@ const RAW = {
       '.last-cleanup',
       '.last-update-result.json',
       'chrome',
+      'daemon.lock',
       'daemon.log',
+      'daemon.status.json',
+      'gh-pr-status-cache.json',
+      'mcp-needs-auth-cache.json',
       'state',
       'logs',
       'telemetry',
