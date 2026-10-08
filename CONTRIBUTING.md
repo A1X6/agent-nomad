@@ -193,10 +193,13 @@ Maintainers release from `main`:
 
 1. Set the new version in `packages/cli/package.json` and `packages/cli/src/version.ts`
    (a test keeps them equal), merged through `dev` to `main`.
-2. Tag the commit on `main` (`git tag v1.2.3 && git push origin v1.2.3`).
-3. `.github/workflows/release.yml` builds and tests the package on every OS, then waits for
+2. Write the release notes in `.github/release-notes/v1.2.3.md` in the same change (the
+   release stops before publishing without them).
+3. Tag the commit on `main` (`git tag v1.2.3 && git push origin v1.2.3`).
+4. `.github/workflows/release.yml` builds and tests the package on every OS, then waits for
    approval in the `npm` environment; after approval it publishes with provenance through
-   npm trusted publishing and checks `npx agentnomad` on every OS.
+   npm trusted publishing, checks `npx agentnomad` on every OS, and makes the GitHub
+   release from the notes file, marked Latest.
 
 To try the package locally: `pnpm release:build`, then
 `npm pack ./packages/cli/release` and install the `.tgz` into a temporary prefix

@@ -583,7 +583,7 @@ the license. The build fails if anything but our own source is bundled or a libr
 not declared. **Releases:** pushing a tag `vX.Y.Z` on `main` runs
 `.github/workflows/release.yml`: build and test on every OS, install and run the packed
 package, wait for the owner's approval, publish the tested tarball through npm trusted
-publishing with provenance (no npm token exists), then check `npx agentnomad` on every OS. The release starts only for a commit
+publishing with provenance (no npm token exists), then check `npx agentnomad` on every OS and make the GitHub release (marked Latest) from `.github/release-notes/vX.Y.Z.md`, which must exist before anything is published. The release starts only for a commit
 with a successful CI run (on any branch) that is also on `main`, and verifies on Node 22.13 and 24.
 
 Deployment: Render builds `main` from `render.yaml` after CI, installing and compiling only
@@ -859,7 +859,7 @@ Also in the server package: `drizzle/` (SQL migrations) and `drizzle.config.ts`.
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.github/workflows/ci.yml`              | CI: checks on 3 OSes × 2 Node versions, Linux keychain, the npm package installed and run end to end, the cross-OS chains, the dependency audit, the migration check, the coverage and unused-code reports (one job). |
 | `.github/workflows/audit.yml`           | Runs `pnpm audit --prod` every Wednesday; a finding fails the run.                                                                                                                                                    |
-| `.github/workflows/release.yml`         | Release: verify on every OS, approval, publish to npm with provenance, check `npx` on every OS.                                                                                                                       |
+| `.github/workflows/release.yml`         | Release: verify on every OS, approval, publish to npm with provenance, check `npx` on every OS, GitHub release.                                                                                                       |
 | `packages/cli/scripts/build-release.ts` | Builds the `agentnomad` npm package (esbuild bundle + manifest).                                                                                                                                                      |
 | `packages/cli/scripts/drift/`           | The weekly Claude Code drift check: `drift.ts` (comparison and report), `check-claude-code.ts` (fetches the sources).                                                                                                 |
 | `.github/workflows/drift-check.yml`     | Runs the drift check every Monday and files or updates the `drift` issue.                                                                                                                                             |

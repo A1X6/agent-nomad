@@ -3,7 +3,8 @@ name: Release
 # T40: publishes the `agentnomad` npm package when a version tag (e.g. v1.0.0) is pushed on
 # main. The package is built and tested on every OS, published only after the owner
 # approves the `npm` environment, through npm trusted publishing (no npm token anywhere;
-# provenance is recorded), and then checked with `npx` on every OS.
+# provenance is recorded), and then checked with `npx` on every OS. Last, the GitHub release
+# is made from .github/release-notes/<tag>.md and marked Latest, like npm's `latest`.
 on:
   push:
     tags: ['v*']
@@ -69,6 +70,7 @@ jobs:
           version="$(node -p "require('./packages/cli/package.json').version")"
           test "$GITHUB_REF_NAME" = "v$version" || { echo "Tag $GITHUB_REF_NAME is not v$version"; exit 1; }
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "The tag is not on main"; exit 1; }
+          test -s ".github/release-notes/$GITHUB_REF_NAME.md" || { echo "Write .github/release-notes/$GITHUB_REF_NAME.md first"; exit 1; }
 
       # No dependency cache in release builds.
       - name: Install dependencies
@@ -191,3 +193,31 @@ jobs:
           npm init -y > /dev/null
           npm install "agentnomad@${GITHUB_REF_NAME#v}"
           npm audit signatures
+
+  # The GitHub release, made only once the published package works, so Releases always
+  # match npm. Updated in place if it already exists (a re-run).
+  github-release:
+    name: GitHub release
+    needs: check-published
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create or update the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          notes=".github/release-notes/$tag.md"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --title "agentnomad ${tag#v}" --notes-file "$notes" --latest
+          else
+            gh release create "$tag" --verify-tag --title "agentnomad ${tag#v}" --notes-file "$notes" --latest
+          fi
