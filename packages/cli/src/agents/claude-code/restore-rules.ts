@@ -99,7 +99,7 @@ export function globalDestination(
   }
   if (underAnyCase(path, RESERVED_DIR)) return refused('unknown agentnomad entry');
   if (GLOBAL_REFUSED.some((entry) => underAnyCase(path, entry))) return refused('never synced');
-  if (isPluginGenerated(path)) return refused(GENERATED_IN_PLUGIN);
+  if (isPluginGenerated(path, { ignoreCase: true })) return refused(GENERATED_IN_PLUGIN);
 
   const allowed =
     GLOBAL_FILES.includes(path) ||
@@ -133,7 +133,7 @@ export function projectDestination(
   if (PROJECT_NEVER_SYNCED.some((entry) => underAnyCase(path, entry))) {
     return refused('never synced');
   }
-  if (isPluginGenerated(path)) return refused(GENERATED_IN_PLUGIN);
+  if (isPluginGenerated(path, { ignoreCase: true })) return refused(GENERATED_IN_PLUGIN);
 
   const claudeFolders = [...PROJECT_CLAUDE_FOLDERS, ...PROJECT_MEMORY_FOLDERS];
   const allowed =

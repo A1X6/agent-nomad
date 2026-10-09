@@ -1,7 +1,5 @@
 import { readFile } from 'node:fs/promises';
 
-import * as z from 'zod';
-
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import {
   createFileGatherer,
@@ -10,7 +8,7 @@ import {
   uniqueByPath,
 } from '../shared/file-gathering.ts';
 import { pathsOf } from '../shared/detector-system.ts';
-import { underFolder } from '../shared/bundle-paths.ts';
+import { JsonObjectSchema } from '../../system/json.ts';
 import { commandsInSettings, programOf } from './settings-commands.ts';
 import { settingsFilesIn } from './claude-code-paths.data.ts';
 import {
@@ -21,8 +19,8 @@ import {
   GLOBAL_FOLDERS,
   GLOBAL_MEMORY_FOLDERS,
   HOME_SCRIPTS_PREFIX,
-  isPluginGenerated,
   NEVER_SYNCED,
+  neverSyncedIn,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
   SKIPPED_NAMES,
@@ -47,12 +45,8 @@ export interface GlobalCollectorOptions {
   readonly globalFiles?: readonly string[];
 }
 
-/**
- * True when `bundlePath` is a never-synced entry or inside one, or something Claude Code
- * generates inside a plugin folder (T96).
- */
-const isNeverSynced = (bundlePath: string) =>
-  NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry)) || isPluginGenerated(bundlePath);
+/** Never-synced entries and what Claude Code generates in a plugin folder (T96). */
+const isNeverSynced = neverSyncedIn(NEVER_SYNCED);
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {
@@ -133,7 +127,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
     } catch (error) {
       throw new ClaudeJsonError(file, { cause: error });
     }
-    const all = z.record(z.string(), z.unknown()).safeParse(parsed);
+    const all = JsonObjectSchema.safeParse(parsed);
     if (!all.success) throw new ClaudeJsonError(file, { cause: all.error });
 
     const selected: Record<string, unknown> = {};

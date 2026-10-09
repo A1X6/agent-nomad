@@ -110,6 +110,19 @@ const ACCOUNT = '00000000-0000-4000-8000-000000000000_11111111-1111-4111-8111-11
 
 export const synced = (...parts: string[]) => join(base, 'skills', 'synced', ACCOUNT, ...parts);
 
+/** One entry of a synced `manifest.json`, with the fields every entry has (review 15 DUP-05). */
+const syncedEntry = (skillId: string, name: string, extra: Record<string, unknown>) => ({
+  skillId,
+  name,
+  description: 'd',
+  updatedAt: 't',
+  ...extra,
+});
+
+/** A synced skill's `SKILL.md` as Claude Code writes it. */
+const syncedSkill = (name: string, body: string) =>
+  writeTestFile(synced(name, 'SKILL.md'), `---\nname: ${name}\n---\n${body}\n`);
+
 /** A synced folder as Claude Code 2.1.283 writes it: the user's skill, Anthropic's, an organization's. */
 export async function syncedSetup(): Promise<void> {
   await writeTestFile(join(base, 'skills', 'synced', `.bucket-${ACCOUNT}`), '');
@@ -120,45 +133,17 @@ export async function syncedSetup(): Promise<void> {
     JSON.stringify({
       lastUpdated: 1,
       skills: [
-        {
-          skillId: 'skill_01',
-          name: 'my-skill',
-          description: 'd',
-          source: 'plugin',
-          updatedAt: 't',
-          creatorType: 'user',
-        },
-        {
-          skillId: 'pdf',
-          name: 'pdf',
-          description: 'd',
-          source: 'anthropic',
-          updatedAt: 't',
-          creatorType: 'anthropic',
-        },
-        {
-          skillId: 'skill_02',
-          name: 'team-skill',
-          description: 'd',
-          source: 'org',
-          updatedAt: 't',
-          creatorType: 'organization',
-        },
-        {
-          skillId: 'skill_03',
-          name: 'synced',
-          description: 'd',
-          source: 'plugin',
-          updatedAt: 't',
-          creatorType: 'user',
-        },
+        syncedEntry('skill_01', 'my-skill', { source: 'plugin', creatorType: 'user' }),
+        syncedEntry('pdf', 'pdf', { source: 'anthropic', creatorType: 'anthropic' }),
+        syncedEntry('skill_02', 'team-skill', { source: 'org', creatorType: 'organization' }),
+        syncedEntry('skill_03', 'synced', { source: 'plugin', creatorType: 'user' }),
       ],
     }),
   );
-  await writeTestFile(synced('my-skill', 'SKILL.md'), '---\nname: my-skill\n---\nDo my thing.\n');
+  await syncedSkill('my-skill', 'Do my thing.');
   await writeTestFile(synced('my-skill', 'reference', 'notes.md'), 'Notes.\n');
-  await writeTestFile(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic PDF skill.\n');
-  await writeTestFile(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nOrg only.\n');
+  await syncedSkill('pdf', 'Anthropic PDF skill.');
+  await syncedSkill('team-skill', 'Org only.');
   await writeTestFile(synced('synced', 'SKILL.md'), 'reserved name');
 }
 
@@ -173,26 +158,13 @@ export async function syncedSetup2_1_295(): Promise<void> {
     JSON.stringify({
       lastUpdated: 1,
       skills: [
-        {
-          skillId: 'skill_01',
-          name: 'my-skill',
-          description: 'd',
-          source: 'plugin',
-          updatedAt: 't',
-          backingPluginId: 'plugin_01',
-        },
-        { skillId: 'pdf', name: 'pdf', description: 'd', source: 'anthropic', updatedAt: 't' },
-        {
-          skillId: 'docs',
-          name: 'docs',
-          description: 'd',
-          source: 'anthropic-example',
-          updatedAt: 't',
-        },
+        syncedEntry('skill_01', 'my-skill', { source: 'plugin', backingPluginId: 'plugin_01' }),
+        syncedEntry('pdf', 'pdf', { source: 'anthropic' }),
+        syncedEntry('docs', 'docs', { source: 'anthropic-example' }),
       ],
     }),
   );
-  await writeTestFile(synced('my-skill', 'SKILL.md'), '---\nname: my-skill\n---\nDo my thing.\n');
-  await writeTestFile(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic PDF skill.\n');
-  await writeTestFile(synced('docs', 'SKILL.md'), '---\nname: docs\n---\nAnthropic docs skill.\n');
+  await syncedSkill('my-skill', 'Do my thing.');
+  await syncedSkill('pdf', 'Anthropic PDF skill.');
+  await syncedSkill('docs', 'Anthropic docs skill.');
 }

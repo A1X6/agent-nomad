@@ -51,7 +51,8 @@ each OS) before writing code:
 - [ ] **Formats:** JSON, TOML, YAML, Markdown. JSON merges by key today; other formats fall
       back to "keep yours, save theirs next to it" until a merge strategy is added to core.
 - [ ] **Extensions or plugins:** reinstall them with the agent's own commands; never copy
-      their files.
+      their installed files. A plugin the user keeps inside a synced folder is part of the
+      setup: sync it, and review it on pull as one unit (Claude Code's skills folder, T96).
 - [ ] **Organization-managed settings:** files an employer enforces; never sync them, only
       tell the user.
 
@@ -193,7 +194,12 @@ never asks anything itself:
 
 - `reviewRunnable(files, current)`: what in the pulled files runs programs (hooks, MCP
   servers, the scripts they run) and is new or changed against this PC. Pull lists these
-  and asks; this is the main safety step of pull, so list everything the agent runs.
+  and asks; this is the main safety step of pull, so list everything the agent runs. It is
+  async, so it may run the agent's own check (Claude Code runs `claude plugin validate` on a
+  pulled mod). An entry's `file` is the bundle file it lives in, or a folder with a trailing
+  slash (`skills/my-mod/`) when the whole folder is one thing to accept or decline, such as a
+  plugin: pull then drops the folder whole when it is declined (`reviewCovers` in
+  `agents/adapter.ts`).
 - `conflicts(files, current)`: each file here that differs, in the order `restore` meets
   them, with the question (`overwriteAllowed`, and a `message` when the default
   "`<path>` already exists here and is different." does not fit).
@@ -325,7 +331,8 @@ the fakes the existing tests use.
 - [ ] Push and pull tried by hand on at least two operating systems (a temporary home
       folder is enough), including a pull onto a PC that already has a different setup.
 - [ ] Anything that runs programs is shown by pull before it is written: your restorer's
-      `reviewRunnable` lists it (Claude Code's is `claude-code/command-review.ts`).
+      `reviewRunnable` lists it (Claude Code's is `claude-code/command-review.ts` for
+      settings and `claude-code/skills-dir-plugins.ts` for plugins in the skills folder).
 - [ ] `pnpm lint` passes: `push/`, `pull/`, `cli/`, `env/` and `commands/` (and every other generic folder) must not import your folder.
 - [ ] README (supported agents), [ROADMAP.md](ROADMAP.md) and
       [ARCHITECTURE.md](ARCHITECTURE.md) (file reference) updated.

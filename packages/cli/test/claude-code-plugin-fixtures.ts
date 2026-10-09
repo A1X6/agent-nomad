@@ -152,6 +152,20 @@ export function pluginFiles(folder: string, options: PluginFilesOptions = {}): C
   return files;
 }
 
+/** The T95 probe mod's folder: the one mod every plugin test uses (review 15 DUP-01). */
+export const PROBE_MOD_FOLDER = 'skills/my-mod/';
+
+/** The T95 probe mod as bundle files: a manifest, `hooks/hooks.json` and one hooks module. */
+export const probeMod = (folder = PROBE_MOD_FOLDER): CollectedFile[] =>
+  pluginFiles(folder, { modules: ['./register.ts'] });
+
+/** What Claude Code generates when it hot-reloads a plugin at `folder` (T95): never synced. */
+export async function writeGeneratedTypes(base: string, folder = PROBE_MOD_FOLDER): Promise<void> {
+  const types = [...folder.split('/').filter(Boolean), '.claude-plugin', 'types'];
+  await writeTestFile(join(base, ...types, 'claude-code', 'index.d.ts'), '// generated\n');
+  await writeTestFile(join(base, ...types, 'tsconfig.json'), '{}\n');
+}
+
 /** Writes `files` (bundle paths from `base`) to disk, as a PC that has the plugin. */
 export async function writePluginFiles(
   base: string,

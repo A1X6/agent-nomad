@@ -32,6 +32,17 @@ describe('paths data file', () => {
     expect(isPluginGenerated(path)).toBe(generated);
   });
 
+  it('ignores case only when asked, as restore does (review 15 SEC-03)', () => {
+    expect(isPluginGenerated('skills/x/.claude-plugin/Types/a.d.ts')).toBe(false);
+    expect(isPluginGenerated('skills/x/.claude-plugin/Types/a.d.ts', { ignoreCase: true })).toBe(
+      true,
+    );
+    expect(isPluginGenerated('skills/x/.Claude-Plugin/TYPES', { ignoreCase: true })).toBe(true);
+    expect(isPluginGenerated('skills/x/.claude-plugin/plugin.json', { ignoreCase: true })).toBe(
+      false,
+    );
+  });
+
   it('never lists one name as both synced and never synced', () => {
     const synced = new Set([
       ...CLAUDE_CODE_PATHS.global.files,

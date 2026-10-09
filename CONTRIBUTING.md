@@ -129,7 +129,8 @@ open, such as a chat or an option letter from a discussion.
     partial API client (`fakeApi`), a bundle server (`fakeBundleServer`, read with
     `storedOn` and `revisionOn`), a local state in a temporary folder (`localStateIn`), an
     adapter that only detects (`fakeAdapter`, with `installedAgent` and `missingAgent`),
-    a password the policy accepts (`STRONG`) and a project folder nobody looks in (`CWD`).
+    a password the policy accepts (`STRONG`), a project folder nobody looks in (`CWD`) and a
+    Linux PC with exactly the given commands on PATH (`fakeExecutables`).
   - `packages/cli/test/claude-code-project-fixtures.ts`: the Claude Code tests' temporary
     home and project (`useProjectFolders`, then `root`, `home`, `base` and `project`), the
     collectors (`options`, `globalCollector`, `collect`, `collectSkipped`), the real adapter
@@ -138,8 +139,10 @@ open, such as a chat or an option letter from a discussion.
     `syncedSetup`, and `syncedSetup2_1_295` in the format Claude Code 2.1.295 writes).
   - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
     `putJson`, `realisticPlugins`), a plugin in the skills folder as bundle files
-    (`pluginFiles`, `writePluginFiles`) and what `claude plugin validate` says about one
-    (`REAL_VALIDATE_REPORT`, `PROBE_MOD_VALIDATION`, `scriptedValidator`) and managed settings (`fakeManagedSystem` with
+    (`pluginFiles` with `PluginFilesOptions`, `writePluginFiles`; the T95 probe mod every
+    plugin test uses: `PROBE_MOD_FOLDER`, `probeMod`, and `writeGeneratedTypes` for what Claude
+    Code generates in it), what `claude plugin validate` says about one (`REAL_VALIDATE_REPORT`,
+    `PROBE_MOD_VALIDATION`, `scriptedValidator`), and managed settings (`fakeManagedSystem` with
     `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).

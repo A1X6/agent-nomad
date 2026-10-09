@@ -3,6 +3,7 @@
  * the paths data file (T32); this module only gives them names and fast lookups.
  */
 import { RESERVED_DIR } from '../adapter.ts';
+import { underFolder } from '../shared/bundle-paths.ts';
 import { inHomeFolder, isSensitiveHomePath } from '../shared/file-gathering.ts';
 import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 
@@ -86,17 +87,32 @@ export const PLUGIN_GENERATED_PATHS: readonly string[] = DATA.plugins.generatedI
 
 /**
  * `bundlePath` is, or is inside, something Claude Code generates in a plugin folder, wherever
- * that folder sits. Whole path segments, with case: on Linux `Types/` is the user's own folder.
+ * that folder sits. Whole path segments. Collecting keeps case (on Linux `Types/` is the
+ * user's own folder); restoring ignores it, as every refusal does (T43, review 15 SEC-03),
+ * since Windows and macOS would write `Types/` into the generated folder.
  */
-export function isPluginGenerated(bundlePath: string): boolean {
-  const segments = bundlePath.split('/');
+export function isPluginGenerated(
+  bundlePath: string,
+  { ignoreCase = false }: { readonly ignoreCase?: boolean } = {},
+): boolean {
+  const fold = (name: string) => (ignoreCase ? name.toLowerCase() : name);
+  const segments = bundlePath.split('/').map(fold);
   return PLUGIN_GENERATED_PATHS.some((generated) => {
-    const parts = generated.split('/');
+    const parts = generated.split('/').map(fold);
     return segments.some((_, start) =>
       parts.every((part, index) => segments[start + index] === part),
     );
   });
 }
+
+/**
+ * The skip rule of a collector's walk: `entries` (a scope's never-synced list) and whatever
+ * Claude Code generates in a plugin folder; one rule for both scopes (review 15 DUP-02).
+ */
+export const neverSyncedIn =
+  (entries: readonly string[]) =>
+  (bundlePath: string): boolean =>
+    entries.some((entry) => underFolder(bundlePath, entry)) || isPluginGenerated(bundlePath);
 
 /** Programs a hook or the status line needs, with install details (`.agentnomad/programs.json`). */
 export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;

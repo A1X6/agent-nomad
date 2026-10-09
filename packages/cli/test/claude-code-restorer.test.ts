@@ -17,6 +17,11 @@ import {
 } from './claude-code-project-fixtures.ts';
 import { collected, readJson, readText, writeTestFile } from './fakes.ts';
 import {
+  PROBE_MOD_VALIDATION,
+  probeMod,
+  scriptedValidator,
+} from './claude-code-plugin-fixtures.ts';
+import {
   CLAUDE_JSON_BUNDLE_PATH,
   createClaudeCodeRestorer,
   hooksForOtherOs,
@@ -26,6 +31,7 @@ import {
   type CollectedFile,
   type ConflictChoice,
   type ConflictQuestion,
+  type PluginValidator,
 } from '../src/index.ts';
 
 const posix = process.platform !== 'win32';
@@ -39,6 +45,8 @@ interface Setup {
   customConfigDir?: boolean;
   /** Replaces the scripted running check, e.g. with one that fails. */
   isClaudeRunning?: () => Promise<boolean>;
+  /** Answers `claude plugin validate` for the review (T96). */
+  validatePlugin?: PluginValidator;
 }
 
 function restorer(setup: Setup = {}): ClaudeCodeRestorer {
@@ -51,6 +59,7 @@ function restorer(setup: Setup = {}): ClaudeCodeRestorer {
     customConfigDir: setup.customConfigDir ?? false,
     now: () => NOW,
     isClaudeRunning: setup.isClaudeRunning ?? (() => Promise.resolve(running.shift() ?? false)),
+    ...(setup.validatePlugin && { validatePlugin: setup.validatePlugin }),
   });
 }
 
@@ -800,13 +809,24 @@ describe('restorer: what pull asks before writing (T61)', () => {
     expect(conflicts[1]?.question).toEqual({ overwriteAllowed: true });
   });
 
-  it('reviews runnable entries and knows the variables that redirect Claude Code', async () => {
-    const r = restorer();
+  it('reviews what runs in settings and the plugins in the skills folder, with the injected check (T96)', async () => {
+    const validator = scriptedValidator(PROBE_MOD_VALIDATION);
+    const r = restorer({ validatePlugin: validator.validate });
     const settings = collected('settings.json', statusLine('ccstatusline'));
     expect((await r.reviewRunnable([settings], [])).map((entry) => entry.label)).toEqual([
       'status line',
     ]);
     expect(await r.reviewRunnable([settings], [settings])).toEqual([]);
+    const both = await r.reviewRunnable([settings, ...probeMod()], []);
+    expect(both.map((entry) => entry.label)).toEqual([
+      'status line',
+      'plugin skills/my-mod/ module ./register.ts (runs code inside Claude Code)',
+    ]);
+    expect(validator.asked.map((plugin) => plugin.name)).toEqual(['my-mod']);
+  });
+
+  it('knows the variables that redirect Claude Code', () => {
+    const r = restorer();
     expect(r.isRedirectVariable('ANTHROPIC_BASE_URL')).toBe(true);
     expect(r.isRedirectVariable('https_proxy')).toBe(true);
     expect(r.isRedirectVariable('GITHUB_TOKEN')).toBe(false);

@@ -1,6 +1,5 @@
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
-import { underFolder } from '../shared/bundle-paths.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import {
   createFileGatherer,
@@ -8,7 +7,7 @@ import {
   jsonFile,
   uniqueByPath,
 } from '../shared/file-gathering.ts';
-import { isPluginGenerated, PLUGINS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
+import { neverSyncedIn, PLUGINS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
 import { projectHookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import {
@@ -29,13 +28,8 @@ export interface ProjectCollectorOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-/**
- * True when `bundlePath` is a never-synced project entry or inside one, or something Claude
- * Code generates inside a plugin folder (T96).
- */
-const isNeverSynced = (bundlePath: string) =>
-  PROJECT_NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry)) ||
-  isPluginGenerated(bundlePath);
+/** Never-synced project entries and what Claude Code generates in a plugin folder (T96). */
+const isNeverSynced = neverSyncedIn(PROJECT_NEVER_SYNCED);
 
 /**
  * A Claude Code project collector (T26). Bundle paths are relative to the project folder;

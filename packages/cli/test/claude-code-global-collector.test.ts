@@ -13,7 +13,7 @@ import {
   syncedSetup,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
-import { pluginFiles, writePluginFiles } from './claude-code-plugin-fixtures.ts';
+import { probeMod, writeGeneratedTypes, writePluginFiles } from './claude-code-plugin-fixtures.ts';
 import { linkFolder, paths, text, withTempDir, writeTestFile } from './fakes.ts';
 import {
   ACCOUNT_SKILLS_PREFIX,
@@ -122,17 +122,9 @@ describe('global collector: what is taken', () => {
   });
 
   it('takes a plugin in skills/, but never what Claude Code generates in it (T96)', async () => {
-    await writePluginFiles(base, pluginFiles('skills/my-mod/', { modules: ['./register.ts'] }));
-    await writeTestFile(
-      join(base, 'skills', 'my-mod', '.claude-plugin', 'types', 'claude-code', 'index.d.ts'),
-    );
-    await writeTestFile(join(base, 'skills', 'my-mod', '.claude-plugin', 'types', 'tsconfig.json'));
-    const found = paths(await collect());
-    expect(found).toEqual([
-      'skills/my-mod/.claude-plugin/plugin.json',
-      'skills/my-mod/hooks/hooks.json',
-      'skills/my-mod/hooks/register.ts',
-    ]);
+    await writePluginFiles(base, probeMod());
+    await writeGeneratedTypes(base);
+    expect(paths(await collect())).toEqual(paths(probeMod()));
   });
 
   it('skips .git, node_modules, OS clutter and agentnomad backup copies', async () => {

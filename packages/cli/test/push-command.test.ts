@@ -470,8 +470,8 @@ describe('agentnomad push', () => {
   });
 
   it('says what the agent wants said about a collected setup, e.g. its plugins (T96)', async () => {
-    const note =
-      'Plugins in the skills folder, saved with it: my-mod (skills/my-mod/, a mod: runs code inside Claude Code).';
+    // The fake's own text: the real wording is pinned where `pluginNotes` is tested.
+    const note = 'two plugins here';
     const t = setup(['global', false], { adapter: collectingAdapter({ describe: [note] }) });
     await t.command.push(noFlags);
     expect(t.lines).toContain(`info: Claude Code global setup: ${note}`);

@@ -12,6 +12,7 @@ import { afterEach, beforeAll, beforeEach } from 'vitest';
 // Module paths, not the package index: the agent boundary test uses these fakes and must
 // not load any agent's adapter.
 import type { AgentAdapter, CollectedFile, DetectedAgent } from '../src/agents/adapter.ts';
+import type { ExecutableLookupSystem } from '../src/agents/shared/detector-system.ts';
 import type { ApiClient, BundleUpload } from '../src/api/api-client.ts';
 import { ApiError } from '../src/api/api-errors.ts';
 import { loadZxcvbnChecker, type PasswordChecker } from '../src/auth/password-policy.ts';
@@ -243,6 +244,17 @@ export const fakeAdapter = (
   detector: { detect: () => Promise.resolve(found) },
   collector: { collect: () => Promise.resolve([]) },
   restorer: stubRestorer(),
+});
+
+/**
+ * A Linux PC where exactly `executables` can be run, for code that looks a command up on PATH
+ * (`/usr/bin`) and nothing else (SOLID-06; review 15 DUP-04).
+ */
+export const fakeExecutables = (executables: readonly string[]): ExecutableLookupSystem => ({
+  platform: 'linux',
+  homedir: '/home/a',
+  env: { PATH: '/usr/bin' },
+  isExecutable: (path) => Promise.resolve(executables.includes(path)),
 });
 
 /** What a detector reports for an installed agent, and for one that is not. */

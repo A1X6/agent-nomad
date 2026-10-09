@@ -23,8 +23,9 @@ export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
 /**
  * Claude Code's `manifest.json` for one account's synced skills (an internal file, so only
  * the fields used here are checked, and each entry on its own). `creatorType` is `user` for
- * skills the user made, `anthropic` for Anthropic's; anything else, including an entry
- * without it (seen on a newly synced skill), is never saved.
+ * skills the user made, `anthropic` for Anthropic's; anything else is never saved. Claude Code
+ * 2.1.295 and later write no `creatorType` at all (T95), so on those nothing is saved until the
+ * reader learns the new fields (`source`, `backingPluginId`).
  */
 const ManifestSchema = z.looseObject({ skills: z.array(z.unknown()) });
 const EntrySchema = z.looseObject({ name: z.string(), creatorType: z.string().optional() });

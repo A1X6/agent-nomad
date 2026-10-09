@@ -14,7 +14,7 @@ import {
   root,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
-import { pluginFiles, writePluginFiles } from './claude-code-plugin-fixtures.ts';
+import { probeMod, writeGeneratedTypes, writePluginFiles } from './claude-code-plugin-fixtures.ts';
 import { linkFolder, paths, text, writeTestFile } from './fakes.ts';
 import { createClaudeCodeProjectCollector } from '../src/index.ts';
 
@@ -76,28 +76,10 @@ describe('project collector: what is taken', () => {
   });
 
   it('takes a plugin in .claude/skills/, but never what Claude Code generates in it (T96)', async () => {
-    await writePluginFiles(
-      project,
-      pluginFiles('.claude/skills/my-mod/', { modules: ['./register.ts'] }),
-    );
-    await writeTestFile(
-      join(
-        project,
-        '.claude',
-        'skills',
-        'my-mod',
-        '.claude-plugin',
-        'types',
-        'claude-code',
-        'index.d.ts',
-      ),
-    );
-    const found = await collect();
-    expect(paths(found)).toEqual([
-      '.claude/skills/my-mod/.claude-plugin/plugin.json',
-      '.claude/skills/my-mod/hooks/hooks.json',
-      '.claude/skills/my-mod/hooks/register.ts',
-    ]);
+    const folder = '.claude/skills/my-mod/';
+    await writePluginFiles(project, probeMod(folder));
+    await writeGeneratedTypes(project, folder);
+    expect(paths(await collect())).toEqual(paths(probeMod(folder)));
   });
 
   it('never takes app code, .env, .git, local agent memory or worktrees', async () => {

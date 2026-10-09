@@ -20,10 +20,10 @@ const fileWalker = {
   message: 'This module is pure: it gets file contents, it does not read them.',
 };
 
-/** Settings parsing has no file access at all (SOLID-05, ARCH-04). */
+/** The text-rule modules have no file or process access at all (SOLID-05, ARCH-04). */
 const nodeModules = {
   group: ['node:*'],
-  message: 'Settings parsing works on text only, with no file or process access.',
+  message: 'This module works on text only (settings, plugins): no file or process access.',
 };
 
 /** @param {readonly object[]} patterns */
@@ -97,12 +97,16 @@ export default defineConfig(
     rules: restrictedImports([otherAgentFolder]),
   },
   {
-    // Later blocks replace the rule's options, so each repeats the agent boundary.
-    files: ['packages/cli/src/agents/claude-code/{restore-rules,command-review,auto-memory}.ts'],
+    // Later blocks replace the rule's options, so each repeats the agent boundary. Auto memory
+    // reads the memory folder itself, so it keeps only the walker rule.
+    files: ['packages/cli/src/agents/claude-code/auto-memory.ts'],
     rules: { ...restrictedImports([otherAgentFolder, fileWalker]), ...noDynamicImport },
   },
   {
-    files: ['packages/cli/src/agents/claude-code/{settings-commands,skills-dir-plugins}.ts'],
+    // The pure text-rule modules, one list (review 15 BP-01).
+    files: [
+      'packages/cli/src/agents/claude-code/{restore-rules,command-review,settings-commands,skills-dir-plugins}.ts',
+    ],
     rules: {
       ...restrictedImports([otherAgentFolder, fileWalker, nodeModules]),
       ...noDynamicImport,

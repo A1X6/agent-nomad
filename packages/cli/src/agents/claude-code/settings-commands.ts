@@ -4,10 +4,10 @@
  */
 import * as z from 'zod';
 
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { PACKAGE_RUNNERS, RUNTIME_COMMANDS } from './global-paths.ts';
 
-const JsonObject = z.record(z.string(), z.unknown());
+const JsonObject = JsonObjectSchema;
 const HookSchema = z.looseObject({
   type: z.string().optional(),
   command: z.string().optional(),

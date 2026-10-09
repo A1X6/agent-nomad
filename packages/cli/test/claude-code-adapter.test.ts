@@ -12,7 +12,7 @@ import {
   useTempDir,
   writeTestFile,
 } from './fakes.ts';
-import { fakeManagedSystem } from './claude-code-plugin-fixtures.ts';
+import { fakeManagedSystem, probeMod } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import {
   AnswerNeededError,
@@ -146,6 +146,14 @@ describe('Claude Code adapter', () => {
       () => Promise.resolve('skip'),
     );
     expect(report.written).toEqual(['CLAUDE.md']);
+  });
+
+  it('tells push about the plugins in a collected skills folder (T96)', () => {
+    const notes = adapter().inspector?.describeCollected?.({ kind: 'global' }, probeMod()) ?? [];
+    expect(notes).toEqual([
+      'Plugins in the skills folder, saved with it: my-mod (skills/my-mod/, a mod: runs code inside Claude Code). They load as <name>@skills-dir on the other PC, after pull shows what they run.',
+    ]);
+    expect(adapter().inspector?.describeCollected?.({ kind: 'global' }, [])).toEqual([]);
   });
 
   it('uses CLAUDE_CONFIG_DIR for every part', async () => {

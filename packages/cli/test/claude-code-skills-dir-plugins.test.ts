@@ -2,15 +2,17 @@ import { describe, expect, it } from 'vitest';
 
 import {
   pluginFiles,
+  PROBE_MOD_FOLDER,
   PROBE_MOD_VALIDATION,
+  probeMod,
   REAL_VALIDATE_REPORT,
   scriptedValidator,
 } from './claude-code-plugin-fixtures.ts';
 import { collected, collectedJson } from './fakes.ts';
 import { pluginFolders, pluginNotes, readValidateReport, reviewPlugins } from '../src/index.ts';
 
-const MOD = 'skills/my-mod/';
-const mod = (folder = MOD) => pluginFiles(folder, { modules: ['./register.ts'] });
+const MOD = PROBE_MOD_FOLDER;
+const mod = probeMod;
 
 describe('plugins in the skills folder (T96): finding them', () => {
   it('a skill folder is a plugin when it has .claude-plugin/plugin.json, in either scope', () => {
@@ -91,26 +93,34 @@ describe('plugins in the skills folder (T96): finding them', () => {
         name: 'my-mod',
         mcpServers: [
           './servers.json',
+          './servers.json',
           docs,
-          './server.mcpb',
-          'https://example.com/s.dxt',
+          './server.MCPB',
+          'HTTPS://example.com/s.dxt',
           './gone.json',
+          './bad.json',
         ],
       }),
       collectedJson(`${MOD}servers.json`, { other: { command: 'other-mcp' } }),
+      collected(`${MOD}bad.json`, '{ not json'),
     ]);
     expect(declared[0]?.servers).toEqual([
+      // A file named twice is read once; a bundle is one whatever the case of its name.
       { label: 'servers.json', servers: { other: { command: 'other-mcp' } } },
       { label: '.claude-plugin/plugin.json', servers: docs },
-      { label: '.claude-plugin/plugin.json', bundle: './server.mcpb' },
-      { label: '.claude-plugin/plugin.json', bundle: 'https://example.com/s.dxt' },
-      // Named but missing: shown as named, never dropped.
+      { label: '.claude-plugin/plugin.json', bundle: './server.MCPB' },
+      { label: '.claude-plugin/plugin.json', bundle: 'HTTPS://example.com/s.dxt' },
+      // Named but missing or not JSON: shown as named, never dropped.
       { label: 'gone.json', servers: './gone.json' },
+      { label: 'bad.json', servers: './bad.json' },
     ]);
   });
 
   it('a manifest that is not JSON still marks the folder as a plugin, and is shown as unreadable', () => {
-    const files = [collected(`${MOD}.claude-plugin/plugin.json`, '{ not json'), ...mod().slice(1)];
+    const files = [
+      collected(`${MOD}.claude-plugin/plugin.json`, '{ not json'),
+      ...mod().filter((file) => !file.path.endsWith('plugin.json')),
+    ];
     const [plugin] = pluginFolders(files);
     expect(plugin?.modules).toEqual(['./register.ts']);
     expect(plugin?.unreadable).toEqual([
@@ -118,19 +128,36 @@ describe('plugins in the skills folder (T96): finding them', () => {
     ]);
   });
 
-  it('one bad manifest field hides no other, and a bad part is shown as unreadable (SEC-01)', () => {
+  it('one bad manifest field hides no other: each is read on its own (SEC-01)', () => {
     const docs = { docs: { command: 'docs-mcp' } };
-    const [plugin] = pluginFolders([
+    const stop = { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] };
+    const [badHooks] = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         hooks: 42,
         mcpServers: docs,
       }),
     ]);
-    expect(plugin?.servers).toEqual([{ label: '.claude-plugin/plugin.json', servers: docs }]);
-    expect(plugin?.unreadable).toEqual([{ label: '.claude-plugin/plugin.json hooks', value: 42 }]);
+    expect(badHooks?.servers).toEqual([{ label: '.claude-plugin/plugin.json', servers: docs }]);
+    expect(badHooks?.unreadable).toEqual([
+      { label: '.claude-plugin/plugin.json hooks', value: 42 },
+    ]);
 
-    // A named hooks file that is missing or not JSON is shown, never dropped.
+    const [badServers] = pluginFolders([
+      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+        name: 'my-mod',
+        hooks: stop,
+        mcpServers: 42,
+      }),
+    ]);
+    expect(badServers?.hooks).toEqual([{ label: '.claude-plugin/plugin.json', hooks: stop }]);
+    expect(badServers?.servers).toEqual([]);
+    expect(badServers?.unreadable).toEqual([
+      { label: '.claude-plugin/plugin.json mcpServers', value: 42 },
+    ]);
+  });
+
+  it('a named hooks file that is missing or not JSON is shown, never dropped (SEC-01)', () => {
     const [named] = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, {
         name: 'my-mod',
@@ -142,8 +169,20 @@ describe('plugins in the skills folder (T96): finding them', () => {
       { label: 'gone.json', value: 'no such file' },
       { label: 'bad.json', value: 'not JSON' },
     ]);
+    // The default file, named by the manifest but missing: the default read never hides it
+    // (review 15 BUG-01).
+    const [defaultNamed] = pluginFolders([
+      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+        name: 'my-mod',
+        hooks: './hooks/hooks.json',
+      }),
+    ]);
+    expect(defaultNamed?.unreadable).toEqual([
+      { label: 'hooks/hooks.json', value: 'no such file' },
+    ]);
+  });
 
-    // A modules list with a stray item keeps the real modules (so the mod is checked) and is shown.
+  it('a modules list with a stray item keeps the real modules, so the mod is checked, and is shown', () => {
     const [stray] = pluginFolders([
       ...pluginFiles(MOD),
       collectedJson(`${MOD}hooks/hooks.json`, { modules: ['./register.ts', 5] }),
@@ -152,6 +191,13 @@ describe('plugins in the skills folder (T96): finding them', () => {
     expect(stray?.unreadable).toEqual([
       { label: 'hooks/hooks.json modules', value: ['./register.ts', 5] },
     ]);
+    // The same module named in two hooks files is one module.
+    const [twice] = pluginFolders([
+      collectedJson(`${MOD}.claude-plugin/plugin.json`, { name: 'my-mod', hooks: './extra.json' }),
+      collectedJson(`${MOD}hooks/hooks.json`, { modules: ['./a.ts'] }),
+      collectedJson(`${MOD}extra.json`, { modules: ['./a.ts', './b.ts'] }),
+    ]);
+    expect(twice?.modules).toEqual(['./a.ts', './b.ts']);
   });
 
   it('a manifest that names the default files does not list their hooks and servers twice', () => {
@@ -354,6 +400,48 @@ describe('plugins in the skills folder (T96): reading claude plugin validate --j
       errors: ['json: Invalid JSON syntax', 'modules../register.ts: missing: no such file'],
       modules: [{ module: './register.ts', hooks: 'nothing', calls: 'nothing on $' }],
     });
+  });
+
+  it('keeps an error in another shape as its JSON, and names an unexplained failure (SEC-02)', () => {
+    const odd = JSON.stringify({
+      success: false,
+      manifest: { errors: [{ code: 'x' }] },
+      contents: [{ type: 'hooks', errors: [], notes: [] }],
+    });
+    expect(readValidateReport(odd)).toEqual({
+      kind: 'report',
+      errors: ['{"code":"x"}'],
+      modules: [],
+    });
+    const silent = JSON.stringify({ success: false, manifest: { errors: [] }, contents: [] });
+    expect(readValidateReport(silent)).toEqual({
+      kind: 'report',
+      errors: ['validate reported a failure it did not explain'],
+      modules: [],
+    });
+    // An error without a path, and a note that is not in a hooks entry.
+    const mixed = JSON.stringify({
+      manifest: { errors: [{ path: null, message: 'bad' }] },
+      contents: [{ type: 'skills', errors: [], notes: ['./x.ts hooks: a'] }],
+    });
+    expect(readValidateReport(mixed)).toEqual({ kind: 'report', errors: ['bad'], modules: [] });
+  });
+
+  it('a module with only a calls note is shown as hooking nothing', async () => {
+    const report = JSON.stringify({
+      success: true,
+      manifest: { errors: [] },
+      contents: [{ type: 'hooks', errors: [], notes: ['./register.ts calls: $.ui.toast'] }],
+    });
+    const read = readValidateReport(report);
+    expect(read).toEqual({
+      kind: 'report',
+      errors: [],
+      modules: [{ module: './register.ts', hooks: '', calls: '$.ui.toast' }],
+    });
+    if (read === null) throw new Error('no report');
+    const review = await reviewPlugins(mod(), [], scriptedValidator(read).validate);
+    expect(review.map((entry) => entry.command)).toEqual(['hooks: nothing; calls: $.ui.toast']);
   });
 
   it('is null for anything but a report, an error answer included', () => {

@@ -2,14 +2,13 @@ import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { stopHook } from './claude-code-project-fixtures.ts';
 import {
   ACCOUNT_SKILLS_PREFIX,
   globalDestination,
   hookScripts,
   projectDestination,
 } from '../src/index.ts';
-
-import { stopHook } from './claude-code-project-fixtures.ts';
 
 // The rules read no file, so these folders need not exist.
 const home = resolve('/home/a');
@@ -57,12 +56,21 @@ describe('restore rules: refuses what a collector never produces', () => {
       'skills/my-mod/.claude-plugin/types/claude-code/index.d.ts',
       'Claude Code generates it inside a plugin folder',
     ],
+    // Refused in any case too, as Windows and macOS fold it (review 15 SEC-03).
+    [
+      'Skills/my-mod/.claude-plugin/Types/claude-code/index.d.ts',
+      'Claude Code generates it inside a plugin folder',
+    ],
   ])('global: %s', (path, reason) => {
     expect(globalDestination(path, new Set())).toEqual({ kind: 'refused', reason });
   });
 
   it('project: what Claude Code generates in a plugin folder is refused too (T96)', () => {
     expect(projectDestination('.claude/skills/my-mod/.claude-plugin/types/x.d.ts')).toEqual({
+      kind: 'refused',
+      reason: 'Claude Code generates it inside a plugin folder',
+    });
+    expect(projectDestination('.claude/skills/my-mod/.claude-plugin/TYPES/x.d.ts')).toEqual({
       kind: 'refused',
       reason: 'Claude Code generates it inside a plugin folder',
     });

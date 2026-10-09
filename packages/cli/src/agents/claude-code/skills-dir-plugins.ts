@@ -2,7 +2,7 @@ import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { hookEntries, serverEntries, unreadableEntry } from './command-review.ts';
 
 /*
@@ -33,7 +33,7 @@ function pluginFolderOf(path: string): { folder: string; name: string } | null {
   return { folder: `${prefix}${name}/`, name };
 }
 
-const Json = z.record(z.string(), z.unknown());
+const Json = JsonObjectSchema;
 /**
  * The manifest fields this module reads, each on its own (SEC-01), in the shapes Claude Code's
  * manifest reference gives: `hooks` is a file path, an inline event map, or an array mixing
@@ -86,7 +86,12 @@ const serversIn = (json: Record<string, unknown>) =>
   'mcpServers' in json ? json['mcpServers'] : json;
 
 /** Reads one plugin folder's declarations, one part at a time: a bad part hides no other (SEC-01). */
-function readPlugin(folder: string, name: string, inside: readonly CollectedFile[]): PluginFolder {
+function readPlugin(
+  folder: string,
+  name: string,
+  inside: readonly CollectedFile[],
+  manifestFile: CollectedFile,
+): PluginFolder {
   const byPath = new Map(inside.map((file) => [file.path.slice(folder.length), file]));
   const hooks: HooksSource[] = [];
   const servers: ServerSource[] = [];
@@ -103,13 +108,16 @@ function readPlugin(folder: string, name: string, inside: readonly CollectedFile
   // A hooks file wraps the event map in `hooks` (a file without the wrapper does not load) and
   // may name `modules`. A file named twice (the manifest naming the default) is read once.
   const hooksFile = (relative: string, named: boolean) => {
-    if (read.has(relative)) return;
-    read.add(relative);
     const json = jsonFileOf(relative);
+    // A missing file is "read" only once it is named, so the default read of hooks/hooks.json
+    // never hides a manifest that names it (review 15 BUG-01).
     if (json === undefined) {
-      if (named) unreadable.push({ label: relative, value: 'no such file' });
+      if (named && !read.has(relative)) unreadable.push({ label: relative, value: 'no such file' });
+      if (named) read.add(relative);
       return;
     }
+    if (read.has(relative)) return;
+    read.add(relative);
     if (json === null) {
       unreadable.push({ label: relative, value: 'not JSON' });
       return;
@@ -125,8 +133,9 @@ function readPlugin(folder: string, name: string, inside: readonly CollectedFile
   };
   hooksFile(DEFAULT_HOOKS_PATH, false);
 
-  const manifest = jsonFileOf(MANIFEST_PATH);
-  if (manifest === null || manifest === undefined) {
+  // The manifest is there (that is what made the folder a plugin); it may still not be JSON.
+  const manifest = valueOrNull(parseJsonWith(Json, manifestFile.content));
+  if (manifest === null) {
     unreadable.push({ label: MANIFEST_PATH, value: 'not JSON' });
   } else {
     // Each field on its own: a bad `hooks` never hides a valid `mcpServers`.
@@ -193,8 +202,9 @@ export function pluginFolders(files: readonly CollectedFile[]): PluginFolder[] {
   }
   const plugins: PluginFolder[] = [];
   for (const [folder, group] of byFolder) {
-    if (!group.files.some((file) => file.path === folder + MANIFEST_PATH)) continue;
-    plugins.push(readPlugin(folder, group.name, group.files));
+    const manifestFile = group.files.find((file) => file.path === folder + MANIFEST_PATH);
+    if (manifestFile === undefined) continue;
+    plugins.push(readPlugin(folder, group.name, group.files, manifestFile));
   }
   return plugins.sort((a, b) => (a.folder < b.folder ? -1 : 1));
 }
@@ -230,18 +240,30 @@ export type PluginValidation =
 /** Runs Claude Code's own check on a plugin's files (`plugin-validate.ts`). */
 export type PluginValidator = (plugin: PluginFolder) => Promise<PluginValidation>;
 
-/** The report `claude plugin validate --json` prints; only what the review reads is checked. */
+/**
+ * The report `claude plugin validate --json` prints; only what the review reads is checked.
+ * Errors are kept as they come: one in an unexpected shape is shown as its JSON, never
+ * dropped (review 15 SEC-02).
+ */
 const Problem = z.looseObject({ path: z.string().nullable().optional(), message: z.string() });
 const ReportSchema = z.looseObject({
-  manifest: z.looseObject({ errors: z.array(Problem).catch([]) }),
+  success: z.boolean().optional(),
+  manifest: z.looseObject({ errors: z.array(z.unknown()).catch([]) }),
   contents: z.array(
     z.looseObject({
       type: z.string(),
-      errors: z.array(Problem).catch([]),
+      errors: z.array(z.unknown()).catch([]),
       notes: z.array(z.string()).catch([]),
     }),
   ),
 });
+
+/** One reported error as text: `path: message`, or the JSON of an error in another shape. */
+function errorText(error: unknown): string {
+  const problem = Problem.safeParse(error);
+  if (!problem.success) return JSON.stringify(error);
+  return problem.data.path ? `${problem.data.path}: ${problem.data.message}` : problem.data.message;
+}
 
 /** `./register.ts hooks: a, b` and `./register.ts calls: $.x, $.y`, as validate notes them (T95). */
 const NOTE = /^(\S+) (hooks|calls): (.*)$/;
@@ -253,7 +275,10 @@ export function readValidateReport(stdout: string): PluginValidation | null {
   const errors = [
     ...report.manifest.errors,
     ...report.contents.flatMap((content) => content.errors),
-  ].map((problem) => (problem.path ? `${problem.path}: ${problem.message}` : problem.message));
+  ].map(errorText);
+  if (report.success === false && errors.length === 0) {
+    errors.push('validate reported a failure it did not explain');
+  }
   const modules = new Map<string, { hooks: string; calls: string }>();
   for (const content of report.contents) {
     if (content.type !== 'hooks') continue;

@@ -11,8 +11,10 @@ const RAW = {
   version: 1,
 
   /**
-   * The newest Claude Code these lists were checked against (T41). The weekly drift check
-   * reports changelog entries of newer versions; bump this after reviewing them.
+   * The newest Claude Code whose changelog these lists were checked against (T41). The weekly
+   * drift check reports changelog entries of newer versions; bump this after reviewing them. A
+   * check of one area on a newer Claude Code (T95 on 2.1.295) does not move it: the changelog
+   * entries 2.1.293 to 2.1.295 are still to be read (review 15 READ-02).
    */
   reviewedVersion: '2.1.292',
 

@@ -1,9 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { win32 } from 'node:path';
 
-import * as z from 'zod';
-
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { runProgram } from '../../system/run-program.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 
@@ -73,7 +71,7 @@ export function managedSettingsDir(
 
 function keysOf(text: string | null): string[] {
   if (text === null) return [];
-  return Object.keys(valueOrNull(parseJsonWith(z.record(z.string(), z.unknown()), text)) ?? {});
+  return Object.keys(valueOrNull(parseJsonWith(JsonObjectSchema, text)) ?? {});
 }
 
 /** Finds every managed settings source on this PC and which policy keys they set. */

@@ -3,7 +3,7 @@ import { win32 } from 'node:path';
 
 import * as z from 'zod';
 
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { runProgram } from '../../system/run-program.ts';
 import type { Prompter, Reporter } from '../../ui/prompter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
@@ -23,7 +23,13 @@ export interface ProgramCli {
   run(
     args: readonly string[],
     cwd: string,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  ): Promise<{
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+    /** Why it did not finish normally (did not start, stopped at the time limit), when known. */
+    failure?: string;
+  }>;
 }
 
 /** What is already on this PC, so nothing is added twice. */
@@ -75,10 +81,7 @@ export async function readCurrentPlugins(
     path.join(baseDir, 'plugins', 'known_marketplaces.json'),
     'utf8',
   ).catch(() => null);
-  const known =
-    knownText === null
-      ? null
-      : valueOrNull(parseJsonWith(z.record(z.string(), z.unknown()), knownText));
+  const known = knownText === null ? null : valueOrNull(parseJsonWith(JsonObjectSchema, knownText));
   const keys = new Set<string>();
   for (const [id, installs] of Object.entries(
     (await readInstalledPlugins(baseDir, platform)) ?? {},
@@ -210,7 +213,11 @@ export async function installPlugins(
     const run = await deps.claude.run(['plugin', 'marketplace', 'add', marketplace.add], deps.cwd);
     if (run.exitCode !== 0) {
       failedMarketplaces.add(marketplace.name);
-      const reason = run.stderr.trim() || run.stdout.trim() || `exit code ${String(run.exitCode)}`;
+      const reason =
+        run.stderr.trim() ||
+        run.stdout.trim() ||
+        run.failure ||
+        `exit code ${String(run.exitCode)}`;
       result.failed.push({
         what: `marketplace ${marketplace.name}`,
         reason: deps.explainFailure?.(reason) ?? reason,
@@ -234,7 +241,8 @@ export async function installPlugins(
     if (run.exitCode === 0 && (outcome === null || outcome.ok)) {
       result.installed.push(plugin.id);
     } else {
-      const reason = outcome?.message || run.stderr.trim() || `exit code ${String(run.exitCode)}`;
+      const reason =
+        outcome?.message || run.stderr.trim() || run.failure || `exit code ${String(run.exitCode)}`;
       result.failed.push({ what: plugin.id, reason: deps.explainFailure?.(reason) ?? reason });
     }
   }
@@ -262,11 +270,18 @@ export type StartProgram = (
 ) => Promise<RunResult>;
 
 const startProgram: StartProgram = async (file, args, options) => {
-  const { exitCode, stdout, stderr } = await runProgram(file, args, {
+  const { exitCode, stdout, stderr, error } = await runProgram(file, args, {
     ...options,
     maxBuffer: 16 * 1024 * 1024,
   });
-  return { exitCode, stdout, stderr };
+  // A stopped program has no exit code of its own; its reason is the error (review 15 UX-02).
+  const failure =
+    error === null
+      ? undefined
+      : 'killed' in error && error.killed === true
+        ? `it did not finish within ${String(Math.round(options.timeoutMs / 1000))} seconds`
+        : error.message;
+  return { exitCode, stdout, stderr, ...(failure !== undefined && { failure }) };
 };
 
 /** Windows launchers npm creates; they need `cmd.exe` to run. */

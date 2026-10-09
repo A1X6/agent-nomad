@@ -44,7 +44,7 @@ describe('claude.ai skills (T42): reading and saving', () => {
     expect([...found.allNames].sort()).toEqual(['my-skill', 'pdf', 'synced', 'team-skill']);
   });
 
-  it('finds none on Claude Code 2.1.295, which writes no creatorType (T95; T104 fixes it)', async () => {
+  it('finds none on Claude Code 2.1.295, which writes no creatorType (T95): the backup is off there until the reader learns the new fields', async () => {
     await syncedSetup2_1_295();
     const found = await readSyncedSkills(pathsOf(process.platform), base);
     expect(found.problem).toBeNull();
@@ -62,7 +62,7 @@ describe('claude.ai skills (T42): reading and saving', () => {
     ]);
   });
 
-  it('an entry without creatorType (as on a newly synced skill) is skipped, not the whole list', async () => {
+  it('an entry without creatorType (every entry on Claude Code 2.1.295 and later) is skipped, not the whole list', async () => {
     await writeTestFile(
       synced('manifest.json'),
       JSON.stringify({

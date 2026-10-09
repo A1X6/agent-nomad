@@ -3,7 +3,7 @@ import * as z from 'zod';
 
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
 import {
   commandsInSettings,
@@ -54,9 +54,9 @@ const LIST_LABELS = /^(hook |setting permissions\.(allow|additionalDirectories)$
 /** Folders whose Markdown files are skills, custom commands or subagents. */
 const MARKDOWN_FOLDERS = /^(\.claude\/)?(skills|commands|agents)\//;
 
-const Json = z.record(z.string(), z.unknown());
+const Json = JsonObjectSchema;
 const Command = z.looseObject({ command: z.string().optional() });
-const Env = z.record(z.string(), z.unknown());
+const Env = JsonObjectSchema;
 
 const parse = (file: CollectedFile) => valueOrNull(parseJsonWith(Json, file.content));
 

@@ -205,7 +205,7 @@ export function createProgram({ handlers, optionalParts, output }: ProgramDeps) 
     .addOption(
       new Option(
         '--allow-commands',
-        'accept new or changed hooks, MCP servers and scripts, and install plugins and programs (--yes alone skips them)',
+        'accept new or changed hooks, MCP servers, scripts and plugins or mods in the skills folder, and install plugins and programs (--yes alone skips them)',
       ),
     );
   addPartOptions(pull, parts, 'pull');

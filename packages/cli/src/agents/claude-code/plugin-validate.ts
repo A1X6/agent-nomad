@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { BundlePathSchema } from '@agentnomad/contracts';
+import * as z from 'zod';
 
 import type { ExecutableLookupSystem } from '../shared/detector-system.ts';
 import { findClaudeExecutable } from './detector.ts';
+import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { createProgramCli, type ProgramCli } from './plugin-sync.ts';
 import { readValidateReport, type PluginValidator } from './skills-dir-plugins.ts';
 
@@ -29,6 +31,20 @@ const VALIDATE_TIMEOUT_MS = 60_000;
 
 const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** `claude` answers some failures as `{ "success": false, "error": "…" }` on stdout. */
+const ErrorAnswer = z.looseObject({ error: z.string() });
+
+/** The one thing to say about a run that gave no report (review 15 UX-02). */
+function noReportReason(run: Awaited<ReturnType<ProgramCli['run']>>): string {
+  const answered = valueOrNull(parseJsonWith(ErrorAnswer, run.stdout.trim()));
+  return (
+    (answered !== null ? `claude said: ${answered.error}` : '') ||
+    run.failure ||
+    run.stderr.trim().split(/\r?\n/)[0] ||
+    `exit code ${String(run.exitCode)}`
+  );
+}
+
 /** A validator for this PC. It never throws: a problem comes back as `unavailable`. */
 export function createPluginValidator(deps: PluginValidatorDeps): PluginValidator {
   const cli =
@@ -42,7 +58,9 @@ export function createPluginValidator(deps: PluginValidatorDeps): PluginValidato
     let root: string | null = null;
     try {
       root = await mkdtemp(join(deps.tempDir ?? tmpdir(), 'agentnomad-plugin-'));
-      const folder = join(root, plugin.name);
+      // A fixed name: validate reads the plugin's name from its manifest, and a bundle must not
+      // choose where under the folder `claude` runs from its files land (review 15 SEC-01).
+      const folder = join(root, 'plugin');
       for (const file of plugin.files) {
         const relative = file.path.slice(plugin.folder.length);
         // Checked again here, although bundle paths are checked when a setup is opened.
@@ -56,8 +74,10 @@ export function createPluginValidator(deps: PluginValidatorDeps): PluginValidato
       const run = await cli(claudePath).run(['plugin', 'validate', '--json', folder], root);
       const report = readValidateReport(run.stdout);
       if (report !== null) return report;
-      const said = run.stderr.trim().split(/\r?\n/)[0] || `exit code ${String(run.exitCode)}`;
-      return { kind: 'unavailable', reason: `claude plugin validate gave no report (${said})` };
+      return {
+        kind: 'unavailable',
+        reason: `claude plugin validate gave no report (${noReportReason(run)})`,
+      };
     } catch (error) {
       return { kind: 'unavailable', reason: `the check could not run (${reason(error)})` };
     } finally {

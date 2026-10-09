@@ -5,6 +5,8 @@ import { GLOBAL_SCOPE_KEY } from '@agentnomad/contracts';
 import { createGzipBundleCodec } from '@agentnomad/core';
 import { describe, expect, it } from 'vitest';
 
+import { reviewCovers } from '../src/agents/adapter.ts';
+
 import { createAgentRegistry } from '../src/agents/registry.ts';
 import type {
   AfterRestoreContext,
@@ -329,5 +331,16 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
     expect(await exists(join(b.base, 'settings.toml'))).toBe(true);
     expect(await exists(join(b.base, 'hooks', 'check.sh'))).toBe(false);
     expect(seen.followUps).toEqual([]);
+  });
+});
+
+describe('reviewCovers: which files a reviewed entry stands for (T96)', () => {
+  it('a file covers itself; a folder covers what is inside it, not a sibling with the same prefix', () => {
+    expect(reviewCovers('settings.json', 'settings.json')).toBe(true);
+    expect(reviewCovers('settings.json', 'settings.json.bak')).toBe(false);
+    expect(reviewCovers('skills/my-mod/', 'skills/my-mod/hooks/register.ts')).toBe(true);
+    expect(reviewCovers('skills/my-mod/', 'skills/my-mod-2/SKILL.md')).toBe(false);
+    // The folder's own path can only be a stray file of a tampered bundle: dropped with the plugin.
+    expect(reviewCovers('skills/my-mod/', 'skills/my-mod')).toBe(true);
   });
 });

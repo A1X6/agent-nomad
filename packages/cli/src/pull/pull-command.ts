@@ -349,13 +349,30 @@ export function createPullPlanner(deps: PullDeps) {
         (!options.yes && (await prompter.confirm('Allow them?', false)));
       if (!allow) {
         declined = true;
-        // A file, or a whole folder such as a plugin's (T96).
+        // A file, or a whole folder such as a plugin's (T96). Files by lookup, folders by their
+        // short list: a setup may hold thousands of files (PERF-01).
         const blocked = [...new Set(review.map((entry) => entry.file))];
+        const blockedFiles = new Set(blocked.filter((entry) => !entry.endsWith('/')));
+        const blockedFolders = blocked.filter((entry) => entry.endsWith('/'));
         files = files.filter(
-          (file) => !blocked.some((covered) => reviewCovers(covered, file.path)),
+          (file) =>
+            !blockedFiles.has(file.path) &&
+            !blockedFolders.some((folder) => reviewCovers(folder, file.path)),
         );
+        const skipped = [
+          ...(blockedFiles.size > 0
+            ? [
+                `Skipped ${[...blockedFiles].map(printableLine).join(', ')}: they hold those commands or are run by them.`,
+              ]
+            : []),
+          ...(blockedFolders.length > 0
+            ? [
+                `Skipped ${blockedFolders.map(printableLine).join(', ')}: a plugin is accepted or left out as a whole.`,
+              ]
+            : []),
+        ];
         reporter.warn(
-          `Skipped ${blocked.map(printableLine).join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
+          `${skipped.join(' ')} The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
         );
       }
     }
