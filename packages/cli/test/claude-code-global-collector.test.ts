@@ -13,6 +13,7 @@ import {
   syncedSetup,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
+import { pluginFiles, writePluginFiles } from './claude-code-plugin-fixtures.ts';
 import { linkFolder, paths, text, withTempDir, writeTestFile } from './fakes.ts';
 import {
   ACCOUNT_SKILLS_PREFIX,
@@ -118,6 +119,20 @@ describe('global collector: what is taken', () => {
     await writeSettings(stopHook(`bash ${join(base, 'skills', 'synced', 'a', 'helper.sh')}`));
     const files = paths(await collect(true));
     expect(files.some((path) => path.startsWith('skills/synced'))).toBe(false);
+  });
+
+  it('takes a plugin in skills/, but never what Claude Code generates in it (T96)', async () => {
+    await writePluginFiles(base, pluginFiles('skills/my-mod/', { modules: ['./register.ts'] }));
+    await writeTestFile(
+      join(base, 'skills', 'my-mod', '.claude-plugin', 'types', 'claude-code', 'index.d.ts'),
+    );
+    await writeTestFile(join(base, 'skills', 'my-mod', '.claude-plugin', 'types', 'tsconfig.json'));
+    const found = paths(await collect());
+    expect(found).toEqual([
+      'skills/my-mod/.claude-plugin/plugin.json',
+      'skills/my-mod/hooks/hooks.json',
+      'skills/my-mod/hooks/register.ts',
+    ]);
   });
 
   it('skips .git, node_modules, OS clutter and agentnomad backup copies', async () => {

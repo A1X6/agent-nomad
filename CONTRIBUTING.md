@@ -138,7 +138,9 @@ open, such as a chat or an option letter from a discussion.
     `syncedSetup`, and `syncedSetup2_1_295` in the format Claude Code 2.1.295 writes).
   - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
     `putJson`, `realisticPlugins`), the plugin data folders and `$.store` files a real Claude
-    Code named (`REAL_DATA_DIRS`, `REAL_STORE_FILES`) and managed settings (`fakeManagedSystem` with
+    Code named (`REAL_DATA_DIRS`, `REAL_STORE_FILES`), a plugin in the skills folder as bundle files
+    (`pluginFiles`, `writePluginFiles`) and what `claude plugin validate` says about one
+    (`REAL_VALIDATE_REPORT`, `PROBE_MOD_VALIDATION`, `scriptedValidator`) and managed settings (`fakeManagedSystem` with
     `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).

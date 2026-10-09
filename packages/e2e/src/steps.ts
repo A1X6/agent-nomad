@@ -23,6 +23,11 @@ const stdin = `${PASSWORD}\n`;
 const HOOK_SCRIPT = '#!/bin/sh\necho ok\n';
 const SKILL = '---\nname: deploy\ndescription: Deploy the app\n---\nRun the deploy script.\n';
 const REVIEW_SKILL = '---\nname: review\ndescription: Review a change\n---\nRead the diff.\n';
+/** A mod in the skills folder (T96): a plugin whose hooks module runs inside Claude Code. */
+const MOD_MANIFEST = JSON.stringify({ name: 'probe-mod', version: '0.1.0', description: 'e2e' });
+const MOD_HOOKS = JSON.stringify({ modules: ['./register.ts'] });
+const MOD_MODULE =
+  "export const register = (on) => {\n  on('session.start', ($, e, next) => next(e))\n}\n";
 const MEMORY = '# Memory\n- The demo app uses port 5173.\n';
 const EDIT = 'Edited on the second PC.\n';
 /** Scripts kept with the other line endings (T56): restore fixes them once, then leaves them. */
@@ -91,6 +96,8 @@ function expectNothingReadable(server: LocalServer, known: Known): void {
     'db.js',
     'check.sh',
     'echo ok',
+    'probe-mod',
+    "on('session.start'",
     EDIT.trim(),
     'Old notes on the third PC',
     'Write release notes.',
@@ -174,6 +181,11 @@ async function expectRestored(pc: Pc, edited: boolean): Promise<void> {
   expect(cmd.replace(/\r/g, '')).toBe(CMD_LF);
   if (!posix) expect(cmd).toBe(CMD_LF.replace(/\n/g, '\r\n'));
   if (edited) expect(await read(claude(pc, 'skills', 'review', 'SKILL.md'))).toBe(REVIEW_SKILL);
+  // T96: the mod came along, without what Claude Code generated in its folder.
+  expect(await read(claude(pc, 'skills', 'probe-mod', 'hooks', 'register.ts'))).toBe(MOD_MODULE);
+  await expect(
+    read(claude(pc, 'skills', 'probe-mod', '.claude-plugin', 'types', 'claude-code', 'index.d.ts')),
+  ).rejects.toThrow();
   if (!claudeRunningHere) {
     const claudeJson = JSON.parse(await read(join(pc.home, '.claude.json'))) as {
       mcpServers?: Record<string, unknown>;
@@ -252,6 +264,12 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     );
     await write(claude(pc, 'hooks', 'check.sh'), HOOK_SCRIPT, true);
     await write(claude(pc, 'skills', 'deploy', 'SKILL.md'), SKILL);
+    // A mod in skills/ (T96), with the types Claude Code generates when it loads one.
+    const probeMod = (...parts: string[]) => claude(pc, 'skills', 'probe-mod', ...parts);
+    await write(probeMod('.claude-plugin', 'plugin.json'), MOD_MANIFEST);
+    await write(probeMod('hooks', 'hooks.json'), MOD_HOOKS);
+    await write(probeMod('hooks', 'register.ts'), MOD_MODULE);
+    await write(probeMod('.claude-plugin', 'types', 'claude-code', 'index.d.ts'), '// generated\n');
     await write(
       join(pc.home, '.claude.json'),
       JSON.stringify({
@@ -298,6 +316,9 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
       ]),
     );
     expect(pushed.stdout).toContain('Saved the Claude Code global setup');
+    expect(pushed.stdout).toContain(
+      'Plugins in the skills folder, saved with it: probe-mod (skills/probe-mod/, a mod: runs code inside Claude Code)',
+    );
     expect(pushed.stdout).toContain('Saved the Claude Code project "demo"');
     // T49: a normal setup gets no false "not saved" warning (its hook script is saved).
     expect(pushed.stderr).not.toContain('left out, because agentnomad does not know');
@@ -363,6 +384,8 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
     );
     expect(pulled.stdout).toContain('Restored the Claude Code global setup');
     expect(pulled.stdout).toContain('Restored the Claude Code project "demo"');
+    // T96: the mod was shown before it was written (checked by claude where it is installed).
+    expect(pulled.stdout).toContain('+ plugin skills/probe-mod/');
     await expectRestored(pc, false);
     // T42: the user's own claude.ai skill is a local skill here; Anthropic's never came along.
     expect(await read(claude(pc, 'skills', 'my-account-skill', 'SKILL.md'))).toBe(ACCOUNT_SKILL);

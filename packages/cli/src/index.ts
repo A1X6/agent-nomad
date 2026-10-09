@@ -24,6 +24,7 @@ export * from './agents/claude-code/restorer.ts';
 export * from './agents/claude-code/runnable-markdown.ts';
 export * from './agents/claude-code/running-claude.ts';
 export * from './agents/claude-code/settings-commands.ts';
+export * from './agents/claude-code/skills-dir-plugins.ts';
 export * from './agents/claude-code/unknown-files.ts';
 export * from './agents/notices.ts';
 export * from './agents/registry.ts';

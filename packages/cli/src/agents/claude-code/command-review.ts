@@ -108,13 +108,16 @@ function describeServer(server: Record<string, unknown>): string {
   return extras.length > 0 ? `${main}  (${extras.join('; ')})` : main;
 }
 
-function settingsEntries(file: CollectedFile, json: Record<string, unknown>): RunnableEntry[] {
+/**
+ * The hooks of a `hooks` block (a settings file's, or a plugin's hooks file, T96), one at a
+ * time: a malformed one is shown as unreadable and hides no other (SEC-01).
+ */
+export function hookEntries(file: string, hooks: unknown): RunnableEntry[] {
   const entries: RunnableEntry[] = [];
-  // One hook at a time: a malformed one is shown as unreadable and hides no other (SEC-01).
-  for (const item of hookItems(json['hooks'])) {
+  for (const item of hookItems(hooks)) {
     if (!('hook' in item)) {
       const label = item.event === null ? 'hooks' : `hook ${item.event}`;
-      entries.push(unreadable(file.path, label, item.unreadable));
+      entries.push(unreadable(file, label, item.unreadable));
       continue;
     }
     const { event, hook } = item;
@@ -127,12 +130,17 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
         hook.args === undefined
           ? `shell ${slashes(command)}`
           : `exec ${stable({ command: slashes(hook.command), args: hook.args.map(slashes) })}`;
-      entries.push(entry(file.path, `hook ${event}`, command, identity));
+      entries.push(entry(file, `hook ${event}`, command, identity));
     } else if (hook.type === 'http' && hook.url !== undefined) {
       // Sends what the hook sees (tool input, prompts) to that address.
-      entries.push(entry(file.path, `hook ${event} (sends data to)`, hook.url));
+      entries.push(entry(file, `hook ${event} (sends data to)`, hook.url));
     }
   }
+  return entries;
+}
+
+function settingsEntries(file: CollectedFile, json: Record<string, unknown>): RunnableEntry[] {
+  const entries: RunnableEntry[] = hookEntries(file.path, json['hooks']);
   const statusLine = Command.safeParse(json['statusLine']);
   if (statusLine.success && statusLine.data.command !== undefined) {
     entries.push(entry(file.path, 'status line', statusLine.data.command));
@@ -192,20 +200,21 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
 }
 
 /**
- * The MCP servers of a file, one at a time (SEC-01): a server that is not an object, or a
- * `mcpServers` block that is not one, is shown as unreadable and hides no other server.
+ * The MCP servers of a file (a settings or `.mcp.json` file's, or a plugin's, T96), one at a
+ * time (SEC-01): a server that is not an object, or a `mcpServers` block that is not one, is
+ * shown as unreadable and hides no other server.
  */
-function serverEntries(file: CollectedFile, servers: unknown): RunnableEntry[] {
+export function serverEntries(file: string, servers: unknown): RunnableEntry[] {
   if (servers === undefined) return [];
   const all = Json.safeParse(servers);
-  if (!all.success) return [unreadable(file.path, 'MCP servers', servers)];
+  if (!all.success) return [unreadable(file, 'MCP servers', servers)];
   return Object.entries(all.data).flatMap(([name, value]) => {
     const server = Json.safeParse(value);
-    if (!server.success) return [unreadable(file.path, `MCP server ${name}`, value)];
+    if (!server.success) return [unreadable(file, `MCP server ${name}`, value)];
     const shown = describeServer(server.data);
     return shown === ''
       ? []
-      : [entry(file.path, `MCP server ${name}`, shown, slashes(stable(server.data)))];
+      : [entry(file, `MCP server ${name}`, shown, slashes(stable(server.data)))];
   });
 }
 
@@ -230,7 +239,7 @@ function runnableEntries(files: readonly CollectedFile[]): RunnableEntry[] {
     const json = SETTINGS_FILES.has(file.path) || MCP_FILES.has(file.path) ? parse(file) : null;
     if (json === null) continue;
     if (SETTINGS_FILES.has(file.path)) entries.push(...settingsEntries(file, json));
-    entries.push(...serverEntries(file, json['mcpServers']));
+    entries.push(...serverEntries(file.path, json['mcpServers']));
   }
   return entries;
 }

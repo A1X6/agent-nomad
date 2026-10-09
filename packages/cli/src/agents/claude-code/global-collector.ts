@@ -32,6 +32,7 @@ import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './a
 import { hookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
+import { isPluginGenerated } from './skills-dir-plugins.ts';
 
 export interface GlobalCollectorOptions {
   /** Claude Code's base folder, from the detector (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -46,9 +47,12 @@ export interface GlobalCollectorOptions {
   readonly globalFiles?: readonly string[];
 }
 
-/** True when `bundlePath` is a never-synced entry or inside one. */
+/**
+ * True when `bundlePath` is a never-synced entry or inside one, or something Claude Code
+ * generates inside a plugin folder (T96).
+ */
 const isNeverSynced = (bundlePath: string) =>
-  NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry));
+  NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry)) || isPluginGenerated(bundlePath);
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {

@@ -9,6 +9,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   crypto,
   dataKey,
+  exists,
   fakeBundleServer,
   fakeEnvWriter,
   localStateIn,
@@ -23,6 +24,12 @@ import {
   useTempDir,
   writeTestFile,
 } from './fakes.ts';
+import {
+  pluginFiles,
+  PROBE_MOD_VALIDATION,
+  scriptedValidator,
+  writePluginFiles,
+} from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter as claudeAdapter, stopHook } from './claude-code-project-fixtures.ts';
 import {
   createAgentRegistry,
@@ -781,5 +788,99 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(second.lines.join('\n')).toContain('already set here');
     expect(await readText(profile)).toBe(after);
     expect((await readdir(b.home, { recursive: true })).sort()).toEqual(files.sort());
+  });
+});
+
+describe('plugins and mods in the skills folder (T96)', () => {
+  const MOD_FILES = ['.claude-plugin/plugin.json', 'hooks/hooks.json', 'hooks/register.ts'];
+  const modFiles = (machine: ReturnType<typeof pc>) =>
+    MOD_FILES.map((file) => join(machine.base, 'skills', 'my-mod', ...file.split('/')));
+
+  /** PC A with a mod in skills/, and the types folder Claude Code generates there. */
+  async function pushedMod() {
+    const server = fakeBundleServer();
+    const a = pc('laptop');
+    await writeTestFile(join(a.base, 'CLAUDE.md'), 'Notes.');
+    await writePluginFiles(a.base, pluginFiles('skills/my-mod/', { modules: ['./register.ts'] }));
+    await writeTestFile(
+      join(a.base, 'skills', 'my-mod', '.claude-plugin', 'types', 'claude-code', 'index.d.ts'),
+      '// generated',
+    );
+    await pushFrom(a, server, ['global', false])(none);
+    return { server };
+  }
+
+  /** Pull on `machine` with a validator that answers for the T95 probe mod. */
+  function pullWithValidator(
+    machine: ReturnType<typeof pc>,
+    server: ReturnType<typeof fakeBundleServer>,
+    answers: unknown[],
+    validation = PROBE_MOD_VALIDATION,
+  ) {
+    const validator = scriptedValidator(validation);
+    const t = pullOn(machine, server, answers, {
+      adapter: claudeAdapter(machine.home, { validatePlugin: validator.validate }),
+    });
+    return { ...t, validator };
+  }
+
+  it('--yes shows what the mod hooks and calls, but never writes it; the rest is restored', async () => {
+    const { server } = await pushedMod();
+    const b = pc('desktop');
+    const t = pullWithValidator(b, server, []);
+    await t.pull({ global: true, yes: true });
+    expect(t.asked).toEqual([]);
+    const review = t.lines.find((line) => line.includes('run programs on this PC')) ?? '';
+    expect(review).toContain(
+      '+ plugin skills/my-mod/ module ./register.ts (runs code inside Claude Code): hooks: session.start, tool.call{tool=Bash}; calls: $.store.get, $.store.set, $.ui.status',
+    );
+    expect(t.validator.asked.map((plugin) => plugin.name)).toEqual(['my-mod']);
+    for (const file of modFiles(b)) expect(await exists(file)).toBe(false);
+    expect(await readText(join(b.base, 'CLAUDE.md'))).toBe('Notes.');
+    expect(
+      t.lines.some(
+        (line) => line.includes('Skipped skills/my-mod/') && line.includes('add --allow-commands'),
+      ),
+    ).toBe(true);
+  });
+
+  it('--allow-commands writes the mod; what Claude Code generated never came along', async () => {
+    const { server } = await pushedMod();
+    const b = pc('desktop');
+    await pullWithValidator(b, server, []).pull({ global: true, yes: true, allowCommands: true });
+    for (const file of modFiles(b)) expect(await exists(file)).toBe(true);
+    expect(await exists(join(b.base, 'skills', 'my-mod', '.claude-plugin', 'types'))).toBe(false);
+    // Pulling again: the mod is here unchanged, so there is nothing to review or check.
+    const again = pullWithValidator(b, server, []);
+    await again.pull({ global: true, yes: true });
+    expect(again.lines.some((line) => line.includes('run programs on this PC'))).toBe(false);
+    expect(again.validator.asked).toEqual([]);
+  });
+
+  it('a yes to the review writes the mod; a no leaves the whole folder out', async () => {
+    const { server } = await pushedMod();
+    const b = pc('desktop');
+    const no = pullWithValidator(b, server, [false]);
+    await no.pull({ global: true, yes: false });
+    expect(no.asked).toHaveLength(1);
+    for (const file of modFiles(b)) expect(await exists(file)).toBe(false);
+    const yes = pullWithValidator(b, server, [true]);
+    await yes.pull({ global: true, yes: false });
+    for (const file of modFiles(b)) expect(await exists(file)).toBe(true);
+  });
+
+  it('a mod that cannot be checked here is shown as not checked, and --yes still skips it', async () => {
+    const { server } = await pushedMod();
+    const b = pc('desktop');
+    const t = pullWithValidator(b, server, [], {
+      kind: 'unavailable',
+      reason: 'the claude command was not found',
+    });
+    await t.pull({ global: true, yes: true });
+    const review = t.lines.find((line) => line.includes('run programs on this PC')) ?? '';
+    expect(review).toContain(
+      '+ plugin skills/my-mod/ (a mod: runs code inside Claude Code, not checked): modules ./register.ts: the claude command was not found, so what they hook and call could not be listed',
+    );
+    for (const file of modFiles(b)) expect(await exists(file)).toBe(false);
   });
 });

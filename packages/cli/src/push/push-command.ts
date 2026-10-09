@@ -301,6 +301,10 @@ export function createPushPlanner(deps: PushDeps) {
       (await item.adapter.inspector?.unknownEntries(item.target)) ?? [],
     );
     if (unknown !== null) reporter.warn(`${describe(item)}: ${unknown}`);
+    // What the agent wants said about the setup, e.g. plugins in its skills folder (T96).
+    for (const note of item.adapter.inspector?.describeCollected?.(item.target, collected) ?? []) {
+      reporter.info(`${describe(item)}: ${note}`);
+    }
     if (collected.length === 0) {
       reporter.info(`Nothing to save for the ${describe(item)}.`);
       return null;

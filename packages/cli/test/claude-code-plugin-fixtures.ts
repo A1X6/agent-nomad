@@ -1,7 +1,14 @@
 import { join } from 'node:path';
 
-import { writeTestFile } from './fakes.ts';
-import type { ManagedSettings, ManagedSettingsSystem } from '../src/index.ts';
+import { collected, collectedJson, writeTestFile } from './fakes.ts';
+import type {
+  CollectedFile,
+  ManagedSettings,
+  ManagedSettingsSystem,
+  PluginFolder,
+  PluginValidation,
+  PluginValidator,
+} from '../src/index.ts';
 
 /** Plugin files shared by the plugin and plugin sync tests (review 7 READ-01). */
 
@@ -110,4 +117,133 @@ export const REAL_DATA_DIRS: Readonly<Record<string, string>> = {
 export const REAL_STORE_FILES: Readonly<Record<string, string>> = {
   'probe-mod@skills-dir': 'probe-mod_skills-dir-e89169932969.json',
   'Odd.Mod_v2@skills-dir': 'Odd_Mod_v2_skills-dir-bc7e6d4978f9.json',
+};
+
+/** What a plugin in the skills folder may hold (T96), besides its manifest. */
+export interface PluginFilesOptions {
+  /** Hooks modules named in `hooks/hooks.json`; each gets a one-line source file. */
+  readonly modules?: readonly string[];
+  /** A classic `hooks` block for `hooks/hooks.json`. */
+  readonly hooks?: unknown;
+  /** An `mcpServers` block for `.mcp.json`. */
+  readonly mcpServers?: unknown;
+  /** Other files, by path inside the plugin folder. */
+  readonly extra?: Readonly<Record<string, string>>;
+}
+
+/**
+ * A plugin in the skills folder as bundle files (T96): `folder` is its bundle path with the
+ * trailing slash (`skills/my-mod/`), the manifest is always there.
+ */
+export function pluginFiles(folder: string, options: PluginFilesOptions = {}): CollectedFile[] {
+  const name = folder.split('/').at(-2) ?? '';
+  const files = [
+    collectedJson(`${folder}.claude-plugin/plugin.json`, {
+      name,
+      version: '0.1.0',
+      description: 'test',
+    }),
+  ];
+  if (options.modules !== undefined || options.hooks !== undefined) {
+    files.push(
+      collectedJson(`${folder}hooks/hooks.json`, {
+        ...(options.modules !== undefined && { modules: options.modules }),
+        ...(options.hooks !== undefined && { hooks: options.hooks }),
+      }),
+    );
+    for (const module of options.modules ?? []) {
+      files.push(
+        collected(
+          `${folder}hooks/${module.replace(/^\.\//, '')}`,
+          'export const register = () => {}\n',
+        ),
+      );
+    }
+  }
+  if (options.mcpServers !== undefined) {
+    files.push(collectedJson(`${folder}.mcp.json`, { mcpServers: options.mcpServers }));
+  }
+  for (const [path, text] of Object.entries(options.extra ?? {})) {
+    files.push(collected(folder + path, text));
+  }
+  return files;
+}
+
+/** Writes `files` (bundle paths from `base`) to disk, as a PC that has the plugin. */
+export async function writePluginFiles(
+  base: string,
+  files: readonly CollectedFile[],
+): Promise<void> {
+  for (const file of files) await writeTestFile(join(base, ...file.path.split('/')), file.content);
+}
+
+/**
+ * What `claude plugin validate --json` printed for the T95 probe mod on Claude Code 2.1.295
+ * (paths shortened): a manifest warning, and the hooks file's notes with the module's hooks and
+ * `$` calls.
+ */
+export const REAL_VALIDATE_REPORT = JSON.stringify({
+  success: true,
+  strict: false,
+  target: '<skills>/probe-mod/.claude-plugin/plugin.json',
+  manifest: {
+    file: '<skills>/probe-mod/.claude-plugin/plugin.json',
+    type: 'plugin',
+    errors: [],
+    warnings: [
+      {
+        path: 'author',
+        message:
+          'No author information provided. Consider adding author details for plugin attribution',
+        code: null,
+      },
+    ],
+    notes: [],
+    gatingHooks: [],
+  },
+  contents: [
+    {
+      file: '<skills>/probe-mod/hooks/hooks.json',
+      type: 'hooks',
+      errors: [],
+      warnings: [],
+      notes: [
+        './register.ts hooks: session.start, tool.call{tool=Bash}',
+        './register.ts gating hook without .catch: tool.call{tool=Bash}',
+        './register.ts calls: $.store.get, $.store.set, $.ui.status',
+      ],
+      gatingHooks: [
+        {
+          module: './register.ts',
+          pattern: 'tool.call',
+          hook: 'tool.call{tool=Bash}',
+          hasCatch: false,
+        },
+      ],
+    },
+  ],
+  advice: [],
+});
+
+/** A plugin validator that always answers `validation` and records which plugins it was given. */
+export function scriptedValidator(validation: PluginValidation) {
+  const asked: PluginFolder[] = [];
+  const validate: PluginValidator = (plugin) => {
+    asked.push(plugin);
+    return Promise.resolve(validation);
+  };
+  return { asked, validate };
+}
+
+/** The T95 probe mod's report, as the review reads it. */
+export const PROBE_MOD_VALIDATION: PluginValidation = {
+  kind: 'report',
+  errors: [],
+  modules: [
+    {
+      module: './register.ts',
+      hooks: 'session.start, tool.call{tool=Bash}',
+      calls: '$.store.get, $.store.set, $.ui.status',
+    },
+  ],
 };

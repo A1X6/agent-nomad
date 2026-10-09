@@ -6,7 +6,7 @@ import type { Restorer } from '../src/agents/adapter.ts';
  */
 export function stubRestorer(restore?: Restorer['restore']): Restorer {
   return {
-    reviewRunnable: () => [],
+    reviewRunnable: () => Promise.resolve([]),
     isRedirectVariable: () => false,
     conflicts: () => [],
     restore:

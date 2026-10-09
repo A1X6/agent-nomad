@@ -227,6 +227,9 @@ loop) into a shared `agents/shared/` module rather than copying them.
   organization-managed settings (see `claude-code/managed-settings.ts`).
 - **`inspector.versionNotice(savedWith, here)`:** what pull says about the version a setup
   was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text).
+- **`inspector.describeCollected(target, files)`:** what push says about a collected setup
+  before saving it, e.g. which skill folders are plugins that run code (see
+  `claude-code/skills-dir-plugins.ts`). It leaves nothing out.
 - **`optionalParts`:** what push saves only after a yes, as data (an id, its scope, what
   there is, the question, and `flagHelp`, the help for `--<id>` / `--no-<id>` in push and
   pull); the collector gets the chosen ids in `options.include`. The command line builds

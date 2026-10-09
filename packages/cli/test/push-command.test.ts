@@ -69,6 +69,8 @@ function collectingAdapter(
     project?: CollectedFile[];
     unknown?: string[];
     notices?: string[];
+    /** What the agent says about a collected setup (T96). */
+    describe?: string[];
   } = {},
 ): AgentAdapter {
   return {
@@ -92,6 +94,7 @@ function collectingAdapter(
     inspector: {
       unknownEntries: () => Promise.resolve(options.unknown ?? []),
       notices: () => Promise.resolve(options.notices ?? []),
+      describeCollected: () => options.describe ?? [],
     },
   };
 }
@@ -464,6 +467,14 @@ describe('agentnomad push', () => {
     ).toBe(true);
     const { bundle } = await received(t.server, { kind: 'global' });
     expect(bundle.files.map((file) => file.path)).toContain('.agentnomad/env.json');
+  });
+
+  it('says what the agent wants said about a collected setup, e.g. its plugins (T96)', async () => {
+    const note =
+      'Plugins in the skills folder, saved with it: my-mod (skills/my-mod/, a mod: runs code inside Claude Code).';
+    const t = setup(['global', false], { adapter: collectingAdapter({ describe: [note] }) });
+    await t.command.push(noFlags);
+    expect(t.lines).toContain(`info: Claude Code global setup: ${note}`);
   });
 
   it('keeps binary files byte for byte', async () => {

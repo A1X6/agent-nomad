@@ -25,6 +25,7 @@ import {
 } from './global-paths.ts';
 import { underFolder } from '../shared/bundle-paths.ts';
 import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts';
+import { isPluginGenerated } from './skills-dir-plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
   PROJECT_CLAUDE_FILES,
@@ -53,6 +54,9 @@ const underAnyCase = (path: string, folder: string) =>
   underFolder(path, folder, { ignoreCase: true });
 
 const refused = (reason: string): RestoreDestination => ({ kind: 'refused', reason });
+
+/** Push never takes it (T96), so a bundle holding it is an old or tampered one. */
+const GENERATED_IN_PLUGIN = 'Claude Code generates it inside a plugin folder';
 
 /**
  * Home files a bundle may restore: known tool settings, or scripts that the setup's own hooks
@@ -95,6 +99,7 @@ export function globalDestination(
   }
   if (underAnyCase(path, RESERVED_DIR)) return refused('unknown agentnomad entry');
   if (GLOBAL_REFUSED.some((entry) => underAnyCase(path, entry))) return refused('never synced');
+  if (isPluginGenerated(path)) return refused(GENERATED_IN_PLUGIN);
 
   const allowed =
     GLOBAL_FILES.includes(path) ||
@@ -128,6 +133,7 @@ export function projectDestination(
   if (PROJECT_NEVER_SYNCED.some((entry) => underAnyCase(path, entry))) {
     return refused('never synced');
   }
+  if (isPluginGenerated(path)) return refused(GENERATED_IN_PLUGIN);
 
   const claudeFolders = [...PROJECT_CLAUDE_FOLDERS, ...PROJECT_MEMORY_FOLDERS];
   const allowed =

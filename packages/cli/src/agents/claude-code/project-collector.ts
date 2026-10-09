@@ -11,6 +11,7 @@ import {
 import { PLUGINS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
 import { projectHookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
+import { isPluginGenerated } from './skills-dir-plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
   PROJECT_CLAUDE_FILES,
@@ -29,9 +30,13 @@ export interface ProjectCollectorOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-/** True when `bundlePath` is a never-synced project entry or inside one. */
+/**
+ * True when `bundlePath` is a never-synced project entry or inside one, or something Claude
+ * Code generates inside a plugin folder (T96).
+ */
 const isNeverSynced = (bundlePath: string) =>
-  PROJECT_NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry));
+  PROJECT_NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry)) ||
+  isPluginGenerated(bundlePath);
 
 /**
  * A Claude Code project collector (T26). Bundle paths are relative to the project folder;

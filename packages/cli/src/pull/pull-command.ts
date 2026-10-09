@@ -8,6 +8,7 @@ import {
 
 import {
   chosenAgent,
+  reviewCovers,
   type AgentAdapter,
   type AgentRegistry,
   type AgentRestorePlan,
@@ -330,7 +331,7 @@ export function createPullPlanner(deps: PullDeps) {
     // are, and anything that runs programs and is new here is confirmed before writing.
     const current = await adapter.collector.collect(target, { includeMemory: true });
     files = preferLocalEquivalents(bundle.files, files, current, resolver);
-    const review = adapter.restorer.reviewRunnable(files, current);
+    const review = await adapter.restorer.reviewRunnable(files, current);
     let declined = false;
     if (review.length > 0) {
       reporter.info(
@@ -348,8 +349,11 @@ export function createPullPlanner(deps: PullDeps) {
         (!options.yes && (await prompter.confirm('Allow them?', false)));
       if (!allow) {
         declined = true;
+        // A file, or a whole folder such as a plugin's (T96).
         const blocked = new Set(review.map((entry) => entry.file));
-        files = files.filter((file) => !blocked.has(file.path));
+        files = files.filter(
+          (file) => ![...blocked].some((covered) => reviewCovers(covered, file.path)),
+        );
         reporter.warn(
           `Skipped ${[...blocked].map(printableLine).join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
         );

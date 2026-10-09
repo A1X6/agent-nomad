@@ -14,6 +14,7 @@ import {
   root,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
+import { pluginFiles, writePluginFiles } from './claude-code-plugin-fixtures.ts';
 import { linkFolder, paths, text, writeTestFile } from './fakes.ts';
 import { createClaudeCodeProjectCollector } from '../src/index.ts';
 
@@ -71,6 +72,31 @@ describe('project collector: what is taken', () => {
       'AGENTS.md',
       'CLAUDE.local.md',
       'CLAUDE.md',
+    ]);
+  });
+
+  it('takes a plugin in .claude/skills/, but never what Claude Code generates in it (T96)', async () => {
+    await writePluginFiles(
+      project,
+      pluginFiles('.claude/skills/my-mod/', { modules: ['./register.ts'] }),
+    );
+    await writeTestFile(
+      join(
+        project,
+        '.claude',
+        'skills',
+        'my-mod',
+        '.claude-plugin',
+        'types',
+        'claude-code',
+        'index.d.ts',
+      ),
+    );
+    const found = await collect();
+    expect(paths(found)).toEqual([
+      '.claude/skills/my-mod/.claude-plugin/plugin.json',
+      '.claude/skills/my-mod/hooks/hooks.json',
+      '.claude/skills/my-mod/hooks/register.ts',
     ]);
   });
 
