@@ -21,6 +21,8 @@ import {
   systemProcessLister,
   type ClaudeRunningCheck,
 } from './running-claude.ts';
+import { createPluginValidator } from './plugin-validate.ts';
+import { pluginNotes, type PluginValidator } from './skills-dir-plugins.ts';
 import { findUnknownEntries } from './unknown-files.ts';
 
 export interface ClaudeCodeAdapterOptions {
@@ -31,6 +33,8 @@ export interface ClaudeCodeAdapterOptions {
   readonly isClaudeRunning?: ClaudeRunningCheck;
   /** Where organization-managed settings are read (T31); defaults to this PC (SOLID-01). */
   readonly managedSystem?: ManagedSettingsSystem;
+  /** Checks a pulled plugin for the review (T96); defaults to this PC's `claude plugin validate`. */
+  readonly validatePlugin?: PluginValidator;
 }
 
 /**
@@ -66,6 +70,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     env: options.env,
     customConfigDir,
     isClaudeRunning,
+    validatePlugin: options.validatePlugin ?? createPluginValidator({ system }),
   });
   const followUp = createClaudeCodeAfterRestore({ system, restorer, managedSettings });
 
@@ -115,6 +120,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
         return notice === null ? [] : [notice];
       },
       versionNotice: (savedWith, here) => agentVersionNotice('Claude Code', savedWith, here),
+      describeCollected: (_target, files) => pluginNotes(files),
     },
 
     /**

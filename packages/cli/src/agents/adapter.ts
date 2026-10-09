@@ -1,6 +1,7 @@
 import type { AgentId, SourceOs } from '@agentnomad/contracts';
 
 import type { Prompter, Reporter } from '../ui/prompter.ts';
+import { underFolder } from './shared/bundle-paths.ts';
 
 /** Where a setup lives on this PC: the agent's global folder, or one project folder. */
 export type ScopeTarget =
@@ -106,7 +107,11 @@ export interface ConflictToAsk {
  * script they run. Pull shows the new or changed ones and asks before writing them.
  */
 export interface RunnableEntry {
-  /** The bundle file it lives in, e.g. `settings.json` or `.mcp.json`. */
+  /**
+   * The bundle file it lives in, e.g. `settings.json` or `.mcp.json`, or a folder (with its
+   * trailing slash, e.g. `skills/my-mod/`) when the whole folder is one thing to accept or
+   * decline, such as a plugin (T96). `reviewCovers` tells which files that is.
+   */
   readonly file: string;
   /** What it is, e.g. `hook PreToolUse`, `status line`, `MCP server github`. */
   readonly label: string;
@@ -119,6 +124,10 @@ export interface RunnableEntry {
 export interface ReviewedEntry extends RunnableEntry {
   readonly change: 'new' | 'changed';
 }
+
+/** Whether a reviewed entry's `file` (a file, or a folder ending in `/`) covers `path`. */
+export const reviewCovers = (file: string, path: string): boolean =>
+  file.endsWith('/') ? underFolder(path, file.slice(0, -1)) : file === path;
 
 /**
  * Where an agent's setup refers to environment variables as `${VAR}` (T30): push offers to
@@ -158,12 +167,13 @@ export interface RestoreContext {
 export interface Restorer {
   /**
    * What in `files` runs programs and is new or changed against `current` (this PC's setup
-   * as the collector sees it). Pull shows these and asks before writing (T34).
+   * as the collector sees it). Pull shows these and asks before writing (T34). It may run
+   * the agent's own check on them (Claude Code's `claude plugin validate`, T96).
    */
   reviewRunnable(
     files: readonly CollectedFile[],
     current: readonly CollectedFile[],
-  ): readonly ReviewedEntry[];
+  ): Promise<readonly ReviewedEntry[]>;
   /**
    * Environment variable names that send programs' requests elsewhere (a proxy, another
    * endpoint): pull gives saved values of these their own question (T44, T56).
@@ -193,6 +203,11 @@ export interface AgentInspector {
   notices(command: 'push' | 'pull' | 'agents'): Promise<readonly string[]>;
   /** What pull says about the version a setup was saved with; `null`: nothing to say. */
   versionNotice?(savedWith: string | null, here: string | null): string | null;
+  /**
+   * What push says about a collected setup before saving it, e.g. which skill folders are
+   * plugins that run code (T96). Nothing is left out because of it.
+   */
+  describeCollected?(target: ScopeTarget, files: readonly CollectedFile[]): readonly string[];
 }
 
 /** What an agent's part of pull's plan step gets for one setup (T61). Nothing is written yet. */

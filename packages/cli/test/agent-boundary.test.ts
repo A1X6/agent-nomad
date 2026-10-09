@@ -116,16 +116,18 @@ function exampleAdapter(home: string, seen: Seen): AgentAdapter {
     ],
     restorer: {
       reviewRunnable: (files, current) =>
-        files
-          .filter((file) => file.path.startsWith('hooks/'))
-          .filter((file) => !current.some((here) => here.path === file.path))
-          .map((file) => ({
-            file: file.path,
-            label: 'hook',
-            command: file.path,
-            identity: file.path,
-            change: 'new' as const,
-          })),
+        Promise.resolve(
+          files
+            .filter((file) => file.path.startsWith('hooks/'))
+            .filter((file) => !current.some((here) => here.path === file.path))
+            .map((file) => ({
+              file: file.path,
+              label: 'hook',
+              command: file.path,
+              identity: file.path,
+              change: 'new' as const,
+            })),
+        ),
       isRedirectVariable: (name) => name === 'EXAMPLE_ENDPOINT',
       conflicts: (files, current) =>
         files.flatMap((file): ConflictToAsk[] => {

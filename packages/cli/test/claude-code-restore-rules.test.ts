@@ -52,8 +52,24 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['Skills/Synced/x/run.sh', 'never synced'],
     ['.AgentNomad/home/x.sh', 'unknown agentnomad entry'],
     ['../outside.md', 'not a safe path'],
+    // Push never takes it (T96); an old or tampered bundle may still hold it.
+    [
+      'skills/my-mod/.claude-plugin/types/claude-code/index.d.ts',
+      'Claude Code generates it inside a plugin folder',
+    ],
   ])('global: %s', (path, reason) => {
     expect(globalDestination(path, new Set())).toEqual({ kind: 'refused', reason });
+  });
+
+  it('project: what Claude Code generates in a plugin folder is refused too (T96)', () => {
+    expect(projectDestination('.claude/skills/my-mod/.claude-plugin/types/x.d.ts')).toEqual({
+      kind: 'refused',
+      reason: 'Claude Code generates it inside a plugin folder',
+    });
+    expect(projectDestination('.claude/skills/my-mod/.claude-plugin/plugin.json')).toEqual({
+      kind: 'target',
+      path: '.claude/skills/my-mod/.claude-plugin/plugin.json',
+    });
   });
 
   it('global: a hook naming an autostart file does not make it restorable (T43)', () => {

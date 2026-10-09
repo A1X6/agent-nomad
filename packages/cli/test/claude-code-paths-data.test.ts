@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CLAUDE_CODE_PATHS,
   GLOBAL_FOLDERS,
+  isPluginGenerated,
+  PLUGIN_GENERATED_PATHS,
   GLOBAL_SETTINGS_FILES,
   NEVER_SYNCED,
   PROJECT_SETTINGS_FILES,
@@ -14,6 +16,20 @@ describe('paths data file', () => {
     expect(GLOBAL_FOLDERS).toEqual(CLAUDE_CODE_PATHS.global.folders);
     expect(NEVER_SYNCED).toContain('skills/synced');
     expect([...SCRIPT_EXTENSIONS]).toEqual(CLAUDE_CODE_PATHS.scriptExtensions);
+    expect(PLUGIN_GENERATED_PATHS).toEqual(CLAUDE_CODE_PATHS.plugins.generatedInPlugin);
+  });
+
+  it.each([
+    ['skills/my-mod/.claude-plugin/types', true],
+    ['skills/my-mod/.claude-plugin/types/claude-code/index.d.ts', true],
+    ['skills/my-mod/.claude-plugin/Types/notes.md', false],
+    ['.claude/skills/my-mod/.claude-plugin/types/tsconfig.json', true],
+    ['skills/my-mod/.claude-plugin/plugin.json', false],
+    ['skills/types/SKILL.md', false],
+    ['skills/my-mod/.claude-plugin/types.md', false],
+    ['skills/my-mod/types/index.d.ts', false],
+  ])('what Claude Code generates in a plugin folder (T96): %s → %s', (path, generated) => {
+    expect(isPluginGenerated(path)).toBe(generated);
   });
 
   it('never lists one name as both synced and never synced', () => {

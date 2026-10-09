@@ -800,11 +800,13 @@ describe('restorer: what pull asks before writing (T61)', () => {
     expect(conflicts[1]?.question).toEqual({ overwriteAllowed: true });
   });
 
-  it('reviews runnable entries and knows the variables that redirect Claude Code', () => {
+  it('reviews runnable entries and knows the variables that redirect Claude Code', async () => {
     const r = restorer();
     const settings = collected('settings.json', statusLine('ccstatusline'));
-    expect(r.reviewRunnable([settings], []).map((entry) => entry.label)).toEqual(['status line']);
-    expect(r.reviewRunnable([settings], [settings])).toEqual([]);
+    expect((await r.reviewRunnable([settings], [])).map((entry) => entry.label)).toEqual([
+      'status line',
+    ]);
+    expect(await r.reviewRunnable([settings], [settings])).toEqual([]);
     expect(r.isRedirectVariable('ANTHROPIC_BASE_URL')).toBe(true);
     expect(r.isRedirectVariable('https_proxy')).toBe(true);
     expect(r.isRedirectVariable('GITHUB_TOKEN')).toBe(false);

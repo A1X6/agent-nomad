@@ -21,6 +21,7 @@ import {
   GLOBAL_FOLDERS,
   GLOBAL_MEMORY_FOLDERS,
   HOME_SCRIPTS_PREFIX,
+  isPluginGenerated,
   NEVER_SYNCED,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
@@ -46,9 +47,12 @@ export interface GlobalCollectorOptions {
   readonly globalFiles?: readonly string[];
 }
 
-/** True when `bundlePath` is a never-synced entry or inside one. */
+/**
+ * True when `bundlePath` is a never-synced entry or inside one, or something Claude Code
+ * generates inside a plugin folder (T96).
+ */
 const isNeverSynced = (bundlePath: string) =>
-  NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry));
+  NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry)) || isPluginGenerated(bundlePath);
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {

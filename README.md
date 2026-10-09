@@ -69,7 +69,8 @@ new PC, and shows you anything that would run programs before writing it.
   confirmed before it is written: hooks, the status line, MCP servers, settings that run a
   command (such as `apiKeyHelper`), the scripts they run, and skills, commands or subagents
   with commands that run by themselves. Commands written in a skill as instructions are never
-  flagged.
+  flagged. A plugin or mod in your skills folder is shown with its hooks, MCP servers and what
+  its code hooks and calls inside Claude Code (from `claude plugin validate`).
 - **Plugins reinstalled, not copied,** with Claude Code's own `claude plugin` commands.
 - **Opt-in memory and secrets.** Include Claude's memory, and save environment variable
   values (such as API keys for MCP servers) inside the encrypted setup.
@@ -171,7 +172,7 @@ The other setups are still done first, and one message lists what was not.
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, scripts your hooks and status line run | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
 | **`~/.claude.json`**     | Your MCP servers and documented preferences, merged in                                                                                                                           | Your login, project list, usage and onboarding state                                                                                 |
-| **Plugins**              | Which plugins and marketplaces you use (reinstalled on the other PC)                                                                                                             | Plugin files and caches                                                                                                              |
+| **Plugins**              | Which plugins and marketplaces you use (reinstalled on the other PC); plugins and mods in your skills folder, saved with it and shown before they are written                    | Plugin files and caches                                                                                                              |
 | **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings and folders, scripts the project's hooks run                                   | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
 | **Opt-in**               | Memory (subagent and auto memory), environment variable values, a copy of your own claude.ai skills (`--account-skills`; never Anthropic's or your organization's)               |                                                                                                                                      |
 

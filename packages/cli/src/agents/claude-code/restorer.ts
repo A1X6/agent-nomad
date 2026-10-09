@@ -38,6 +38,7 @@ import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
 import { globalDestination, projectDestination, type RestoreDestination } from './restore-rules.ts';
 import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
+import { reviewPlugins, type PluginValidator } from './skills-dir-plugins.ts';
 
 /** What pull's plan step decided for this restore (T61). */
 interface ClaudeRestoreContext extends RestoreContext {
@@ -73,6 +74,11 @@ export interface RestorerOptions {
   readonly customConfigDir: boolean;
   /** Checked right before `~/.claude.json` is written: never while Claude Code runs. */
   readonly isClaudeRunning: ClaudeRunningCheck;
+  /**
+   * Runs `claude plugin validate` on a pulled plugin for the review (T96); without it, a
+   * mod is shown as not checked and still needs a yes.
+   */
+  readonly validatePlugin?: PluginValidator;
   /** Clock for backup names; injectable for tests. */
   readonly now?: () => Date;
 }
@@ -219,7 +225,13 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   }
 
   return {
-    reviewRunnable,
+    /** What runs programs (T44), and the plugins in the skills folder with what they run (T96). */
+    async reviewRunnable(incoming, current) {
+      return [
+        ...reviewRunnable(incoming, current),
+        ...(await reviewPlugins(incoming, current, options.validatePlugin)),
+      ];
+    },
     isRedirectVariable,
 
     /**
