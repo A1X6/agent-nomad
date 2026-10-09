@@ -1,0 +1,27 @@
+{
+  "lastUpdated": 1791554547239,
+  "skills": [
+    {
+      "skillId": "docs",
+      "name": "docs",
+      "description": "Trimmed.",
+      "source": "anthropic-example",
+      "updatedAt": "2026-09-30T00:33:27.599727Z"
+    },
+    {
+      "skillId": "skill_02EXAMPLE",
+      "name": "my-uploaded-skill",
+      "description": "Trimmed.",
+      "source": "plugin",
+      "updatedAt": "2026-10-03T16:06:29.599288Z",
+      "backingPluginId": "plugin_02EXAMPLE"
+    },
+    {
+      "skillId": "pdf",
+      "name": "pdf",
+      "description": "Trimmed.",
+      "source": "anthropic",
+      "updatedAt": "2026-07-10T19:23:15.432550Z"
+    }
+  ]
+}

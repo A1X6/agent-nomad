@@ -1,0 +1,15 @@
+import type { Register } from 'claude-code'
+
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    const runs = Number((await $.store.get('runs')) ?? 0) + 1
+    await $.store.set('runs', runs)
+    return next(e)
+  })
+
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const ran = await next(e)
+    $.ui.status(ran.isError === true ? 'last command failed' : undefined)
+    return ran
+  })
+}

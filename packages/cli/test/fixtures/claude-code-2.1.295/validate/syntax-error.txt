@@ -1,0 +1,9 @@
+Validating plugin manifest: <mods>/syntax/.claude-plugin/plugin.json
+
+Validating hooks: <mods>/syntax/hooks/hooks.json
+
+× Found 1 error:
+
+  > modules../register.ts: syntax: <mods>/syntax/hooks/register.ts does not parse: Unexpected end of file (line 1, column 86)
+
+× Validation failed

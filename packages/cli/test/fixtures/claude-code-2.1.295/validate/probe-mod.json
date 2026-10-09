@@ -1,0 +1,41 @@
+{
+  "success": true,
+  "strict": false,
+  "target": "<skills>/probe-mod/.claude-plugin/plugin.json",
+  "manifest": {
+    "file": "<skills>/probe-mod/.claude-plugin/plugin.json",
+    "type": "plugin",
+    "errors": [],
+    "warnings": [
+      {
+        "path": "author",
+        "message": "No author information provided. Consider adding author details for plugin attribution",
+        "code": null
+      }
+    ],
+    "notes": [],
+    "gatingHooks": []
+  },
+  "contents": [
+    {
+      "file": "<skills>/probe-mod/hooks/hooks.json",
+      "type": "hooks",
+      "errors": [],
+      "warnings": [],
+      "notes": [
+        "./register.ts hooks: session.start, tool.call{tool=Bash}",
+        "./register.ts gating hook without .catch: tool.call{tool=Bash}",
+        "./register.ts calls: $.store.get, $.store.set, $.ui.status"
+      ],
+      "gatingHooks": [
+        {
+          "module": "./register.ts",
+          "pattern": "tool.call",
+          "hook": "tool.call{tool=Bash}",
+          "hasCatch": false
+        }
+      ]
+    }
+  ],
+  "advice": []
+}

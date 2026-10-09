@@ -1,0 +1,7 @@
+probe-mod 0
+probe-mod.strict 1
+risky 0
+syntax-error 1
+missing-module 1
+bad-manifest 1
+classic-hooks 0

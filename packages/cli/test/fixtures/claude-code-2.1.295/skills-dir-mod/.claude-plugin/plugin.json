@@ -1,0 +1,5 @@
+{
+  "name": "probe-mod",
+  "version": "0.1.0",
+  "description": "T95 probe: writes $.store on session start"
+}
