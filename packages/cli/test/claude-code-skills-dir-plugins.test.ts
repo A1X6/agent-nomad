@@ -67,31 +67,72 @@ describe('plugins in the skills folder (T96): finding them', () => {
     expect(plugin?.files).toHaveLength(5);
   });
 
-  it('also reads the hooks and MCP files the manifest names, and inline blocks', () => {
-    const files = [
+  it('reads hooks in every shape the manifest reference gives: a file, an inline map, a mixed list', () => {
+    const stop = { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] };
+    const fileOnly = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         hooks: './extra/hooks.json',
-        mcpServers: { inline: { command: 'inline-mcp' } },
       }),
-      collectedJson(`${MOD}extra/hooks.json`, { modules: ['./x.ts'] }),
-      collectedJson(`${MOD}other/plugin.json`, { hooks: { Stop: [] } }),
-    ];
-    const [plugin] = pluginFolders(files);
-    expect(plugin?.modules).toEqual(['./x.ts']);
-    expect(plugin?.hooks.map((source) => source.label)).toEqual(['extra/hooks.json']);
-    expect(plugin?.servers.map((source) => source.label)).toEqual(['.claude-plugin/plugin.json']);
+      collectedJson(`${MOD}extra/hooks.json`, { hooks: stop, modules: ['./x.ts'] }),
+      // Not named by the manifest and not the default file: not a hooks source.
+      collectedJson(`${MOD}other/hooks.json`, { hooks: stop }),
+    ]);
+    expect(fileOnly[0]?.modules).toEqual(['./x.ts']);
+    expect(fileOnly[0]?.hooks).toEqual([{ label: 'extra/hooks.json', hooks: stop }]);
 
+    // An inline object is the event map itself, with no `hooks` wrapper.
     const inline = pluginFolders([
+      collectedJson(`${MOD}.claude-plugin/plugin.json`, { name: 'my-mod', hooks: stop }),
+    ]);
+    expect(inline[0]?.hooks).toEqual([{ label: '.claude-plugin/plugin.json', hooks: stop }]);
+
+    const mixed = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, {
         name: 'my-mod',
-        hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] },
-        mcpServers: './servers.json',
+        hooks: ['./extra/hooks.json', stop],
       }),
-      collectedJson(`${MOD}servers.json`, { docs: { command: 'docs-mcp' } }),
+      collectedJson(`${MOD}hooks/hooks.json`, { hooks: { Start: [] } }),
+      collectedJson(`${MOD}extra/hooks.json`, { hooks: { Stop: [] } }),
     ]);
-    expect(inline[0]?.hooks.map((source) => source.label)).toEqual(['.claude-plugin/plugin.json']);
-    expect(inline[0]?.servers.map((source) => source.label)).toEqual(['servers.json']);
+    expect(mixed[0]?.hooks.map((source) => source.label)).toEqual([
+      'hooks/hooks.json',
+      'extra/hooks.json',
+      '.claude-plugin/plugin.json',
+    ]);
+  });
+
+  it('reads MCP servers in every shape: .mcp.json with or without the wrapper, a file, a map, a bundle', () => {
+    const docs = { docs: { command: 'docs-mcp' } };
+    const wrapped = pluginFolders([
+      ...pluginFiles(MOD),
+      collectedJson(`${MOD}.mcp.json`, { mcpServers: docs }),
+    ]);
+    expect(wrapped[0]?.servers).toEqual([{ label: '.mcp.json', servers: docs }]);
+    const unwrapped = pluginFolders([...pluginFiles(MOD), collectedJson(`${MOD}.mcp.json`, docs)]);
+    expect(unwrapped[0]?.servers).toEqual([{ label: '.mcp.json', servers: docs }]);
+
+    const declared = pluginFolders([
+      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+        name: 'my-mod',
+        mcpServers: [
+          './servers.json',
+          docs,
+          './server.mcpb',
+          'https://example.com/s.dxt',
+          './gone.json',
+        ],
+      }),
+      collectedJson(`${MOD}servers.json`, { other: { command: 'other-mcp' } }),
+    ]);
+    expect(declared[0]?.servers).toEqual([
+      { label: 'servers.json', servers: { other: { command: 'other-mcp' } } },
+      { label: '.claude-plugin/plugin.json', servers: docs },
+      { label: '.claude-plugin/plugin.json', bundle: './server.mcpb' },
+      { label: '.claude-plugin/plugin.json', bundle: 'https://example.com/s.dxt' },
+      // Named but missing: shown as named, never dropped.
+      { label: 'gone.json', servers: './gone.json' },
+    ]);
   });
 
   it('a manifest that is not JSON still marks the folder as a plugin', () => {
@@ -179,6 +220,24 @@ describe('plugins in the skills folder (T96): the pull review', () => {
       ['skills/classic/', 'plugin skills/classic/ MCP server docs', 'npx docs-mcp  (env: KEY)'],
     ]);
     expect(validator.asked).toEqual([]);
+  });
+
+  it('lists inline manifest hooks and MCP bundles, which download or extract code', async () => {
+    const files = [
+      collectedJson('skills/pack/.claude-plugin/plugin.json', {
+        name: 'pack',
+        hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] },
+        mcpServers: 'https://example.com/server.mcpb',
+      }),
+    ];
+    const review = await reviewPlugins(files, [], scriptedValidator(PROBE_MOD_VALIDATION).validate);
+    expect(review.map((entry) => [entry.label, entry.command])).toEqual([
+      ['plugin skills/pack/ hook Stop', 'echo bye'],
+      [
+        'plugin skills/pack/ MCP bundle (.claude-plugin/plugin.json, downloaded or extracted)',
+        'https://example.com/server.mcpb',
+      ],
+    ]);
   });
 
   it('a plugin with only skills is not shown: its skills are reviewed as skills', async () => {
@@ -337,6 +396,19 @@ describe('plugins in the skills folder (T96): running claude plugin validate', (
       reason: 'claude plugin validate gave no report (claude: unknown option --json)',
     });
     expect(await readdir(tempDir)).toEqual([]);
+  });
+
+  it('never throws: a folder it cannot write is reported as unavailable', async () => {
+    const claude = recordingCli(REAL_VALIDATE_REPORT);
+    const validate = createPluginValidator({
+      system: system(['/usr/bin/claude']),
+      cli: claude.cli,
+      tempDir: join(tempDir, 'missing', 'deeper'),
+    });
+    const result = await validate(plugin);
+    expect(result.kind).toBe('unavailable');
+    expect(result.kind === 'unavailable' && result.reason).toContain('the check could not run');
+    expect(claude.calls).toEqual([]);
   });
 
   it('refuses to write a path that is not a safe bundle path', async () => {

@@ -81,6 +81,9 @@ export function homePathProblem(relative: string): string | null {
 /** Marketplaces and plugins to reinstall on pull (T29). */
 export const PLUGINS_BUNDLE_PATH = `${RESERVED_DIR}/plugins.json`;
 
+/** Written by Claude Code inside a plugin's folder in `skills/` (T95, T96); never synced. */
+export const PLUGIN_GENERATED_PATHS: readonly string[] = DATA.plugins.generatedInPlugin;
+
 /** Programs a hook or the status line needs, with install details (`.agentnomad/programs.json`). */
 export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
 

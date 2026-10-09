@@ -14,6 +14,7 @@ export * from './agents/claude-code/global-paths.ts';
 export * from './agents/claude-code/hook-scripts.ts';
 export * from './agents/claude-code/managed-settings.ts';
 export * from './agents/claude-code/plugin-sync.ts';
+export * from './agents/claude-code/plugin-validate.ts';
 export * from './agents/claude-code/plugins.ts';
 export * from './agents/claude-code/programs.ts';
 export * from './agents/claude-code/project-collector.ts';

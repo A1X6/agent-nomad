@@ -350,9 +350,9 @@ export function createPullPlanner(deps: PullDeps) {
       if (!allow) {
         declined = true;
         // A file, or a whole folder such as a plugin's (T96).
-        const blocked = new Set(review.map((entry) => entry.file));
+        const blocked = [...new Set(review.map((entry) => entry.file))];
         files = files.filter(
-          (file) => ![...blocked].some((covered) => reviewCovers(covered, file.path)),
+          (file) => !blocked.some((covered) => reviewCovers(covered, file.path)),
         );
         reporter.warn(
           `Skipped ${[...blocked].map(printableLine).join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,

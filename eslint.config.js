@@ -102,7 +102,7 @@ export default defineConfig(
     rules: { ...restrictedImports([otherAgentFolder, fileWalker]), ...noDynamicImport },
   },
   {
-    files: ['packages/cli/src/agents/claude-code/settings-commands.ts'],
+    files: ['packages/cli/src/agents/claude-code/{settings-commands,skills-dir-plugins}.ts'],
     rules: {
       ...restrictedImports([otherAgentFolder, fileWalker, nodeModules]),
       ...noDynamicImport,

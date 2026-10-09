@@ -1,18 +1,10 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-
-import { BundlePathSchema, sameBytes } from '@agentnomad/contracts';
+import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
-import { underFolder } from '../shared/bundle-paths.ts';
-import type { ExecutableLookupSystem } from '../shared/detector-system.ts';
-import { CLAUDE_CODE_PATHS } from './claude-code-paths.data.ts';
 import { hookEntries, serverEntries } from './command-review.ts';
-import { findClaudeExecutable } from './detector.ts';
-import { createProgramCli, type ProgramCli } from './plugin-sync.ts';
+import { PLUGIN_GENERATED_PATHS } from './global-paths.ts';
 
 /*
  * Plugins and mods in the skills folder (T96). A folder in `skills/` (or a project's
@@ -20,22 +12,20 @@ import { createProgramCli, type ProgramCli } from './plugin-sync.ts';
  * as `<name>@skills-dir` (T95). One whose hooks file names `modules` is a mod: code that runs
  * inside Claude Code. The folder is already synced whole (T25); this module leaves out what
  * Claude Code generates in it, names the plugins in push's summary, and gives pull's review
- * what each one runs, from `claude plugin validate`.
+ * what each one runs. Pure text rules (SOLID-05): the files come in, nothing is read or run
+ * here; `plugin-validate.ts` runs Claude Code's own check.
  */
 
 /** A plugin's manifest file, from its folder. */
 const MANIFEST_PATH = '.claude-plugin/plugin.json';
-/** Where a plugin's hooks and MCP servers live unless the manifest names other files. */
+/** Where a plugin's hooks and MCP servers live unless the manifest names other sources. */
 const DEFAULT_HOOKS_PATH = 'hooks/hooks.json';
 const DEFAULT_MCP_PATH = '.mcp.json';
 
-/** Written by Claude Code inside a plugin's folder; never synced (T95). */
-const GENERATED: readonly string[] = CLAUDE_CODE_PATHS.plugins.generatedInPlugin;
-
-/** The bundle path is or is inside something Claude Code generates in a plugin folder. */
+/** The bundle path is or is inside something Claude Code generates in a plugin folder (T95). */
 export function isPluginGenerated(bundlePath: string): boolean {
   const segments = bundlePath.split('/');
-  return GENERATED.some((generated) => {
+  return PLUGIN_GENERATED_PATHS.some((generated) => {
     const parts = generated.split('/');
     for (let start = 0; start + parts.length <= segments.length; start += 1) {
       if (parts.every((part, index) => segments[start + index] === part)) return true;
@@ -48,19 +38,30 @@ export function isPluginGenerated(bundlePath: string): boolean {
 const PLUGIN_FOLDER = /^((?:\.claude\/)?skills\/)([^/]+)\//;
 
 const Json = z.record(z.string(), z.unknown());
-/** The manifest fields this module reads: where the hooks and MCP servers are. */
+/**
+ * The manifest fields this module reads, in the shapes Claude Code's manifest reference
+ * gives: `hooks` is a file path, an inline event map, or an array mixing both; `mcpServers`
+ * is a `.json` file path, an MCP bundle path or URL (`.mcpb`, `.dxt`), an inline map, or an
+ * array mixing them.
+ */
 const ManifestSchema = z.looseObject({
-  hooks: z.union([z.string(), z.array(z.string()), Json]).optional(),
-  mcpServers: z.union([z.string(), Json]).optional(),
+  hooks: z.union([z.string(), Json, z.array(z.union([z.string(), Json]))]).optional(),
+  mcpServers: z.union([z.string(), Json, z.array(z.union([z.string(), Json]))]).optional(),
 });
 const HooksFileSchema = z.looseObject({ modules: z.array(z.string()).optional() });
 
-/** Hooks a plugin declares: a file of its own, or inline in the manifest. */
+/** Hooks a plugin declares: the event map, and where it came from. */
 interface HooksSource {
-  /** What the review names, e.g. `hooks/hooks.json` or `plugin.json`. */
+  /** What the review names, e.g. `hooks/hooks.json` or `.claude-plugin/plugin.json`. */
   readonly label: string;
-  readonly json: Record<string, unknown>;
+  readonly hooks: unknown;
 }
+
+/** MCP servers a plugin declares: a map of servers, or a packaged server it loads. */
+type ServerSource =
+  | { readonly label: string; readonly servers: unknown }
+  /** An MCP bundle, as a path inside the plugin or a URL: code Claude Code downloads or extracts. */
+  | { readonly label: string; readonly bundle: string };
 
 /** One plugin folder among a setup's files. */
 export interface PluginFolder {
@@ -70,14 +71,25 @@ export interface PluginFolder {
   /** Every file of the folder. */
   readonly files: readonly CollectedFile[];
   readonly hooks: readonly HooksSource[];
-  /** MCP server definitions, as `mcpServers` objects. */
-  readonly servers: readonly { readonly label: string; readonly servers: unknown }[];
+  readonly servers: readonly ServerSource[];
   /** Hooks modules the plugin names: code that runs inside Claude Code (a mod). */
   readonly modules: readonly string[];
 }
 
 /** A path the manifest names, relative to the plugin folder (`./hooks/x.json` → `hooks/x.json`). */
 const insideFolder = (relative: string) => relative.replace(/^\.\//, '');
+
+const isBundle = (value: string) => /\.(mcpb|dxt)$/i.test(value) || /^https?:\/\//i.test(value);
+
+/** A JSON object file of the plugin, or `null`. */
+const jsonFileOf = (byPath: ReadonlyMap<string, CollectedFile>, relative: string) => {
+  const file = byPath.get(relative);
+  return file === undefined ? null : valueOrNull(parseJsonWith(Json, file.content));
+};
+
+/** An MCP file's servers: under `mcpServers`, or the whole file when the wrapper is left out. */
+const serversIn = (json: Record<string, unknown>) =>
+  'mcpServers' in json ? json['mcpServers'] : json;
 
 /**
  * The plugin folders among `files`: each `skills/<name>/` with a manifest, with the hooks and
@@ -99,34 +111,39 @@ export function pluginFolders(files: readonly CollectedFile[]): PluginFolder[] {
     const manifest = valueOrNull(parseJsonWith(ManifestSchema, manifestFile.content));
 
     const hooks: HooksSource[] = [];
-    const servers: PluginFolder['servers'][number][] = [];
     const modules: string[] = [];
+    // A hooks file wraps the event map in `hooks` (a file without the wrapper does not load).
     const hooksFile = (relative: string) => {
-      const file = byPath.get(relative);
-      const json = file === undefined ? null : valueOrNull(parseJsonWith(Json, file.content));
+      const json = jsonFileOf(byPath, relative);
       if (json === null) return;
-      hooks.push({ label: relative, json });
+      hooks.push({ label: relative, hooks: json['hooks'] });
       const named = HooksFileSchema.safeParse(json);
       if (named.success) modules.push(...(named.data.modules ?? []));
     };
     hooksFile(DEFAULT_HOOKS_PATH);
-    const declared = manifest?.hooks;
-    if (typeof declared === 'string') hooksFile(insideFolder(declared));
-    else if (Array.isArray(declared)) {
-      for (const path of declared) hooksFile(insideFolder(path));
-    } else if (declared !== undefined) hooks.push({ label: MANIFEST_PATH, json: declared });
+    const declaredHooks = manifest?.hooks;
+    for (const item of Array.isArray(declaredHooks) ? declaredHooks : [declaredHooks]) {
+      if (typeof item === 'string') hooksFile(insideFolder(item));
+      // An inline object is the event map itself, with no wrapper.
+      else if (item !== undefined) hooks.push({ label: MANIFEST_PATH, hooks: item });
+    }
 
-    const mcpFile = byPath.get(DEFAULT_MCP_PATH);
-    const mcpJson =
-      mcpFile === undefined ? null : valueOrNull(parseJsonWith(Json, mcpFile.content));
-    if (mcpJson !== null) servers.push({ label: DEFAULT_MCP_PATH, servers: mcpJson['mcpServers'] });
+    const servers: ServerSource[] = [];
+    const mcpJson = jsonFileOf(byPath, DEFAULT_MCP_PATH);
+    if (mcpJson !== null) servers.push({ label: DEFAULT_MCP_PATH, servers: serversIn(mcpJson) });
     const declaredServers = manifest?.mcpServers;
-    if (typeof declaredServers === 'string') {
-      const file = byPath.get(insideFolder(declaredServers));
-      const json = file === undefined ? null : valueOrNull(parseJsonWith(Json, file.content));
-      if (json !== null) servers.push({ label: insideFolder(declaredServers), servers: json });
-    } else if (declaredServers !== undefined) {
-      servers.push({ label: MANIFEST_PATH, servers: declaredServers });
+    for (const item of Array.isArray(declaredServers) ? declaredServers : [declaredServers]) {
+      if (item === undefined) continue;
+      if (typeof item !== 'string') servers.push({ label: MANIFEST_PATH, servers: item });
+      else if (isBundle(item)) servers.push({ label: MANIFEST_PATH, bundle: item });
+      else {
+        const json = jsonFileOf(byPath, insideFolder(item));
+        // A file that is not there or not JSON is shown as it is named, never dropped (SEC-01).
+        servers.push({
+          label: insideFolder(item),
+          servers: json === null ? item : serversIn(json),
+        });
+      }
     }
 
     plugins.push({
@@ -169,7 +186,7 @@ export type PluginValidation =
     }
   | { readonly kind: 'unavailable'; readonly reason: string };
 
-/** Runs Claude Code's own check on a plugin's files; nothing is written into the setup. */
+/** Runs Claude Code's own check on a plugin's files (`plugin-validate.ts`). */
 export type PluginValidator = (plugin: PluginFolder) => Promise<PluginValidation>;
 
 /** The report `claude plugin validate --json` prints; only what the review reads is checked. */
@@ -190,7 +207,7 @@ const ReportSchema = z.looseObject({
 /** `./register.ts hooks: a, b` and `./register.ts calls: $.x, $.y`, as validate notes them (T95). */
 const NOTE = /^(\S+) (hooks|calls): (.*)$/;
 
-/** The report as the review uses it. */
+/** The report as the review uses it; `null` when `stdout` is not one. */
 export function readValidateReport(stdout: string): PluginValidation | null {
   const report = valueOrNull(parseJsonWith(ReportSchema, stdout.trim()));
   if (report === null) return null;
@@ -217,56 +234,6 @@ export function readValidateReport(stdout: string): PluginValidation | null {
   };
 }
 
-export interface PluginValidatorDeps {
-  readonly system: ExecutableLookupSystem;
-  /** Runs a found program; injected for tests. */
-  readonly cli?: (path: string) => ProgramCli;
-  /** Where the plugin is written for the check; the OS temporary folder by default. */
-  readonly tempDir?: string;
-}
-
-/** Long enough for Claude Code to start and read a plugin; a hung check must not hang pull. */
-const VALIDATE_TIMEOUT_MS = 60_000;
-
-/**
- * Checks a plugin with `claude plugin validate --json`, which reads its manifest and the
- * source of its hooks modules without running them (T95). The files go into a temporary
- * folder of their own, which is removed afterwards, so nothing lands in the setup before the
- * user has agreed.
- */
-export function createPluginValidator(deps: PluginValidatorDeps): PluginValidator {
-  const cli =
-    deps.cli ??
-    ((path: string) => createProgramCli(path, deps.system, { timeoutMs: VALIDATE_TIMEOUT_MS }));
-  return async (plugin) => {
-    const claudePath = await findClaudeExecutable(deps.system);
-    if (claudePath === null) {
-      return { kind: 'unavailable', reason: 'the claude command was not found' };
-    }
-    const root = await mkdtemp(join(deps.tempDir ?? tmpdir(), 'agentnomad-plugin-'));
-    try {
-      const folder = join(root, plugin.name);
-      for (const file of plugin.files) {
-        const relative = file.path.slice(plugin.folder.length);
-        // Checked again here, although bundle paths are checked when a setup is opened.
-        if (!BundlePathSchema.safeParse(relative).success) {
-          return { kind: 'unavailable', reason: `unsafe path ${relative}` };
-        }
-        const target = join(folder, ...relative.split('/'));
-        await mkdir(dirname(target), { recursive: true });
-        await writeFile(target, file.content);
-      }
-      const run = await cli(claudePath).run(['plugin', 'validate', '--json', folder], root);
-      const report = readValidateReport(run.stdout);
-      if (report !== null) return report;
-      const said = run.stderr.trim().split(/\r?\n/)[0] || `exit code ${String(run.exitCode)}`;
-      return { kind: 'unavailable', reason: `claude plugin validate gave no report (${said})` };
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  };
-}
-
 const label = (plugin: PluginFolder, rest: string) => `plugin ${plugin.folder} ${rest}`;
 
 const entry = (plugin: PluginFolder, rest: string, command: string): RunnableEntry => ({
@@ -283,11 +250,17 @@ async function pluginEntries(
 ): Promise<RunnableEntry[]> {
   const entries: RunnableEntry[] = [];
   for (const source of plugin.hooks) {
-    for (const found of hookEntries(source.label, source.json['hooks'])) {
+    for (const found of hookEntries(source.label, source.hooks)) {
       entries.push({ ...found, file: plugin.folder, label: label(plugin, found.label) });
     }
   }
   for (const source of plugin.servers) {
+    if ('bundle' in source) {
+      entries.push(
+        entry(plugin, `MCP bundle (${source.label}, downloaded or extracted)`, source.bundle),
+      );
+      continue;
+    }
     for (const found of serverEntries(source.label, source.servers)) {
       entries.push({ ...found, file: plugin.folder, label: label(plugin, found.label) });
     }
@@ -333,19 +306,26 @@ async function pluginEntries(
 /**
  * The plugins among `incoming` that are new or changed on this PC, with everything each one
  * runs: its hooks (the T44 reader, as `claude plugin validate` does not list classic hooks),
- * its MCP servers, and for a mod what its modules hook and call. The whole folder is one unit
- * (its `file` is the folder), so declining leaves the plugin out entirely; an unchanged plugin
- * is not shown.
+ * its MCP servers and bundles, and for a mod what its modules hook and call. The whole folder
+ * is one unit (its `file` is the folder), so declining leaves the plugin out entirely; an
+ * unchanged plugin is not shown.
  */
 export async function reviewPlugins(
   incoming: readonly CollectedFile[],
   current: readonly CollectedFile[],
   validate?: PluginValidator,
 ): Promise<ReviewedEntry[]> {
+  // Lookup tables, not a search per plugin or file: a setup may hold thousands (PERF-01).
   const here = new Map(current.map((file) => [file.path, file]));
+  const hereFolders = new Set(
+    current.flatMap((file) => {
+      const match = PLUGIN_FOLDER.exec(file.path);
+      return match === null ? [] : [`${match[1] ?? ''}${match[2] ?? ''}/`];
+    }),
+  );
   const entries: ReviewedEntry[] = [];
   for (const plugin of pluginFolders(incoming)) {
-    const existing = current.some((file) => underFolder(file.path, plugin.folder.slice(0, -1)));
+    const existing = hereFolders.has(plugin.folder);
     const differs = plugin.files.some((file) => {
       const same = here.get(file.path);
       return same === undefined || !sameBytes(same.content, file.content);

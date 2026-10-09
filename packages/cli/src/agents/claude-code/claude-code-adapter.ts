@@ -21,7 +21,8 @@ import {
   systemProcessLister,
   type ClaudeRunningCheck,
 } from './running-claude.ts';
-import { createPluginValidator, pluginNotes, type PluginValidator } from './skills-dir-plugins.ts';
+import { createPluginValidator } from './plugin-validate.ts';
+import { pluginNotes, type PluginValidator } from './skills-dir-plugins.ts';
 import { findUnknownEntries } from './unknown-files.ts';
 
 export interface ClaudeCodeAdapterOptions {
