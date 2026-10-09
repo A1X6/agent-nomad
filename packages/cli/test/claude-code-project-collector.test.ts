@@ -14,7 +14,12 @@ import {
   root,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
-import { probeMod, writeGeneratedTypes, writePluginFiles } from './claude-code-plugin-fixtures.ts';
+import {
+  probeMod,
+  PROJECT_MOD_FOLDER,
+  writeGeneratedTypes,
+  writePluginFiles,
+} from './claude-code-plugin-fixtures.ts';
 import { linkFolder, paths, text, writeTestFile } from './fakes.ts';
 import { createClaudeCodeProjectCollector } from '../src/index.ts';
 
@@ -76,10 +81,10 @@ describe('project collector: what is taken', () => {
   });
 
   it('takes a plugin in .claude/skills/, but never what Claude Code generates in it (T96)', async () => {
-    const folder = '.claude/skills/my-mod/';
-    await writePluginFiles(project, probeMod(folder));
-    await writeGeneratedTypes(project, folder);
-    expect(paths(await collect())).toEqual(paths(probeMod(folder)));
+    await writePluginFiles(project, probeMod(PROJECT_MOD_FOLDER));
+    await writeGeneratedTypes(project, PROJECT_MOD_FOLDER);
+    // Compared as sets: the fixture promises no file order (review 16 READ-09).
+    expect(paths(await collect()).sort()).toEqual(paths(probeMod(PROJECT_MOD_FOLDER)).sort());
   });
 
   it('never takes app code, .env, .git, local agent memory or worktrees', async () => {

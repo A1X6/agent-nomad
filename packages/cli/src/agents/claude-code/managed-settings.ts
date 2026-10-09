@@ -170,13 +170,17 @@ export function managedSettingsNotice(
 }
 
 /** Words Claude Code uses when a plugin install is refused by policy. */
+/** Words that name the organization's policy itself. */
 const POLICY_WORDS =
-  /\b(policy|policies|blocked|not allowed|strictKnownMarketplaces|blockedMarketplaces|managed settings)\b/i;
+  /\b(policy|policies|strictKnownMarketplaces|blockedMarketplaces|managed settings)\b/i;
+/** Words a network or server failure can hold too: the policy only when one is set here (review 16 UX-03). */
+const BLOCKED_WORDS = /\b(blocked|not allowed)\b/i;
 
 /** A clearer reason for a failed plugin install when the organization's policy blocked it. */
 export function explainPluginFailure(reason: string, found: ManagedSettings | null): string {
-  if (!POLICY_WORDS.test(reason)) return reason;
-  const where = found && found.sources.length > 0 ? ` (${sourcesText(found)})` : '';
+  const managed = found !== null && found.sources.length > 0;
+  if (!POLICY_WORDS.test(reason) && !(managed && BLOCKED_WORDS.test(reason))) return reason;
+  const where = managed ? ` (${sourcesText(found)})` : '';
   return `blocked by your organization's Claude Code policy${where}. Ask your admin to allow it. Details: ${reason}`;
 }
 

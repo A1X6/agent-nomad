@@ -6,36 +6,13 @@ import { BundlePathSchema } from '@agentnomad/contracts';
 
 import { TEMP_MARKER } from '../../system/files.ts';
 import type { CollectedFile } from '../adapter.ts';
+import { isSensitiveHomePath } from './bundle-paths.ts';
 import { pathsOf } from './detector-system.ts';
 
 /*
  * Reading an agent's files for a bundle, for any adapter (ARCH-02): nothing here is
  * specific to one agent; what to take comes from the adapter's own data file.
  */
-
-/** Home folders for keys and cloud logins: never read for a setup, whatever links there. */
-const SENSITIVE_HOME_DIRS: readonly string[] = [
-  '.ssh',
-  '.gnupg',
-  '.aws',
-  '.azure',
-  '.kube',
-  '.docker',
-  '.config/gcloud',
-  '.config/gh',
-  '.password-store',
-];
-
-/** `relative` (from home, `/`-separated) is `dir` or inside a `dir` folder; any case. */
-export function inHomeFolder(relative: string, dir: string): boolean {
-  const [lower, folder] = [relative.toLowerCase(), dir.toLowerCase()];
-  return lower === folder || lower.startsWith(`${folder}/`) || lower.includes(`/${folder}/`);
-}
-
-/** A path from the home folder inside a folder for keys and logins (any case). */
-export function isSensitiveHomePath(relative: string): boolean {
-  return SENSITIVE_HOME_DIRS.some((dir) => inHomeFolder(relative, dir));
-}
 
 /** `file` as a bundle path from `folder` (forward slashes), or `null` when it is not inside it. */
 export function bundlePathInside(path: PlatformPath, folder: string, file: string): string | null {

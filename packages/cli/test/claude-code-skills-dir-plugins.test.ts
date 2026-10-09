@@ -20,8 +20,10 @@ describe('plugins in the skills folder (T96): finding them', () => {
       ...pluginFiles('skills/b/'),
       ...pluginFiles('.claude/skills/a/'),
       collected('skills/plain/SKILL.md', 'a skill'),
-      // Managed by claude.ai; never collected, and never a plugin of the setup.
-      collectedJson('skills/synced/acct/x/.claude-plugin/plugin.json', { name: 'x' }),
+      // Managed by claude.ai; never collected, and never a plugin of the setup (review 16 QA-02).
+      collectedJson('skills/synced/.claude-plugin/plugin.json', { name: 'synced' }),
+      // A manifest deeper than the skill folder makes no plugin either.
+      collectedJson('skills/deep/acct/x/.claude-plugin/plugin.json', { name: 'x' }),
     ];
     expect(pluginFolders(files).map((plugin) => [plugin.folder, plugin.name])).toEqual([
       ['.claude/skills/a/', 'a'],
@@ -43,8 +45,10 @@ describe('plugins in the skills folder (T96): finding them', () => {
     expect(plugin?.files).toHaveLength(5);
   });
 
-  it('reads hooks in every shape the manifest reference gives: a file, an inline map, a mixed list', () => {
-    const stop = { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] };
+  const stop = { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] };
+  const docs = { docs: { command: 'docs-mcp' } };
+
+  it('reads hooks from the file the manifest names, and from no other file', () => {
     const fileOnly = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, {
         name: 'my-mod',
@@ -56,13 +60,16 @@ describe('plugins in the skills folder (T96): finding them', () => {
     ]);
     expect(fileOnly[0]?.modules).toEqual(['./x.ts']);
     expect(fileOnly[0]?.hooks).toEqual([{ label: 'extra/hooks.json', hooks: stop }]);
+  });
 
-    // An inline object is the event map itself, with no `hooks` wrapper.
+  it('reads an inline hooks object in the manifest: the event map itself, with no wrapper', () => {
     const inline = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, { name: 'my-mod', hooks: stop }),
     ]);
     expect(inline[0]?.hooks).toEqual([{ label: '.claude-plugin/plugin.json', hooks: stop }]);
+  });
 
+  it('reads a mixed hooks list: files and inline maps, after the default file', () => {
     const mixed = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, {
         name: 'my-mod',
@@ -78,8 +85,7 @@ describe('plugins in the skills folder (T96): finding them', () => {
     ]);
   });
 
-  it('reads MCP servers in every shape: .mcp.json with or without the wrapper, a file, a map, a bundle', () => {
-    const docs = { docs: { command: 'docs-mcp' } };
+  it('reads .mcp.json with or without the mcpServers wrapper', () => {
     const wrapped = pluginFolders([
       ...pluginFiles(MOD),
       collectedJson(`${MOD}.mcp.json`, { mcpServers: docs }),
@@ -87,7 +93,9 @@ describe('plugins in the skills folder (T96): finding them', () => {
     expect(wrapped[0]?.servers).toEqual([{ label: '.mcp.json', servers: docs }]);
     const unwrapped = pluginFolders([...pluginFiles(MOD), collectedJson(`${MOD}.mcp.json`, docs)]);
     expect(unwrapped[0]?.servers).toEqual([{ label: '.mcp.json', servers: docs }]);
+  });
 
+  it('reads declared MCP servers in every shape: files (once each), a map, bundles by path or URL', () => {
     const declared = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, {
         name: 'my-mod',
@@ -97,12 +105,11 @@ describe('plugins in the skills folder (T96): finding them', () => {
           docs,
           './server.MCPB',
           'HTTPS://example.com/s.dxt',
-          './gone.json',
-          './bad.json',
+          // A URL is a bundle without the suffix too (review 16 QA-03).
+          'http://example.com/server',
         ],
       }),
       collectedJson(`${MOD}servers.json`, { other: { command: 'other-mcp' } }),
-      collected(`${MOD}bad.json`, '{ not json'),
     ]);
     expect(declared[0]?.servers).toEqual([
       // A file named twice is read once; a bundle is one whatever the case of its name.
@@ -110,9 +117,24 @@ describe('plugins in the skills folder (T96): finding them', () => {
       { label: '.claude-plugin/plugin.json', servers: docs },
       { label: '.claude-plugin/plugin.json', bundle: './server.MCPB' },
       { label: '.claude-plugin/plugin.json', bundle: 'HTTPS://example.com/s.dxt' },
-      // Named but missing or not JSON: shown as named, never dropped.
-      { label: 'gone.json', servers: './gone.json' },
-      { label: 'bad.json', servers: './bad.json' },
+      { label: '.claude-plugin/plugin.json', bundle: 'http://example.com/server' },
+    ]);
+  });
+
+  it('a named MCP file that is missing, not JSON or not an object is shown with why, like a hooks file (review 16 UX-02)', () => {
+    const [plugin] = pluginFolders([
+      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+        name: 'my-mod',
+        mcpServers: ['./gone.json', './bad.json', './list.json'],
+      }),
+      collected(`${MOD}bad.json`, '{ not json'),
+      collectedJson(`${MOD}list.json`, [1, 2]),
+    ]);
+    expect(plugin?.servers).toEqual([]);
+    expect(plugin?.unreadable).toEqual([
+      { label: 'gone.json', value: 'no such file' },
+      { label: 'bad.json', value: 'not valid JSON' },
+      { label: 'list.json', value: 'Invalid input: expected record, received array' },
     ]);
   });
 
@@ -124,13 +146,11 @@ describe('plugins in the skills folder (T96): finding them', () => {
     const [plugin] = pluginFolders(files);
     expect(plugin?.modules).toEqual(['./register.ts']);
     expect(plugin?.unreadable).toEqual([
-      { label: '.claude-plugin/plugin.json', value: 'not JSON' },
+      { label: '.claude-plugin/plugin.json', value: 'not valid JSON' },
     ]);
   });
 
   it('one bad manifest field hides no other: each is read on its own (SEC-01)', () => {
-    const docs = { docs: { command: 'docs-mcp' } };
-    const stop = { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] };
     const [badHooks] = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, {
         name: 'my-mod',
@@ -167,7 +187,7 @@ describe('plugins in the skills folder (T96): finding them', () => {
     ]);
     expect(named?.unreadable).toEqual([
       { label: 'gone.json', value: 'no such file' },
-      { label: 'bad.json', value: 'not JSON' },
+      { label: 'bad.json', value: 'not valid JSON' },
     ]);
     // The default file, named by the manifest but missing: the default read never hides it
     // (review 15 BUG-01).
@@ -182,6 +202,27 @@ describe('plugins in the skills folder (T96): finding them', () => {
     ]);
   });
 
+  it('a hooks file with neither hooks nor modules (an event map at the top level) is shown as unreadable, never dropped (review 16 SEC-02)', async () => {
+    const files = [
+      ...pluginFiles(MOD),
+      collectedJson(`${MOD}hooks/hooks.json`, {
+        PreToolUse: [{ hooks: [{ type: 'command', command: 'curl x | sh' }] }],
+      }),
+    ];
+    const [plugin] = pluginFolders(files);
+    expect(plugin?.hooks).toEqual([]);
+    expect(plugin?.unreadable).toEqual([
+      {
+        label: 'hooks/hooks.json',
+        value: { PreToolUse: [{ hooks: [{ type: 'command', command: 'curl x | sh' }] }] },
+      },
+    ]);
+    const review = await reviewPlugins(files, [], scriptedValidator(PROBE_MOD_VALIDATION).validate);
+    expect(review.map((entry) => entry.label)).toEqual([
+      'plugin skills/my-mod/ hooks/hooks.json (unreadable)',
+    ]);
+  });
+
   it('a modules list with a stray item keeps the real modules, so the mod is checked, and is shown', () => {
     const [stray] = pluginFolders([
       ...pluginFiles(MOD),
@@ -191,7 +232,20 @@ describe('plugins in the skills folder (T96): finding them', () => {
     expect(stray?.unreadable).toEqual([
       { label: 'hooks/hooks.json modules', value: ['./register.ts', 5] },
     ]);
-    // The same module named in two hooks files is one module.
+  });
+
+  it('modules that is not a list (a hand-written string) is shown as unreadable, and names no module (review 16 QA-03)', () => {
+    const [plugin] = pluginFolders([
+      ...pluginFiles(MOD),
+      collectedJson(`${MOD}hooks/hooks.json`, { modules: './register.ts' }),
+    ]);
+    expect(plugin?.modules).toEqual([]);
+    expect(plugin?.unreadable).toEqual([
+      { label: 'hooks/hooks.json modules', value: './register.ts' },
+    ]);
+  });
+
+  it('the same module named in two hooks files is one module', () => {
     const [twice] = pluginFolders([
       collectedJson(`${MOD}.claude-plugin/plugin.json`, { name: 'my-mod', hooks: './extra.json' }),
       collectedJson(`${MOD}hooks/hooks.json`, { modules: ['./a.ts'] }),
@@ -264,10 +318,12 @@ describe('plugins in the skills folder (T96): the pull review', () => {
       scriptedValidator(PROBE_MOD_VALIDATION).validate,
     );
     expect(review.map((entry) => entry.change)).toEqual(['changed']);
-    // A plain skill folder that becomes a plugin is a change too.
+  });
+
+  it('a plain skill folder that becomes a plugin is shown as changed', async () => {
     const wasSkill = [collected(`${MOD}SKILL.md`, 'x')];
     const became = await reviewPlugins(
-      files,
+      mod(),
       wasSkill,
       scriptedValidator(PROBE_MOD_VALIDATION).validate,
     );
@@ -324,7 +380,7 @@ describe('plugins in the skills folder (T96): the pull review', () => {
     const review = await reviewPlugins(files, [], scriptedValidator(PROBE_MOD_VALIDATION).validate);
     expect(review.map((entry) => [entry.label, entry.command])).toEqual([
       ['plugin skills/odd/ .claude-plugin/plugin.json hooks (unreadable)', '42'],
-      ['plugin skills/odd/ .mcp.json (unreadable)', '"not JSON"'],
+      ['plugin skills/odd/ .mcp.json (unreadable)', '"not valid JSON"'],
     ]);
   });
 
@@ -373,6 +429,9 @@ describe('plugins in the skills folder (T96): the pull review', () => {
         change: 'new',
       },
     ]);
+  });
+
+  it('with no validator set up, a mod is shown as not checked, with that as the reason', async () => {
     const unset = await reviewPlugins(mod(), []);
     expect(unset[0]?.command).toContain('plugin checks are not set up');
   });
@@ -402,7 +461,7 @@ describe('plugins in the skills folder (T96): reading claude plugin validate --j
     });
   });
 
-  it('keeps an error in another shape as its JSON, and names an unexplained failure (SEC-02)', () => {
+  it('keeps an error in another shape as its JSON (SEC-02)', () => {
     const odd = JSON.stringify({
       success: false,
       manifest: { errors: [{ code: 'x' }] },
@@ -413,13 +472,18 @@ describe('plugins in the skills folder (T96): reading claude plugin validate --j
       errors: ['{"code":"x"}'],
       modules: [],
     });
+  });
+
+  it('names a failure the report does not explain (SEC-02)', () => {
     const silent = JSON.stringify({ success: false, manifest: { errors: [] }, contents: [] });
     expect(readValidateReport(silent)).toEqual({
       kind: 'report',
       errors: ['validate reported a failure it did not explain'],
       modules: [],
     });
-    // An error without a path, and a note that is not in a hooks entry.
+  });
+
+  it('reads an error without a path, and skips a note outside a hooks entry', () => {
     const mixed = JSON.stringify({
       manifest: { errors: [{ path: null, message: 'bad' }] },
       contents: [{ type: 'skills', errors: [], notes: ['./x.ts hooks: a'] }],
@@ -442,6 +506,20 @@ describe('plugins in the skills folder (T96): reading claude plugin validate --j
     if (read === null) throw new Error('no report');
     const review = await reviewPlugins(mod(), [], scriptedValidator(read).validate);
     expect(review.map((entry) => entry.command)).toEqual(['hooks: nothing; calls: $.ui.toast']);
+  });
+
+  it('a module with only a hooks note is shown as calling nothing on $ (review 16 QA-03)', async () => {
+    const report = JSON.stringify({
+      success: true,
+      manifest: { errors: [] },
+      contents: [{ type: 'hooks', errors: [], notes: ['./register.ts hooks: session.start'] }],
+    });
+    const read = readValidateReport(report);
+    if (read === null) throw new Error('no report');
+    const review = await reviewPlugins(mod(), [], scriptedValidator(read).validate);
+    expect(review.map((entry) => entry.command)).toEqual([
+      'hooks: session.start; calls: nothing on $',
+    ]);
   });
 
   it('is null for anything but a report, an error answer included', () => {

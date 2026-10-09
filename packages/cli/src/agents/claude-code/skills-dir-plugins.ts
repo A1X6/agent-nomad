@@ -2,7 +2,12 @@ import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
-import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
+import {
+  JsonObjectSchema,
+  parseJsonWith,
+  valueOrNull,
+  type JsonResult,
+} from '../../system/json.ts';
 import { hookEntries, serverEntries, unreadableEntry } from './command-review.ts';
 
 /*
@@ -20,6 +25,8 @@ const MANIFEST_PATH = '.claude-plugin/plugin.json';
 /** Where a plugin's hooks and MCP servers live unless the manifest names other sources. */
 const DEFAULT_HOOKS_PATH = 'hooks/hooks.json';
 const DEFAULT_MCP_PATH = '.mcp.json';
+/** Why a named file could not be read, next to the parse problems `parseJsonWith` gives. */
+const NO_SUCH_FILE = 'no such file';
 
 /** A skill folder's bundle path prefix (`skills/` or `.claude/skills/`) and the plugin's name. */
 const PLUGIN_FOLDER = /^((?:\.claude\/)?skills\/)([^/]+)\//;
@@ -31,6 +38,18 @@ function pluginFolderOf(path: string): { folder: string; name: string } | null {
   // `skills/synced/` is managed by claude.ai; never collected, and never a plugin of the setup.
   if (prefix === undefined || name === undefined || name === 'synced') return null;
   return { folder: `${prefix}${name}/`, name };
+}
+
+/**
+ * A plugin's MCP sources known by path alone: its default `.mcp.json` and its manifest (inline
+ * `mcpServers`), so the env scan sees their `${VAR}` references too (review 16 BUG-01). A file
+ * the manifest names instead is only known once the manifest is read.
+ */
+export function isPluginMcpSource(path: string): boolean {
+  const found = pluginFolderOf(path);
+  if (found === null) return false;
+  const inside = path.slice(found.folder.length);
+  return inside === DEFAULT_MCP_PATH || inside === MANIFEST_PATH;
 }
 
 const Json = JsonObjectSchema;
@@ -99,30 +118,40 @@ function readPlugin(
   const unreadable: Unreadable[] = [];
   const read = new Set<string>();
 
-  /** A JSON object file of the plugin; `undefined` when there is no such file, `null` when not JSON. */
-  const jsonFileOf = (relative: string) => {
+  /**
+   * A JSON object file of the plugin, or why it could not be read: missing, not JSON, or not an
+   * object, in the words `parseJsonWith` gives (review 16 UX-01, UX-02).
+   */
+  const jsonFileOf = (relative: string): JsonResult<Record<string, unknown>> => {
     const file = byPath.get(relative);
-    return file === undefined ? undefined : valueOrNull(parseJsonWith(Json, file.content));
+    return file === undefined ? { problem: NO_SUCH_FILE } : parseJsonWith(Json, file.content);
   };
 
-  // A hooks file wraps the event map in `hooks` (a file without the wrapper does not load) and
-  // may name `modules`. A file named twice (the manifest naming the default) is read once.
+  // A hooks file wraps the event map in `hooks` and may name `modules`. A file named twice (the
+  // manifest naming the default) is read once.
   const hooksFile = (relative: string, named: boolean) => {
-    const json = jsonFileOf(relative);
     // A missing file is "read" only once it is named, so the default read of hooks/hooks.json
     // never hides a manifest that names it (review 15 BUG-01).
-    if (json === undefined) {
-      if (named && !read.has(relative)) unreadable.push({ label: relative, value: 'no such file' });
+    if (!byPath.has(relative)) {
+      if (named && !read.has(relative)) unreadable.push({ label: relative, value: NO_SUCH_FILE });
       if (named) read.add(relative);
       return;
     }
     if (read.has(relative)) return;
     read.add(relative);
-    if (json === null) {
-      unreadable.push({ label: relative, value: 'not JSON' });
+    const result = jsonFileOf(relative);
+    if ('problem' in result) {
+      unreadable.push({ label: relative, value: result.problem });
       return;
     }
-    hooks.push({ label: relative, hooks: json['hooks'] });
+    const json = result.value;
+    // A file with neither key is not a hooks file Claude Code loads (an event map at the top
+    // level is refused): shown as it is, never dropped (review 16 SEC-02).
+    if (json['hooks'] === undefined && json['modules'] === undefined) {
+      unreadable.push({ label: relative, value: json });
+      return;
+    }
+    if (json['hooks'] !== undefined) hooks.push({ label: relative, hooks: json['hooks'] });
     const list = json['modules'];
     if (list === undefined) return;
     const names = Array.isArray(list) ? list.filter((item) => typeof item === 'string') : [];
@@ -134,10 +163,11 @@ function readPlugin(
   hooksFile(DEFAULT_HOOKS_PATH, false);
 
   // The manifest is there (that is what made the folder a plugin); it may still not be JSON.
-  const manifest = valueOrNull(parseJsonWith(Json, manifestFile.content));
-  if (manifest === null) {
-    unreadable.push({ label: MANIFEST_PATH, value: 'not JSON' });
+  const manifestRead = parseJsonWith(Json, manifestFile.content);
+  if ('problem' in manifestRead) {
+    unreadable.push({ label: MANIFEST_PATH, value: manifestRead.problem });
   } else {
+    const manifest = manifestRead.value;
     // Each field on its own: a bad `hooks` never hides a valid `mcpServers`.
     const hooksField = HooksFieldSchema.safeParse(manifest['hooks']);
     if (manifest['hooks'] !== undefined && !hooksField.success) {
@@ -163,18 +193,17 @@ function readPlugin(
         const relative = insideFolder(item);
         if (read.has(relative)) continue;
         read.add(relative);
-        const json = jsonFileOf(relative);
-        // A file that is not there or not JSON is shown as it is named, never dropped.
-        servers.push({ label: relative, servers: json ? serversIn(json) : item });
+        const result = jsonFileOf(relative);
+        // A file that is missing or not JSON is shown with why, never dropped (review 16 UX-02).
+        if ('problem' in result) unreadable.push({ label: relative, value: result.problem });
+        else servers.push({ label: relative, servers: serversIn(result.value) });
       }
     }
   }
-  if (!read.has(DEFAULT_MCP_PATH)) {
-    const mcpJson = jsonFileOf(DEFAULT_MCP_PATH);
-    if (mcpJson === null) unreadable.push({ label: DEFAULT_MCP_PATH, value: 'not JSON' });
-    else if (mcpJson !== undefined) {
-      servers.push({ label: DEFAULT_MCP_PATH, servers: serversIn(mcpJson) });
-    }
+  if (!read.has(DEFAULT_MCP_PATH) && byPath.has(DEFAULT_MCP_PATH)) {
+    const result = jsonFileOf(DEFAULT_MCP_PATH);
+    if ('problem' in result) unreadable.push({ label: DEFAULT_MCP_PATH, value: result.problem });
+    else servers.push({ label: DEFAULT_MCP_PATH, servers: serversIn(result.value) });
   }
   return {
     folder,

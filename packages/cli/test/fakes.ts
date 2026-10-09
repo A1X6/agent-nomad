@@ -248,12 +248,17 @@ export const fakeAdapter = (
 
 /**
  * A Linux PC where exactly `executables` can be run, for code that looks a command up on PATH
- * (`/usr/bin`) and nothing else (SOLID-06; review 15 DUP-04).
+ * (`/usr/bin`) and nothing else (SOLID-06; review 15 DUP-04). `overrides` for a test whose
+ * code also reads the home folder or platform (review 16 BP-02).
  */
-export const fakeExecutables = (executables: readonly string[]): ExecutableLookupSystem => ({
+export const fakeExecutables = (
+  executables: readonly string[],
+  overrides: Partial<Omit<ExecutableLookupSystem, 'isExecutable'>> = {},
+): ExecutableLookupSystem => ({
   platform: 'linux',
   homedir: '/home/a',
   env: { PATH: '/usr/bin' },
+  ...overrides,
   isExecutable: (path) => Promise.resolve(executables.includes(path)),
 });
 

@@ -33,7 +33,8 @@ const answer = (choice: ConflictChoice) => () => Promise.resolve(choice);
 
 describe('Claude Code plan step: closing Claude Code before ~/.claude.json changes (T61)', () => {
   const incoming = collected(CLAUDE_JSON_BUNDLE_PATH, '{"diffTool":"terminal"}');
-  const noManagedSettings = fakeManagedSystem({ platform: 'linux' });
+  // Not the fixtures' `noManagedSettings` (a parsed result): this is the PC to read (review 16 READ-07).
+  const unmanagedPc = fakeManagedSystem({ platform: 'linux' });
   const QUESTION =
     'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.';
 
@@ -42,7 +43,7 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     const { reporter } = recordingReporter({ levels: false });
     const adapter = claudeCodeAdapter(home, {
       isClaudeRunning: () => Promise.resolve(running.shift() ?? false),
-      managedSystem: noManagedSettings,
+      managedSystem: unmanagedPc,
     });
     const plan = (overrides: Partial<RestorePlanContext> = {}) => {
       if (!adapter.planRestore) throw new Error('no plan step');

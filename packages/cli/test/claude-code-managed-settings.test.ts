@@ -154,6 +154,14 @@ describe('server-managed settings (claude.ai admin console)', () => {
     );
   });
 
+  it('"blocked" in a network failure is the policy only when one is set here (review 16 UX-03)', async () => {
+    const network = 'connect ECONNREFUSED: request blocked by firewall';
+    expect(explainPluginFailure(network, null)).toBe(network);
+    expect(explainPluginFailure(network, await blockingMarketplace())).toBe(
+      `blocked by your organization's Claude Code policy (the claude.ai admin console). Ask your admin to allow it. Details: ${network}`,
+    );
+  });
+
   it('an empty cache means none are set', async () => {
     const found = await detectManagedSettings(
       fakeSystem({ platform: 'linux', files: { '/home/a/.claude/remote-settings.json': '{}' } }),

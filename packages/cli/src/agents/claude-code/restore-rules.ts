@@ -22,7 +22,7 @@ import {
   extensionOf,
   isPluginGenerated,
   isScript,
-  TOOL_CONFIG_FILES,
+  TOOL_CONFIG_PATHS,
 } from './global-paths.ts';
 import { underFolder } from '../shared/bundle-paths.ts';
 import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts';
@@ -70,8 +70,7 @@ function homeDestination(
 ): RestoreDestination {
   const problem = homePathProblem(relative);
   if (problem !== null) return refused(problem);
-  const toolSettings = Object.values(TOOL_CONFIG_FILES).flat();
-  if (toolSettings.includes(relative) || allowedScripts.has(HOME_SCRIPTS_PREFIX + relative))
+  if (TOOL_CONFIG_PATHS.has(relative) || allowedScripts.has(HOME_SCRIPTS_PREFIX + relative))
     return { kind: 'home', path: relative };
   return refused('no hook or status line in this setup runs it');
 }

@@ -34,15 +34,16 @@ Examples:
                                                     restore a project into the current folder
   agentnomad pull --global --merge --yes            restore without questions, merging files;
                                                     new hooks and commands are skipped
-  agentnomad pull --global --yes --allow-commands   also accept new hooks, MCP servers and
-                                                    installs (only for setups you trust)
+  agentnomad pull --global --yes --allow-commands   also accept new hooks, MCP servers, plugins
+                                                    or mods and installs (only for setups you trust)
   echo "$PASSWORD" | agentnomad login --username me --password-stdin
                                                     log in from a script
 
 With no terminal (a script or CI), nothing is asked: a question the flags do not
 answer stops the command with exit code 1 and names the flags to add. Push and pull
 also exit with code 1 when a setup was skipped or refused without a "no" from you
-(a newer or older copy, over ${formatSize(MAX_BUNDLE_BYTES)}, or skipped by --yes); the rest is done first.`;
+(a newer or older copy, over ${formatSize(MAX_BUNDLE_BYTES)}, skipped by --yes, or a file pull
+found different but never asked about); the rest is done first.`;
 
 /** `--<id>` and `--no-<id>` for each optional part, with the command's help texts. */
 function addPartOptions(

@@ -10,7 +10,6 @@ import {
 import { pathsOf } from '../shared/detector-system.ts';
 import { JsonObjectSchema } from '../../system/json.ts';
 import { commandsInSettings, programOf } from './settings-commands.ts';
-import { settingsFilesIn } from './claude-code-paths.data.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
@@ -23,6 +22,7 @@ import {
   neverSyncedIn,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
+  settingsFilesIn,
   SKIPPED_NAMES,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';

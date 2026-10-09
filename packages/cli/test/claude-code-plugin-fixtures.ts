@@ -10,7 +10,11 @@ import type {
   PluginValidator,
 } from '../src/index.ts';
 
-/** Plugin files shared by the plugin and plugin sync tests (review 7 READ-01). */
+/**
+ * Plugin fixtures: installed plugins and marketplaces, managed settings, and (T96) plugins in
+ * the skills folder with what `claude plugin validate` says about them (review 7 READ-01,
+ * review 16 READ-06).
+ */
 
 /** Claude Code's list of installed plugins in the base folder `base`. */
 export const installedPluginsFile = (base: string) =>
@@ -154,16 +158,22 @@ export function pluginFiles(folder: string, options: PluginFilesOptions = {}): C
 
 /** The T95 probe mod's folder: the one mod every plugin test uses (review 15 DUP-01). */
 export const PROBE_MOD_FOLDER = 'skills/my-mod/';
+/** The same mod in a project's `.claude/skills/` (review 16 QA-01). */
+export const PROJECT_MOD_FOLDER = '.claude/skills/my-mod/';
 
 /** The T95 probe mod as bundle files: a manifest, `hooks/hooks.json` and one hooks module. */
 export const probeMod = (folder = PROBE_MOD_FOLDER): CollectedFile[] =>
   pluginFiles(folder, { modules: ['./register.ts'] });
 
+/** Where Claude Code generates a plugin's types on disk under `base` (T95; review 16 DUP-04). */
+export const generatedTypesDir = (base: string, folder = PROBE_MOD_FOLDER): string =>
+  join(base, ...folder.split('/').filter(Boolean), '.claude-plugin', 'types');
+
 /** What Claude Code generates when it hot-reloads a plugin at `folder` (T95): never synced. */
 export async function writeGeneratedTypes(base: string, folder = PROBE_MOD_FOLDER): Promise<void> {
-  const types = [...folder.split('/').filter(Boolean), '.claude-plugin', 'types'];
-  await writeTestFile(join(base, ...types, 'claude-code', 'index.d.ts'), '// generated\n');
-  await writeTestFile(join(base, ...types, 'tsconfig.json'), '{}\n');
+  const types = generatedTypesDir(base, folder);
+  await writeTestFile(join(types, 'claude-code', 'index.d.ts'), '// generated\n');
+  await writeTestFile(join(types, 'tsconfig.json'), '{}\n');
 }
 
 /** Writes `files` (bundle paths from `base`) to disk, as a PC that has the plugin. */

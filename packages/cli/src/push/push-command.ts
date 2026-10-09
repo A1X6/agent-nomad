@@ -36,9 +36,9 @@ import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { scanEnvReferences } from '../env/env-references.ts';
 import { chooseEnvValues, envSectionFile } from '../env/env-section.ts';
+import { listSavedRevisions } from '../pull/saved-setups.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
-import { listSavedRevisions } from '../pull/saved-setups.ts';
 import { formatSize } from '../ui/format-size.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { toBundleFiles } from './bundle-files.ts';
@@ -333,8 +333,8 @@ export function createPushPlanner(deps: PushDeps) {
   /**
    * Whether to upload one collected setup, and over which revision. Asks before pushing a
    * setup whose last pull did not restore everything (T46, BUG-05) and before replacing a
-   * copy the server has in another revision than this PC knows (T38); a no from the user is their choice, a skip by
-   * `--yes` is not done.
+   * copy the server has in another revision than this PC knows (T38); a no from the user is
+   * their choice, a skip by `--yes` is not done.
    */
   async function decide(
     item: PushItem,

@@ -29,6 +29,7 @@ export * from './agents/claude-code/skills-dir-plugins.ts';
 export * from './agents/claude-code/unknown-files.ts';
 export * from './agents/notices.ts';
 export * from './agents/registry.ts';
+export * from './agents/shared/bundle-paths.ts';
 export * from './agents/shared/detector-system.ts';
 export * from './agents/shared/file-gathering.ts';
 export * from './api/api-client.ts';

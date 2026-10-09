@@ -16,7 +16,7 @@ import {
   GLOBAL_SETTINGS_FILES,
   HOME_SCRIPTS_PREFIX,
   isScript,
-  TOOL_CONFIG_FILES,
+  TOOL_CONFIG_PATHS,
 } from './global-paths.ts';
 import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
@@ -340,13 +340,12 @@ export function reviewRunnable(
 
   // Settings of status line tools can hold commands of their own (ccstatusline's Custom
   // Command widget), so a new or changed copy is shown too.
-  const toolSettings = new Set(
-    Object.values(TOOL_CONFIG_FILES)
-      .flat()
-      .map((path) => HOME_SCRIPTS_PREFIX + path),
-  );
   const tools: ReviewedEntry[] = incoming
-    .filter((file) => toolSettings.has(file.path))
+    .filter(
+      (file) =>
+        file.path.startsWith(HOME_SCRIPTS_PREFIX) &&
+        TOOL_CONFIG_PATHS.has(file.path.slice(HOME_SCRIPTS_PREFIX.length)),
+    )
     .flatMap((file) => {
       const change = newOrChanged(file);
       if (change === null) return [];

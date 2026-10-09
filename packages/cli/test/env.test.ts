@@ -89,6 +89,29 @@ describe('finding ${VAR} references', () => {
     expect([...scan.setBySettings]).toEqual(['COMPANY_PROXY']);
   });
 
+  it("finds them in a plugin's MCP files in the skills folder, in either scope (T96, review 16 BUG-01)", () => {
+    const scan = scanEnvReferences(
+      [
+        collectedJson('skills/gh/.claude-plugin/plugin.json', {
+          name: 'gh',
+          mcpServers: { inline: { command: 'x', env: { INLINE_KEY: '${INLINE_KEY}' } } },
+        }),
+        // The wrapper left out: the whole file is the servers map.
+        collectedJson('skills/gh/.mcp.json', { gh: { env: { GITHUB_TOKEN: '${GITHUB_TOKEN}' } } }),
+        collectedJson('.claude/skills/p/.mcp.json', {
+          mcpServers: { p: { env: { P_KEY: '${P_KEY}' } } },
+        }),
+        collectedJson('skills/plain/notes.json', { note: '${NOT_SCANNED}' }),
+      ],
+      CLAUDE_ENV_REFERENCES,
+    );
+    expect(scan.variables).toEqual([
+      { name: 'GITHUB_TOKEN', usedBy: ['skills/gh/.mcp.json'] },
+      { name: 'INLINE_KEY', usedBy: ['MCP server inline (skills/gh/.claude-plugin/plugin.json)'] },
+      { name: 'P_KEY', usedBy: ['MCP server p (.claude/skills/p/.mcp.json)'] },
+    ]);
+  });
+
   it('ignores files that are not JSON', () => {
     const broken = collected('.mcp.json', '{ nope');
     expect(scanEnvReferences([broken], CLAUDE_ENV_REFERENCES).variables).toEqual([]);

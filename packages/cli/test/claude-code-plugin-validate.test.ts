@@ -70,40 +70,48 @@ describe('running claude plugin validate on a pulled plugin (T96)', () => {
     expect(await readdir(tempDir)).toEqual([]);
   });
 
-  it('is unavailable, with what claude said, when there is no report to read', async () => {
-    const claude = recordingCli('', 1, 'claude: unknown option --json\nmore');
-    const validate = createPluginValidator({
-      system: system(['/usr/bin/claude']),
-      cli: claude.cli,
-      tempDir,
-    });
-    expect(await validate(plugin)).toEqual({
-      kind: 'unavailable',
-      reason: 'claude plugin validate gave no report (claude: unknown option --json)',
-    });
-    expect(await readdir(tempDir)).toEqual([]);
-  });
-
-  it('names the reason when there is no report: an error answer, a stop, or only an exit code', async () => {
-    const run = (stdout: string, exitCode: number, stderr: string, failure?: string) =>
-      createPluginValidator({
+  // One rule, four reasons in order of preference (review 15 UX-02; a table, review 16 BP-01).
+  it.each([
+    [
+      'what claude said',
+      '{"success":false,"error":"Plugin directory not found"}',
+      1,
+      '',
+      undefined,
+      'claude said: Plugin directory not found',
+    ],
+    [
+      'why the run stopped',
+      '',
+      1,
+      '',
+      'it did not finish within 60 seconds',
+      'it did not finish within 60 seconds',
+    ],
+    [
+      'the first line of stderr',
+      '',
+      1,
+      'claude: unknown option --json\nmore',
+      undefined,
+      'claude: unknown option --json',
+    ],
+    ['the exit code', '', 2, '', undefined, 'exit code 2'],
+  ])(
+    'is unavailable when there is no report, naming %s',
+    async (_what, stdout, exitCode, stderr, failure, expected) => {
+      const validate = createPluginValidator({
         system: system(['/usr/bin/claude']),
         cli: recordingCli(stdout, exitCode, stderr, failure).cli,
         tempDir,
-      })(plugin);
-    expect(await run('{"success":false,"error":"Plugin directory not found"}', 1, '')).toEqual({
-      kind: 'unavailable',
-      reason: 'claude plugin validate gave no report (claude said: Plugin directory not found)',
-    });
-    expect(await run('', 1, '', 'it did not finish within 60 seconds')).toEqual({
-      kind: 'unavailable',
-      reason: 'claude plugin validate gave no report (it did not finish within 60 seconds)',
-    });
-    expect(await run('', 2, '')).toEqual({
-      kind: 'unavailable',
-      reason: 'claude plugin validate gave no report (exit code 2)',
-    });
-  });
+      });
+      expect(await validate(plugin)).toEqual({
+        kind: 'unavailable',
+        reason: `claude plugin validate gave no report (${expected})`,
+      });
+      expect(await readdir(tempDir)).toEqual([]);
+    },
+  );
 
   it("a plugin named .claude lands under the fixed name, not where Claude Code reads a project's settings", async () => {
     const claude = recordingCli(REAL_VALIDATE_REPORT);

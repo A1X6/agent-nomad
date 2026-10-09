@@ -187,7 +187,8 @@ the data file lists it; that is what keeps credentials out.
 **Restore rules** are a pure function: for each bundle path, where it goes, or why it is
 refused. Allow only what your collector could have produced. This is what stops a damaged
 or tampered bundle from writing credentials, state or files outside the setup. See
-`claude-code/restore-rules.ts`, including `windowsNameProblem` for Windows-unsafe names.
+`claude-code/restore-rules.ts`; Windows-unsafe names are refused with `windowsNameProblem`
+from `@agentnomad/core`, as `claude-code/restorer.ts` does.
 
 **The restorer** also tells pull's plan step what to ask before anything is written, and
 never asks anything itself:
@@ -241,7 +242,8 @@ loop) into a shared `agents/shared/` module rather than copying them.
   pull); the collector gets the chosen ids in `options.include`. The command line builds
   the flags from the registered adapters: nothing to add in `cli/`.
 - **`memoryDescription`:** what push's memory question names.
-- **`envReferences`:** which bundle files hold MCP servers (`mcp`) and settings with an
+- **`envReferences`:** which bundle files hold MCP servers (`mcp`, plus an
+  optional `isMcpFile` rule for ones found by path, such as a plugin's `.mcp.json`) and settings with an
   `env` block (`settings`) that can use `${VAR}`, the variables the agent sets itself
   (`ownVariables`), and an optional `label` for messages. Push offers to save the values
   these files use and `agentnomad env` lists them; without it, both find none (see
@@ -333,7 +335,8 @@ the fakes the existing tests use.
 - [ ] Anything that runs programs is shown by pull before it is written: your restorer's
       `reviewRunnable` lists it (Claude Code's is `claude-code/command-review.ts` for
       settings and `claude-code/skills-dir-plugins.ts` for plugins in the skills folder).
-- [ ] `pnpm lint` passes: `push/`, `pull/`, `cli/`, `env/` and `commands/` (and every other generic folder) must not import your folder.
+- [ ] `pnpm lint` passes: `push/`, `pull/`, `cli/`, `env/` and `commands/` (and every other
+      generic folder) must not import your folder.
 - [ ] README (supported agents), [ROADMAP.md](ROADMAP.md) and
       [ARCHITECTURE.md](ARCHITECTURE.md) (file reference) updated.
 - [ ] The [threat model](security/threat-model.md) still holds: no credentials collected,

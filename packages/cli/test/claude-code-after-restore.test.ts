@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { noManagedSettings as noPolicy } from './claude-code-plugin-fixtures.ts';
-import { collected, collectedJson, recordingReporter, scriptedPrompter } from './fakes.ts';
+import {
+  collected,
+  collectedJson,
+  fakeExecutables,
+  recordingReporter,
+  scriptedPrompter,
+} from './fakes.ts';
 
 import {
   createClaudeCodeAfterRestore,
@@ -46,15 +52,8 @@ function afterRestore(deps: {
   };
 }
 
-/** Only what after-restore reads (SOLID-06): no full detector system to fake. */
-function system(executables: string[]): ExecutableLookupSystem {
-  return {
-    platform: 'linux',
-    homedir: '/home/a',
-    env: { PATH: '/usr/bin' },
-    isExecutable: (path) => Promise.resolve(executables.includes(path)),
-  };
-}
+/** Only what after-restore reads (SOLID-06): the shared lookup fake (review 16 DUP-03). */
+const system = fakeExecutables;
 
 function context(files: CollectedFile[], answers: boolean[] = [true, true]) {
   const script = scriptedPrompter(answers);

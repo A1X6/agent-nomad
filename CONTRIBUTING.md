@@ -140,8 +140,9 @@ open, such as a chat or an option letter from a discussion.
   - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
     `putJson`, `realisticPlugins`), a plugin in the skills folder as bundle files
     (`pluginFiles` with `PluginFilesOptions`, `writePluginFiles`; the T95 probe mod every
-    plugin test uses: `PROBE_MOD_FOLDER`, `probeMod`, and `writeGeneratedTypes` for what Claude
-    Code generates in it), what `claude plugin validate` says about one (`REAL_VALIDATE_REPORT`,
+    plugin test uses: `PROBE_MOD_FOLDER`, `PROJECT_MOD_FOLDER`, `probeMod`, and
+    `writeGeneratedTypes` with `generatedTypesDir` for what Claude Code generates in it), what
+    `claude plugin validate` says about one (`REAL_VALIDATE_REPORT`,
     `PROBE_MOD_VALIDATION`, `scriptedValidator`), and managed settings (`fakeManagedSystem` with
     `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
@@ -165,7 +166,8 @@ open, such as a chat or an option letter from a discussion.
   compares against stays written out, and so do the header names, sizes and settings that
   pin the API format in the contracts tests and the server's `support/fixtures.ts`.
 - A module's tests go in the test file named after it (see the file reference in
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), so they are found by name.
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), so they are found by name; the few small
+  modules covered only through their callers are listed there too.
 - Anything that touches paths runs on macOS, Linux and Windows in CI; write it so it passes
   on all three (use `path.join`, never assume `/`).
 - A change to push, pull or the bundle belongs in the end-to-end steps too

@@ -7,6 +7,7 @@ import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { RESERVED_DIR, type CollectedFile } from '../adapter.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
+import { pluginFolders } from './skills-dir-plugins.ts';
 
 /**
  * Skills from the user's claude.ai account (T42). Claude Code downloads them into
@@ -43,7 +44,10 @@ export interface SyncedSkills {
   readonly own: readonly { readonly name: string; readonly dir: string }[];
   /** Every synced skill name on this PC (any creator), to avoid adding a duplicate. */
   readonly allNames: ReadonlySet<string>;
-  /** Why nothing could be read, e.g. a manifest in an unknown format; `null` when fine. */
+  /**
+   * Why something could not be read, e.g. a manifest in an unknown format, one sentence per
+   * account (review 16 BUG-02); `null` when fine.
+   */
   readonly problem: string | null;
 }
 
@@ -55,7 +59,7 @@ export async function readSyncedSkills(path: PlatformPath, baseDir: string): Pro
   const root = path.join(baseDir, ...SYNCED_SKILLS_DIR.split('/'));
   const own = new Map<string, string>();
   const allNames = new Set<string>();
-  let problem: string | null = null;
+  const problems: string[] = [];
   const accounts = await readdir(root, { withFileTypes: true }).catch(() => []);
   for (const account of accounts) {
     if (!account.isDirectory() || account.name.startsWith('.')) continue;
@@ -63,7 +67,9 @@ export async function readSyncedSkills(path: PlatformPath, baseDir: string): Pro
     const text = await readFile(path.join(accountDir, 'manifest.json'), 'utf8').catch(() => null);
     const manifest = text === null ? null : valueOrNull(parseJsonWith(ManifestSchema, text));
     if (manifest === null) {
-      problem = `Claude Code's list of synced skills (${SYNCED_SKILLS_DIR}/${account.name}/manifest.json) is missing or in a format agentnomad does not know.`;
+      problems.push(
+        `Claude Code's list of synced skills (${SYNCED_SKILLS_DIR}/${account.name}/manifest.json) is missing or in a format agentnomad does not know.`,
+      );
       continue;
     }
     for (const entry of manifest.skills) {
@@ -87,7 +93,7 @@ export async function readSyncedSkills(path: PlatformPath, baseDir: string): Pro
       .map(([name, dir]) => ({ name, dir }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     allNames,
-    problem,
+    problem: problems.length === 0 ? null : problems.join(' '),
   };
 }
 
@@ -128,7 +134,9 @@ export function planAccountSkills(
     const rest = file.path.slice(ACCOUNT_SKILLS_PREFIX.length);
     const name = rest.split('/')[0] ?? '';
     if (!isUsableSkillName(name) || rest === name) continue;
-    byName.set(name, [...(byName.get(name) ?? []), file]);
+    const group = byName.get(name);
+    if (group) group.push(file);
+    else byName.set(name, [file]);
   }
   const toAdd: { name: string; runsCommands: boolean }[] = [];
   const skipped: { name: string; reason: string }[] = [];
@@ -142,15 +150,24 @@ export function planAccountSkills(
       skipped.push({ name, reason: 'you already have a local skill with this name' });
       continue;
     }
+    const asLocal = skillFiles.map((file) => ({
+      ...file,
+      path: `skills/${file.path.slice(ACCOUNT_SKILLS_PREFIX.length)}`,
+    }));
+    // A folder with `.claude-plugin/plugin.json` would load here as a plugin, hooks and MCP
+    // servers included, past the review pull gives plugins in the skills folder (T96): a
+    // claude.ai skill is a skill, so one that is a plugin is never added (review 16 SEC-01).
+    if (pluginFolders(asLocal).length > 0) {
+      skipped.push({ name, reason: 'it is a plugin, which pull adds only from a skills folder' });
+      continue;
+    }
     const runsCommands = skillFiles.some(
       (file) =>
         file.path.toLowerCase().endsWith('.md') &&
         runnableInMarkdown(new TextDecoder().decode(file.content)).length > 0,
     );
     toAdd.push({ name, runsCommands });
-    for (const file of skillFiles) {
-      files.push({ ...file, path: `skills/${file.path.slice(ACCOUNT_SKILLS_PREFIX.length)}` });
-    }
+    files.push(...asLocal);
   }
   return { toAdd, skipped, files };
 }

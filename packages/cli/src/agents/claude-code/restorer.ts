@@ -143,6 +143,48 @@ export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform)
     .map(({ text }) => text);
 }
 
+/** The settings files of a scope: where its hooks and status line are declared. */
+const settingsFilesOf = (target: ScopeTarget): readonly string[] =>
+  target.kind === 'global' ? GLOBAL_SETTINGS_FILES : PROJECT_SETTINGS_FILES;
+
+/**
+ * Bundle paths of the scripts the setup's own hooks and status line run (T38): the home files
+ * a global restore may write, or the project files a project restore may (review 16 REF-01).
+ */
+function allowedScriptsOf(
+  target: ScopeTarget,
+  incoming: readonly CollectedFile[],
+  options: RestorerOptions,
+): ReadonlySet<string> {
+  const settings = incoming
+    .filter((entry) => settingsFilesOf(target).includes(entry.path))
+    .map((entry) => new TextDecoder().decode(entry.content));
+  return new Set(
+    settings.flatMap((text) =>
+      (target.kind === 'project'
+        ? projectHookScripts(text, { projectDir: target.projectDir, platform: options.platform })
+        : hookScripts(text, options)
+      ).map((script) => script.bundlePath),
+    ),
+  );
+}
+
+/** One warning per hook or status line that came from another OS and will likely not run here. */
+function otherOsWarnings(
+  target: ScopeTarget,
+  incoming: readonly CollectedFile[],
+  sourceOs: string,
+  platform: NodeJS.Platform,
+): string[] {
+  return incoming
+    .filter((entry) => settingsFilesOf(target).includes(entry.path))
+    .flatMap((file) => hooksForOtherOs(new TextDecoder().decode(file.content), platform))
+    .map(
+      (command) =>
+        `This hook or status line came from ${sourceOs} and will likely not run here: ${printableLine(command)}`,
+    );
+}
+
 /**
  * Writes a pulled Claude Code setup to this PC (T27). Only paths a collector could have
  * produced are written; existing files that differ are resolved with the user's choice
@@ -164,11 +206,14 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     ? path.join(options.baseDir, '.claude.json')
     : path.join(options.homedir, '.claude.json');
 
-  async function readExisting(nativePath: string): Promise<Uint8Array | 'folder' | null> {
+  /** What is at `nativePath`: the file with its permission bits (one stat, review 16 PERF-01), a folder, or nothing. */
+  async function readExisting(
+    nativePath: string,
+  ): Promise<{ readonly content: Uint8Array; readonly mode: number } | 'folder' | null> {
     const info = await stat(nativePath).catch(() => null);
     if (info === null) return null;
     if (!info.isFile()) return 'folder';
-    return new Uint8Array(await readFile(nativePath));
+    return { content: new Uint8Array(await readFile(nativePath)), mode: info.mode & 0o777 };
   }
 
   /**
@@ -186,7 +231,11 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   const claudeJson = createClaudeJsonMerge({
     claudeJsonFile,
     isClaudeRunning: options.isClaudeRunning,
-    readExisting,
+    // The merge needs the bytes only.
+    readExisting: async (nativePath) => {
+      const found = await readExisting(nativePath);
+      return found === null || found === 'folder' ? found : found.content;
+    },
     writeAtomically,
     freeSuffix,
     ...(options.now && { now: options.now }),
@@ -281,33 +330,13 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           }
         };
       const ask = stopping(onConflict);
-      const projectScripts = new Set(
-        target.kind === 'project'
-          ? incoming
-              .filter((entry) => PROJECT_SETTINGS_FILES.includes(entry.path))
-              .flatMap((entry) =>
-                projectHookScripts(new TextDecoder().decode(entry.content), {
-                  projectDir: target.projectDir,
-                  platform: options.platform,
-                }).map((script) => script.bundlePath),
-              )
-          : [],
-      );
-      const globalScripts = new Set(
-        incoming
-          .filter((entry) => GLOBAL_SETTINGS_FILES.includes(entry.path))
-          .flatMap((entry) =>
-            hookScripts(new TextDecoder().decode(entry.content), options).map(
-              (script) => script.bundlePath,
-            ),
-          ),
-      );
+      const allowedScripts = allowedScriptsOf(target, incoming, options);
       const destinationOf = (path: string): RestoreDestination => {
         const windowsProblem = options.platform === 'win32' ? windowsNameProblem(path) : null;
         if (windowsProblem !== null) return { kind: 'refused', reason: windowsProblem };
         return target.kind === 'global'
-          ? globalDestination(path, globalScripts)
-          : projectDestination(path, projectScripts);
+          ? globalDestination(path, allowedScripts)
+          : projectDestination(path, allowedScripts);
       };
 
       let memory: Promise<string | null> | undefined;
@@ -349,15 +378,16 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         }
 
         const content = lineEndingsFor(options.platform, file.path, file.content);
-        const existing = await readExisting(nativePath);
-        if (existing === 'folder') {
+        const found = await readExisting(nativePath);
+        if (found === 'folder') {
           report.skipped.push(file.path);
           report.warnings.push(
             `Skipped "${printableLine(file.path)}": a folder with that name exists.`,
           );
           return;
         }
-        const existingMode = existing === null ? null : (await stat(nativePath)).mode & 0o777;
+        const existing = found === null ? null : found.content;
+        const existingMode = found === null ? null : found.mode;
 
         let writes: readonly PlannedWrite[];
         if (existing === null) {
@@ -426,18 +456,9 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       }
 
       if (context.sourceOs !== undefined && context.sourceOs !== os) {
-        const settingsPaths =
-          target.kind === 'global' ? GLOBAL_SETTINGS_FILES : PROJECT_SETTINGS_FILES;
-        for (const file of incoming.filter((entry) => settingsPaths.includes(entry.path))) {
-          for (const command of hooksForOtherOs(
-            new TextDecoder().decode(file.content),
-            options.platform,
-          )) {
-            report.warnings.push(
-              `This hook or status line came from ${context.sourceOs} and will likely not run here: ${printableLine(command)}`,
-            );
-          }
-        }
+        report.warnings.push(
+          ...otherOsWarnings(target, incoming, context.sourceOs, options.platform),
+        );
       }
       return report;
     },

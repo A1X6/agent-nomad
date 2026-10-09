@@ -163,8 +163,9 @@ agentnomad pull --global --merge --yes
 
 Exit codes: `0` done, `1` failed (or an answer was needed), `130` cancelled. Push and pull
 also exit with `1` when a setup was skipped or refused without you answering no: a newer copy
-on the server, an older copy than this PC had, a setup over 5 MB, or a skip made by `--yes`.
-The other setups are still done first, and one message lists what was not.
+on the server, an older copy than this PC had, a setup over 5 MB, a skip made by `--yes`, or a
+file pull found different but never asked about. The other setups are still done first, and
+one message lists what was not.
 
 ## What is synced
 

@@ -25,8 +25,10 @@ import {
   writeTestFile,
 } from './fakes.ts';
 import {
+  generatedTypesDir,
   PROBE_MOD_VALIDATION,
   probeMod,
+  PROJECT_MOD_FOLDER,
   scriptedValidator,
   writeGeneratedTypes,
   writePluginFiles,
@@ -806,10 +808,12 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
 });
 
 describe('plugins and mods in the skills folder (T96)', () => {
-  const modFiles = (machine: ReturnType<typeof pc>, base = machine.base) =>
-    probeMod().map((file) => join(base, ...file.path.split('/')));
-  const PUSH_NOTE =
-    'info: Claude Code global setup: Plugins in the skills folder, saved with it: my-mod (skills/my-mod/, a mod: runs code inside Claude Code). They load as <name>@skills-dir on the other PC, after pull shows what they run.';
+  /** Where the probe mod's files land on `machine`: in `~/.claude/skills/`, or a project's `.claude/skills/`. */
+  const modFiles = (machine: ReturnType<typeof pc>, scope: 'global' | 'project' = 'global') =>
+    (scope === 'global' ? probeMod() : probeMod(PROJECT_MOD_FOLDER)).map((file) =>
+      join(scope === 'global' ? machine.base : machine.project, ...file.path.split('/')),
+    );
+  const PUSH_NOTE_START = 'info: Claude Code global setup: Plugins in the skills folder';
 
   /**
    * PC A with a mod in skills/ and the types folder Claude Code generates there, a plain skill
@@ -832,8 +836,9 @@ describe('plugins and mods in the skills folder (T96)', () => {
     );
     const { reporter, lines } = recordingReporter();
     await pushFrom(a, server, ['global', false], { reporter })(none);
-    // The real adapter names the plugin on push (QA-01).
-    expect(lines).toContain(PUSH_NOTE);
+    // The real adapter names the plugin on push (QA-01); the wording is pinned once, in
+    // claude-code-adapter.test.ts (review 16 DUP-05).
+    expect(lines.some((line) => line.startsWith(PUSH_NOTE_START))).toBe(true);
     return { server, a };
   }
 
@@ -843,12 +848,10 @@ describe('plugins and mods in the skills folder (T96)', () => {
     server: ReturnType<typeof fakeBundleServer>,
     answers: unknown[],
     validation = PROBE_MOD_VALIDATION,
-    cwd?: string,
   ) {
     const validator = scriptedValidator(validation);
     const t = pullOn(machine, server, answers, {
       adapter: claudeAdapter(machine.home, { validatePlugin: validator.validate }),
-      ...(cwd !== undefined && { cwd }),
     });
     return { ...t, validator };
   }
@@ -879,17 +882,22 @@ describe('plugins and mods in the skills folder (T96)', () => {
     const t = pullWithValidator(b, server, []);
     await t.pull({ global: true, yes: true, allowCommands: true });
     for (const file of modFiles(b)) expect(await exists(file)).toBe(true);
-    expect(await exists(join(b.base, 'skills', 'my-mod', '.claude-plugin', 'types'))).toBe(false);
+    expect(await exists(generatedTypesDir(b.base))).toBe(false);
     // Left out by push, not refused by restore: nothing was refused (QA-06).
     expect(t.lines.filter((line) => line.startsWith('warn:'))).toEqual([]);
-    // Pulling again: the mod is here unchanged, so there is nothing to review or check.
+  });
+
+  it('a mod already here unchanged is neither reviewed nor checked again', async () => {
+    const { server } = await pushedMod();
+    const b = pc('desktop');
+    await pullWithValidator(b, server, []).pull({ global: true, yes: true, allowCommands: true });
     const again = pullWithValidator(b, server, []);
     await again.pull({ global: true, yes: true });
     expect(reviewShown(again.lines)).toBe('');
     expect(again.validator.asked).toEqual([]);
   });
 
-  it('a yes to the review writes the mod; a no leaves the whole folder out, and its neighbour in', async () => {
+  it('a no to the review leaves the whole folder out, and its neighbour in', async () => {
     const { server } = await pushedMod();
     const b = pc('desktop');
     const no = pullWithValidator(b, server, [false]);
@@ -902,8 +910,14 @@ describe('plugins and mods in the skills folder (T96)', () => {
     expect(no.lines).toContain(
       'warn: Skipped settings.json, hooks/check.sh: they hold those commands or are run by them. Skipped skills/my-mod/: a plugin is accepted or left out as a whole. The rest is restored.',
     );
+  });
+
+  it('a yes to the review writes the mod', async () => {
+    const { server } = await pushedMod();
+    const b = pc('desktop');
     const yes = pullWithValidator(b, server, [true]);
     await yes.pull({ global: true, yes: false });
+    expect(yes.asked).toEqual(['Allow them?']);
     for (const file of modFiles(b)) expect(await exists(file)).toBe(true);
   });
 
@@ -915,18 +929,22 @@ describe('plugins and mods in the skills folder (T96)', () => {
     await writeTestFile(local, 'export const register = () => { /* mine */ }\n');
     const t = pullWithValidator(b, server, [false]);
     await t.pull({ global: true, yes: false });
-    expect(reviewShown(t.lines)).toContain('~ plugin skills/my-mod/ module ./register.ts');
+    expect(t.asked).toEqual(['Allow them?']);
+    // A changed mod is checked again, and marked as changed (review 16 READ-08).
+    expect(t.validator.asked.map((plugin) => plugin.name)).toEqual(['my-mod']);
+    expect(reviewShown(t.lines)).toContain(
+      '~ plugin skills/my-mod/ module ./register.ts (runs code inside Claude Code): hooks: session.start, tool.call{tool=Bash}; calls: $.store.get, $.store.set, $.ui.status  (changed)',
+    );
     expect(await readText(local)).toBe('export const register = () => { /* mine */ }\n');
   });
 
   it("a mod in a project's .claude/skills/ is reviewed and written the same way", async () => {
     const server = fakeBundleServer();
     const a = pc('laptop');
-    const folder = '.claude/skills/my-mod/';
     // Claude Code counts as installed on A once its folder exists.
     await writeTestFile(join(a.base, 'CLAUDE.md'), 'Notes.');
-    await writePluginFiles(a.project, probeMod(folder));
-    await writeGeneratedTypes(a.project, folder);
+    await writePluginFiles(a.project, probeMod(PROJECT_MOD_FOLDER));
+    await writeGeneratedTypes(a.project, PROJECT_MOD_FOLDER);
     await writeTestFile(join(a.project, 'CLAUDE.md'), 'Project rules.');
     await pushFrom(a, server, ['project', 'my-app', false])(none);
     const b = pc('desktop');
@@ -935,18 +953,18 @@ describe('plugins and mods in the skills folder (T96)', () => {
     expect(reviewShown(skipped.lines)).toContain(
       '+ plugin .claude/skills/my-mod/ module ./register.ts',
     );
-    for (const file of modFiles(b, b.project)) expect(await exists(file)).toBe(false);
-    await pullWithValidator(b, server, []).pull({
-      global: false,
-      project: 'my-app',
-      yes: true,
-      allowCommands: true,
-    });
-    for (const file of probeMod(folder).map((file) => join(b.project, ...file.path.split('/'))))
-      expect(await exists(file)).toBe(true);
-    expect(
-      await exists(join(b.project, '.claude', 'skills', 'my-mod', '.claude-plugin', 'types')),
-    ).toBe(false);
+    // The project mod lives under .claude/skills/, so that is where "not written" is checked
+    // (review 16 QA-01); the folder-only skip warning has no files sentence (QA-04).
+    for (const file of modFiles(b, 'project')) expect(await exists(file)).toBe(false);
+    expect(skipped.lines).toContain(
+      'warn: Skipped .claude/skills/my-mod/: a plugin is accepted or left out as a whole. The rest is restored. --yes never accepts new commands; add --allow-commands to accept them.',
+    );
+    const written = pullWithValidator(b, server, []);
+    await written.pull({ global: false, project: 'my-app', yes: true, allowCommands: true });
+    for (const file of modFiles(b, 'project')) expect(await exists(file)).toBe(true);
+    // Left out by push, not refused by restore (QA-06).
+    expect(written.lines.filter((line) => line.startsWith('warn:'))).toEqual([]);
+    expect(await exists(generatedTypesDir(b.project, PROJECT_MOD_FOLDER))).toBe(false);
   });
 
   it('a mod that cannot be checked here is shown as not checked, and --yes still skips it', async () => {

@@ -3,9 +3,11 @@
  * the paths data file (T32); this module only gives them names and fast lookups.
  */
 import { RESERVED_DIR } from '../adapter.ts';
-import { underFolder } from '../shared/bundle-paths.ts';
-import { inHomeFolder, isSensitiveHomePath } from '../shared/file-gathering.ts';
+import { inHomeFolder, isSensitiveHomePath, underFolder } from '../shared/bundle-paths.ts';
 import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
+
+/** The data file's helper, for the collectors too: the data file is read through its views (review 16 ARCH-02). */
+export { settingsFilesIn };
 
 /** Single files in the base folder. */
 export const GLOBAL_FILES: readonly string[] = DATA.global.files;
@@ -122,6 +124,11 @@ export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
  * command runs the tool, directly or through `npx` / `bunx`.
  */
 export const TOOL_CONFIG_FILES: Readonly<Record<string, readonly string[]>> = DATA.toolConfigFiles;
+
+/** Every tool settings path from the home folder, for lookups (review 16 DUP-01). */
+export const TOOL_CONFIG_PATHS: ReadonlySet<string> = new Set(
+  Object.values(TOOL_CONFIG_FILES).flat(),
+);
 
 /** Shells and runtimes: present wherever agentnomad runs, so not recorded as programs. */
 export const RUNTIME_COMMANDS: ReadonlySet<string> = new Set(DATA.runtimeCommands);

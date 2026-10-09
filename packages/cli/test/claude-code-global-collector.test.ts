@@ -124,7 +124,8 @@ describe('global collector: what is taken', () => {
   it('takes a plugin in skills/, but never what Claude Code generates in it (T96)', async () => {
     await writePluginFiles(base, probeMod());
     await writeGeneratedTypes(base);
-    expect(paths(await collect())).toEqual(paths(probeMod()));
+    // Compared as sets: the fixture promises no file order (review 16 READ-09).
+    expect(paths(await collect()).sort()).toEqual(paths(probeMod()).sort());
   });
 
   it('skips .git, node_modules, OS clutter and agentnomad backup copies', async () => {

@@ -114,8 +114,8 @@ const describe = (adapter: AgentAdapter, setup: SavedSetup) =>
 /**
  * Pull's plan step (T59): chooses saved setups, downloads and checks them, and asks every
  * question before anything is written: an older copy, what would run programs, each file
- * here that differs, saved environment values, and each agent's own questions (T61). Without a terminal, a question the flags
- * leave open stops pull here (T46).
+ * here that differs, saved environment values, and each agent's own questions (T61). Without a
+ * terminal, a question the flags leave open stops pull here (T46).
  */
 export function createPullPlanner(deps: PullDeps) {
   const { prompter, reporter } = deps;
@@ -510,9 +510,9 @@ export function createPullPlanner(deps: PullDeps) {
 
 /**
  * Pull's apply step (T59): writes each planned setup with the answers from the plan, adds the
- * chosen environment values, remembers the revision, then runs each agent's follow-up. It has no prompter, so it never
- * asks: a file that differs but was not asked about (only the restorer saw it) is left as it
- * is, and the setup is not done.
+ * chosen environment values, remembers the revision, then runs each agent's follow-up. It has
+ * no prompter, so it never asks: a file that differs but was not asked about (only the restorer
+ * saw it) is left as it is, and the setup is not done.
  */
 export function createPullApplier(deps: PullApplyDeps) {
   const { reporter } = deps;

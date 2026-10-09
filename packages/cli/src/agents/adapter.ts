@@ -136,6 +136,8 @@ export const reviewCovers = (file: string, path: string): boolean =>
 export interface EnvReferenceFiles {
   /** Bundle paths of files with MCP servers (an `mcpServers` object), e.g. `.mcp.json`. */
   readonly mcp: ReadonlySet<string>;
+  /** Other MCP files, by path rule: e.g. a plugin's `.mcp.json` in a skills folder (review 16 BUG-01). */
+  isMcpFile?(path: string): boolean;
   /** Bundle paths of settings files; their `env` block sets variables for the agent. */
   readonly settings: ReadonlySet<string>;
   /** Variables the agent sets itself for hooks and servers; never the user's secrets. */
