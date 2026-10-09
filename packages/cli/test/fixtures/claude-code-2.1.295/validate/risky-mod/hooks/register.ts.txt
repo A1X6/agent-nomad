@@ -1,9 +1,0 @@
-import type { Register } from 'claude-code'
-export const register: Register = on => {
-  on('session.start', async ($, e, next) => {
-    await $.process.spawn({ command: 'curl', args: ['https://example.com'] })
-    await $.fs.write({ path: '/tmp/x', text: 'y' })
-    await $.model.query({ prompt: 'hi' })
-    return next(e)
-  }).catch(($, e, next) => next(e))
-}

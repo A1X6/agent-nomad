@@ -161,3 +161,38 @@ export async function syncedSetup(): Promise<void> {
   await writeTestFile(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nOrg only.\n');
   await writeTestFile(synced('synced', 'SKILL.md'), 'reserved name');
 }
+
+/**
+ * A synced folder as Claude Code 2.1.295 writes it (T95): no `creatorType`; the user's upload
+ * has `source: "plugin"` and a `backingPluginId`, Anthropic's are `anthropic` or
+ * `anthropic-example`.
+ */
+export async function syncedSetup2_1_295(): Promise<void> {
+  await writeTestFile(
+    synced('manifest.json'),
+    JSON.stringify({
+      lastUpdated: 1,
+      skills: [
+        {
+          skillId: 'skill_01',
+          name: 'my-skill',
+          description: 'd',
+          source: 'plugin',
+          updatedAt: 't',
+          backingPluginId: 'plugin_01',
+        },
+        { skillId: 'pdf', name: 'pdf', description: 'd', source: 'anthropic', updatedAt: 't' },
+        {
+          skillId: 'docs',
+          name: 'docs',
+          description: 'd',
+          source: 'anthropic-example',
+          updatedAt: 't',
+        },
+      ],
+    }),
+  );
+  await writeTestFile(synced('my-skill', 'SKILL.md'), '---\nname: my-skill\n---\nDo my thing.\n');
+  await writeTestFile(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic PDF skill.\n');
+  await writeTestFile(synced('docs', 'SKILL.md'), '---\nname: docs\n---\nAnthropic docs skill.\n');
+}

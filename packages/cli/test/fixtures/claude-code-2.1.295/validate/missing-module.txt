@@ -1,9 +1,0 @@
-Validating plugin manifest: <mods>/missing/.claude-plugin/plugin.json
-
-Validating hooks: <mods>/missing/hooks/hooks.json
-
-× Found 1 error:
-
-  > modules../register.ts: missing: <mods>/missing/hooks/register.ts: no such file
-
-× Validation failed

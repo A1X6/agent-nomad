@@ -135,9 +135,10 @@ open, such as a chat or an option letter from a discussion.
     collectors (`options`, `globalCollector`, `collect`, `collectSkipped`), the real adapter
     (`claudeCodeAdapter`), settings with one Stop hook (`stopHook`), an auto memory folder
     (`setMemoryDirectory`, `memoryDir`) and a claude.ai synced skills folder (`synced`,
-    `syncedSetup`).
+    `syncedSetup`, and `syncedSetup2_1_295` in the format Claude Code 2.1.295 writes).
   - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
-    `putJson`, `realisticPlugins`) and managed settings (`fakeManagedSystem` with
+    `putJson`, `realisticPlugins`), the plugin data folders and `$.store` files a real Claude
+    Code named (`REAL_DATA_DIRS`, `REAL_STORE_FILES`) and managed settings (`fakeManagedSystem` with
     `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).

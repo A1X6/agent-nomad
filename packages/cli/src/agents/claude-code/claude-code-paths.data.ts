@@ -102,8 +102,8 @@ const RAW = {
   },
 
   /**
-   * Where Claude Code keeps plugins and mods (T95, checked on Claude Code 2.1.295; the real
-   * files are in `test/fixtures/claude-code-2.1.295/`). A plugin id is `<name>@<source>`.
+   * Where Claude Code keeps plugins and mods (T95, checked on Claude Code 2.1.295; the names
+   * it made are in `test/claude-code-plugin-fixtures.ts`). A plugin id is `<name>@<source>`.
    * Read by the plugin and mod sync (T96 to T102); `plugins/` itself stays never synced.
    */
   plugins: {

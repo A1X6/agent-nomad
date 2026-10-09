@@ -1,8 +1,0 @@
-Validating plugin manifest: <mods>/risky/.claude-plugin/plugin.json
-
-Validating hooks: <mods>/risky/hooks/hooks.json
-
-  > ./register.ts hooks: session.start
-  > ./register.ts calls: $.fs.write, $.model.query, $.process.spawn
-
-√ Validation passed
