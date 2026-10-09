@@ -14,18 +14,19 @@ import {
 } from './fakes.ts';
 import { stubRestorer } from './stub-restorer.ts';
 import {
-  isRedirectVariable,
   BLOCK_END,
-  CLAUDE_ENV_REFERENCES,
   BLOCK_START,
   chooseEnvValues,
+  CLAUDE_ENV_REFERENCES,
   CLAUDE_JSON_BUNDLE_PATH,
   createEnvCommand,
   createShellProfileWriter,
   createWindowsEnvWriter,
   describeEnv,
   envSectionFile,
+  EnvSectionSchema,
   globalDestination,
+  isRedirectVariable,
   parseEnvSection,
   planEnvRestore,
   projectDestination,
@@ -41,7 +42,6 @@ import {
   type CollectedFile,
   type EnvWriter,
   type MultiselectOptions,
-  EnvSectionSchema,
 } from '../src/index.ts';
 
 const posix = process.platform !== 'win32';
@@ -92,11 +92,18 @@ describe('finding ${VAR} references', () => {
   it("finds them in a plugin's MCP files in the skills folder, in either scope (T96, review 16 BUG-01)", () => {
     const scan = scanEnvReferences(
       [
+        // The manifest may declare servers as a list mixing maps and file names (review 17 BUG-01).
         collectedJson('skills/gh/.claude-plugin/plugin.json', {
           name: 'gh',
-          mcpServers: { inline: { command: 'x', env: { INLINE_KEY: '${INLINE_KEY}' } } },
+          mcpServers: [
+            './servers.json',
+            { inline: { command: 'x', env: { INLINE_KEY: '${INLINE_KEY}' } } },
+          ],
         }),
-        // The wrapper left out: the whole file is the servers map.
+        // A file the manifest names is not scanned: only the manifest and `.mcp.json` are known.
+        collectedJson('skills/gh/servers.json', { named: { env: { NAMED_KEY: '${NAMED_KEY}' } } }),
+        // The wrapper left out: the whole file is the servers map, as the plugin review reads it
+        // (review 17 UX-01).
         collectedJson('skills/gh/.mcp.json', { gh: { env: { GITHUB_TOKEN: '${GITHUB_TOKEN}' } } }),
         collectedJson('.claude/skills/p/.mcp.json', {
           mcpServers: { p: { env: { P_KEY: '${P_KEY}' } } },
@@ -106,10 +113,17 @@ describe('finding ${VAR} references', () => {
       CLAUDE_ENV_REFERENCES,
     );
     expect(scan.variables).toEqual([
-      { name: 'GITHUB_TOKEN', usedBy: ['skills/gh/.mcp.json'] },
+      { name: 'GITHUB_TOKEN', usedBy: ['MCP server gh (skills/gh/.mcp.json)'] },
       { name: 'INLINE_KEY', usedBy: ['MCP server inline (skills/gh/.claude-plugin/plugin.json)'] },
       { name: 'P_KEY', usedBy: ['MCP server p (.claude/skills/p/.mcp.json)'] },
     ]);
+  });
+
+  it('finds none for an agent that names no files (review 17 QA-13)', () => {
+    expect(scanEnvReferences([mcpJson], undefined)).toEqual({
+      variables: [],
+      setBySettings: new Set(),
+    });
   });
 
   it('ignores files that are not JSON', () => {
@@ -157,10 +171,14 @@ describe('saving values on push (opt-in)', () => {
     expect(section).toBeNull();
   });
 
-  it('the env section round-trips and is never written by restore', () => {
+  it('the env section round-trips, and a bad variable name does not parse', () => {
     const entry = envSectionFile({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
     expect(parseEnvSection(entry.content)).toEqual({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
     expect(parseEnvSection(new TextEncoder().encode('{"variables":{"bad name":"x"}}'))).toBeNull();
+  });
+
+  it('the env section is never written by restore, in either scope', () => {
+    const entry = envSectionFile({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
     expect(globalDestination(entry.path, new Set())).toEqual({ kind: 'metadata' });
     expect(projectDestination(entry.path)).toEqual({ kind: 'metadata' });
   });
@@ -509,55 +527,62 @@ describe('restoring values on pull', () => {
     expect(written).toEqual([section.variables]);
   });
 
-  it('--yes alone never adds a variable that sends traffic elsewhere (T56)', async () => {
-    const { reporter, lines } = recordingReporter({ levels: false });
+  describe('variables that send traffic elsewhere (T56)', () => {
     const redirects = {
       variables: { API_KEY: 'key-1', HTTPS_PROXY: 'http://p', ANTHROPIC_BASE_URL: 'https://x' },
     };
-    const first = recordingWriter();
-    const result = await restoreEnvValues({
-      isRedirectVariable,
-      section: redirects,
-      env: {},
-      writer: first.writer,
-      prompter: neverAsks,
-      reporter,
-      assumeYes: true,
-    });
-    expect(first.written).toEqual([{ API_KEY: 'key-1' }]);
-    expect(result.declined).toBe(true);
-    expect(lines.join('\n')).toContain('Not added: ANTHROPIC_BASE_URL, HTTPS_PROXY.');
-    expect(lines.join('\n')).toContain('--allow-commands');
-    expect(lines.join('\n')).not.toContain('http://p');
 
-    const { asked, prompter } = defaultAnswers();
-    const second = recordingWriter();
-    await restoreEnvValues({
-      isRedirectVariable,
-      section: redirects,
-      env: {},
-      writer: second.writer,
-      prompter,
-      reporter,
+    it('--yes alone adds the others but never these, and says how to accept them', async () => {
+      const { reporter, lines } = recordingReporter({ levels: false });
+      const { writer, written } = recordingWriter();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section: redirects,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.declined).toBe(true);
+      expect(lines.join('\n')).toContain('Not added: ANTHROPIC_BASE_URL, HTTPS_PROXY.');
+      expect(lines.join('\n')).toContain('--allow-commands');
+      expect(lines.join('\n')).not.toContain('http://p');
     });
-    expect(asked[1]).toEqual([
-      'ANTHROPIC_BASE_URL, HTTPS_PROXY send programs’ requests elsewhere. Add them too?',
-      false,
-    ]);
-    expect(second.written).toEqual([{ API_KEY: 'key-1' }]);
 
-    const third = recordingWriter();
-    await restoreEnvValues({
-      isRedirectVariable,
-      section: redirects,
-      env: {},
-      writer: third.writer,
-      prompter: neverAsks,
-      reporter,
-      assumeYes: true,
-      allowCommands: true,
+    it('asks about them on their own, no by default', async () => {
+      const { asked, prompter } = defaultAnswers();
+      const { writer, written } = recordingWriter();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section: redirects,
+        env: {},
+        writer,
+        prompter,
+        reporter: recordingReporter({ levels: false }).reporter,
+      });
+      expect(asked[1]).toEqual([
+        'ANTHROPIC_BASE_URL, HTTPS_PROXY send programs’ requests elsewhere. Add them too?',
+        false,
+      ]);
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
     });
-    expect(third.written).toEqual([redirects.variables]);
+
+    it('--allow-commands adds them too', async () => {
+      const { writer, written } = recordingWriter();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section: redirects,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: recordingReporter({ levels: false }).reporter,
+        assumeYes: true,
+        allowCommands: true,
+      });
+      expect(written).toEqual([redirects.variables]);
+    });
   });
 
   describe('variables that make programs run code (T44)', () => {
@@ -639,7 +664,7 @@ describe('agentnomad env', () => {
     envReferences: CLAUDE_ENV_REFERENCES,
   });
 
-  async function run(env: Record<string, string>, cwd = '/work/app') {
+  async function run(env: Record<string, string>, cwd = '/work/app', installed = true) {
     const { reporter, lines } = recordingReporter({ levels: false });
     await createEnvCommand({
       registry: () => ({
@@ -651,6 +676,7 @@ describe('agentnomad env', () => {
               }),
             ],
             [mcpJson],
+            installed,
           ),
         ],
         get: () => undefined,
@@ -684,6 +710,13 @@ describe('agentnomad env', () => {
         '  ✓ GITHUB_TOKEN  set here         MCP server github (~/.claude.json), Claude Code global',
       ]);
     }
+  });
+
+  it('leaves out an agent that is not installed here (review 17 DEAD-03)', async () => {
+    const lines = await run({}, '/work/app', false);
+    expect(lines).toEqual([
+      'Your setups here use no environment variables (no ${VAR} in MCP servers or settings).',
+    ]);
   });
 
   it('says so when everything is set', async () => {

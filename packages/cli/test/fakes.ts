@@ -213,6 +213,16 @@ export function memorySecretStore(
   };
 }
 
+/** A secret store with the data key of a logged-in session (review 17 DUP-04). */
+export const loggedInStore = (key = dataKey): SecretStore => memorySecretStore({ loggedIn: key });
+
+/** What the plan steps of push and pull get from the handler: the session and its keys. */
+export const sessionKeys = (secrets: SecretStore = loggedInStore()) => ({
+  secrets,
+  crypto,
+  dataKey,
+});
+
 /** A memory SecretStore and the map behind it. */
 export function memorySecrets(backend: SecretStore['backend'] = 'keychain') {
   const saved = new Map<SecretName, string>();
@@ -273,11 +283,13 @@ export const missingAgent: DetectedAgent = { installed: false, baseDir: null, ve
 /**
  * Answers questions from a script, in order, and throws when it runs out. A validator's
  * complaint is recorded in `rejected` and the next answer used, like the real prompter
- * asking again; an Error answer is thrown, like a question the user cancels.
+ * asking again; an Error answer is thrown, like a question the user cancels. `offered` records
+ * the choices of each select and multiselect, in order (review 17 QA-02).
  */
 export function scriptedPrompter(answers: unknown[]) {
   const asked: string[] = [];
   const rejected: string[] = [];
+  const offered: (readonly Choice<string>[])[] = [];
   const next = (message: string, validate?: (value: string) => string | undefined): unknown => {
     for (;;) {
       asked.push(message);
@@ -310,8 +322,12 @@ export function scriptedPrompter(answers: unknown[]) {
     return answer;
   };
   const prompter: Prompter = {
-    select: (message, choices) => Promise.resolve(choice(message, choices, next(message))),
+    select: (message, choices) => {
+      offered.push(choices);
+      return Promise.resolve(choice(message, choices, next(message)));
+    },
     multiselect: (message, choices) => {
+      offered.push(choices);
       const answer = next(message);
       if (!Array.isArray(answer)) throw wrong(message, 'a list', answer);
       return Promise.resolve(answer.map((value: unknown) => choice(message, choices, value)));
@@ -324,7 +340,7 @@ export function scriptedPrompter(answers: unknown[]) {
       return Promise.resolve(answer);
     },
   };
-  return { prompter, asked, rejected, left: answers };
+  return { prompter, asked, rejected, offered, left: answers };
 }
 
 /**

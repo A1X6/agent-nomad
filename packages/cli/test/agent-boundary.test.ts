@@ -21,12 +21,11 @@ import { AnswerNeededError, createNoTerminalPrompter } from '../src/ui/no-termin
 import type { Prompter } from '../src/ui/prompter.ts';
 import {
   crypto,
-  dataKey,
   exists,
   fakeBundleServer,
   fakeEnvWriter,
   localStateIn,
-  memorySecretStore,
+  loggedInStore,
   readText,
   recordingReporter,
   scriptedPrompter,
@@ -196,7 +195,7 @@ function depsFor(
     prompter,
     reporter,
     registry: () => createAgentRegistry([exampleAdapter(pc.home, seen)]),
-    secrets: () => Promise.resolve(memorySecretStore({ loggedIn: dataKey })),
+    secrets: () => Promise.resolve(loggedInStore()),
     api: () => server,
     crypto: () => Promise.resolve(crypto),
     codec: createGzipBundleCodec(),

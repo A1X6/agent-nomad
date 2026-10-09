@@ -10,7 +10,12 @@ import {
   REAL_VALIDATE_REPORT,
 } from './claude-code-plugin-fixtures.ts';
 import { collected, fakeExecutables, useTempDir } from './fakes.ts';
-import { createPluginValidator, pluginFolders, type ProgramCli } from '../src/index.ts';
+import {
+  createPluginValidator,
+  pluginFolders,
+  type ProgramCli,
+  type StartProgram,
+} from '../src/index.ts';
 
 describe('running claude plugin validate on a pulled plugin (T96)', () => {
   let tempDir: string;
@@ -124,6 +129,19 @@ describe('running claude plugin validate on a pulled plugin (T96)', () => {
     if (dotClaude === undefined) throw new Error('no plugin');
     expect(await validate(dotClaude)).toEqual(PROBE_MOD_VALIDATION);
     expect(claude.calls[0]?.args[3]).toBe(join(claude.calls[0]?.cwd ?? '', 'plugin'));
+  });
+
+  it('without an injected cli, runs claude plugin validate --json with the 60 s limit (review 17 QA-05)', async () => {
+    const started: { args: readonly string[]; timeoutMs: number | undefined }[] = [];
+    const start: StartProgram = (_path, args, options) => {
+      started.push({ args, timeoutMs: options.timeoutMs });
+      return Promise.resolve({ exitCode: 0, stdout: REAL_VALIDATE_REPORT, stderr: '' });
+    };
+    const validate = createPluginValidator({ system: system(['/usr/bin/claude']), start, tempDir });
+    expect(await validate(plugin)).toEqual(PROBE_MOD_VALIDATION);
+    expect(started).toHaveLength(1);
+    expect(started[0]?.args.slice(0, 3)).toEqual(['plugin', 'validate', '--json']);
+    expect(started[0]?.timeoutMs).toBe(60_000);
   });
 
   it('never throws: a folder it cannot write is reported as unavailable', async () => {

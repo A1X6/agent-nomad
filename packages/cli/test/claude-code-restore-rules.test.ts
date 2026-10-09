@@ -122,8 +122,35 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['.agentnomad/x.sh', 'unknown agentnomad entry'],
     ['.agentnomad/auto-memory/run.sh', 'auto memory holds only Markdown files'],
     ['.agentnomad/auto-memory/.bashrc', 'auto memory holds only Markdown files'],
+    ['../outside.md', 'not a safe path'],
   ])('project: %s', (path, reason) => {
     expect(projectDestination(path)).toEqual({ kind: 'refused', reason });
+  });
+});
+
+describe('restore rules: what is let through, and where (review 17 QA-06)', () => {
+  it.each([
+    ['settings.json', { kind: 'target', path: 'settings.json' }],
+    ['rules/style.md', { kind: 'target', path: 'rules/style.md' }],
+    [
+      'agent-memory/reviewer/MEMORY.md',
+      { kind: 'target', path: 'agent-memory/reviewer/MEMORY.md' },
+    ],
+    ['.agentnomad/claude.json', { kind: 'claude-json' }],
+    ['.agentnomad/plugins.json', { kind: 'metadata' }],
+  ])('global: %s', (path, destination) => {
+    expect(globalDestination(path, new Set())).toEqual(destination);
+  });
+
+  it.each([
+    ['.claude/settings.local.json', { kind: 'target', path: '.claude/settings.local.json' }],
+    ['CLAUDE.md', { kind: 'target', path: 'CLAUDE.md' }],
+    [
+      '.claude/agent-memory/reviewer/MEMORY.md',
+      { kind: 'target', path: '.claude/agent-memory/reviewer/MEMORY.md' },
+    ],
+  ])('project: %s', (path, destination) => {
+    expect(projectDestination(path)).toEqual(destination);
   });
 
   // A forged bundle cannot replace a launcher or Claude Code itself in its folder (T55, SEC-03).

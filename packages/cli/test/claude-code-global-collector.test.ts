@@ -113,13 +113,24 @@ describe('global collector: what is taken', () => {
     }
   });
 
-  it('never takes skills/synced/, even through a link or a hook', async () => {
+  it('never takes skills/synced/, even when a hook names a file there', async () => {
     await writeTestFile(join(base, 'skills', 'synced', 'a', 'SKILL.md'));
     await writeTestFile(join(base, 'skills', 'synced', 'a', 'helper.sh'));
     await writeSettings(stopHook(`bash ${join(base, 'skills', 'synced', 'a', 'helper.sh')}`));
     const files = paths(await collect(true));
     expect(files.some((path) => path.startsWith('skills/synced'))).toBe(false);
   });
+
+  it.runIf(posix)(
+    "a skill folder linked to a synced skill is the user's own skill, under its own name (review 17 READ-12)",
+    async () => {
+      await writeTestFile(join(base, 'skills', 'synced', 'a', 'SKILL.md'), 'synced');
+      await linkFolder(join(base, 'skills', 'synced', 'a'), join(base, 'skills', 'promoted'));
+      const files = await collect();
+      expect(paths(files)).toEqual(['skills/promoted/SKILL.md']);
+      expect(text(files, 'skills/promoted/SKILL.md')).toBe('synced');
+    },
+  );
 
   it('takes a plugin in skills/, but never what Claude Code generates in it (T96)', async () => {
     await writePluginFiles(base, probeMod());
@@ -210,8 +221,11 @@ describe('global collector: ~/.claude.json', () => {
     expect(JSON.parse(text(files, '.agentnomad/claude.json'))).toEqual({ diffTool: 'auto' });
   });
 
-  it('stops with a clear message when the file is half-written', async () => {
-    await writeTestFile(join(home, '.claude.json'), '{"mcpServers": {');
+  it.each([
+    ['half-written', '{"mcpServers": {'],
+    ['JSON but not an object (review 17 QA-11)', '[]'],
+  ])('stops with a clear message when the file is %s', async (_case, content) => {
+    await writeTestFile(join(home, '.claude.json'), content);
     await expect(collect()).rejects.toBeInstanceOf(ClaudeJsonError);
   });
 });
@@ -381,6 +395,14 @@ describe('global collector: programs the status line and hooks need', () => {
   it('records a program that is not from npm without install details', async () => {
     await writeSettings(stopHook('terminal-notifier -message done'));
     const files = await collectWith((command) => Promise.resolve({ command, npm: null }));
+    expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
+      programs: [{ command: 'terminal-notifier', npm: null }],
+    });
+  });
+
+  it('records a program the locator does not know as a command with no npm package (review 17 QA-11)', async () => {
+    await writeSettings(stopHook('terminal-notifier -message done'));
+    const files = await collectWith(() => Promise.resolve(null));
     expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
       programs: [{ command: 'terminal-notifier', npm: null }],
     });

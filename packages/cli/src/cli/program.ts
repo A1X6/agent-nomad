@@ -83,7 +83,10 @@ function scopeOptions() {
   ] as const;
 }
 
-const yesOption = () => new Option('-y, --yes', 'accept defaults instead of asking');
+/** `-y, --yes`: the commands that can take every default instead of asking. */
+function yesOption() {
+  return new Option('-y, --yes', 'accept defaults instead of asking');
+}
 
 /** `--username`, `--password-stdin`: register, login and account delete from a script. */
 function credentialOptions() {

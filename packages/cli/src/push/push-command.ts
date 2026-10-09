@@ -32,7 +32,7 @@ import type { ApiClient } from '../api/api-client.ts';
 import { ApiError } from '../api/api-errors.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PushOptions } from '../cli/commands.ts';
-import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
+import { projectFolderRefusalFor } from '../cli/project-folder.ts';
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { scanEnvReferences } from '../env/env-references.ts';
 import { chooseEnvValues, envSectionFile } from '../env/env-section.ts';
@@ -160,15 +160,11 @@ export function createPushPlanner(deps: PushDeps) {
     const { adapter } = agent;
     // The home folder and the agent's own folder are never a project: their `.claude/` is the
     // global setup (BUG-05).
-    const refusal = projectFolderRefusal(deps.cwd, {
-      homedir: deps.homedir,
-      baseDir: agent.baseDir,
-      agentName: adapter.displayName,
-      platform: deps.platform,
-    });
-    if (options.project !== undefined && refusal !== null) {
-      throw new ProjectFolderError(deps.cwd, refusal);
-    }
+    const refusal = projectFolderRefusalFor(
+      deps,
+      { baseDir: agent.baseDir, displayName: adapter.displayName },
+      options.project !== undefined,
+    );
     if (options.global && options.project !== undefined) return 'both';
     if (options.global) return 'global';
     if (options.project !== undefined) return 'project';

@@ -105,6 +105,13 @@ describe('help and version', () => {
     expect(out).toContain(`over ${formatSize(MAX_BUNDLE_BYTES)}`);
   });
 
+  it('names every exit-1 cause and what --allow-commands accepts, as README does (review 17 QA-15)', async () => {
+    const { out } = await run(['--help']);
+    expect(out).toContain('or a file pull');
+    expect(out).toContain('found different but never asked about');
+    expect(out).toMatch(/MCP servers, plugins\s+or mods and installs/);
+  });
+
   it("describes --memory without one agent's words (ARCH-02)", async () => {
     const { out } = await run(['push', '--help']);
     expect(out).toMatch(/--memory +include the agent's memory/);

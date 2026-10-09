@@ -18,9 +18,11 @@ import {
   dataKey,
   fakeBundleServer,
   localStateIn,
+  loggedInStore,
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
+  sessionKeys,
   storedOn,
   useDataKey,
   useTempDir,
@@ -41,6 +43,7 @@ import {
   SetupsNotDoneError,
   type AgentAdapter,
   type CollectedFile,
+  type OptionalPart,
   type Prompter,
   type PushApplyDeps,
   type PushDeps,
@@ -52,7 +55,6 @@ const HOME = posix ? '/home/ahmed' : 'C:\\Users\\ahmed';
 const PROJECT = posix ? '/home/ahmed/work/my-app' : 'C:\\Users\\ahmed\\work\\my-app';
 
 useDataKey();
-const loggedIn = () => memorySecretStore({ loggedIn: dataKey });
 
 let dir: string;
 useTempDir('agentnomad-push-', (temp) => (dir = temp));
@@ -103,6 +105,8 @@ function setup(
   answers: unknown[],
   options: {
     adapter?: AgentAdapter;
+    /** Every registered adapter, when a test needs more than one. */
+    adapters?: AgentAdapter[];
     server?: ReturnType<typeof fakeBundleServer>;
     secrets?: SecretStore;
     cwd?: string;
@@ -120,8 +124,9 @@ function setup(
   // What apply gets: everything but the prompter.
   const applyDeps: PushApplyDeps = {
     reporter,
-    registry: () => createAgentRegistry([options.adapter ?? collectingAdapter()]),
-    secrets: () => Promise.resolve(options.secrets ?? loggedIn()),
+    registry: () =>
+      createAgentRegistry(options.adapters ?? [options.adapter ?? collectingAdapter()]),
+    secrets: () => Promise.resolve(options.secrets ?? loggedInStore()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
     codec: options.codec ?? createGzipBundleCodec(),
@@ -298,7 +303,7 @@ describe('agentnomad push', () => {
       expect(t.lines).toContain('info: No claude.ai skills of your own were found on this PC.');
     });
 
-    it('asks about them only when there are some; no by default', async () => {
+    it('asks about them when there are some; no by default', async () => {
       const some = withAccountSkills(['my-skill']);
       const t = setup([false], { adapter: some.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
@@ -306,7 +311,9 @@ describe('agentnomad push', () => {
         'Also save a copy of your 1 claude.ai skill (my-skill)? Your claude.ai account already syncs them; the copy is for PCs without that account.',
       ]);
       expect(some.seen).toEqual([false]);
+    });
 
+    it('asks nothing about them when there are none', async () => {
       const none = withAccountSkills([]);
       const quiet = setup([], { adapter: none.adapter, pc: 'no-account-skills' });
       await quiet.command.push({ global: true, yes: false, memory: false });
@@ -554,7 +561,7 @@ describe('agentnomad push', () => {
   it('the plan step asks every question and uploads nothing; apply uploads and asks nothing (T59)', async () => {
     const server = await savedFromLaptop();
     const desktop = setup(['global', false, true], { server, pc: 'desktop' });
-    const keys = { secrets: loggedIn(), crypto, dataKey };
+    const keys = sessionKeys();
 
     const plan = await createPushPlanner(desktop.deps).plan(noFlags, keys);
     expect(desktop.script.asked).toEqual([
@@ -578,7 +585,7 @@ describe('agentnomad push', () => {
   it('apply never asks: a copy saved from another PC after the plan is not done (T59)', async () => {
     const server = fakeBundleServer();
     const t = setup(['global', false], { server });
-    const keys = { secrets: loggedIn(), crypto, dataKey };
+    const keys = sessionKeys();
     const plan = await createPushPlanner(t.deps).plan(noFlags, keys);
     // Another PC saves while this push is between its plan and its upload.
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
@@ -672,5 +679,118 @@ describe('agentnomad push', () => {
     await expect(setup([], { secrets: empty }).command.push(noFlags)).rejects.toThrow(
       /^You are not logged in on this PC\. Run `agentnomad login` first\.$/,
     );
+  });
+});
+
+describe("push's choosers and notices (review 17 QA-03)", () => {
+  /** The collecting adapter, with its detector answering `installed`. */
+  const detected = (installed: boolean): AgentAdapter => {
+    const adapter = collectingAdapter();
+    return {
+      ...adapter,
+      detector: { detect: () => Promise.resolve({ installed, baseDir: null, version: null }) },
+    };
+  };
+
+  it.each([
+    [
+      'an unknown id',
+      collectingAdapter(),
+      ['nope'],
+      'Unknown agent "nope". Run `agentnomad agents` to see the supported ones.',
+    ],
+    [
+      'an agent not installed here',
+      detected(false),
+      ['claude-code'],
+      'Claude Code is not installed on this PC.',
+    ],
+  ])('stops on --agent naming %s', async (_case, adapter, agents, message) => {
+    const t = setup([], { adapter });
+    await expect(
+      t.command.push({ global: true, yes: true, memory: false, agents }),
+    ).rejects.toThrow(message);
+  });
+
+  it('says so when no supported agent is installed, and pushes nothing', async () => {
+    const t = setup([], { adapter: detected(false) });
+    await t.command.push({ global: true, yes: true, memory: false });
+    expect(t.lines).toContain(
+      'info: No supported agent is installed on this PC, so there is nothing to push.',
+    );
+    expect(t.server.stored.size).toBe(0);
+  });
+
+  it('asks which agents when more than one is installed, and pushes the chosen ones', async () => {
+    const other: AgentAdapter = {
+      ...collectingAdapter(),
+      id: 'other-cli',
+      displayName: 'Other CLI',
+    };
+    const t = setup([['other-cli'], 'global', false], { adapters: [collectingAdapter(), other] });
+    await t.command.push({ global: false, yes: false, memory: false });
+    expect(t.script.asked[0]).toBe('Which agents?');
+    expect([...t.server.stored.keys()].map((key) => key.split('/')[0])).toEqual(['other-cli']);
+  });
+
+  it('says so when a setup has nothing to save, and saves nothing', async () => {
+    const t = setup([], { adapter: collectingAdapter({ global: [] }) });
+    await t.command.push({ global: true, yes: true, memory: false });
+    expect(t.lines).toContain('info: Nothing to save for the Claude Code global setup.');
+    expect(t.server.stored.size).toBe(0);
+  });
+
+  it('names what a collector left out, and why', async () => {
+    const adapter = collectingAdapter();
+    const leaving: AgentAdapter = {
+      ...adapter,
+      collector: {
+        collect: (target, options) => {
+          options.onSkipped?.('skills/big.bin', 'it is larger than 10 MB');
+          return adapter.collector.collect(target, options);
+        },
+      },
+    };
+    const t = setup([], { adapter: leaving });
+    await t.command.push({ global: true, yes: true, memory: false });
+    expect(t.lines).toContain(
+      'warn: Claude Code global setup: left out\n  - skills/big.bin: it is larger than 10 MB',
+    );
+  });
+
+  it('rejects a project name the schema refuses, and takes the folder name for an empty one', async () => {
+    // Over 100 characters: the schema refuses it, and the prompter asks again.
+    const t = setup(['project', 'x'.repeat(101), ''], { pc: 'naming' });
+    await t.command.push({ global: false, yes: false, memory: false });
+    expect(t.script.rejected).toHaveLength(1);
+    // Saved under the folder's name: `received` finds it by that name or throws.
+    await received(t.server, { kind: 'project', name: 'my-app' });
+    expect(t.server.stored.size).toBe(1);
+  });
+
+  it('warns when an optional part cannot be read, and says when a flag finds none', async () => {
+    const part: OptionalPart = {
+      id: 'account-skills',
+      scope: 'global',
+      flagHelp: {
+        push: { include: 'save them', leaveOut: 'leave them out' },
+        pull: { include: 'add them', leaveOut: 'leave them out' },
+      },
+      available: () => Promise.resolve({ names: [], problem: 'the manifest is unreadable' }),
+      question: () => 'Save them?',
+      unreadable: (problem) => `Your claude.ai skills were not read: ${problem}`,
+      noneFound: 'No claude.ai skills of your own were found on this PC.',
+    };
+    const t = setup([], { adapter: { ...collectingAdapter(), optionalParts: [part] } });
+    await t.command.push({
+      global: true,
+      yes: true,
+      memory: false,
+      parts: new Map([['account-skills', true]]),
+    });
+    expect(t.lines).toContain(
+      'warn: Your claude.ai skills were not read: the manifest is unreadable',
+    );
+    expect(t.lines).toContain('info: No claude.ai skills of your own were found on this PC.');
   });
 });

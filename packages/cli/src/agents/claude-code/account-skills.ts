@@ -4,8 +4,9 @@ import type { PlatformPath } from 'node:path';
 import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
-import { RESERVED_DIR, type CollectedFile } from '../adapter.ts';
+import type { CollectedFile } from '../adapter.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
+import { ACCOUNT_SKILLS_PREFIX } from './global-paths.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 import { pluginFolders } from './skills-dir-plugins.ts';
 
@@ -17,9 +18,6 @@ import { pluginFolders } from './skills-dir-plugins.ts';
  * local skills on a PC that does not get them from its own claude.ai sync.
  */
 const SYNCED_SKILLS_DIR = 'skills/synced';
-/** The id of the optional part for saved claude.ai skills (T42, T61); also the flag name. */
-export const ACCOUNT_SKILLS_PART = 'account-skills';
-export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
 
 /**
  * Claude Code's `manifest.json` for one account's synced skills (an internal file, so only
@@ -31,13 +29,14 @@ export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
 const ManifestSchema = z.looseObject({ skills: z.array(z.unknown()) });
 const EntrySchema = z.looseObject({ name: z.string(), creatorType: z.string().optional() });
 
-/** A skill folder name that is safe everywhere and not one Claude Code reserves. */
+/**
+ * A skill folder name that is safe everywhere and not one Claude Code reserves (the regex
+ * admits no `:`, so `anthropic-skills:<name>` ids fail it by themselves, review 17 DEAD-01).
+ */
 const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const RESERVED_NAMES = new Set(['synced', 'anthropic-skills']);
 const isUsableSkillName = (name: string) =>
-  SKILL_NAME.test(name) &&
-  !RESERVED_NAMES.has(name.toLowerCase()) &&
-  !name.toLowerCase().startsWith('anthropic-skills:');
+  SKILL_NAME.test(name) && !RESERVED_NAMES.has(name.toLowerCase());
 
 export interface SyncedSkills {
   /** The user's own skills, with their folder on this PC. */

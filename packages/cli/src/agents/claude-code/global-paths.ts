@@ -6,7 +6,10 @@ import { RESERVED_DIR } from '../adapter.ts';
 import { inHomeFolder, isSensitiveHomePath, underFolder } from '../shared/bundle-paths.ts';
 import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 
-/** The data file's helper, for the collectors too: the data file is read through its views (review 16 ARCH-02). */
+/**
+ * The data file's helper, for the collectors too: the data file is read through its views
+ * (review 16 ARCH-02).
+ */
 export { settingsFilesIn };
 
 /** Single files in the base folder. */
@@ -83,6 +86,51 @@ export function homePathProblem(relative: string): string | null {
 
 /** Marketplaces and plugins to reinstall on pull (T29). */
 export const PLUGINS_BUNDLE_PATH = `${RESERVED_DIR}/plugins.json`;
+
+/** The id of the optional part for saved claude.ai skills (T42, T61); also the flag name. */
+export const ACCOUNT_SKILLS_PART = 'account-skills';
+/**
+ * Where push saves the user's own claude.ai skills (T42); a reserved path, so the pure rules
+ * read it from here and not from the module that reads the disk (review 17 ARCH-02).
+ */
+export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
+
+/*
+ * Plugins in the skills folder (T96): a skill folder with a manifest loads as a plugin. The
+ * path rules live here, with the other path rules, so the plugin reader and the env scan share
+ * them without importing each other (review 17 ARCH-01).
+ */
+
+/** The manifest that makes a skill folder a plugin, relative to the folder. */
+export const PLUGIN_MANIFEST_PATH = '.claude-plugin/plugin.json';
+/** Where a plugin's MCP servers live unless the manifest names another file. */
+export const PLUGIN_MCP_PATH = '.mcp.json';
+
+/** A skill folder's bundle path prefix (`skills/` or `.claude/skills/`) and the plugin's name. */
+const PLUGIN_FOLDER = /^((?:\.claude\/)?skills\/)([^/]+)\//;
+
+/** The plugin folder a bundle path is in (`skills/<name>/`) and its name; `null` outside one. */
+export function pluginFolderOf(path: string): { folder: string; name: string } | null {
+  const match = PLUGIN_FOLDER.exec(path);
+  const [, prefix, name] = match ?? [];
+  // `skills/synced/` is managed by claude.ai; never collected, and never a plugin of the setup.
+  if (prefix === undefined || name === undefined || name === 'synced') return null;
+  return { folder: `${prefix}${name}/`, name };
+}
+
+/**
+ * What a plugin file holds for the env scan (review 16 BUG-01, review 17 BUG-01): its
+ * `.mcp.json` is the server map, with or without the `mcpServers` wrapper; its manifest
+ * declares servers under `mcpServers` as a map, or a list mixing maps and file names. A file
+ * the manifest names is only known once the manifest is read, so it is not scanned.
+ */
+export function pluginMcpFileKind(path: string): 'map' | 'declares' | undefined {
+  const found = pluginFolderOf(path);
+  if (found === null) return undefined;
+  const inside = path.slice(found.folder.length);
+  if (inside === PLUGIN_MCP_PATH) return 'map';
+  return inside === PLUGIN_MANIFEST_PATH ? 'declares' : undefined;
+}
 
 /** Written by Claude Code inside a plugin's folder in `skills/` (T95, T96); never synced. */
 export const PLUGIN_GENERATED_PATHS: readonly string[] = DATA.plugins.generatedInPlugin;

@@ -54,27 +54,37 @@ export function scanEnvReferences(
   const setBySettings = new Set<string>();
   if (references === undefined) return { variables: [], setBySettings };
   const { mcp, settings, ownVariables } = references;
-  const isMcp = (path: string) => mcp.has(path) || (references.isMcpFile?.(path) ?? false);
+  /** `declares` for the fixed MCP files too: their servers sit under `mcpServers`. */
+  const mcpKind = (path: string) => (mcp.has(path) ? 'declares' : references.mcpFileKind?.(path));
   const use = (name: string, where: string) => {
     const label = scopeLabel ? `${where}, ${scopeLabel}` : where;
     usage.set(name, (usage.get(name) ?? new Set()).add(label));
   };
 
   for (const file of files) {
-    if (!isMcp(file.path) && !settings.has(file.path)) continue;
+    const kind = mcpKind(file.path);
+    if (kind === undefined && !settings.has(file.path)) continue;
     const json = valueOrNull(parseJsonWith(JsonObjectSchema, file.content));
     if (json === null) continue;
     const label = references.label?.(file.path) ?? file.path;
 
-    const servers = JsonObjectSchema.safeParse(json['mcpServers']);
-    const rest = Object.fromEntries(Object.entries(json).filter(([key]) => key !== 'mcpServers'));
-    if (servers.success) {
+    // The servers: the whole file when it is the map and the wrapper is left out (as the plugin
+    // review reads it, review 17 UX-01); else what `mcpServers` declares, a map or a list mixing
+    // maps and file names (review 17 BUG-01). The rest of the file is scanned as text.
+    const wholeFile = kind === 'map' && !('mcpServers' in json);
+    const declared = wholeFile ? json : json['mcpServers'];
+    for (const item of Array.isArray(declared) ? declared : [declared]) {
+      const servers = JsonObjectSchema.safeParse(item);
+      if (!servers.success) continue;
       for (const [server, config] of Object.entries(servers.data)) {
         for (const name of referencesIn(config, ownVariables)) {
           use(name, `MCP server ${server} (${label})`);
         }
       }
     }
+    const rest = wholeFile
+      ? {}
+      : Object.fromEntries(Object.entries(json).filter(([key]) => key !== 'mcpServers'));
     if (settings.has(file.path)) {
       const env = JsonObjectSchema.safeParse(json['env']);
       if (env.success) for (const name of Object.keys(env.data)) setBySettings.add(name);

@@ -16,6 +16,7 @@ import {
   type CollectedFile,
   type ConflictChoice,
   type ConflictResolver,
+  type ConflictToAsk,
   type DetectedAgent,
   type ScopeTarget,
 } from '../agents/adapter.ts';
@@ -23,7 +24,7 @@ import { showNotices } from '../agents/notices.ts';
 import type { ApiClient } from '../api/api-client.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
-import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
+import { ProjectFolderError, projectFolderRefusalFor } from '../cli/project-folder.ts';
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { planEnvRestore, writeEnvValues } from '../env/env-restore.ts';
 import { ENV_BUNDLE_PATH, parseEnvSection, type EnvSection } from '../env/env-section.ts';
@@ -76,6 +77,8 @@ interface Prepared {
   readonly current: readonly CollectedFile[];
   /** The user declined commands it holds, so they were left out. */
   readonly declined: boolean;
+  /** Reviewed folders (a plugin's, T96) the user accepted: each is written or left as a whole. */
+  readonly acceptedFolders: readonly string[];
 }
 
 /** One setup the plan will restore, with every answer the restore needs (T59). */
@@ -133,7 +136,11 @@ export function createPullPlanner(deps: PullDeps) {
     if (options.agents) {
       return options.agents.map((id) => {
         const match = withSetups.find((entry) => entry.adapter.id === id);
-        if (!match) throw new Error(`No saved setup for agent "${id}".`);
+        if (!match) {
+          throw new Error(
+            `No saved setup for agent "${id}". Run \`agentnomad list\` to see what is saved, or \`agentnomad agents\` for the supported ids.`,
+          );
+        }
         return chosenAgent(match);
       });
     }
@@ -161,15 +168,11 @@ export function createPullPlanner(deps: PullDeps) {
     const { adapter } = agent;
     // A project is never restored into the home folder or the agent's own folder: its
     // `.claude/` there is the global setup (BUG-05).
-    const refusal = projectFolderRefusal(deps.cwd, {
-      homedir: deps.homedir,
-      baseDir: agent.baseDir,
-      agentName: adapter.displayName,
-      platform: deps.platform,
-    });
-    if (options.project !== undefined && refusal !== null) {
-      throw new ProjectFolderError(deps.cwd, refusal);
-    }
+    const refusal = projectFolderRefusalFor(
+      deps,
+      { baseDir: agent.baseDir, displayName: adapter.displayName },
+      options.project !== undefined,
+    );
     const mine = saved.filter((setup) => setup.agent === adapter.id);
     const global = mine.find((setup) => setup.projectName === null);
     const projects = mine.filter((setup) => setup.projectName !== null);
@@ -332,6 +335,9 @@ export function createPullPlanner(deps: PullDeps) {
     const current = await adapter.collector.collect(target, { includeMemory: true });
     files = preferLocalEquivalents(bundle.files, files, current, resolver);
     const review = await adapter.restorer.reviewRunnable(files, current);
+    const reviewedFolders = [
+      ...new Set(review.map((entry) => entry.file).filter((file) => file.endsWith('/'))),
+    ];
     let declined = false;
     if (review.length > 0) {
       reporter.info(
@@ -377,17 +383,47 @@ export function createPullPlanner(deps: PullDeps) {
       }
     }
 
-    return { adapter, setup, bundle, revision, target, files, current, declined };
+    return {
+      adapter,
+      setup,
+      bundle,
+      revision,
+      target,
+      files,
+      current,
+      declined,
+      acceptedFolders: declined ? [] : reviewedFolders,
+    };
   }
 
-  /** The answer for each file that is here and differs, as the agent's restorer lists them. */
+  /**
+   * The answer for each file that is here and differs, as the agent's restorer lists them. The
+   * files of an accepted plugin folder are asked about once, as the folder: a yes to what it
+   * runs is never followed by half of it being written (T96, review 17 BUG-02).
+   */
   async function answerConflicts(
-    { adapter, files, current }: Prepared,
+    { adapter, files, current, acceptedFolders }: Prepared,
     ask: ConflictResolver,
   ): Promise<Map<string, ConflictChoice>> {
     const answers = new Map<string, ConflictChoice>();
+    const byFolder = new Map<string, ConflictToAsk[]>();
     for (const conflict of adapter.restorer.conflicts(files, current)) {
-      answers.set(conflict.path, await ask(conflict.path, conflict.question));
+      const folder = acceptedFolders.find((entry) => reviewCovers(entry, conflict.path));
+      if (folder === undefined) {
+        answers.set(conflict.path, await ask(conflict.path, conflict.question));
+        continue;
+      }
+      const inside = byFolder.get(folder);
+      if (inside) inside.push(conflict);
+      else byFolder.set(folder, [conflict]);
+    }
+    for (const [folder, inside] of byFolder) {
+      const names = inside.map((conflict) => printableLine(conflict.path.slice(folder.length)));
+      const choice = await ask(folder, {
+        overwriteAllowed: inside.every((conflict) => conflict.question.overwriteAllowed),
+        message: `${printableLine(folder)} is a plugin and ${String(inside.length)} of its files differ here (${names.join(', ')}). It is written or left as a whole.`,
+      });
+      for (const conflict of inside) answers.set(conflict.path, choice);
     }
     return answers;
   }

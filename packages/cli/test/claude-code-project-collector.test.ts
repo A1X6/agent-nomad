@@ -106,9 +106,17 @@ describe('project collector: what is taken', () => {
     expect(text(files, '.agentnomad/auto-memory/user_role.md')).toBe('backend dev');
   });
 
-  it('takes scripts the project hooks run, when they are inside the project', async () => {
+  it('takes scripts the project hooks run, from both settings files, when they are inside the project', async () => {
     await writeTestFile(join(project, '.claude', 'hooks', 'lint.sh'), 'npm run lint');
     await writeTestFile(join(project, 'scripts', 'check.py'), 'print(1)');
+    // Hooks in the local settings file count too (review 17 QA-12).
+    await writeTestFile(join(project, 'scripts', 'local.py'), 'print(2)');
+    await writeTestFile(
+      join(project, '.claude', 'settings.local.json'),
+      JSON.stringify({
+        hooks: { Stop: [{ hooks: [{ type: 'command', command: 'python scripts/local.py' }] }] },
+      }),
+    );
     await writeTestFile(join(project, '.env.sh'), 'SECRET');
     await writeTestFile(join(root, 'outside.sh'));
     await writeTestFile(
@@ -132,7 +140,9 @@ describe('project collector: what is taken', () => {
     expect(paths(files)).toEqual([
       '.claude/hooks/lint.sh',
       '.claude/settings.json',
+      '.claude/settings.local.json',
       'scripts/check.py',
+      'scripts/local.py',
     ]);
     expect(text(files, '.claude/hooks/lint.sh')).toBe('npm run lint');
   });

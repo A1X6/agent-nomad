@@ -242,12 +242,12 @@ loop) into a shared `agents/shared/` module rather than copying them.
   pull); the collector gets the chosen ids in `options.include`. The command line builds
   the flags from the registered adapters: nothing to add in `cli/`.
 - **`memoryDescription`:** what push's memory question names.
-- **`envReferences`:** which bundle files hold MCP servers (`mcp`, plus an
-  optional `isMcpFile` rule for ones found by path, such as a plugin's `.mcp.json`) and settings with an
-  `env` block (`settings`) that can use `${VAR}`, the variables the agent sets itself
-  (`ownVariables`), and an optional `label` for messages. Push offers to save the values
-  these files use and `agentnomad env` lists them; without it, both find none (see
-  `claude-code/env-files.ts`).
+- **`envReferences`:** which bundle files hold MCP servers (`mcp`, plus an optional
+  `mcpFileKind` rule for ones found by path: a plugin's `.mcp.json` is the server map, its
+  manifest declares servers) and settings with an `env` block (`settings`) that can use
+  `${VAR}`, the variables the agent sets itself (`ownVariables`), and an optional `label` for
+  messages. Push offers to save the values these files use and `agentnomad env` lists them;
+  without it, both find none (see `claude-code/env-files.ts`).
 - **`planRestore(context)`:** the agent's own questions in pull's plan step, before anything
   is written, such as reinstalling extensions with the agent's own commands. It returns how
   to write the setup (usually the restorer's `restore`) and a follow-up that runs after

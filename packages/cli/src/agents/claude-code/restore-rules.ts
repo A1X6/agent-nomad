@@ -23,9 +23,9 @@ import {
   isPluginGenerated,
   isScript,
   TOOL_CONFIG_PATHS,
+  ACCOUNT_SKILLS_PREFIX,
 } from './global-paths.ts';
 import { underFolder } from '../shared/bundle-paths.ts';
-import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
   PROJECT_CLAUDE_FILES,
@@ -34,6 +34,13 @@ import {
   PROJECT_NEVER_SYNCED,
   PROJECT_ROOT_FILES,
 } from './project-paths.ts';
+
+/** The folders a restore may write into, once per module, not per entry (review 17 BP-01). */
+const GLOBAL_WRITABLE_FOLDERS: readonly string[] = [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS];
+const PROJECT_WRITABLE_FOLDERS: readonly string[] = [
+  ...PROJECT_CLAUDE_FOLDERS,
+  ...PROJECT_MEMORY_FOLDERS,
+];
 
 /** Where a bundle entry belongs, or why it is refused. */
 export type RestoreDestination =
@@ -102,7 +109,7 @@ export function globalDestination(
 
   const allowed =
     GLOBAL_FILES.includes(path) ||
-    [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].some((folder) => path.startsWith(`${folder}/`));
+    GLOBAL_WRITABLE_FOLDERS.some((folder) => path.startsWith(`${folder}/`));
   if (allowed) return { kind: 'target', path };
   if (isScript(path)) {
     return allowedScripts.has(path)
@@ -134,7 +141,7 @@ export function projectDestination(
   }
   if (isPluginGenerated(path, { ignoreCase: true })) return refused(GENERATED_IN_PLUGIN);
 
-  const claudeFolders = [...PROJECT_CLAUDE_FOLDERS, ...PROJECT_MEMORY_FOLDERS];
+  const claudeFolders = PROJECT_WRITABLE_FOLDERS;
   const allowed =
     PROJECT_ROOT_FILES.includes(path) ||
     PROJECT_CLAUDE_FILES.some((name) => path === `.claude/${name}`) ||

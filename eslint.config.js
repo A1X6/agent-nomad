@@ -103,9 +103,11 @@ export default defineConfig(
     rules: { ...restrictedImports([otherAgentFolder, fileWalker]), ...noDynamicImport },
   },
   {
-    // The pure text-rule modules, one list (review 15 BP-01).
+    // The pure text-rule modules and the shared path rules they use, one list (review 15 BP-01,
+    // review 17 ARCH-02).
     files: [
       'packages/cli/src/agents/claude-code/{restore-rules,command-review,settings-commands,skills-dir-plugins}.ts',
+      'packages/cli/src/agents/shared/bundle-paths.ts',
     ],
     rules: {
       ...restrictedImports([otherAgentFolder, fileWalker, nodeModules]),

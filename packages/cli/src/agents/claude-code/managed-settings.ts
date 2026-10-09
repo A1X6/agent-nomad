@@ -169,11 +169,13 @@ export function managedSettingsNotice(
   return lines.join(' ');
 }
 
-/** Words Claude Code uses when a plugin install is refused by policy. */
 /** Words that name the organization's policy itself. */
 const POLICY_WORDS =
   /\b(policy|policies|strictKnownMarketplaces|blockedMarketplaces|managed settings)\b/i;
-/** Words a network or server failure can hold too: the policy only when one is set here (review 16 UX-03). */
+/**
+ * Words a network or server failure can hold too: they mean the policy only when one is set
+ * here (review 16 UX-03).
+ */
 const BLOCKED_WORDS = /\b(blocked|not allowed)\b/i;
 
 /** A clearer reason for a failed plugin install when the organization's policy blocked it. */

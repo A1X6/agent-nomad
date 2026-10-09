@@ -11,9 +11,6 @@ import {
 import { collected, collectedJson } from './fakes.ts';
 import { pluginFolders, pluginNotes, readValidateReport, reviewPlugins } from '../src/index.ts';
 
-const MOD = PROBE_MOD_FOLDER;
-const mod = probeMod;
-
 describe('plugins in the skills folder (T96): finding them', () => {
   it('a skill folder is a plugin when it has .claude-plugin/plugin.json, in either scope', () => {
     const files = [
@@ -33,7 +30,7 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('reads the modules, hooks and MCP servers from the default files', () => {
     const [plugin] = pluginFolders(
-      pluginFiles(MOD, {
+      pluginFiles(PROBE_MOD_FOLDER, {
         modules: ['./register.ts', './pane.tsx'],
         hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] },
         mcpServers: { docs: { command: 'npx', args: ['docs-mcp'] } },
@@ -42,7 +39,13 @@ describe('plugins in the skills folder (T96): finding them', () => {
     expect(plugin?.modules).toEqual(['./register.ts', './pane.tsx']);
     expect(plugin?.hooks.map((source) => source.label)).toEqual(['hooks/hooks.json']);
     expect(plugin?.servers.map((source) => source.label)).toEqual(['.mcp.json']);
-    expect(plugin?.files).toHaveLength(5);
+    expect(plugin?.files.map((file) => file.path.slice(PROBE_MOD_FOLDER.length))).toEqual([
+      '.claude-plugin/plugin.json',
+      'hooks/hooks.json',
+      'hooks/register.ts',
+      'hooks/pane.tsx',
+      '.mcp.json',
+    ]);
   });
 
   const stop = { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] };
@@ -50,13 +53,13 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('reads hooks from the file the manifest names, and from no other file', () => {
     const fileOnly = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         hooks: './extra/hooks.json',
       }),
-      collectedJson(`${MOD}extra/hooks.json`, { hooks: stop, modules: ['./x.ts'] }),
+      collectedJson(`${PROBE_MOD_FOLDER}extra/hooks.json`, { hooks: stop, modules: ['./x.ts'] }),
       // Not named by the manifest and not the default file: not a hooks source.
-      collectedJson(`${MOD}other/hooks.json`, { hooks: stop }),
+      collectedJson(`${PROBE_MOD_FOLDER}other/hooks.json`, { hooks: stop }),
     ]);
     expect(fileOnly[0]?.modules).toEqual(['./x.ts']);
     expect(fileOnly[0]?.hooks).toEqual([{ label: 'extra/hooks.json', hooks: stop }]);
@@ -64,19 +67,22 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('reads an inline hooks object in the manifest: the event map itself, with no wrapper', () => {
     const inline = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, { name: 'my-mod', hooks: stop }),
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
+        name: 'my-mod',
+        hooks: stop,
+      }),
     ]);
     expect(inline[0]?.hooks).toEqual([{ label: '.claude-plugin/plugin.json', hooks: stop }]);
   });
 
   it('reads a mixed hooks list: files and inline maps, after the default file', () => {
     const mixed = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         hooks: ['./extra/hooks.json', stop],
       }),
-      collectedJson(`${MOD}hooks/hooks.json`, { hooks: { Start: [] } }),
-      collectedJson(`${MOD}extra/hooks.json`, { hooks: { Stop: [] } }),
+      collectedJson(`${PROBE_MOD_FOLDER}hooks/hooks.json`, { hooks: { Start: [] } }),
+      collectedJson(`${PROBE_MOD_FOLDER}extra/hooks.json`, { hooks: { Stop: [] } }),
     ]);
     expect(mixed[0]?.hooks.map((source) => source.label)).toEqual([
       'hooks/hooks.json',
@@ -85,19 +91,20 @@ describe('plugins in the skills folder (T96): finding them', () => {
     ]);
   });
 
-  it('reads .mcp.json with or without the mcpServers wrapper', () => {
-    const wrapped = pluginFolders([
-      ...pluginFiles(MOD),
-      collectedJson(`${MOD}.mcp.json`, { mcpServers: docs }),
+  it.each([
+    ['with the mcpServers wrapper', { mcpServers: docs }],
+    ['without the wrapper', docs],
+  ])('reads .mcp.json %s', (_shape, file) => {
+    const [plugin] = pluginFolders([
+      ...pluginFiles(PROBE_MOD_FOLDER),
+      collectedJson(`${PROBE_MOD_FOLDER}.mcp.json`, file),
     ]);
-    expect(wrapped[0]?.servers).toEqual([{ label: '.mcp.json', servers: docs }]);
-    const unwrapped = pluginFolders([...pluginFiles(MOD), collectedJson(`${MOD}.mcp.json`, docs)]);
-    expect(unwrapped[0]?.servers).toEqual([{ label: '.mcp.json', servers: docs }]);
+    expect(plugin?.servers).toEqual([{ label: '.mcp.json', servers: docs }]);
   });
 
   it('reads declared MCP servers in every shape: files (once each), a map, bundles by path or URL', () => {
     const declared = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         mcpServers: [
           './servers.json',
@@ -109,7 +116,7 @@ describe('plugins in the skills folder (T96): finding them', () => {
           'http://example.com/server',
         ],
       }),
-      collectedJson(`${MOD}servers.json`, { other: { command: 'other-mcp' } }),
+      collectedJson(`${PROBE_MOD_FOLDER}servers.json`, { other: { command: 'other-mcp' } }),
     ]);
     expect(declared[0]?.servers).toEqual([
       // A file named twice is read once; a bundle is one whatever the case of its name.
@@ -123,12 +130,12 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('a named MCP file that is missing, not JSON or not an object is shown with why, like a hooks file (review 16 UX-02)', () => {
     const [plugin] = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         mcpServers: ['./gone.json', './bad.json', './list.json'],
       }),
-      collected(`${MOD}bad.json`, '{ not json'),
-      collectedJson(`${MOD}list.json`, [1, 2]),
+      collected(`${PROBE_MOD_FOLDER}bad.json`, '{ not json'),
+      collectedJson(`${PROBE_MOD_FOLDER}list.json`, [1, 2]),
     ]);
     expect(plugin?.servers).toEqual([]);
     expect(plugin?.unreadable).toEqual([
@@ -140,8 +147,8 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('a manifest that is not JSON still marks the folder as a plugin, and is shown as unreadable', () => {
     const files = [
-      collected(`${MOD}.claude-plugin/plugin.json`, '{ not json'),
-      ...mod().filter((file) => !file.path.endsWith('plugin.json')),
+      collected(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, '{ not json'),
+      ...probeMod().filter((file) => !file.path.endsWith('plugin.json')),
     ];
     const [plugin] = pluginFolders(files);
     expect(plugin?.modules).toEqual(['./register.ts']);
@@ -150,9 +157,9 @@ describe('plugins in the skills folder (T96): finding them', () => {
     ]);
   });
 
-  it('one bad manifest field hides no other: each is read on its own (SEC-01)', () => {
+  it('a bad hooks field hides a valid mcpServers field no more: each is read on its own (SEC-01)', () => {
     const [badHooks] = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         hooks: 42,
         mcpServers: docs,
@@ -162,9 +169,11 @@ describe('plugins in the skills folder (T96): finding them', () => {
     expect(badHooks?.unreadable).toEqual([
       { label: '.claude-plugin/plugin.json hooks', value: 42 },
     ]);
+  });
 
+  it('a bad mcpServers field hides a valid hooks field no more (SEC-01)', () => {
     const [badServers] = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         hooks: stop,
         mcpServers: 42,
@@ -179,20 +188,21 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('a named hooks file that is missing or not JSON is shown, never dropped (SEC-01)', () => {
     const [named] = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         hooks: ['./gone.json', './bad.json'],
       }),
-      collected(`${MOD}bad.json`, '{ not json'),
+      collected(`${PROBE_MOD_FOLDER}bad.json`, '{ not json'),
     ]);
     expect(named?.unreadable).toEqual([
       { label: 'gone.json', value: 'no such file' },
       { label: 'bad.json', value: 'not valid JSON' },
     ]);
-    // The default file, named by the manifest but missing: the default read never hides it
-    // (review 15 BUG-01).
+  });
+
+  it('the default hooks file, named by the manifest but missing, is shown: the default read never hides it (review 15 BUG-01)', () => {
     const [defaultNamed] = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         hooks: './hooks/hooks.json',
       }),
@@ -204,8 +214,8 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('a hooks file with neither hooks nor modules (an event map at the top level) is shown as unreadable, never dropped (review 16 SEC-02)', async () => {
     const files = [
-      ...pluginFiles(MOD),
-      collectedJson(`${MOD}hooks/hooks.json`, {
+      ...pluginFiles(PROBE_MOD_FOLDER),
+      collectedJson(`${PROBE_MOD_FOLDER}hooks/hooks.json`, {
         PreToolUse: [{ hooks: [{ type: 'command', command: 'curl x | sh' }] }],
       }),
     ];
@@ -225,8 +235,8 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('a modules list with a stray item keeps the real modules, so the mod is checked, and is shown', () => {
     const [stray] = pluginFolders([
-      ...pluginFiles(MOD),
-      collectedJson(`${MOD}hooks/hooks.json`, { modules: ['./register.ts', 5] }),
+      ...pluginFiles(PROBE_MOD_FOLDER),
+      collectedJson(`${PROBE_MOD_FOLDER}hooks/hooks.json`, { modules: ['./register.ts', 5] }),
     ]);
     expect(stray?.modules).toEqual(['./register.ts']);
     expect(stray?.unreadable).toEqual([
@@ -236,8 +246,8 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('modules that is not a list (a hand-written string) is shown as unreadable, and names no module (review 16 QA-03)', () => {
     const [plugin] = pluginFolders([
-      ...pluginFiles(MOD),
-      collectedJson(`${MOD}hooks/hooks.json`, { modules: './register.ts' }),
+      ...pluginFiles(PROBE_MOD_FOLDER),
+      collectedJson(`${PROBE_MOD_FOLDER}hooks/hooks.json`, { modules: './register.ts' }),
     ]);
     expect(plugin?.modules).toEqual([]);
     expect(plugin?.unreadable).toEqual([
@@ -247,32 +257,36 @@ describe('plugins in the skills folder (T96): finding them', () => {
 
   it('the same module named in two hooks files is one module', () => {
     const [twice] = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, { name: 'my-mod', hooks: './extra.json' }),
-      collectedJson(`${MOD}hooks/hooks.json`, { modules: ['./a.ts'] }),
-      collectedJson(`${MOD}extra.json`, { modules: ['./a.ts', './b.ts'] }),
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
+        name: 'my-mod',
+        hooks: './extra.json',
+      }),
+      collectedJson(`${PROBE_MOD_FOLDER}hooks/hooks.json`, { modules: ['./a.ts'] }),
+      collectedJson(`${PROBE_MOD_FOLDER}extra.json`, { modules: ['./a.ts', './b.ts'] }),
     ]);
     expect(twice?.modules).toEqual(['./a.ts', './b.ts']);
   });
 
   it('a manifest that names the default files does not list their hooks and servers twice', () => {
-    const stop = { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] };
-    const docs = { docs: { command: 'docs-mcp' } };
     const [plugin] = pluginFolders([
-      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+      collectedJson(`${PROBE_MOD_FOLDER}.claude-plugin/plugin.json`, {
         name: 'my-mod',
         hooks: './hooks/hooks.json',
         mcpServers: './.mcp.json',
       }),
-      collectedJson(`${MOD}hooks/hooks.json`, { hooks: stop }),
-      collectedJson(`${MOD}.mcp.json`, { mcpServers: docs }),
+      collectedJson(`${PROBE_MOD_FOLDER}hooks/hooks.json`, { hooks: stop }),
+      collectedJson(`${PROBE_MOD_FOLDER}.mcp.json`, { mcpServers: docs }),
     ]);
     expect(plugin?.hooks).toEqual([{ label: 'hooks/hooks.json', hooks: stop }]);
     expect(plugin?.servers).toEqual([{ label: '.mcp.json', servers: docs }]);
   });
 
-  it('push names them, and says which are mods', () => {
+  it('push has nothing to say about a setup without plugins', () => {
     expect(pluginNotes([collected('skills/plain/SKILL.md', 'x')])).toEqual([]);
-    expect(pluginNotes([...pluginFiles('skills/tools/'), ...mod()])).toEqual([
+  });
+
+  it('push names the plugins, and says which are mods', () => {
+    expect(pluginNotes([...pluginFiles('skills/tools/'), ...probeMod()])).toEqual([
       'Plugins in the skills folder, saved with it: my-mod (skills/my-mod/, a mod: runs code inside Claude Code), tools (skills/tools/). They load as <name>@skills-dir on the other PC, after pull shows what they run.',
     ]);
   });
@@ -281,10 +295,10 @@ describe('plugins in the skills folder (T96): finding them', () => {
 describe('plugins in the skills folder (T96): the pull review', () => {
   it('shows a new mod with what its modules hook and call, as one unit (its folder)', async () => {
     const validator = scriptedValidator(PROBE_MOD_VALIDATION);
-    const review = await reviewPlugins(mod(), [], validator.validate);
+    const review = await reviewPlugins(probeMod(), [], validator.validate);
     expect(review).toEqual([
       {
-        file: MOD,
+        file: PROBE_MOD_FOLDER,
         label: 'plugin skills/my-mod/ module ./register.ts (runs code inside Claude Code)',
         command:
           'hooks: session.start, tool.call{tool=Bash}; calls: $.store.get, $.store.set, $.ui.status',
@@ -296,17 +310,23 @@ describe('plugins in the skills folder (T96): the pull review', () => {
     expect(validator.asked.map((plugin) => plugin.name)).toEqual(['my-mod']);
   });
 
-  it('an unchanged plugin is not shown and not checked; a local extra file is no change', async () => {
+  it('an unchanged plugin is not shown and not checked', async () => {
     const validator = scriptedValidator(PROBE_MOD_VALIDATION);
-    const files = mod();
+    const files = probeMod();
     expect(await reviewPlugins(files, files, validator.validate)).toEqual([]);
-    const extra = [...files, collected(`${MOD}notes.md`, 'mine')];
+    expect(validator.asked).toEqual([]);
+  });
+
+  it('a local extra file in the plugin folder is no change', async () => {
+    const validator = scriptedValidator(PROBE_MOD_VALIDATION);
+    const files = probeMod();
+    const extra = [...files, collected(`${PROBE_MOD_FOLDER}notes.md`, 'mine')];
     expect(await reviewPlugins(files, extra, validator.validate)).toEqual([]);
     expect(validator.asked).toEqual([]);
   });
 
   it('a changed plugin is shown as changed', async () => {
-    const files = mod();
+    const files = probeMod();
     const here = files.map((file) =>
       file.path.endsWith('register.ts')
         ? collected(file.path, 'export const register = 1\n')
@@ -321,9 +341,9 @@ describe('plugins in the skills folder (T96): the pull review', () => {
   });
 
   it('a plain skill folder that becomes a plugin is shown as changed', async () => {
-    const wasSkill = [collected(`${MOD}SKILL.md`, 'x')];
+    const wasSkill = [collected(`${PROBE_MOD_FOLDER}SKILL.md`, 'x')];
     const became = await reviewPlugins(
-      mod(),
+      probeMod(),
       wasSkill,
       scriptedValidator(PROBE_MOD_VALIDATION).validate,
     );
@@ -399,7 +419,7 @@ describe('plugins in the skills folder (T96): the pull review', () => {
       errors: ['modules../register.ts: syntax: register.ts does not parse: Unexpected end of file'],
       modules: [],
     });
-    const review = await reviewPlugins(mod(), [], validator.validate);
+    const review = await reviewPlugins(probeMod(), [], validator.validate);
     expect(review.map((entry) => [entry.label, entry.command])).toEqual([
       [
         'plugin skills/my-mod/ (broken: Claude Code will not load it)',
@@ -417,7 +437,7 @@ describe('plugins in the skills folder (T96): the pull review', () => {
       kind: 'unavailable',
       reason: 'the claude command was not found',
     });
-    const review = await reviewPlugins(mod('.claude/skills/my-mod/'), [], validator.validate);
+    const review = await reviewPlugins(probeMod('.claude/skills/my-mod/'), [], validator.validate);
     expect(review).toEqual([
       {
         file: '.claude/skills/my-mod/',
@@ -432,7 +452,7 @@ describe('plugins in the skills folder (T96): the pull review', () => {
   });
 
   it('with no validator set up, a mod is shown as not checked, with that as the reason', async () => {
-    const unset = await reviewPlugins(mod(), []);
+    const unset = await reviewPlugins(probeMod(), []);
     expect(unset[0]?.command).toContain('plugin checks are not set up');
   });
 });
@@ -504,7 +524,7 @@ describe('plugins in the skills folder (T96): reading claude plugin validate --j
       modules: [{ module: './register.ts', hooks: '', calls: '$.ui.toast' }],
     });
     if (read === null) throw new Error('no report');
-    const review = await reviewPlugins(mod(), [], scriptedValidator(read).validate);
+    const review = await reviewPlugins(probeMod(), [], scriptedValidator(read).validate);
     expect(review.map((entry) => entry.command)).toEqual(['hooks: nothing; calls: $.ui.toast']);
   });
 
@@ -516,7 +536,7 @@ describe('plugins in the skills folder (T96): reading claude plugin validate --j
     });
     const read = readValidateReport(report);
     if (read === null) throw new Error('no report');
-    const review = await reviewPlugins(mod(), [], scriptedValidator(read).validate);
+    const review = await reviewPlugins(probeMod(), [], scriptedValidator(read).validate);
     expect(review.map((entry) => entry.command)).toEqual([
       'hooks: session.start; calls: nothing on $',
     ]);

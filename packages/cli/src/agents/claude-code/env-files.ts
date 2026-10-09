@@ -1,7 +1,10 @@
 import type { EnvReferenceFiles } from '../adapter.ts';
-import { CLAUDE_JSON_BUNDLE_PATH, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
+import {
+  CLAUDE_JSON_BUNDLE_PATH,
+  GLOBAL_SETTINGS_FILES,
+  pluginMcpFileKind,
+} from './global-paths.ts';
 import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
-import { isPluginMcpSource } from './skills-dir-plugins.ts';
 
 /** Files that can hold `${VAR}` references: MCP servers and settings. */
 export const MCP_FILES: ReadonlySet<string> = new Set(['.mcp.json', CLAUDE_JSON_BUNDLE_PATH]);
@@ -14,7 +17,7 @@ export const SETTINGS_FILES: ReadonlySet<string> = new Set([
 export const CLAUDE_ENV_REFERENCES: EnvReferenceFiles = {
   mcp: MCP_FILES,
   /** A plugin's `.mcp.json` and manifest in the skills folder (T96, review 16 BUG-01). */
-  isMcpFile: isPluginMcpSource,
+  mcpFileKind: pluginMcpFileKind,
   settings: SETTINGS_FILES,
   /** Variables Claude Code sets itself for hooks and servers; never the user's secrets. */
   ownVariables: new Set([

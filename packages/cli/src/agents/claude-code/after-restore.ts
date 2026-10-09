@@ -6,15 +6,15 @@ import type {
   RestorePlanContext,
   Restorer,
 } from '../adapter.ts';
+import { planAccountSkills, readSyncedSkills } from './account-skills.ts';
+import { findExecutable, pathsOf, type ExecutableLookupSystem } from '../shared/detector-system.ts';
+import { claudeConfigDir, findClaudeExecutable } from './detector.ts';
 import {
   ACCOUNT_SKILLS_PART,
   ACCOUNT_SKILLS_PREFIX,
-  planAccountSkills,
-  readSyncedSkills,
-} from './account-skills.ts';
-import { findExecutable, pathsOf, type ExecutableLookupSystem } from '../shared/detector-system.ts';
-import { claudeConfigDir, findClaudeExecutable } from './detector.ts';
-import { PLUGINS_BUNDLE_PATH, PROGRAMS_BUNDLE_PATH } from './global-paths.ts';
+  PLUGINS_BUNDLE_PATH,
+  PROGRAMS_BUNDLE_PATH,
+} from './global-paths.ts';
 import { explainPluginFailure, type ManagedSettings } from './managed-settings.ts';
 import {
   askPluginSync,

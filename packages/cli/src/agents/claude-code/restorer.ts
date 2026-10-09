@@ -1,5 +1,4 @@
 import { readFile, stat } from 'node:fs/promises';
-
 import { sameBytes } from '@agentnomad/contracts';
 import {
   BACKUP_MARKER,
@@ -12,6 +11,8 @@ import {
   type PlannedWrite,
 } from '@agentnomad/core';
 
+import { freeSuffix, writeFileAtomically } from '../../system/files.ts';
+import { printableLine } from '../../ui/printable.ts';
 import type {
   CollectedFile,
   ConflictResolver,
@@ -21,23 +22,21 @@ import type {
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
-import { freeSuffix, writeFileAtomically } from '../../system/files.ts';
-import { printableLine } from '../../ui/printable.ts';
 import { pathsOf } from '../shared/detector-system.ts';
-import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
-import { reviewRunnable } from './command-review.ts';
 import {
   CLAUDE_JSON_QUESTION,
   createClaudeJsonMerge,
   type MutableReport,
 } from './claude-json-merge.ts';
-import { pathWords, settingsCommands } from './settings-commands.ts';
+import { reviewRunnable } from './command-review.ts';
 import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
+import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
 import { globalDestination, projectDestination, type RestoreDestination } from './restore-rules.ts';
 import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
+import { pathWords, settingsCommands } from './settings-commands.ts';
 import { reviewPlugins, type PluginValidator } from './skills-dir-plugins.ts';
 
 /** What pull's plan step decided for this restore (T61). */
@@ -143,9 +142,13 @@ export function hooksForOtherOs(settingsJson: string, platform: NodeJS.Platform)
     .map(({ text }) => text);
 }
 
-/** The settings files of a scope: where its hooks and status line are declared. */
-const settingsFilesOf = (target: ScopeTarget): readonly string[] =>
-  target.kind === 'global' ? GLOBAL_SETTINGS_FILES : PROJECT_SETTINGS_FILES;
+/** The text of a scope's settings files among `incoming`: where hooks and the status line live. */
+function settingsTextsOf(target: ScopeTarget, incoming: readonly CollectedFile[]): string[] {
+  const settingsFiles = target.kind === 'global' ? GLOBAL_SETTINGS_FILES : PROJECT_SETTINGS_FILES;
+  return incoming
+    .filter((entry) => settingsFiles.includes(entry.path))
+    .map((entry) => new TextDecoder().decode(entry.content));
+}
 
 /**
  * Bundle paths of the scripts the setup's own hooks and status line run (T38): the home files
@@ -156,11 +159,8 @@ function allowedScriptsOf(
   incoming: readonly CollectedFile[],
   options: RestorerOptions,
 ): ReadonlySet<string> {
-  const settings = incoming
-    .filter((entry) => settingsFilesOf(target).includes(entry.path))
-    .map((entry) => new TextDecoder().decode(entry.content));
   return new Set(
-    settings.flatMap((text) =>
+    settingsTextsOf(target, incoming).flatMap((text) =>
       (target.kind === 'project'
         ? projectHookScripts(text, { projectDir: target.projectDir, platform: options.platform })
         : hookScripts(text, options)
@@ -176,9 +176,8 @@ function otherOsWarnings(
   sourceOs: string,
   platform: NodeJS.Platform,
 ): string[] {
-  return incoming
-    .filter((entry) => settingsFilesOf(target).includes(entry.path))
-    .flatMap((file) => hooksForOtherOs(new TextDecoder().decode(file.content), platform))
+  return settingsTextsOf(target, incoming)
+    .flatMap((text) => hooksForOtherOs(text, platform))
     .map(
       (command) =>
         `This hook or status line came from ${sourceOs} and will likely not run here: ${printableLine(command)}`,
@@ -206,7 +205,10 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     ? path.join(options.baseDir, '.claude.json')
     : path.join(options.homedir, '.claude.json');
 
-  /** What is at `nativePath`: the file with its permission bits (one stat, review 16 PERF-01), a folder, or nothing. */
+  /**
+   * What is at `nativePath`: the file with its permission bits (one stat, review 16 PERF-01),
+   * a folder, or nothing.
+   */
   async function readExisting(
     nativePath: string,
   ): Promise<{ readonly content: Uint8Array; readonly mode: number } | 'folder' | null> {

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 // The global setup's scope key is this constant for every account (scopeKeyFor returns it).
 import { GLOBAL_SCOPE_KEY } from '@agentnomad/contracts';
-import { createGzipBundleCodec, DATA_KEY_BYTES } from '@agentnomad/core';
+import { createGzipBundleCodec, DATA_KEY_BYTES, scopeKeyFor } from '@agentnomad/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
@@ -13,12 +13,14 @@ import {
   fakeBundleServer,
   fakeEnvWriter,
   localStateIn,
+  loggedInStore,
   memorySecretStore,
   paths,
   readText,
   recordingReporter,
   revisionOn,
   scriptedPrompter,
+  sessionKeys,
   storedOn,
   useDataKey,
   useTempDir,
@@ -35,19 +37,19 @@ import {
 } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter as claudeAdapter, stopHook } from './claude-code-project-fixtures.ts';
 import {
+  AnswerNeededError,
   createAgentRegistry,
+  createNoTerminalPrompter,
   createPullApplier,
   createPullCommand,
   createPullPlanner,
-  createNoTerminalPrompter,
+  createPushCommand,
+  createShellProfileWriter,
+  MislabelledSetupError,
+  NotLoggedInError,
   ProjectFolderError,
   PromptCancelledError,
   SetupsNotDoneError,
-  createPushCommand,
-  createShellProfileWriter,
-  AnswerNeededError,
-  MislabelledSetupError,
-  NotLoggedInError,
   SetupUnreadableError,
   type AgentAdapter,
   type EnvWriter,
@@ -60,7 +62,6 @@ import {
 import type { AgentRestorePlan } from '../src/agents/adapter.ts';
 
 useDataKey();
-const loggedIn = (key = dataKey) => memorySecretStore({ loggedIn: key });
 
 let root: string;
 useTempDir('agentnomad-pull-', (dir) => (root = dir));
@@ -86,17 +87,16 @@ function pushFrom(
   server: ReturnType<typeof fakeBundleServer>,
   answers: unknown[],
   options: {
-    prompter?: Prompter;
     reporter?: Reporter;
     env?: Record<string, string>;
     adapter?: AgentAdapter;
   } = {},
 ) {
   return createPushCommand({
-    prompter: options.prompter ?? scriptedPrompter(answers).prompter,
+    prompter: scriptedPrompter(answers).prompter,
     reporter: options.reporter ?? recordingReporter().reporter,
     registry: () => createAgentRegistry([options.adapter ?? claudeAdapter(machine.home)]),
-    secrets: () => Promise.resolve(loggedIn()),
+    secrets: () => Promise.resolve(loggedInStore()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
     codec: createGzipBundleCodec(),
@@ -114,6 +114,8 @@ function pullOn(
   answers: unknown[],
   options: {
     adapter?: AgentAdapter;
+    /** Every registered adapter, when a test needs more than one. */
+    adapters?: AgentAdapter[];
     secrets?: SecretStore;
     writer?: EnvWriter;
     prompter?: Prompter;
@@ -127,8 +129,9 @@ function pullOn(
   // What apply gets: everything but the prompter.
   const applyDeps: PullApplyDeps = {
     reporter,
-    registry: () => createAgentRegistry([options.adapter ?? claudeAdapter(machine.home)]),
-    secrets: () => Promise.resolve(options.secrets ?? loggedIn()),
+    registry: () =>
+      createAgentRegistry(options.adapters ?? [options.adapter ?? claudeAdapter(machine.home)]),
+    secrets: () => Promise.resolve(options.secrets ?? loggedInStore()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
     codec: createGzipBundleCodec(),
@@ -141,15 +144,12 @@ function pullOn(
   };
   const deps: PullDeps = { ...applyDeps, prompter: options.prompter ?? script.prompter };
   const pull = createPullCommand(deps).pull;
-  return { pull, deps, applyDeps, asked: script.asked, lines, state };
+  return { pull, deps, applyDeps, asked: script.asked, offered: script.offered, lines, state };
 }
 
 /** The review pull printed before writing: what would run programs on this PC (review 15 DUP-06). */
 const reviewShown = (lines: readonly string[]) =>
   lines.find((line) => line.includes('run programs on this PC')) ?? '';
-
-/** The session and data key the plan step gets from the handler. */
-const keysOf = (secrets = loggedIn()) => ({ secrets, crypto, dataKey });
 
 const none = { global: false, yes: false };
 
@@ -418,13 +418,17 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect((await readdir(b.base)).some((name) => name.includes('agentnomad-incoming'))).toBe(true);
   });
 
-  it('picks a project by --project, and lists the names when it is not saved', async () => {
+  it('picks a project by --project', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
     await pullOn(b, server, []).pull({ global: false, yes: true, project: 'my-app' });
     expect(await readText(join(b.project, 'CLAUDE.md'))).toBe('Project rules.');
+  });
+
+  it('lists the saved names when --project names one that is not saved', async () => {
+    const { server } = await pushedSetup();
     await expect(
-      pullOn(b, server, []).pull({ global: false, yes: true, project: 'nope' }),
+      pullOn(pc('desktop'), server, []).pull({ global: false, yes: true, project: 'nope' }),
     ).rejects.toThrow('No saved Claude Code project named "nope". Saved: my-app.');
   });
 
@@ -463,7 +467,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     await expect(readdir(b.base)).rejects.toThrow();
   });
 
-  it('an older copy than this PC had: skipped with --yes, asked otherwise (T38)', async () => {
+  it('an older copy than this PC had: skipped with --yes, with exit code 1 (T38)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
     const yes = pullOn(b, server, []);
@@ -477,8 +481,13 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     );
     expect(yes.lines).toContain('info: Skipped the Claude Code global setup.');
     await expect(readdir(b.base)).rejects.toThrow();
+  });
 
+  it('an older copy than this PC had: asked about, and a yes restores it (T38)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
     const asked = pullOn(b, server, [true, true, 'merge-all']);
+    await asked.state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 3);
     await asked.pull({ global: true, yes: false });
     expect(asked.asked[0]).toBe('Restore this older copy anyway?');
     expect(await readText(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
@@ -515,7 +524,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const t = pullOn(b, server, [true, 'overwrite']);
     const options = { global: true, yes: false };
 
-    const plan = await createPullPlanner(t.deps).plan(options, keysOf());
+    const plan = await createPullPlanner(t.deps).plan(options, sessionKeys());
     expect(t.asked).toEqual(['Allow them?', 'CLAUDE.md already exists here and is different.']);
     expect(plan?.restores[0]?.conflicts).toEqual(new Map([['CLAUDE.md', 'overwrite']]));
     expect(await readText(join(b.base, 'CLAUDE.md'))).toBe('mine');
@@ -556,8 +565,24 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     // The revision is noted as partial, so a later push asks before replacing those files (BUG-05).
     expect(await t.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBe(1);
     expect(await t.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(true);
+  });
 
-    // With an answer for every file (--merge), there is nothing left unasked.
+  it('with an answer for every file (--merge), nothing is left unasked (T59)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const base = claudeAdapter(b.home);
+    const adapter: AgentAdapter = {
+      ...base,
+      planRestore: withRestore(base, async (onConflict) => {
+        const choice = await onConflict('notes/extra.md', { overwriteAllowed: true });
+        return {
+          written: [],
+          skipped: choice === 'skip' ? ['notes/extra.md'] : [],
+          backups: [],
+          warnings: [],
+        };
+      }),
+    };
     const merged = pullOn(b, server, [], { adapter });
     await merged.pull({ global: true, yes: false, allowCommands: true, conflict: 'merge' });
     expect(merged.asked).toEqual([]);
@@ -678,10 +703,16 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     );
     expect(revisionOn(server, GLOBAL_SCOPE_KEY)).toBe(1);
     expect(lines.some((line) => line.includes('did not restore everything'))).toBe(true);
+  });
 
-    // Asked, and a yes pushes; afterwards this PC's copy is complete again.
+  it('after a pull that left out declined commands, push asks, and a yes pushes (T46)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, [false]);
+    await t.pull({ global: true, yes: false });
     await pushFrom(b, server, [true])({ global: true, yes: false, memory: false });
     expect(revisionOn(server, GLOBAL_SCOPE_KEY)).toBe(2);
+    // Afterwards this PC's copy is complete again.
     expect(await t.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(false);
   });
 
@@ -703,7 +734,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('a setup that cannot be opened with this key writes nothing', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    const wrongKey = loggedIn(crypto.randomBytes(DATA_KEY_BYTES));
+    const wrongKey = loggedInStore(crypto.randomBytes(DATA_KEY_BYTES));
     // The project name opens with neither key, so only the global setup is offered.
     const t = pullOn(b, server, [], { secrets: wrongKey });
     await expect(t.pull({ global: true, yes: true })).rejects.toBeInstanceOf(SetupUnreadableError);
@@ -912,13 +943,52 @@ describe('plugins and mods in the skills folder (T96)', () => {
     );
   });
 
-  it('a yes to the review writes the mod', async () => {
+  it('a yes to the review writes the mod, and the rest, with nothing refused', async () => {
     const { server } = await pushedMod();
     const b = pc('desktop');
     const yes = pullWithValidator(b, server, [true]);
     await yes.pull({ global: true, yes: false });
     expect(yes.asked).toEqual(['Allow them?']);
+    expect(yes.validator.asked.map((plugin) => plugin.name)).toEqual(['my-mod']);
     for (const file of modFiles(b)) expect(await exists(file)).toBe(true);
+    expect(await exists(join(b.base, 'skills', 'my-mod-2', 'SKILL.md'))).toBe(true);
+    expect(await readText(join(b.base, 'CLAUDE.md'))).toBe('Notes.');
+    expect(yes.lines.filter((line) => line.startsWith('warn:'))).toEqual([]);
+  });
+
+  /** PC B with the pushed mod, then two of its files changed by hand. */
+  async function changedModOn(server: ReturnType<typeof fakeBundleServer>) {
+    const b = pc('desktop');
+    await pullWithValidator(b, server, []).pull({ global: true, yes: true, allowCommands: true });
+    const mine = {
+      register: join(b.base, 'skills', 'my-mod', 'hooks', 'register.ts'),
+      hooks: join(b.base, 'skills', 'my-mod', 'hooks', 'hooks.json'),
+    };
+    await writeTestFile(mine.register, 'export const register = () => { /* mine */ }\n');
+    await writeTestFile(mine.hooks, '{"modules":["./register.ts"],"mine":true}\n');
+    return { b, mine };
+  }
+  const FOLDER_QUESTION =
+    'skills/my-mod/ is a plugin and 2 of its files differ here (hooks/hooks.json, hooks/register.ts). It is written or left as a whole.';
+
+  it('a yes to a changed mod asks about its differing files once, as the folder; overwrite writes them all (review 17 BUG-02)', async () => {
+    const { server } = await pushedMod();
+    const { b, mine } = await changedModOn(server);
+    const t = pullWithValidator(b, server, [true, 'overwrite']);
+    await t.pull({ global: true, yes: false });
+    expect(t.asked).toEqual(['Allow them?', FOLDER_QUESTION]);
+    expect(await readText(mine.register)).toBe('export const register = () => {}\n');
+    expect(await readText(mine.hooks)).not.toContain('"mine"');
+  });
+
+  it('a skip on the folder question leaves every file of the mod as it is (review 17 BUG-02)', async () => {
+    const { server } = await pushedMod();
+    const { b, mine } = await changedModOn(server);
+    const t = pullWithValidator(b, server, [true, 'skip']);
+    await t.pull({ global: true, yes: false });
+    expect(t.asked).toEqual(['Allow them?', FOLDER_QUESTION]);
+    expect(await readText(mine.register)).toBe('export const register = () => { /* mine */ }\n');
+    expect(await readText(mine.hooks)).toContain('"mine"');
   });
 
   it("declining a changed mod leaves this PC's copy as it is", async () => {
@@ -938,7 +1008,8 @@ describe('plugins and mods in the skills folder (T96)', () => {
     expect(await readText(local)).toBe('export const register = () => { /* mine */ }\n');
   });
 
-  it("a mod in a project's .claude/skills/ is reviewed and written the same way", async () => {
+  /** PC A with the probe mod in a project's .claude/skills/, pushed as the project `my-app`. */
+  async function pushedProjectMod() {
     const server = fakeBundleServer();
     const a = pc('laptop');
     // Claude Code counts as installed on A once its folder exists.
@@ -947,6 +1018,11 @@ describe('plugins and mods in the skills folder (T96)', () => {
     await writeGeneratedTypes(a.project, PROJECT_MOD_FOLDER);
     await writeTestFile(join(a.project, 'CLAUDE.md'), 'Project rules.');
     await pushFrom(a, server, ['project', 'my-app', false])(none);
+    return { server, a };
+  }
+
+  it("--yes shows a mod in a project's .claude/skills/ and skips it, saying so", async () => {
+    const { server } = await pushedProjectMod();
     const b = pc('desktop');
     const skipped = pullWithValidator(b, server, []);
     await skipped.pull({ global: false, project: 'my-app', yes: true });
@@ -959,6 +1035,11 @@ describe('plugins and mods in the skills folder (T96)', () => {
     expect(skipped.lines).toContain(
       'warn: Skipped .claude/skills/my-mod/: a plugin is accepted or left out as a whole. The rest is restored. --yes never accepts new commands; add --allow-commands to accept them.',
     );
+  });
+
+  it("--allow-commands writes a project's mod, without what Claude Code generated", async () => {
+    const { server } = await pushedProjectMod();
+    const b = pc('desktop');
     const written = pullWithValidator(b, server, []);
     await written.pull({ global: false, project: 'my-app', yes: true, allowCommands: true });
     for (const file of modFiles(b, 'project')) expect(await exists(file)).toBe(true);
@@ -979,5 +1060,110 @@ describe('plugins and mods in the skills folder (T96)', () => {
       '+ plugin skills/my-mod/ (a mod: runs code inside Claude Code, not checked): modules ./register.ts: the claude command was not found, so what they hook and call could not be listed',
     );
     for (const file of modFiles(b)) expect(await exists(file)).toBe(false);
+  });
+});
+
+describe("pull's choosers and notices (review 17 QA-02)", () => {
+  /** The real adapter under another id, so two agents can have saved setups. */
+  const otherAgent = (home: string): AgentAdapter => ({
+    ...claudeAdapter(home),
+    id: 'other-cli',
+    displayName: 'Other CLI',
+  });
+
+  it('stops on --agent naming an agent with nothing saved, and says what to run', async () => {
+    const { server } = await pushedSetup();
+    await expect(
+      pullOn(pc('desktop'), server, []).pull({ global: true, yes: true, agents: ['nope'] }),
+    ).rejects.toThrow(
+      'No saved setup for agent "nope". Run `agentnomad list` to see what is saved, or `agentnomad agents` for the supported ids.',
+    );
+  });
+
+  it('stops when --global asks for a global setup and only projects are saved', async () => {
+    const server = fakeBundleServer();
+    const a = pc('laptop');
+    await writeTestFile(join(a.base, 'CLAUDE.md'), 'Notes (not pushed).');
+    await writeTestFile(join(a.project, 'CLAUDE.md'), 'Project rules.');
+    await pushFrom(a, server, ['project', 'my-app', false])(none);
+    await expect(
+      pullOn(pc('desktop'), server, []).pull({ global: true, yes: true }),
+    ).rejects.toThrow('There is no saved Claude Code global setup.');
+  });
+
+  it('asks which of two saved projects to restore, hinting the one saved from this folder', async () => {
+    const server = fakeBundleServer();
+    const a = pc('laptop');
+    await writeTestFile(join(a.base, 'CLAUDE.md'), 'Notes.');
+    await writeTestFile(join(a.project, 'CLAUDE.md'), 'My app.');
+    await pushFrom(a, server, ['project', 'my-app', false])(none);
+    const elsewhere = { ...a, project: join(root, 'laptop', 'code', 'other') };
+    await writeTestFile(join(elsewhere.project, 'CLAUDE.md'), 'Other app.');
+    await pushFrom(elsewhere, server, ['project', 'other', false])(none);
+    // Back in my-app's folder, with only projects saved: the chooser, the remembered name hinted.
+    const otherKey = scopeKeyFor(crypto, dataKey, { kind: 'project', name: 'other' });
+    const t = pullOn(a, server, [otherKey, 'merge-all']);
+    await t.pull({ global: false, yes: false });
+    expect(t.asked).toEqual([
+      'Which project? It is restored into this folder.',
+      expect.stringContaining('already exists here and is different.'),
+    ]);
+    expect(t.offered[0]).toEqual([
+      {
+        value: scopeKeyFor(crypto, dataKey, { kind: 'project', name: 'my-app' }),
+        label: 'my-app',
+        hint: 'saved from this folder',
+      },
+      { value: otherKey, label: 'other' },
+    ]);
+    expect(t.lines.some((line) => line.includes('Restored the Claude Code project "other"'))).toBe(
+      true,
+    );
+  });
+
+  it('asks which agents when two have saved setups, and restores the chosen one', async () => {
+    const server = fakeBundleServer();
+    const a = pc('laptop');
+    await writeTestFile(join(a.base, 'CLAUDE.md'), 'Notes.');
+    await pushFrom(a, server, ['global', false])(none);
+    await pushFrom(a, server, ['global', false], { adapter: otherAgent(a.home) })(none);
+    const b = pc('desktop');
+    const t = pullOn(b, server, [['claude-code']], {
+      adapters: [claudeAdapter(b.home), otherAgent(b.home)],
+    });
+    await t.pull({ global: true, yes: false });
+    expect(t.asked).toEqual(['Which agents?']);
+    expect(t.lines.filter((line) => line.startsWith('success: Restored'))).toEqual([
+      expect.stringContaining('Restored the Claude Code global setup'),
+    ]);
+  });
+
+  it('says so when no saved setup is for an agent this agentnomad supports', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, [], { adapters: [otherAgent(b.home)] });
+    await t.pull({ global: true, yes: true });
+    expect(t.lines).toContain(
+      'info: None of the saved setups are for an agent agentnomad supports here.',
+    );
+  });
+
+  it("warns with the adapter's note about the version a setup was saved with", async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const base = claudeAdapter(b.home);
+    const noting: AgentAdapter = {
+      ...base,
+      inspector: {
+        ...base.inspector,
+        unknownEntries: () => Promise.resolve([]),
+        notices: () => Promise.resolve([]),
+        versionNotice: (savedWith, here) =>
+          `saved with ${savedWith ?? 'an unknown version'}, this PC has ${here ?? 'none'}`,
+      },
+    };
+    const t = pullOn(b, server, [], { adapter: noting });
+    await t.pull({ global: true, yes: true, allowCommands: true });
+    expect(t.lines.some((line) => line.startsWith('warn: saved with '))).toBe(true);
   });
 });

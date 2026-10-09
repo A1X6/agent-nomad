@@ -136,8 +136,13 @@ export const reviewCovers = (file: string, path: string): boolean =>
 export interface EnvReferenceFiles {
   /** Bundle paths of files with MCP servers (an `mcpServers` object), e.g. `.mcp.json`. */
   readonly mcp: ReadonlySet<string>;
-  /** Other MCP files, by path rule: e.g. a plugin's `.mcp.json` in a skills folder (review 16 BUG-01). */
-  isMcpFile?(path: string): boolean;
+  /**
+   * Other MCP files, by path rule (review 16 BUG-01, review 17 BUG-01): `map` for a file that
+   * is the server map, under `mcpServers` or as the whole file (a plugin's `.mcp.json`);
+   * `declares` for one whose `mcpServers` field declares servers as a map or a list mixing
+   * maps and file names (a plugin's manifest).
+   */
+  mcpFileKind?(path: string): 'map' | 'declares' | undefined;
   /** Bundle paths of settings files; their `env` block sets variables for the agent. */
   readonly settings: ReadonlySet<string>;
   /** Variables the agent sets itself for hooks and servers; never the user's secrets. */

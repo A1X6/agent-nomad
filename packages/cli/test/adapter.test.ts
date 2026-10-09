@@ -7,12 +7,15 @@ import { reviewCovers } from '../src/index.ts';
  * interfaces themselves are proved by `agent-boundary.test.ts`.
  */
 describe('reviewCovers: which files a reviewed entry stands for (T96)', () => {
-  it('a file covers itself; a folder covers what is inside it, not a sibling with the same prefix', () => {
-    expect(reviewCovers('settings.json', 'settings.json')).toBe(true);
-    expect(reviewCovers('settings.json', 'settings.json.bak')).toBe(false);
-    expect(reviewCovers('skills/my-mod/', 'skills/my-mod/hooks/register.ts')).toBe(true);
-    expect(reviewCovers('skills/my-mod/', 'skills/my-mod-2/SKILL.md')).toBe(false);
+  it.each([
+    ['settings.json', 'settings.json', true],
+    ['settings.json', 'settings.json.bak', false],
+    ['skills/my-mod/', 'skills/my-mod/hooks/register.ts', true],
+    // A sibling whose path starts like the folder's is another folder.
+    ['skills/my-mod/', 'skills/my-mod-2/SKILL.md', false],
     // The folder's own path can only be a stray file of a tampered bundle: dropped with the plugin.
-    expect(reviewCovers('skills/my-mod/', 'skills/my-mod')).toBe(true);
+    ['skills/my-mod/', 'skills/my-mod', true],
+  ])('%s covers %s: %s', (file, path, covered) => {
+    expect(reviewCovers(file, path)).toBe(covered);
   });
 });

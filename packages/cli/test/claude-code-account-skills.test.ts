@@ -201,17 +201,20 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     expect(t.lines.at(-1)).toContain('Added mine as local skills.');
   });
 
-  it('no by default; --yes alone never adds them and never asks', async () => {
+  it('a no adds nothing', async () => {
     const no = run([saved('mine', 'Plain.')], {}, [false]);
     await no.done;
     await expect(skillFile('mine')).rejects.toThrow();
+  });
+
+  it('--yes alone never adds them and never asks', async () => {
     const yes = run([saved('mine', 'Plain.')], { assumeYes: true });
     await yes.done;
     expect(yes.asked).toEqual([]);
     await expect(skillFile('mine')).rejects.toThrow();
   });
 
-  it('--account-skills adds them without asking, but not one that runs commands unless --allow-commands', async () => {
+  it('--account-skills adds them without asking, but not one that runs commands', async () => {
     const files = [saved('mine', 'Plain.'), saved('runner', 'Run !`git status`')];
     const flag = run(files, { accountSkills: true });
     await flag.done;
@@ -220,7 +223,10 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     await expect(skillFile('runner')).rejects.toThrow();
     expect(flag.lines.join('\n')).toContain('runner  ⚠ runs commands');
     expect(flag.lines.join('\n')).toContain('Skipped runner: it runs commands as a local skill.');
+  });
 
+  it('--account-skills with --allow-commands adds one that runs commands too', async () => {
+    const files = [saved('mine', 'Plain.'), saved('runner', 'Run !`git status`')];
     const allowed = run(files, { accountSkills: true, allowCommands: true });
     await allowed.done;
     expect(await skillFile('runner')).toContain('git status');

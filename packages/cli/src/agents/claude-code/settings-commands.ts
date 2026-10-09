@@ -16,6 +16,9 @@ const HookSchema = z.looseObject({
 });
 const HookCommandSchema = z.looseObject({ command: z.string().optional() });
 
+/** One group of a hooks event: its `hooks` list, read by itself so a bad group hides no other. */
+const HookGroupSchema = z.looseObject({ hooks: z.array(z.unknown()).optional() });
+
 /**
  * One item of a settings `hooks` block: a hook, or a part of the block that could not be
  * read (`event` `null`: the whole block).
@@ -40,7 +43,7 @@ export function hookItems(hooks: unknown): HookItem[] {
       continue;
     }
     for (const group of groups) {
-      const parsed = z.looseObject({ hooks: z.array(z.unknown()).optional() }).safeParse(group);
+      const parsed = HookGroupSchema.safeParse(group);
       if (!parsed.success) {
         items.push({ event, unreadable: group });
         continue;

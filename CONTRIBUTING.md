@@ -124,7 +124,9 @@ open, such as a chat or an option letter from a discussion.
     and `dataKey`) and the real password checker (`useZxcvbnChecker`, then `zxcvbn`);
     collected files (`collected`, `collectedJson`, `paths`, `text`); files on disk
     (`writeTestFile`, `linkFolder`, `readText`, `readJson`, `exists`); a secret store
-    (`memorySecretStore`, `memorySecrets`), a scripted prompter (`scriptedPrompter`), a
+    (`memorySecretStore`, `memorySecrets`; logged in: `loggedInStore`, with `sessionKeys` for
+    the plan steps), a scripted prompter (`scriptedPrompter`, recording what was asked and the
+    choices offered), a
     recording reporter (`recordingReporter`), an env writer (`fakeEnvWriter`), a typed
     partial API client (`fakeApi`), a bundle server (`fakeBundleServer`, read with
     `storedOn` and `revisionOn`), a local state in a temporary folder (`localStateIn`), an
@@ -144,7 +146,7 @@ open, such as a chat or an option letter from a discussion.
     `writeGeneratedTypes` with `generatedTypesDir` for what Claude Code generates in it), what
     `claude plugin validate` says about one (`REAL_VALIDATE_REPORT`,
     `PROBE_MOD_VALIDATION`, `scriptedValidator`), and managed settings (`fakeManagedSystem` with
-    `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`).
+    `FakeManagedPc`, `remoteSettingsFile`, `noManagedSettings`, `fileManagedSettings`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).
   - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`

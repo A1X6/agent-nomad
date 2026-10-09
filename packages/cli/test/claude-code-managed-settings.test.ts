@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   fakeManagedSystem as fakeSystem,
   fileManagedSettings,
+  noManagedSettings,
+  remoteSettingsFile,
 } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import { recordingReporter } from './fakes.ts';
@@ -25,6 +27,8 @@ describe('finding managed settings', () => {
   it('uses the system folder Claude Code reads on each OS', () => {
     expect(managedSettingsDir('linux', {})).toBe('/etc/claude-code');
     expect(managedSettingsDir('darwin', {})).toBe('/Library/Application Support/ClaudeCode');
+    // Without ProgramFiles in the environment, the usual folder (review 17 QA-09).
+    expect(managedSettingsDir('win32', {})).toBe('C:\\Program Files\\ClaudeCode');
     expect(managedSettingsDir('win32', { ProgramFiles: 'D:\\Programs' })).toBe(
       'D:\\Programs\\ClaudeCode',
     );
@@ -131,7 +135,7 @@ describe('server-managed settings (claude.ai admin console)', () => {
       fakeSystem({
         platform: 'linux',
         files: {
-          '/home/a/.claude/remote-settings.json': JSON.stringify({
+          [remoteSettingsFile('linux')]: JSON.stringify({
             blockedMarketplaces: [{ source: 'github', repo: 'x/y' }],
           }),
         },
@@ -140,9 +144,7 @@ describe('server-managed settings (claude.ai admin console)', () => {
 
   it('are found through the copy Claude Code caches', async () => {
     const found = await blockingMarketplace();
-    expect(found.sources).toEqual([
-      { kind: 'remote', where: '/home/a/.claude/remote-settings.json' },
-    ]);
+    expect(found.sources).toEqual([{ kind: 'remote', where: remoteSettingsFile('linux') }]);
     expect(found.restrictsPlugins).toBe(true);
     expect(managedSettingsNotice(found, 'pull')).toContain('(the claude.ai admin console)');
   });
@@ -154,9 +156,30 @@ describe('server-managed settings (claude.ai admin console)', () => {
     );
   });
 
-  it('"blocked" in a network failure is the policy only when one is set here (review 16 UX-03)', async () => {
-    const network = 'connect ECONNREFUSED: request blocked by firewall';
-    expect(explainPluginFailure(network, null)).toBe(network);
+  // A policy word names the policy whatever is set here; a generic word only when one is
+  // (review 16 UX-03; as a table, review 17 QA-09).
+  const network = 'connect ECONNREFUSED: request blocked by firewall';
+  const notAllowed = 'install not allowed';
+  const policyWord = 'strictKnownMarketplaces forbids it';
+  const managed = (reason: string) =>
+    `blocked by your organization's Claude Code policy (/etc/claude-code/managed-settings.json). Ask your admin to allow it. Details: ${reason}`;
+  it.each([
+    ['a generic word, nothing managed', network, null, network],
+    ['a generic word, an empty cache', network, noManagedSettings, network],
+    ['"not allowed", nothing managed', notAllowed, null, notAllowed],
+    ['a generic word, managed', network, fileManagedSettings, managed(network)],
+    ['"not allowed", managed', notAllowed, fileManagedSettings, managed(notAllowed)],
+    [
+      'a policy word, nothing managed',
+      policyWord,
+      null,
+      `blocked by your organization's Claude Code policy. Ask your admin to allow it. Details: ${policyWord}`,
+    ],
+  ])('explains a failure: %s', (_case, reason, found, expected) => {
+    expect(explainPluginFailure(reason, found)).toBe(expected);
+  });
+
+  it('a generic word with the admin console cache names the console (review 16 UX-03)', async () => {
     expect(explainPluginFailure(network, await blockingMarketplace())).toBe(
       `blocked by your organization's Claude Code policy (the claude.ai admin console). Ask your admin to allow it. Details: ${network}`,
     );
@@ -164,7 +187,7 @@ describe('server-managed settings (claude.ai admin console)', () => {
 
   it('an empty cache means none are set', async () => {
     const found = await detectManagedSettings(
-      fakeSystem({ platform: 'linux', files: { '/home/a/.claude/remote-settings.json': '{}' } }),
+      fakeSystem({ platform: 'linux', files: { [remoteSettingsFile('linux')]: '{}' } }),
     );
     expect(found.sources).toEqual([]);
   });
@@ -177,6 +200,22 @@ describe('warnings (T31 done-when)', () => {
     expect(managedSettingsNotice(found, 'push')).toBe(
       'Your organization manages some Claude Code settings on this PC (/etc/claude-code/managed-settings.json). They stay with this PC and are not saved with your setup. They limit which plugins can be installed and which MCP servers can run, so some items may be blocked here.',
     );
+  });
+
+  it.each([
+    [
+      'plugins only',
+      { ...found, keys: ['strictKnownMarketplaces'], restrictsMcpServers: false },
+      'They limit which plugins can be installed, so some items may be blocked here.',
+    ],
+    [
+      'MCP servers only',
+      { ...found, keys: ['allowedMcpServers'], restrictsPlugins: false },
+      'They limit which MCP servers can run, so some items may be blocked here.',
+    ],
+  ])('names only the limit that is set: %s (review 17 QA-09)', (_case, settings, limit) => {
+    expect(managedSettingsNotice(settings, 'push')).toContain(limit);
+    expect(managedSettingsNotice(settings, 'push')).not.toContain(' and which ');
   });
 
   it('pull says they take priority', () => {

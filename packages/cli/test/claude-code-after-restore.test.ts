@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { noManagedSettings as noPolicy } from './claude-code-plugin-fixtures.ts';
+import {
+  fileManagedSettings,
+  noManagedSettings as noPolicy,
+} from './claude-code-plugin-fixtures.ts';
 import {
   collected,
   collectedJson,
@@ -11,20 +14,12 @@ import {
 
 import {
   createClaudeCodeAfterRestore,
-  type ProgramCli,
   type CollectedFile,
   type ExecutableLookupSystem,
   type FollowUpPlanContext,
   type ManagedSettings,
+  type ProgramCli,
 } from '../src/index.ts';
-
-/** Organization-managed settings, injected so no test reads this PC's (SOLID-01). */
-const blockedByPolicy: ManagedSettings = {
-  sources: [{ kind: 'file', where: '/etc/claude-code/managed-settings.json' }],
-  keys: ['strictKnownMarketplaces'],
-  restrictsPlugins: true,
-  restrictsMcpServers: false,
-};
 
 /** A saved `.agentnomad/plugins.json` with these marketplaces and plugins. */
 const savedPlugins = (marketplaces: object[], plugins: object[]) =>
@@ -51,9 +46,6 @@ function afterRestore(deps: {
     await followUp({ reporter: ctx.reporter });
   };
 }
-
-/** Only what after-restore reads (SOLID-06): the shared lookup fake (review 16 DUP-03). */
-const system = fakeExecutables;
 
 function context(files: CollectedFile[], answers: boolean[] = [true, true]) {
   const script = scriptedPrompter(answers);
@@ -90,7 +82,7 @@ describe('after a Claude Code restore', () => {
   it('offers to install a missing npm program, and names the others', async () => {
     const { cli, runs } = recordingCli();
     const t = context([programs]);
-    await afterRestore({ system: system(['/usr/bin/npm']), cli })(t.ctx);
+    await afterRestore({ system: fakeExecutables(['/usr/bin/npm']), cli })(t.ctx);
     expect(t.asked).toEqual([
       '"ccstatusline" is not installed here. Install it with `npm install -g ccstatusline@2.2.22`?',
     ]);
@@ -109,7 +101,7 @@ describe('after a Claude Code restore', () => {
     async (allow, ran) => {
       const { cli, runs } = recordingCli();
       const t = context([programs], []);
-      await afterRestore({ system: system(['/usr/bin/npm']), cli })({
+      await afterRestore({ system: fakeExecutables(['/usr/bin/npm']), cli })({
         ...t.ctx,
         assumeYes: true,
         allowCommands: allow,
@@ -128,7 +120,11 @@ describe('after a Claude Code restore', () => {
     const { cli, runs } = recordingCli();
     const t = context([programs]);
     await afterRestore({
-      system: system(['/usr/bin/npm', '/usr/bin/ccstatusline', '/usr/bin/terminal-notifier']),
+      system: fakeExecutables([
+        '/usr/bin/npm',
+        '/usr/bin/ccstatusline',
+        '/usr/bin/terminal-notifier',
+      ]),
       cli,
     })(t.ctx);
     expect(runs).toEqual([]);
@@ -140,7 +136,7 @@ describe('after a Claude Code restore', () => {
     async (pkg) => {
       const { cli, runs } = recordingCli();
       const bad = savedPrograms([{ command: 'x', npm: { package: pkg, version: '1.0.0' } }]);
-      await afterRestore({ system: system(['/usr/bin/npm']), cli })(context([bad]).ctx);
+      await afterRestore({ system: fakeExecutables(['/usr/bin/npm']), cli })(context([bad]).ctx);
       expect(runs).toEqual([]);
     },
   );
@@ -149,7 +145,7 @@ describe('after a Claude Code restore', () => {
     const { cli, runs } = recordingCli();
     const plugins = savedPlugins([{ name: 'brag', add: 'latent-spaces/brag' }], [brag]);
     const t = context([plugins]);
-    await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx);
+    await afterRestore({ system: fakeExecutables(['/usr/bin/claude']), cli })(t.ctx);
     expect(runs).toEqual([
       '/usr/bin/claude plugin marketplace add latent-spaces/brag',
       '/usr/bin/claude plugin install brag@brag --scope user --json',
@@ -161,7 +157,7 @@ describe('after a Claude Code restore', () => {
     const plugins = savedPlugins([], [{ id: 'build@market', scope: 'user', commandSource: true }]);
     const t = context([plugins, programs], [true, true, true]);
     const followUp = await createClaudeCodeAfterRestore({
-      system: system(['/usr/bin/claude', '/usr/bin/npm']),
+      system: fakeExecutables(['/usr/bin/claude', '/usr/bin/npm']),
       cli,
       managedSettings: () => Promise.resolve(noPolicy),
     })(t.ctx);
@@ -186,22 +182,53 @@ describe('after a Claude Code restore', () => {
         Promise.resolve({
           exitCode: 1,
           stdout: '',
-          stderr: `${path} ${args[1] ?? ''}: blocked by policy`,
+          // Only the generic word: the policy sentence needs the injected settings (QA-01).
+          stderr: `${path} ${args[1] ?? ''}: Marketplace brag is blocked`,
         }),
     });
     const t = context([plugins]);
     await afterRestore({
-      system: system(['/usr/bin/claude']),
+      system: fakeExecutables(['/usr/bin/claude']),
       cli: blocked,
-      managed: blockedByPolicy,
+      managed: fileManagedSettings,
     })(t.ctx);
-    expect(t.lines.join('\n')).toContain("blocked by your organization's Claude Code policy");
+    expect(t.lines.join('\n')).toContain(
+      "blocked by your organization's Claude Code policy (/etc/claude-code/managed-settings.json)",
+    );
+    // Without the injection the generic word is just what claude said (review 17 QA-01).
+    const unmanaged = context([plugins]);
+    await afterRestore({ system: fakeExecutables(['/usr/bin/claude']), cli: blocked })(
+      unmanaged.ctx,
+    );
+    expect(unmanaged.lines.join('\n')).not.toContain('Claude Code policy');
+    expect(unmanaged.lines.join('\n')).toContain('Marketplace brag is blocked');
+  });
+
+  it('says how to install a missing program by hand when npm is not here (review 17 QA-08)', async () => {
+    const { cli, runs } = recordingCli();
+    const t = context([programs]);
+    await afterRestore({ system: fakeExecutables([]), cli })(t.ctx);
+    expect(t.asked).toEqual([]);
+    expect(runs).toEqual([]);
+    expect(t.lines).toContain(
+      '"ccstatusline" is missing and npm was not found. Install it with: npm install -g ccstatusline@2.2.22',
+    );
+  });
+
+  it('reports an install that failed, with what npm said (review 17 QA-08)', async () => {
+    const failing = (): ProgramCli => ({
+      run: () =>
+        Promise.resolve({ exitCode: 1, stdout: '', stderr: 'EACCES: permission denied\n' }),
+    });
+    const t = context([programs]);
+    await afterRestore({ system: fakeExecutables(['/usr/bin/npm']), cli: failing })(t.ctx);
+    expect(t.lines).toContain('Could not install ccstatusline@2.2.22: EACCES: permission denied');
   });
 
   it('says so when Claude Code is not installed, instead of failing', async () => {
     const plugins = savedPlugins([], [brag]);
     const t = context([plugins]);
-    await afterRestore({ system: system([]), cli: recordingCli().cli })(t.ctx);
+    await afterRestore({ system: fakeExecutables([]), cli: recordingCli().cli })(t.ctx);
     expect(t.lines[0]).toContain('the claude command was not found');
   });
 });
@@ -217,7 +244,7 @@ describe('pull says when saved plugins or programs cannot be read (BUG-01)', () 
       [brag, { id: '.x@brag', scope: 'user', commandSource: false }],
     );
     const t = context([plugins]);
-    await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx);
+    await afterRestore({ system: fakeExecutables(['/usr/bin/claude']), cli })(t.ctx);
     expect(runs).toEqual([
       '/usr/bin/claude plugin marketplace add latent-spaces/brag',
       '/usr/bin/claude plugin install brag@brag --scope user --json',
@@ -235,7 +262,7 @@ describe('pull says when saved plugins or programs cannot be read (BUG-01)', () 
     const { cli, runs } = recordingCli();
     const file = collected('.agentnomad/plugins.json', text);
     const t = context([file]);
-    await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx);
+    await afterRestore({ system: fakeExecutables(['/usr/bin/claude']), cli })(t.ctx);
     expect(runs).toEqual([]);
     expect(t.lines.some((line) => line.startsWith('Saved plugins could not be read: '))).toBe(true);
   });
@@ -247,7 +274,7 @@ describe('pull says when saved plugins or programs cannot be read (BUG-01)', () 
       { command: 'ccstatusline', npm: { package: 'ccstatusline', version: '2.2.22' } },
     ]);
     const t = context([saved]);
-    await afterRestore({ system: system(['/usr/bin/npm']), cli })(t.ctx);
+    await afterRestore({ system: fakeExecutables(['/usr/bin/npm']), cli })(t.ctx);
     expect(runs).toEqual(['/usr/bin/npm install -g ccstatusline@2.2.22']);
     expect(
       t.lines.some(
@@ -260,7 +287,7 @@ describe('pull says when saved plugins or programs cannot be read (BUG-01)', () 
     const { cli } = recordingCli();
     const file = collected('.agentnomad/programs.json', '[]');
     const t = context([file]);
-    await afterRestore({ system: system(['/usr/bin/npm']), cli })(t.ctx);
+    await afterRestore({ system: fakeExecutables(['/usr/bin/npm']), cli })(t.ctx);
     expect(t.lines.some((line) => line.startsWith('Saved programs could not be read: '))).toBe(
       true,
     );

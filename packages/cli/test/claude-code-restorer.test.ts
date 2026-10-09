@@ -83,11 +83,16 @@ function restoreGlobal(
 }
 
 /** Restores `files` into the test's project, answering every conflict question `choice`. */
-function restoreProject(files: readonly CollectedFile[], choice: ConflictChoice) {
+function restoreProject(
+  files: readonly CollectedFile[],
+  choice: ConflictChoice,
+  context?: Parameters<ClaudeCodeRestorer['restore']>[3],
+) {
   return restorer().restore(
     { kind: 'project', projectDir: project },
     files,
     answer(choice).resolve,
+    context,
   );
 }
 
@@ -689,11 +694,27 @@ describe('restorer: per-OS fixes', () => {
     expect(report.warnings).toEqual([
       `This hook or status line came from ${otherOs} and will likely not run here: ${expected}`,
     ]);
-    // Nothing to warn about from the same OS.
+  });
+
+  it('has nothing to warn about when the setup came from the same OS', async () => {
+    const settings = JSON.stringify(stopHook('powershell -File C:/hooks/notify.ps1'));
     const same = await restoreGlobal([collected('settings.json', settings)], 'skip', {
       sourceOs: process.platform === 'darwin' ? 'darwin' : posix ? 'linux' : 'win32',
     });
     expect(same.warnings).toEqual([]);
+  });
+
+  it("warns about a project's hooks from another OS too, from both settings files (review 17 QA-07)", async () => {
+    const otherOs = posix ? 'win32' : 'linux';
+    const foreign = posix ? 'powershell -File C:/hooks/notify.ps1' : '~/.claude/hooks/check.sh';
+    const report = await restoreProject(
+      [collected('.claude/settings.local.json', JSON.stringify(stopHook(foreign)))],
+      'skip',
+      { sourceOs: otherOs },
+    );
+    expect(report.warnings).toEqual([
+      `This hook or status line came from ${otherOs} and will likely not run here: ${foreign}`,
+    ]);
   });
 
   it('shows a hook command with a line break on one warning line (SEC-01)', async () => {
@@ -809,14 +830,19 @@ describe('restorer: what pull asks before writing (T61)', () => {
     expect(conflicts[1]?.question).toEqual({ overwriteAllowed: true });
   });
 
-  it('reviews what runs in settings and the plugins in the skills folder, with the injected check (T96)', async () => {
-    const validator = scriptedValidator(PROBE_MOD_VALIDATION);
-    const r = restorer({ validatePlugin: validator.validate });
+  it('reviews what runs in settings: a new status line, not an unchanged one (T44)', async () => {
+    const r = restorer();
     const settings = collected('settings.json', statusLine('ccstatusline'));
     expect((await r.reviewRunnable([settings], [])).map((entry) => entry.label)).toEqual([
       'status line',
     ]);
     expect(await r.reviewRunnable([settings], [settings])).toEqual([]);
+  });
+
+  it('reviews the plugins in the skills folder with the settings, through the injected check (T96)', async () => {
+    const validator = scriptedValidator(PROBE_MOD_VALIDATION);
+    const r = restorer({ validatePlugin: validator.validate });
+    const settings = collected('settings.json', statusLine('ccstatusline'));
     const both = await r.reviewRunnable([settings, ...probeMod()], []);
     expect(both.map((entry) => entry.label)).toEqual([
       'status line',

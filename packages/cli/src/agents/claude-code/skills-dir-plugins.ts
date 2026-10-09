@@ -9,6 +9,11 @@ import {
   type JsonResult,
 } from '../../system/json.ts';
 import { hookEntries, serverEntries, unreadableEntry } from './command-review.ts';
+import {
+  PLUGIN_MANIFEST_PATH as MANIFEST_PATH,
+  PLUGIN_MCP_PATH as DEFAULT_MCP_PATH,
+  pluginFolderOf,
+} from './global-paths.ts';
 
 /*
  * Plugins and mods in the skills folder (T96). A folder in `skills/` (or a project's
@@ -20,37 +25,10 @@ import { hookEntries, serverEntries, unreadableEntry } from './command-review.ts
  * here; `plugin-validate.ts` runs Claude Code's own check.
  */
 
-/** A plugin's manifest file, from its folder. */
-const MANIFEST_PATH = '.claude-plugin/plugin.json';
-/** Where a plugin's hooks and MCP servers live unless the manifest names other sources. */
+/** Where a plugin's hooks live unless the manifest names other sources. */
 const DEFAULT_HOOKS_PATH = 'hooks/hooks.json';
-const DEFAULT_MCP_PATH = '.mcp.json';
 /** Why a named file could not be read, next to the parse problems `parseJsonWith` gives. */
 const NO_SUCH_FILE = 'no such file';
-
-/** A skill folder's bundle path prefix (`skills/` or `.claude/skills/`) and the plugin's name. */
-const PLUGIN_FOLDER = /^((?:\.claude\/)?skills\/)([^/]+)\//;
-
-/** The plugin folder a bundle path is in (`skills/<name>/`) and its name; `null` outside one. */
-function pluginFolderOf(path: string): { folder: string; name: string } | null {
-  const match = PLUGIN_FOLDER.exec(path);
-  const [, prefix, name] = match ?? [];
-  // `skills/synced/` is managed by claude.ai; never collected, and never a plugin of the setup.
-  if (prefix === undefined || name === undefined || name === 'synced') return null;
-  return { folder: `${prefix}${name}/`, name };
-}
-
-/**
- * A plugin's MCP sources known by path alone: its default `.mcp.json` and its manifest (inline
- * `mcpServers`), so the env scan sees their `${VAR}` references too (review 16 BUG-01). A file
- * the manifest names instead is only known once the manifest is read.
- */
-export function isPluginMcpSource(path: string): boolean {
-  const found = pluginFolderOf(path);
-  if (found === null) return false;
-  const inside = path.slice(found.folder.length);
-  return inside === DEFAULT_MCP_PATH || inside === MANIFEST_PATH;
-}
 
 const Json = JsonObjectSchema;
 /**

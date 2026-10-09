@@ -86,11 +86,21 @@ export interface FakeManagedPc {
 }
 
 /** Managed settings read from `pc` instead of this PC (SOLID-01). */
+/** The fake managed PC's Claude Code base folder. */
+const fakeBaseDir = (platform: NodeJS.Platform): string =>
+  platform === 'win32' ? 'C:\\Users\\a\\.claude' : '/home/a/.claude';
+
+/** Claude Code's cached copy of the claude.ai admin console settings on the fake PC (review 17 READ-10). */
+export const remoteSettingsFile = (platform: NodeJS.Platform): string =>
+  platform === 'win32'
+    ? `${fakeBaseDir(platform)}\\remote-settings.json`
+    : `${fakeBaseDir(platform)}/remote-settings.json`;
+
 export function fakeManagedSystem(pc: FakeManagedPc): ManagedSettingsSystem {
   return {
     platform: pc.platform,
     env: pc.env ?? {},
-    baseDir: pc.platform === 'win32' ? 'C:\\Users\\a\\.claude' : '/home/a/.claude',
+    baseDir: fakeBaseDir(pc.platform),
     readText: (path) => Promise.resolve(pc.files?.[path] ?? null),
     exists: (path) => Promise.resolve(path in (pc.files ?? {})),
     listDir: (path) => Promise.resolve(pc.dirs?.[path] ?? []),

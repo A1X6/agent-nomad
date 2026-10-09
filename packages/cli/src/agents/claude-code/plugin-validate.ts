@@ -1,14 +1,13 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-
 import { BundlePathSchema } from '@agentnomad/contracts';
 import * as z from 'zod';
 
+import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import type { ExecutableLookupSystem } from '../shared/detector-system.ts';
 import { findClaudeExecutable } from './detector.ts';
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
-import { createProgramCli, type ProgramCli } from './plugin-sync.ts';
+import { createProgramCli, type ProgramCli, type StartProgram } from './plugin-sync.ts';
 import { readValidateReport, type PluginValidator } from './skills-dir-plugins.ts';
 
 /*
@@ -22,6 +21,8 @@ export interface PluginValidatorDeps {
   readonly system: ExecutableLookupSystem;
   /** Runs a found program; injected for tests. */
   readonly cli?: (path: string) => ProgramCli;
+  /** How the default `cli` starts a program; injected to test what it asks for (review 17 QA-05). */
+  readonly start?: StartProgram;
   /** Where the plugin is written for the check; the OS temporary folder by default. */
   readonly tempDir?: string;
 }
@@ -49,7 +50,11 @@ function noReportReason(run: Awaited<ReturnType<ProgramCli['run']>>): string {
 export function createPluginValidator(deps: PluginValidatorDeps): PluginValidator {
   const cli =
     deps.cli ??
-    ((path: string) => createProgramCli(path, deps.system, { timeoutMs: VALIDATE_TIMEOUT_MS }));
+    ((path: string) =>
+      createProgramCli(path, deps.system, {
+        timeoutMs: VALIDATE_TIMEOUT_MS,
+        ...(deps.start !== undefined && { start: deps.start }),
+      }));
   return async (plugin) => {
     const claudePath = await findClaudeExecutable(deps.system);
     if (claudePath === null) {

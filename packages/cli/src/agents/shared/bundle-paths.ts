@@ -1,7 +1,7 @@
 /*
  * Rules for bundle paths (relative, `/`-separated), for any adapter (DUP-01): pure text, so
- * the pure modules may use them too (review 16 ARCH-01: the home-folder rules live here, not
- * in the file walker, so no pure module reaches `node:fs` through them).
+ * the pure modules may use them too; this module imports nothing and is held to the same lint
+ * rule as them (review 16 ARCH-01, review 17 ARCH-02).
  */
 
 /** Home folders for keys and cloud logins: never read for a setup, whatever links there. */

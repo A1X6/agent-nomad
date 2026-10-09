@@ -1,16 +1,18 @@
 import { readFile } from 'node:fs/promises';
 
+import { JsonObjectSchema } from '../../system/json.ts';
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 import {
   createFileGatherer,
   type FileGatherer,
   jsonFile,
   uniqueByPath,
 } from '../shared/file-gathering.ts';
-import { pathsOf } from '../shared/detector-system.ts';
-import { JsonObjectSchema } from '../../system/json.ts';
-import { commandsInSettings, programOf } from './settings-commands.ts';
+import { collectAccountSkills, readSyncedSkills } from './account-skills.ts';
+import { ClaudeJsonError } from './claude-json-merge.ts';
 import {
+  ACCOUNT_SKILLS_PART,
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
   CLAUDE_JSON_PREFERENCE_KEYS,
@@ -26,11 +28,10 @@ import {
   SKIPPED_NAMES,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
-import { ClaudeJsonError } from './claude-json-merge.ts';
-import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
+import { commandsInSettings, programOf } from './settings-commands.ts';
 
 export interface GlobalCollectorOptions {
   /** Claude Code's base folder, from the detector (`~/.claude` or `CLAUDE_CONFIG_DIR`). */

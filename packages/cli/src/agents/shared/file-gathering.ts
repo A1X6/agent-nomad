@@ -1,3 +1,4 @@
+import type { Stats } from 'node:fs';
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import type { PlatformPath } from 'node:path';
 
@@ -95,8 +96,10 @@ export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimi
     return null;
   }
 
-  async function fileEntry(nativePath: string, bundlePath: string) {
-    const info = await stat(nativePath);
+  /** The entry for a file known to exist, from the one stat its caller did (review 17 PERF-01). */
+  async function fileEntry(nativePath: string, bundlePath: string, info: Stats) {
+    const problem = await linkProblem(nativePath);
+    if (problem !== null) return skip(bundlePath, problem);
     if (info.size > MAX_FILE_BYTES) return skip(bundlePath, 'it is larger than 10 MB');
     return {
       path: bundlePath,
@@ -108,9 +111,7 @@ export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimi
 
   async function readIfFile(nativePath: string, bundlePath: string) {
     const info = await stat(nativePath).catch(() => null);
-    if (!info?.isFile()) return null;
-    const problem = await linkProblem(nativePath);
-    return problem === null ? fileEntry(nativePath, bundlePath) : skip(bundlePath, problem);
+    return info?.isFile() ? fileEntry(nativePath, bundlePath, info) : null;
   }
 
   async function walk(
@@ -145,7 +146,7 @@ export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimi
       if (info?.isDirectory()) {
         files.push(...(await walk(nativePath, bundlePath, excluded, seen)));
       } else if (info?.isFile()) {
-        const file = await readIfFile(nativePath, bundlePath);
+        const file = await fileEntry(nativePath, bundlePath, info);
         if (file) files.push(file);
       }
     }

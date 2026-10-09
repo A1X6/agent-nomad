@@ -7,6 +7,21 @@
 
 **How it was done:** four reviewers each read one part of the scope line by line (the adapter source; the commands, e2e step and docs; the plugin, fixture, after-restore and managed-settings tests; the command, collector, account-skills and env tests), checked every review-16 fix in their files, and confirmed each finding at exact lines, running the behavioural ones. The orchestrator re-confirmed every one of the 51 findings the reviewers returned: the behavioural claims were re-run against the built package (`packages/cli/dist`), the rest re-read at the quoted lines or re-grepped, and each was checked against `30eb20f` for whether it is new or pre-existing. Five pairs reported by two reviewers were merged, the orchestrator's own cross-file pass (import graph, transitive `node:*` reach of the pure modules) added two, and one test-shape finding was re-filed as QA. Nothing a reviewer reported was dropped as unconfirmed.
 
+## After the fixes (2026-10-09, same day)
+
+All 46 findings are fixed on the review branch `review-reports` in one change; every box
+below is ticked and `files.md` reads `fixed` for every file that had a finding. New since the
+review: the plugin path rules (`pluginFolderOf`, `pluginMcpFileKind`, `PLUGIN_MANIFEST_PATH`,
+`PLUGIN_MCP_PATH`) and the account-skills bundle paths live in `global-paths.ts`, which ends the
+cycle and the pure modules' reach to `node:fs` (ARCH-01, ARCH-02); `EnvReferenceFiles` takes
+`mcpFileKind` in place of `isMcpFile`, and the scan reads a manifest's server list and a
+wrapper-less `.mcp.json` as the plugin review does (BUG-01, UX-01); pull asks about an accepted
+plugin folder's differing files once, as the folder (BUG-02); `projectFolderRefusalFor` in
+`cli/project-folder.ts`; `test/import-cycles.test.ts` pins the import graph; `loggedInStore`,
+`sessionKeys`, `fakeBaseDir`, `remoteSettingsFile` and an `offered` record on the scripted
+prompter in the shared fixtures; a `start` dependency on the plugin validator. READ-12 pins the
+behaviour as it is: a skill folder linked to a synced skill is collected under its own name.
+
 ## Summary
 
 The 37 review-16 fixes are in place and 34 of them are correct and complete. Three left something behind, and those are the findings to read first: the env-scan fix reads a plugin's `.mcp.json` and manifest but still drops a manifest `mcpServers` **array** and any file the manifest names (BUG-01), and it created the one import cycle in the CLI package, `env-files → skills-dir-plugins → command-review → env-files` (ARCH-01); and the pure-module fix moved the home-folder rules out of the file walker but `restore-rules.ts` still reaches `node:fs` through its import of `account-skills.ts`, while the new comment says it does not (ARCH-02). The remaining 12 new points are small: a stale comment the UX-03 fix stacked on top of the old one, four comment lines over the width the same commit fixed elsewhere, a test moved as-is instead of into a table, a doc pairing that names the wrong test, and one message label the new env test pins at its less useful wording.
@@ -64,7 +79,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### BUG-01 · Medium · The env scan still drops `${VAR}` in a manifest `mcpServers` array and in a file the manifest names
 
-- [ ] **Where:** `packages/cli/src/env/env-references.ts:68-81` (`JsonObjectSchema.safeParse(json['mcpServers'])`, then `rest` built without the key whatever its shape); `packages/cli/src/agents/claude-code/skills-dir-plugins.ts:44-53` (`isPluginMcpSource` knows the default file and the manifest only)
+- [x] **Where:** `packages/cli/src/env/env-references.ts:68-81` (`JsonObjectSchema.safeParse(json['mcpServers'])`, then `rest` built without the key whatever its shape); `packages/cli/src/agents/claude-code/skills-dir-plugins.ts:44-53` (`isPluginMcpSource` knows the default file and the manifest only)
 - **Problem:** The review-16 BUG-01 fix made the scan read a plugin's `.mcp.json` and manifest, but the scan takes `mcpServers` only when it is an object and removes the key from `rest` even when it is not, so a manifest declaring `mcpServers: ['./servers.json', { inline: {…} }]` (a shape the manifest reference allows and `ServersFieldSchema` accepts) loses its inline servers' references; `./servers.json` itself is not a path the rule knows. Confirmed against the built package: a manifest with that array, a `servers.json` with `${T_NAMED_FILE}`, a plugin `.mcp.json` with `${T_BARE}` and a root `.mcp.json` with `${T_ROOT}` scan to `T_BARE` and `T_ROOT` only.
 - **Why it matters:** The review-16 finding was that push offers to save nothing for a plugin's servers while pull's review shows them; for the array shape and named files that is still true.
 - **Fix:** Keep the key in `rest` when it is not an object (`const rest = servers.success ? withoutServers : json`), or walk an array's object items as servers. For named files, either let `isMcpFile` accept any `*.json` under a plugin folder, or say in ADDING-AN-AGENT `:245-250` and ARCHITECTURE `:326`, `:808` that only the default file and the manifest are read. Add the array case to `env.test.ts` (QA-14).
@@ -73,7 +88,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### BUG-02 · Low · A yes to a changed plugin can still be split by per-file conflict questions
 
-- [ ] **Where:** `packages/cli/src/pull/pull-command.ts:389` (`for (const conflict of adapter.restorer.conflicts(files, current))`), `packages/cli/src/agents/claude-code/restorer.ts:243-266` (`conflicts` has no rule for a plugin folder)
+- [x] **Where:** `packages/cli/src/pull/pull-command.ts:389` (`for (const conflict of adapter.restorer.conflicts(files, current))`), `packages/cli/src/agents/claude-code/restorer.ts:243-266` (`conflicts` has no rule for a plugin folder)
 - **Problem:** The review asks about a plugin as one unit ("a plugin is accepted or left out as a whole", pinned at `pull-command.test.ts:912`). After a yes to a changed mod, each differing file of the folder is still asked about on its own as a conflict (`register.ts already exists here and is different`); a `skip` on one of them leaves the new manifest and hooks file next to the old module, so what `claude plugin validate` checked is not what runs. Reasoned from the code; no test runs the yes-to-a-changed-mod path (QA-10).
 - **Why it matters:** The promise the review line makes is about the folder; the conflict step does not know the folder.
 - **Fix:** Decide the rule and pin it: either the conflict step treats the files of a reviewed plugin folder as one question (overwrite or skip the folder), or the review line says a changed plugin's differing files are asked about one by one.
@@ -84,7 +99,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### PERF-01 · Low · The walker stats every file three times
 
-- [ ] **Where:** `packages/cli/src/agents/shared/file-gathering.ts:144` (`walk`), `:110` (`readIfFile`), `:99` (`fileEntry`), plus `realpath` at `:76`
+- [x] **Where:** `packages/cli/src/agents/shared/file-gathering.ts:144` (`walk`), `:110` (`readIfFile`), `:99` (`fileEntry`), plus `realpath` at `:76`
 - **Problem:** `walk` stats to tell a folder from a file, `readIfFile` stats again for `isFile()`, `fileEntry` stats a third time for size and mode. Pre-existing; the shape review 16 PERF-01 fixed in the restorer.
 - **Fix:** Pass the `Stats` the walk already has into an internal `readEntry(nativePath, bundlePath, info)` that `readIfFile` also uses after its one stat.
 - **Effort:** S
@@ -92,7 +107,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### PERF-02 · Low · A Zod schema is built per hook group inside the loop
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/settings-commands.ts:43` (`z.looseObject({ hooks: z.array(z.unknown()).optional() }).safeParse(group)`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/settings-commands.ts:43` (`z.looseObject({ hooks: z.array(z.unknown()).optional() }).safeParse(group)`)
 - **Problem:** Its siblings `HookSchema` and `HookCommandSchema` (`:11-17`) are module constants. Pre-existing.
 - **Fix:** Hoist to `const HookGroupSchema = …`.
 - **Effort:** S
@@ -102,7 +117,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### UX-01 · Low · A wrapper-less plugin `.mcp.json` labels its variables by file, not by server
 
-- [ ] **Where:** `packages/cli/src/env/env-references.ts:68-81` vs `packages/cli/src/agents/claude-code/skills-dir-plugins.ts:103-105` (`serversIn`); pinned at `packages/cli/test/env.test.ts:109`
+- [x] **Where:** `packages/cli/src/env/env-references.ts:68-81` vs `packages/cli/src/agents/claude-code/skills-dir-plugins.ts:103-105` (`serversIn`); pinned at `packages/cli/test/env.test.ts:109`
 - **Problem:** The plugin review reads a file without the `mcpServers` wrapper as the server map; the env scan reads it through `rest`, so `agentnomad env` shows `skills/gh/.mcp.json` for one file and `MCP server p (.claude/skills/p/.mcp.json)` for another that differs only by the wrapper. The review-16 BUG-01 test pins the less useful label. Confirmed by probe: `T_BARE → ['skills/gh/.mcp.json']`, `T_ROOT → ['MCP server root (.mcp.json)']`.
 - **Fix:** When `isMcpFile(path)` is true and the file has no `mcpServers` key, treat the whole object as the server map (share `serversIn`); the test then expects `MCP server gh (skills/gh/.mcp.json)`.
 - **Effort:** S
@@ -110,7 +125,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### UX-02 · Low · Pull's `--agent` message names no next step, unlike push's
 
-- [ ] **Where:** `packages/cli/src/pull/pull-command.ts:136` (`No saved setup for agent "${id}".`); `packages/cli/src/push/push-command.ts:136` (`Unknown agent "${id}". Run \`agentnomad agents\` to see the supported ones.`)
+- [x] **Where:** `packages/cli/src/pull/pull-command.ts:136` (`No saved setup for agent "${id}".`); `packages/cli/src/push/push-command.ts:136` (`Unknown agent "${id}". Run \`agentnomad agents\` to see the supported ones.`)
 - **Problem:** Pull cannot tell an unknown id from a known agent with nothing saved, and gives no command to run. Pre-existing.
 - **Fix:** `No saved setup for agent "${id}". Run \`agentnomad list\` to see what is saved, or \`agentnomad agents\` for the supported ids.`
 - **Effort:** S
@@ -120,7 +135,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### DEAD-01 · Low · A name check that can never decide
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/account-skills.ts:35-40` (`!name.toLowerCase().startsWith('anthropic-skills:')`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/account-skills.ts:35-40` (`!name.toLowerCase().startsWith('anthropic-skills:')`)
 - **Problem:** `SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/` admits no `:`, so any name reaching that term has already failed the regex (`SKILL_NAME.test('anthropic-skills:x')` is `false`). Pre-existing.
 - **Fix:** Drop the term, or explain the prefix in `RESERVED_NAMES`' comment.
 - **Effort:** S
@@ -128,7 +143,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### DEAD-02 · Low · `pushFrom`'s `prompter` option and `keysOf`'s parameter are never passed
 
-- [ ] **Where:** `packages/cli/test/pull-command.test.ts:89` (`prompter?: Prompter`, used at `:96`), `:152` (`const keysOf = (secrets = loggedIn()) => …`, one call as `keysOf()` at `:518`)
+- [x] **Where:** `packages/cli/test/pull-command.test.ts:89` (`prompter?: Prompter`, used at `:96`), `:152` (`const keysOf = (secrets = loggedIn()) => …`, one call as `keysOf()` at `:518`)
 - **Problem:** Every `prompter:` in the file goes to `pullOn`; `keysOf` takes no argument anywhere. Pre-existing.
 - **Fix:** Drop the option; make `keysOf` a constant (see DUP-04).
 - **Effort:** S
@@ -136,7 +151,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### DEAD-03 · Low · `adapter()`'s `installed` parameter in the env-command tests is never used
 
-- [ ] **Where:** `packages/cli/test/env.test.ts:625-640` (`installed = true`), the one call at `:647`
+- [x] **Where:** `packages/cli/test/env.test.ts:625-640` (`installed = true`), the one call at `:647`
 - **Problem:** The `installed: false` branch of `createEnvCommand` is untested while the helper reads as if it covers it. Pre-existing.
 - **Fix:** Add `it('leaves out an agent that is not installed here')` passing `false`, or drop the parameter.
 - **Effort:** S
@@ -146,7 +161,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### DUP-01 · Low · The two lifted restorer helpers select and decode the settings files the same way
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:159-161` (`allowedScriptsOf`), `:180-181` (`otherOsWarnings`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:159-161` (`allowedScriptsOf`), `:180-181` (`otherOsWarnings`)
 - **Problem:** `incoming.filter((entry) => settingsFilesOf(target).includes(entry.path))` then `new TextDecoder().decode(entry.content)` in both, created by the review-16 REF-01 lift.
 - **Fix:** One `settingsTextsOf(target, incoming)` used by both.
 - **Effort:** S
@@ -154,7 +169,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### DUP-02 · Low · The project-folder refusal block is written twice
 
-- [ ] **Where:** `packages/cli/src/pull/pull-command.ts:162-172`; `packages/cli/src/push/push-command.ts:161-171` (identical but for the comment's wording); also `createPathResolver({ os: sourceOsOf(deps.platform), homeDir: deps.homedir })` at `pull:327` and `push:322`
+- [x] **Where:** `packages/cli/src/pull/pull-command.ts:162-172`; `packages/cli/src/push/push-command.ts:161-171` (identical but for the comment's wording); also `createPathResolver({ os: sourceOsOf(deps.platform), homeDir: deps.homedir })` at `pull:327` and `push:322`
 - **Problem:** Eleven lines per command; `env/env-command.ts`, the third importer of `projectFolderRefusal`, would copy them next. Pre-existing.
 - **Fix:** `projectFolderRefusalFor(deps, agent, options)` in `cli/project-folder.ts`, throwing `ProjectFolderError` when `--project` is set.
 - **Effort:** S
@@ -162,7 +177,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### DUP-03 · Low · `blockedByPolicy` re-spells the fixtures' `fileManagedSettings`
 
-- [ ] **Where:** `packages/cli/test/claude-code-after-restore.test.ts:22-27`; `packages/cli/test/claude-code-plugin-fixtures.ts:102-107`
+- [x] **Where:** `packages/cli/test/claude-code-after-restore.test.ts:22-27`; `packages/cli/test/claude-code-plugin-fixtures.ts:102-107`
 - **Problem:** Same source and `restrictsPlugins`; the keys differ only by `allowedMcpServers`. `claude-code-managed-settings.test.ts:174` already imports the fixture for the same purpose. Pre-existing.
 - **Fix:** Import `fileManagedSettings` and delete the local (QA-01 uses its `where`).
 - **Effort:** S
@@ -170,7 +185,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### DUP-04 · Low · The logged-in secret store and the keys object are built in five test files
 
-- [ ] **Where:** `packages/cli/test/pull-command.test.ts:63`, `:152`; `packages/cli/test/push-command.test.ts:55`, `:557`, `:581`; `packages/cli/test/agent-boundary.test.ts:199`; `packages/cli/test/setup-commands.test.ts:91`; `packages/cli/test/auth-commands.test.ts:803`
+- [x] **Where:** `packages/cli/test/pull-command.test.ts:63`, `:152`; `packages/cli/test/push-command.test.ts:55`, `:557`, `:581`; `packages/cli/test/agent-boundary.test.ts:199`; `packages/cli/test/setup-commands.test.ts:91`; `packages/cli/test/auth-commands.test.ts:803`
 - **Problem:** `memorySecretStore({ loggedIn: dataKey })` as a one-liner in five files, two under different signatures; `{ secrets, crypto, dataKey }` as a helper once and inline twice. `fakes.ts` already owns `memorySecretStore`, `crypto` and `dataKey`. Pre-existing.
 - **Fix:** `loggedInStore(key = dataKey)` and `sessionKeys(secrets = loggedInStore())` in `fakes.ts`; list both in CONTRIBUTING.
 - **Effort:** S
@@ -180,7 +195,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-01 · Low · Comment and doc lines over the 100-column width, added by the fix commit
 
-- [ ] **Where:** `packages/cli/src/agents/adapter.ts:139` (106 columns), `packages/cli/src/agents/claude-code/global-paths.ts:9` (115), `packages/cli/src/agents/claude-code/managed-settings.ts:176` (110), `packages/cli/src/agents/claude-code/restorer.ts:209` (120); `docs/ADDING-AN-AGENT.md:246` (104, a bullet among bullets wrapped near 95)
+- [x] **Where:** `packages/cli/src/agents/adapter.ts:139` (106 columns), `packages/cli/src/agents/claude-code/global-paths.ts:9` (115), `packages/cli/src/agents/claude-code/managed-settings.ts:176` (110), `packages/cli/src/agents/claude-code/restorer.ts:209` (120); `docs/ADDING-AN-AGENT.md:246` (104, a bullet among bullets wrapped near 95)
 - **Problem:** The shape review 16 READ-10 fixed, added back by the same commit (`.prettierrc` `printWidth: 100`; Prettier does not rewrap comments or prose).
 - **Fix:** Rewrap the five lines.
 - **Effort:** S
@@ -188,7 +203,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-02 · Low · A stale doc comment left stacked above `POLICY_WORDS`
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/managed-settings.ts:172-173`
+- [x] **Where:** `packages/cli/src/agents/claude-code/managed-settings.ts:172-173`
 - **Problem:** `/** Words Claude Code uses when a plugin install is refused by policy. */` (the old one) directly followed by `/** Words that name the organization's policy itself. */` (the new one); only the second is the doc.
 - **Fix:** Delete line 172.
 - **Effort:** S
@@ -196,7 +211,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-03 · Low · ARCHITECTURE pairs `cli/project-folder.ts` with a test that cannot reach it
 
-- [ ] **Where:** `docs/ARCHITECTURE.md:657` (`cli/flags.ts` and `cli/project-folder.ts` (`program.test.ts`))
+- [x] **Where:** `docs/ARCHITECTURE.md:657` (`cli/flags.ts` and `cli/project-folder.ts` (`program.test.ts`))
 - **Problem:** `program.ts` imports `flags.ts` but not `project-folder.ts`, whose importers are the pull, push and env commands; `program.test.ts` has no `ProjectFolder` mention. The bullet is the review-16 READ-03 fix, whose point is telling a reader where a module is covered.
 - **Fix:** "`cli/flags.ts` (`program.test.ts`), `cli/project-folder.ts` (the push, pull and env command tests)".
 - **Effort:** S
@@ -204,7 +219,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-04 · Low · The "covered through their callers" bullet still leaves one module out
 
-- [ ] **Where:** `docs/ARCHITECTURE.md:654-659`; `CONTRIBUTING.md:168-170`
+- [x] **Where:** `docs/ARCHITECTURE.md:654-659`; `CONTRIBUTING.md:168-170`
 - **Problem:** `agents/claude-code/reviewed-settings.ts` has no test file named after it, falls under none of the four groups, and is covered through `claude-code-command-review.test.ts` and `claude-code-drift.test.ts`.
 - **Fix:** Add it to the bullet.
 - **Effort:** S
@@ -212,7 +227,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-05 · Low · The reserved-entries table says home files come back "only if the setup's own hooks run them"
 
-- [ ] **Where:** `docs/ARCHITECTURE.md:187`; `packages/cli/src/agents/claude-code/restore-rules.ts:73` (`TOOL_CONFIG_PATHS.has(relative) || allowedScripts.has(…)`)
+- [x] **Where:** `docs/ARCHITECTURE.md:187`; `packages/cli/src/agents/claude-code/restore-rules.ts:73` (`TOOL_CONFIG_PATHS.has(relative) || allowedScripts.has(…)`)
 - **Problem:** A known tool's settings file is restored whether or not a hook runs it, as the same document says at `:374-375`. Pre-existing.
 - **Fix:** "Written back to the home folder: a script only if the setup's own hooks or status line run it, a tool's settings file when it is one of the known ones."
 - **Effort:** S
@@ -220,7 +235,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-06 · Low · CONTRIBUTING says the e2e run has "three simulated PCs"; there are four
 
-- [ ] **Where:** `CONTRIBUTING.md:33`; `packages/e2e/src/steps.ts` (`newPc` four times, the fourth a stale PC)
+- [x] **Where:** `CONTRIBUTING.md:33`; `packages/e2e/src/steps.ts` (`newPc` four times, the fourth a stale PC)
 - **Problem:** ARCHITECTURE `:563` counts the stale PC; CONTRIBUTING does not. Pre-existing.
 - **Fix:** "(three steps on four simulated PCs)".
 - **Effort:** S
@@ -228,7 +243,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-07 · Low · `yesOption` is an arrow constant among `function` siblings
 
-- [ ] **Where:** `packages/cli/src/cli/program.ts:86`
+- [x] **Where:** `packages/cli/src/cli/program.ts:86`
 - **Problem:** The four other option builders are function declarations with a JSDoc line; this one is the only arrow and the only one without a comment. Pre-existing.
 - **Fix:** A documented `function yesOption()`.
 - **Effort:** S
@@ -236,7 +251,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-08 · Low · Aliases, shadowed constants and a magic count in the skills-dir tests
 
-- [ ] **Where:** `packages/cli/test/claude-code-skills-dir-plugins.test.ts:14-15` (`const MOD = PROBE_MOD_FOLDER; const mod = probeMod;`), `:258-259` (`stop` and `docs` redefined inside an `it`, identical to the describe-level ones), `:45` (`toHaveLength(5)`)
+- [x] **Where:** `packages/cli/test/claude-code-skills-dir-plugins.test.ts:14-15` (`const MOD = PROBE_MOD_FOLDER; const mod = probeMod;`), `:258-259` (`stop` and `docs` redefined inside an `it`, identical to the describe-level ones), `:45` (`toHaveLength(5)`)
 - **Problem:** Two names for each fixture; the inner constants shadow the outer ones; `5` is manifest, hooks file, two modules and `.mcp.json`, which nothing says.
 - **Fix:** Use the fixture names directly; delete the inner constants; assert the five paths.
 - **Effort:** S
@@ -244,7 +259,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-09 · Low · `const system = fakeExecutables` hides the shared fake under a local name in two files
 
-- [ ] **Where:** `packages/cli/test/claude-code-plugin-validate.test.ts:19`; `packages/cli/test/claude-code-after-restore.test.ts:55-56`
+- [x] **Where:** `packages/cli/test/claude-code-plugin-validate.test.ts:19`; `packages/cli/test/claude-code-after-restore.test.ts:55-56`
 - **Problem:** Every call site reads `system([...])`, so a grep for `fakeExecutables(` misses them, which is how review 16 DUP-03 happened.
 - **Fix:** Call `fakeExecutables([...])` at the sites.
 - **Effort:** S
@@ -252,7 +267,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-10 · Low · The fake managed PC's base folder is a hidden constant retyped three times
 
-- [ ] **Where:** `packages/cli/test/claude-code-plugin-fixtures.ts:93` (`baseDir: … '/home/a/.claude'`); `packages/cli/test/claude-code-managed-settings.test.ts:134`, `:144`, `:167` (`'/home/a/.claude/remote-settings.json'`)
+- [x] **Where:** `packages/cli/test/claude-code-plugin-fixtures.ts:93` (`baseDir: … '/home/a/.claude'`); `packages/cli/test/claude-code-managed-settings.test.ts:134`, `:144`, `:167` (`'/home/a/.claude/remote-settings.json'`)
 - **Problem:** The remote-cache tests depend on a folder the fixture hard-codes and does not export. Pre-existing.
 - **Fix:** Export a `remoteSettingsFile(platform)` helper from the fixtures.
 - **Effort:** S
@@ -260,7 +275,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-11 · Low · `isPluginGenerated` tests sit under "paths data file", but the function lives in `global-paths.ts`
 
-- [ ] **Where:** `packages/cli/test/claude-code-paths-data.test.ts:14`, `:22-44`; `packages/cli/src/agents/claude-code/global-paths.ts:96-108`; `docs/ARCHITECTURE.md:654-658` (lists `global-paths.ts` as covered through callers)
+- [x] **Where:** `packages/cli/test/claude-code-paths-data.test.ts:14`, `:22-44`; `packages/cli/src/agents/claude-code/global-paths.ts:96-108`; `docs/ARCHITECTURE.md:654-658` (lists `global-paths.ts` as covered through callers)
 - **Problem:** The `describe` and the file name say the data file; the doc says the module has no direct test while this file tests it directly. Pre-existing.
 - **Fix:** A `describe('global-paths: …')` in this file and a sentence in ARCHITECTURE, or a `claude-code-global-paths.test.ts`.
 - **Effort:** S
@@ -268,7 +283,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-12 · Low · A title promises a link case the test does not set up
 
-- [ ] **Where:** `packages/cli/test/claude-code-global-collector.test.ts:116-122` ("never takes skills/synced/, even through a link or a hook")
+- [x] **Where:** `packages/cli/test/claude-code-global-collector.test.ts:116-122` ("never takes skills/synced/, even through a link or a hook")
 - **Problem:** The body writes two plain files and a hook; there is no `linkFolder` call. Pre-existing (T91).
 - **Fix:** Drop "through a link", or add the link under `describe.runIf(posix)` and pin what the collector does with it.
 - **Effort:** S
@@ -276,7 +291,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### READ-13 · Low · Imports out of the sibling order in five source files and two test files
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/claude-code-adapter.ts:5`, `:24`; `command-review.ts:5`, `:15-20`; `plugin-validate.ts:10`; `global-collector.ts:10-11`; `restorer.ts:24-41`; `packages/cli/test/env.test.ts:16-45`; `packages/cli/test/pull-command.test.ts:38-59`
+- [x] **Where:** `packages/cli/src/agents/claude-code/claude-code-adapter.ts:5`, `:24`; `command-review.ts:5`, `:15-20`; `plugin-validate.ts:10`; `global-collector.ts:10-11`; `restorer.ts:24-41`; `packages/cli/test/env.test.ts:16-45`; `packages/cli/test/pull-command.test.ts:38-59`
 - **Problem:** The prevailing shape (externals, blank line, internals sorted by path) is not followed in these; review 16 READ-10 treated one such import as a finding. No lint rule orders imports. Pre-existing.
 - **Fix:** Reorder, or add an import-order rule so it is never a review item again.
 - **Effort:** S
@@ -286,7 +301,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### REF-01 · Low · `it`s that run a second scenario after the first
 
-- [ ] **Where:** `packages/cli/test/pull-command.test.ts:941-968` (the project-mod test the review-16 QA-01 fix rewrote: a `--yes` pull, then an `--allow-commands` pull, the exact shape REF-03 split for its global twins), `:421-429`, `:466-486`, `:534-560`, `:665-686`; `packages/cli/test/push-command.test.ts:301-314`; `packages/cli/test/claude-code-account-skills.test.ts:204-212`, `:214-227`; `packages/cli/test/env.test.ts:512-561` (one test for the three cases that `:563-593` splits into three), `:160-167`; `packages/cli/test/claude-code-skills-dir-plugins.test.ts:88-96`, `:153-178`, `:180-203` (two finding IDs in one `it`), `:273-278`, `:299-306`; `packages/cli/test/claude-code-restorer.test.ts:674-697`, `:812-826`; `packages/cli/test/claude-code-adapter.test.ts:97-106`, `:123-150`
+- [x] **Where:** `packages/cli/test/pull-command.test.ts:941-968` (the project-mod test the review-16 QA-01 fix rewrote: a `--yes` pull, then an `--allow-commands` pull, the exact shape REF-03 split for its global twins), `:421-429`, `:466-486`, `:534-560`, `:665-686`; `packages/cli/test/push-command.test.ts:301-314`; `packages/cli/test/claude-code-account-skills.test.ts:204-212`, `:214-227`; `packages/cli/test/env.test.ts:512-561` (one test for the three cases that `:563-593` splits into three), `:160-167`; `packages/cli/test/claude-code-skills-dir-plugins.test.ts:88-96`, `:153-178`, `:180-203` (two finding IDs in one `it`), `:273-278`, `:299-306`; `packages/cli/test/claude-code-restorer.test.ts:674-697`, `:812-826`; `packages/cli/test/claude-code-adapter.test.ts:97-106`, `:123-150`
 - **Problem:** CONTRIBUTING asks for one behaviour per test; a failure in the second half reports under the first half's title. Reviews 15 and 16 each split some; these remain, and the project-mod test gained a second pull instead of a split.
 - **Fix:** Split the project-mod test (`pushedProjectMod()` like `pushedMod()`) and the T56 env test now; the rest when touched (`it.each` fits the skills-dir pairs).
 - **Effort:** S per test
@@ -296,7 +311,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### BP-01 · Low · Per-call array spreads in the destination rules
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/restore-rules.ts:105` (`[...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].some(…)`), `:137` (`[...PROJECT_CLAUDE_FOLDERS, ...PROJECT_MEMORY_FOLDERS]`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/restore-rules.ts:105` (`[...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].some(…)`), `:137` (`[...PROJECT_CLAUDE_FOLDERS, ...PROJECT_MEMORY_FOLDERS]`)
 - **Problem:** Both destination functions rebuild the list on every call (one per bundle entry), against the lookup-table convention review 16 DUP-01 applied two lines up. Pre-existing.
 - **Fix:** Two module constants.
 - **Effort:** S
@@ -304,7 +319,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### BP-02 · Low · The `reviewCovers` rule test is five `expect`s, not a table
 
-- [ ] **Where:** `packages/cli/test/adapter.test.ts:10-17`
+- [x] **Where:** `packages/cli/test/adapter.test.ts:10-17`
 - **Problem:** CONTRIBUTING asks for table tests for rules; the review-16 BP-03 move copied the `it` unchanged.
 - **Fix:** `it.each([[file, path, expected], …])`.
 - **Effort:** S
@@ -314,7 +329,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### ARCH-01 · Medium · The env-scan fix introduced an import cycle
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/env-files.ts:4` (`import { isPluginMcpSource } from './skills-dir-plugins.ts'`) → `skills-dir-plugins.ts:11` (`from './command-review.ts'`) → `command-review.ts:7` (`import { MCP_FILES, SETTINGS_FILES } from './env-files.ts'`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/env-files.ts:4` (`import { isPluginMcpSource } from './skills-dir-plugins.ts'`) → `skills-dir-plugins.ts:11` (`from './command-review.ts'`) → `command-review.ts:7` (`import { MCP_FILES, SETTINGS_FILES } from './env-files.ts'`)
 - **Problem:** Before the fix `env-files.ts` imported only the two path views; review 16's header states "import cycles none", which is no longer true (`madge --circular` reports exactly this one). It is harmless today only because `isPluginMcpSource` is a hoisted function declaration; the first `const` export added to the loop would throw at module evaluation.
 - **Why it matters:** The pure modules are the ones the lint block protects most carefully; a cycle among them breaks silently at load time, and the review's own invariant is gone.
 - **Fix:** Move the plugin path rules (`PLUGIN_FOLDER`, `pluginFolderOf`, `MANIFEST_PATH`, `DEFAULT_MCP_PATH`, `isPluginMcpSource`) into `global-paths.ts` next to `isPluginGenerated` (path rules, no file access); `skills-dir-plugins.ts` and `env-files.ts` import them from there. Add a cycle check to `pnpm check` (a short script over `packages/cli/src`).
@@ -323,7 +338,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### ARCH-02 · Low · `restore-rules.ts` still reaches `node:fs` through `account-skills.ts`, and the new pure home is not lint-covered
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/restore-rules.ts:28` (`import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts'`), `account-skills.ts:1` (`node:fs/promises`); `packages/cli/src/agents/shared/bundle-paths.ts:2-4` ("so no pure module reaches `node:fs` through them"); `eslint.config.js:105-114`
+- [x] **Where:** `packages/cli/src/agents/claude-code/restore-rules.ts:28` (`import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts'`), `account-skills.ts:1` (`node:fs/promises`); `packages/cli/src/agents/shared/bundle-paths.ts:2-4` ("so no pure module reaches `node:fs` through them"); `eslint.config.js:105-114`
 - **Problem:** Review 16 ARCH-01 closed the path through `global-paths.ts`, but a reachability pass over the import graph shows `restore-rules.ts → account-skills.ts → node:fs/promises` (the other three pure modules reach no `node:*`). The import is pre-existing; the comment that declares the problem closed is new. `bundle-paths.ts`, now described as the pure modules' helper, sits outside the pure lint block.
 - **Fix:** Move `ACCOUNT_SKILLS_PREFIX` (and `ACCOUNT_SKILLS_PART`) to `global-paths.ts` next to the other reserved bundle paths and import them from there in `account-skills.ts`, `restore-rules.ts`, `global-collector.ts` and `claude-code-adapter.ts`; add `bundle-paths.ts` to the pure lint block; make the comment say what is true.
 - **Effort:** S
@@ -333,7 +348,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-01 · Medium · The "injected managed settings" plugin-failure test passes with no injection
 
-- [ ] **Where:** `packages/cli/test/claude-code-after-restore.test.ts:182-199`; `packages/cli/src/agents/claude-code/managed-settings.ts:174-185`
+- [x] **Where:** `packages/cli/test/claude-code-after-restore.test.ts:182-199`; `packages/cli/src/agents/claude-code/managed-settings.ts:174-185`
 - **Problem:** The fake `claude` answers `…: blocked by policy`; `policy` is in `POLICY_WORDS`, which rewrites the reason whatever `found` is, and the test asserts only the generic sentence (`toContain("blocked by your organization's Claude Code policy")`). With `managed: undefined`, or with `deps.managedSettings()` removed from `after-restore.ts:94`, the test stays green. It is the only test of the `explainFailure: (reason) => explainPluginFailure(reason, managed)` wiring. Pre-existing; after review 16's UX-03 the parenthesised source is the one observable of the injection, and it is what the test does not look at.
 - **Fix:** Assert the source too (`… policy (/etc/claude-code/managed-settings.json)`), or use a stderr with only a generic word (`… is blocked`) so the sentence appears only when `managed` is set; use `fileManagedSettings` (DUP-03).
 - **Effort:** S
@@ -341,7 +356,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-02 · Medium · Pull's agent and scope choosers and their error messages run in no test
 
-- [ ] **Where:** `packages/cli/src/pull/pull-command.ts:136` (`No saved setup for agent "${id}".`), `:144-152` ("Which agents?"), `:194-198` ("what to restore?"), `:203` (`There is no saved … global setup.`), `:219-231` ("Which project?" with the `saved from this folder` hint), `:321-322` (`versionNotice` warning), `:437` (`None of the saved setups are for an agent agentnomad supports here.`)
+- [x] **Where:** `packages/cli/src/pull/pull-command.ts:136` (`No saved setup for agent "${id}".`), `:144-152` ("Which agents?"), `:194-198` ("what to restore?"), `:203` (`There is no saved … global setup.`), `:219-231` ("Which project?" with the `saved from this folder` hint), `:321-322` (`versionNotice` warning), `:437` (`None of the saved setups are for an agent agentnomad supports here.`)
 - **Problem:** Each string has zero hits in the test files (the `Which agents?`/`Which project?` hits in `no-terminal-prompter.test.ts` and `program.test.ts` are the no-terminal error path); `multiselect` appears nowhere in `pull-command.test.ts`; every pull test saves one project and registers one agent. Pre-existing.
 - **Why it matters:** The two-project chooser is the path every user with two saved projects takes; the messages are what a user reads after a typo in `--agent` or a `--global` with only projects saved (UX-02 is one such drift).
 - **Fix:** Push two projects from two folders and pull without `--project` in the second, answering by `scopeKey`; an `it.each` over the three messages; one test with two fake adapters answering the multiselect; one with `versionNotice` returning a string.
@@ -350,7 +365,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-03 · Medium · Push's agent chooser, name validation, part messages and skip notices run in no test
 
-- [ ] **Where:** `packages/cli/src/push/push-command.ts:136` (`Unknown agent "${id}"…`), `:139` (`… is not installed on this PC.`), `:147-155` ("Which agents?"), `:195-201` (the project-name `validate` and the `basename(deps.cwd)` fallback), `:263` (`part.unreadable(found.problem)`), `:269` (`part.noneFound`), `:298` (`${describe(item)}: left out` from `onSkipped`), `:309` (`Nothing to save for the …`), `:385` (`No supported agent is installed on this PC…`)
+- [x] **Where:** `packages/cli/src/push/push-command.ts:136` (`Unknown agent "${id}"…`), `:139` (`… is not installed on this PC.`), `:147-155` ("Which agents?"), `:195-201` (the project-name `validate` and the `basename(deps.cwd)` fallback), `:263` (`part.unreadable(found.problem)`), `:269` (`part.noneFound`), `:298` (`${describe(item)}: left out` from `onSkipped`), `:309` (`Nothing to save for the …`), `:385` (`No supported agent is installed on this PC…`)
 - **Problem:** Zero hits for each in the test files; `collectingAdapter`'s `collect` never calls `onSkipped`; every project-name answer is valid and non-empty; `agent-boundary.test.ts:109-110` defines `unreadable` and `noneFound` for its part but asserts neither. Pre-existing.
 - **Why it matters:** "Nothing to save" and "left out" are the two messages a user sees most on a fresh PC or with a large file in a skill; the name validation is the one place push turns typing into a scope key.
 - **Fix:** An `it.each` for the three agent errors; `collectingAdapter({ global: [] })` pinning `Nothing to save`; a collector calling `onSkipped` pinning `left out`; answers `['project', 'bad name!', 'ok-name', false]` pinning one rejection and the saved name, and `''` → `basename`; a part whose `available()` returns a problem.
@@ -359,7 +374,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-04 · Low · `isPluginMcpSource` has no test in its module's file and its negatives are unpinned
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/skills-dir-plugins.ts:48-53`; `packages/cli/test/claude-code-skills-dir-plugins.test.ts` (no occurrence)
+- [x] **Where:** `packages/cli/src/agents/claude-code/skills-dir-plugins.ts:48-53`; `packages/cli/test/claude-code-skills-dir-plugins.test.ts` (no occurrence)
 - **Problem:** Reached only through `env.test.ts:92-116` with three positives and one unrelated negative. Unpinned: `skills/synced/.mcp.json` → false, `skills/gh/servers.json` → false, `skills/gh/hooks/hooks.json` → false.
 - **Fix:** An `it.each` over those paths in the module's test file (or in `claude-code-paths-data.test.ts` if the rule moves with ARCH-01).
 - **Effort:** S
@@ -367,7 +382,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-05 · Low · The validator's default `cli` and the 60 s timeout are never exercised
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/plugin-validate.ts:30`, `:50-52`; every `createPluginValidator` call in `packages/cli/test/claude-code-plugin-validate.test.ts` passes `cli`
+- [x] **Where:** `packages/cli/src/agents/claude-code/plugin-validate.ts:30`, `:50-52`; every `createPluginValidator` call in `packages/cli/test/claude-code-plugin-validate.test.ts` passes `cli`
 - **Problem:** The `'it did not finish within 60 seconds'` table row is a scripted string, not the timeout's result; the branch that builds the real `ProgramCli` runs in no test. `createProgramCli` already takes `start?: StartProgram`. Pre-existing.
 - **Fix:** Let `PluginValidatorDeps` take an optional `start` passed through, and one test recording the `timeoutMs` (60 000) and the args.
 - **Effort:** S
@@ -375,7 +390,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-06 · Low · Some destination branches of `restore-rules.ts` are pinned nowhere
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/restore-rules.ts:211` (project `not a safe path`), `:177` (`claude-json`), `:190-193` (`GLOBAL_MEMORY_FOLDERS`); `packages/cli/test/claude-code-restore-rules.test.ts:115-127` (no `../` row in the project table)
+- [x] **Where:** `packages/cli/src/agents/claude-code/restore-rules.ts:211` (project `not a safe path`), `:177` (`claude-json`), `:190-193` (`GLOBAL_MEMORY_FOLDERS`); `packages/cli/test/claude-code-restore-rules.test.ts:115-127` (no `../` row in the project table)
 - **Problem:** `projectDestination('../x')` is never asserted; the `claude-json` kind is reached only through the restorer's tests; a global `agent-memory/<name>/MEMORY.md` is never restored in any test. Pre-existing.
 - **Fix:** A `../outside.md` row in the project table; one acceptance table (`settings.json`, `agent-memory/a/MEMORY.md`, `.agentnomad/claude.json`).
 - **Effort:** S
@@ -383,7 +398,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-07 · Low · `otherOsWarnings` is never run for a project target
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:173-186`; `packages/cli/test/claude-code-restorer.test.ts:674-712` (both other-OS tests use `restoreGlobal`; `restoreProject` at `:86-92` takes no context)
+- [x] **Where:** `packages/cli/src/agents/claude-code/restorer.ts:173-186`; `packages/cli/test/claude-code-restorer.test.ts:674-712` (both other-OS tests use `restoreGlobal`; `restoreProject` at `:86-92` takes no context)
 - **Problem:** A foreign hook in `.claude/settings.json` with `sourceOs` set is never shown to produce the warning; the project half of the lifted function is untested. Pre-existing.
 - **Fix:** Give `restoreProject` an optional context and one test with a `powershell` hook in `.claude/settings.local.json` and `sourceOs: 'win32'`.
 - **Effort:** S
@@ -391,7 +406,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-08 · Low · Two program-install branches of `after-restore.ts` have no test
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/after-restore.ts:127-133` (`… npm was not found. Install it with: npm install -g …`), `:150-155` (`Could not install ${spec}: …`); `packages/cli/test/claude-code-after-restore.test.ts` (every `recordingCli` answers exit code 0)
+- [x] **Where:** `packages/cli/src/agents/claude-code/after-restore.ts:127-133` (`… npm was not found. Install it with: npm install -g …`), `:150-155` (`Could not install ${spec}: …`); `packages/cli/test/claude-code-after-restore.test.ts` (every `recordingCli` answers exit code 0)
 - **Problem:** Neither message appears in any test. Pre-existing.
 - **Fix:** One test with no `npm` on PATH and a programs file; one with a cli answering `exitCode: 1, stderr: 'EACCES'`.
 - **Effort:** S
@@ -399,7 +414,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-09 · Low · `explainPluginFailure` and `managedSettingsNotice` branches left unpinned
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/managed-settings.ts:174-185`, `:155-168`, `:63-67`; `packages/cli/test/claude-code-managed-settings.test.ts:150-163`, `:176-186`, `:25-31`
+- [x] **Where:** `packages/cli/src/agents/claude-code/managed-settings.ts:174-185`, `:155-168`, `:63-67`; `packages/cli/test/claude-code-managed-settings.test.ts:150-163`, `:176-186`, `:25-31`
 - **Problem:** Unpinned: a policy word with `found === null` (rewritten with no source); `not allowed` (in `BLOCKED_WORDS`, in no test); `found` with empty `sources` and a blocked word (the shape after-restore passes on an unmanaged PC; only `null` is tested); the notice with one limit; `managedSettingsDir('win32', {})`'s default. Pre-existing.
 - **Fix:** Extend the UX-03 test into an `it.each` over `[reason, found, expected]`; one notice row per limit set.
 - **Effort:** S
@@ -407,7 +422,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-10 · Low · "a yes to the review writes the mod" asserts less than its siblings, and no test accepts a changed mod
 
-- [ ] **Where:** `packages/cli/test/pull-command.test.ts:915-922`; the changed-mod case only as a "no" at `:924-939`
+- [x] **Where:** `packages/cli/test/pull-command.test.ts:915-922`; the changed-mod case only as a "no" at `:924-939`
 - **Problem:** The yes test checks `asked` and the files, but not `validator.asked`, not the absence of `warn:` lines, not the neighbour and `CLAUDE.md` (all pinned by siblings). No test says yes to a changed mod, which is where BUG-02 lives.
 - **Fix:** Add the three assertions; add a yes-to-a-changed-mod test with answers `[true, 'overwrite']` and pin the outcome.
 - **Effort:** S
@@ -415,7 +430,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-11 · Low · Two global-collector branches have no case
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/global-collector.ts:96-99` (`findProgram` returning `null` → `{ command, npm: null }`), `:130-131` (`~/.claude.json` that is JSON but not an object → `ClaudeJsonError`); `packages/cli/test/claude-code-global-collector.test.ts`
+- [x] **Where:** `packages/cli/src/agents/claude-code/global-collector.ts:96-99` (`findProgram` returning `null` → `{ command, npm: null }`), `:130-131` (`~/.claude.json` that is JSON but not an object → `ClaudeJsonError`); `packages/cli/test/claude-code-global-collector.test.ts`
 - **Problem:** No test's `findProgram` returns `null`; the one `ClaudeJsonError` case is half-written JSON, so the array branch is untested. Pre-existing.
 - **Fix:** `collectWith(() => Promise.resolve(null))` with a hook naming a program; `'[]'` in `~/.claude.json`.
 - **Effort:** S
@@ -423,7 +438,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-12 · Low · Project hooks in `.claude/settings.local.json` are never collected in a test
 
-- [ ] **Where:** `packages/cli/src/agents/claude-code/project-collector.ts:110-120`; `packages/cli/test/claude-code-project-collector.test.ts:109-138` (hooks only in `.claude/settings.json`; `settings.local.json` appears only as an empty file at `:38`, `:72`)
+- [x] **Where:** `packages/cli/src/agents/claude-code/project-collector.ts:110-120`; `packages/cli/test/claude-code-project-collector.test.ts:109-138` (hooks only in `.claude/settings.json`; `settings.local.json` appears only as an empty file at `:38`, `:72`)
 - **Problem:** The global twin pins the two-settings-files case (T86); the project one does not. Pre-existing.
 - **Fix:** A hook in `.claude/settings.local.json` running `scripts/local.py`, and the script in the expected list.
 - **Effort:** S
@@ -431,7 +446,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-13 · Low · `scanEnvReferences` with no `envReferences` is untested
 
-- [ ] **Where:** `packages/cli/src/env/env-references.ts:55` (`if (references === undefined) return …`); every call in `packages/cli/test/env.test.ts` and `push-command.test.ts` passes `CLAUDE_ENV_REFERENCES`
+- [x] **Where:** `packages/cli/src/env/env-references.ts:55` (`if (references === undefined) return …`); every call in `packages/cli/test/env.test.ts` and `push-command.test.ts` passes `CLAUDE_ENV_REFERENCES`
 - **Problem:** `AgentAdapter.envReferences` is optional, so an agent without it goes through this branch on every push. Pre-existing.
 - **Fix:** `expect(scanEnvReferences([mcpJson], undefined)).toEqual({ variables: [], setBySettings: new Set() })`.
 - **Effort:** S
@@ -439,7 +454,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-14 · Low · No test for a manifest `mcpServers` array or a manifest-named MCP file in the env scan
 
-- [ ] **Where:** `packages/cli/test/env.test.ts:92-116`
+- [x] **Where:** `packages/cli/test/env.test.ts:92-116`
 - **Problem:** The review-16 BUG-01 test covers the default `.mcp.json` in both scopes and an inline manifest map, which is why BUG-01 passed.
 - **Fix:** Add the array case (and the named-file case once BUG-01 decides it).
 - **Effort:** S
@@ -447,7 +462,7 @@ Nothing found blocks merging the review branch into `dev`; the cycle is harmless
 
 ### QA-15 · Low · The exit-code paragraph and the `--allow-commands` example in the help are pinned by no test
 
-- [ ] **Where:** `packages/cli/src/cli/program.ts:37-38`, `:42-46`; `packages/cli/test/program.test.ts:104-106` (asserts only `over ${formatSize(MAX_BUNDLE_BYTES)}`)
+- [x] **Where:** `packages/cli/src/cli/program.ts:37-38`, `:42-46`; `packages/cli/test/program.test.ts:104-106` (asserts only `over ${formatSize(MAX_BUNDLE_BYTES)}`)
 - **Problem:** The review-16 READ-04 fix changed both texts; `never asked about` and `or mods` have zero hits in `program.test.ts`, so the README and help pairing is kept by hand only.
 - **Fix:** Extend the `--help` test with `toContain('or a file pull')` and a match for "plugins … or mods" that tolerates the wrap.
 - **Effort:** S
