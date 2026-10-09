@@ -1,6 +1,7 @@
 import type { AgentId, SourceOs } from '@agentnomad/contracts';
 
 import type { Prompter, Reporter } from '../ui/prompter.ts';
+import { underFolder } from './shared/bundle-paths.ts';
 
 /** Where a setup lives on this PC: the agent's global folder, or one project folder. */
 export type ScopeTarget =
@@ -126,7 +127,7 @@ export interface ReviewedEntry extends RunnableEntry {
 
 /** Whether a reviewed entry's `file` (a file, or a folder ending in `/`) covers `path`. */
 export const reviewCovers = (file: string, path: string): boolean =>
-  file === path || (file.endsWith('/') && path.startsWith(file));
+  file.endsWith('/') ? underFolder(path, file.slice(0, -1)) : file === path;
 
 /**
  * Where an agent's setup refers to environment variables as `${VAR}` (T30): push offers to

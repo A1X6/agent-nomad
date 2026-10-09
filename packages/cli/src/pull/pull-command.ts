@@ -355,7 +355,7 @@ export function createPullPlanner(deps: PullDeps) {
           (file) => !blocked.some((covered) => reviewCovers(covered, file.path)),
         );
         reporter.warn(
-          `Skipped ${[...blocked].map(printableLine).join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
+          `Skipped ${blocked.map(printableLine).join(', ')}: they hold those commands or are run by them. The rest is restored.${options.yes ? ' --yes never accepts new commands; add --allow-commands to accept them.' : ''}`,
         );
       }
     }

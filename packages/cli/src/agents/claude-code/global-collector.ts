@@ -21,6 +21,7 @@ import {
   GLOBAL_FOLDERS,
   GLOBAL_MEMORY_FOLDERS,
   HOME_SCRIPTS_PREFIX,
+  isPluginGenerated,
   NEVER_SYNCED,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
@@ -32,7 +33,6 @@ import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './a
 import { hookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
-import { isPluginGenerated } from './skills-dir-plugins.ts';
 
 export interface GlobalCollectorOptions {
   /** Claude Code's base folder, from the detector (`~/.claude` or `CLAUDE_CONFIG_DIR`). */

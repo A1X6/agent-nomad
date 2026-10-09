@@ -20,12 +20,12 @@ import {
   PROGRAMS_BUNDLE_PATH,
   homePathProblem,
   extensionOf,
+  isPluginGenerated,
   isScript,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
 import { underFolder } from '../shared/bundle-paths.ts';
 import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts';
-import { isPluginGenerated } from './skills-dir-plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
   PROJECT_CLAUDE_FILES,

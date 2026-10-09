@@ -84,8 +84,9 @@ const entry = (file: string, label: string, command: string, identity = slashes(
  * A part of a file that cannot be read as Claude Code expects (SEC-01): shown as its JSON,
  * so pull still asks about it instead of leaving it out of the review.
  */
-const unreadable = (file: string, label: string, value: unknown) =>
+export const unreadableEntry = (file: string, label: string, value: unknown): RunnableEntry =>
   entry(file, `${label} (unreadable)`, stable(value), stable(value));
+const unreadable = unreadableEntry;
 
 /** An MCP server as shown: what runs or where it connects, plus what else it carries. */
 function describeServer(server: Record<string, unknown>): string {

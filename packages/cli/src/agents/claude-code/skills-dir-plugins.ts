@@ -3,8 +3,7 @@ import * as z from 'zod';
 
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
-import { hookEntries, serverEntries } from './command-review.ts';
-import { PLUGIN_GENERATED_PATHS } from './global-paths.ts';
+import { hookEntries, serverEntries, unreadableEntry } from './command-review.ts';
 
 /*
  * Plugins and mods in the skills folder (T96). A folder in `skills/` (or a project's
@@ -22,33 +21,27 @@ const MANIFEST_PATH = '.claude-plugin/plugin.json';
 const DEFAULT_HOOKS_PATH = 'hooks/hooks.json';
 const DEFAULT_MCP_PATH = '.mcp.json';
 
-/** The bundle path is or is inside something Claude Code generates in a plugin folder (T95). */
-export function isPluginGenerated(bundlePath: string): boolean {
-  const segments = bundlePath.split('/');
-  return PLUGIN_GENERATED_PATHS.some((generated) => {
-    const parts = generated.split('/');
-    for (let start = 0; start + parts.length <= segments.length; start += 1) {
-      if (parts.every((part, index) => segments[start + index] === part)) return true;
-    }
-    return false;
-  });
-}
-
 /** A skill folder's bundle path prefix (`skills/` or `.claude/skills/`) and the plugin's name. */
 const PLUGIN_FOLDER = /^((?:\.claude\/)?skills\/)([^/]+)\//;
 
+/** The plugin folder a bundle path is in (`skills/<name>/`) and its name; `null` outside one. */
+function pluginFolderOf(path: string): { folder: string; name: string } | null {
+  const match = PLUGIN_FOLDER.exec(path);
+  const [, prefix, name] = match ?? [];
+  // `skills/synced/` is managed by claude.ai; never collected, and never a plugin of the setup.
+  if (prefix === undefined || name === undefined || name === 'synced') return null;
+  return { folder: `${prefix}${name}/`, name };
+}
+
 const Json = z.record(z.string(), z.unknown());
 /**
- * The manifest fields this module reads, in the shapes Claude Code's manifest reference
- * gives: `hooks` is a file path, an inline event map, or an array mixing both; `mcpServers`
- * is a `.json` file path, an MCP bundle path or URL (`.mcpb`, `.dxt`), an inline map, or an
- * array mixing them.
+ * The manifest fields this module reads, each on its own (SEC-01), in the shapes Claude Code's
+ * manifest reference gives: `hooks` is a file path, an inline event map, or an array mixing
+ * both; `mcpServers` is a `.json` file path, an MCP bundle path or URL (`.mcpb`, `.dxt`), an
+ * inline map, or an array mixing them.
  */
-const ManifestSchema = z.looseObject({
-  hooks: z.union([z.string(), Json, z.array(z.union([z.string(), Json]))]).optional(),
-  mcpServers: z.union([z.string(), Json, z.array(z.union([z.string(), Json]))]).optional(),
-});
-const HooksFileSchema = z.looseObject({ modules: z.array(z.string()).optional() });
+const HooksFieldSchema = z.union([z.string(), Json, z.array(z.union([z.string(), Json]))]);
+const ServersFieldSchema = HooksFieldSchema;
 
 /** Hooks a plugin declares: the event map, and where it came from. */
 interface HooksSource {
@@ -63,6 +56,12 @@ type ServerSource =
   /** An MCP bundle, as a path inside the plugin or a URL: code Claude Code downloads or extracts. */
   | { readonly label: string; readonly bundle: string };
 
+/** A part of a plugin that could not be read as Claude Code expects; shown, never dropped. */
+interface Unreadable {
+  readonly label: string;
+  readonly value: unknown;
+}
+
 /** One plugin folder among a setup's files. */
 export interface PluginFolder {
   /** Bundle path of the folder, with its trailing slash: `skills/<name>/`. */
@@ -74,6 +73,7 @@ export interface PluginFolder {
   readonly servers: readonly ServerSource[];
   /** Hooks modules the plugin names: code that runs inside Claude Code (a mod). */
   readonly modules: readonly string[];
+  readonly unreadable: readonly Unreadable[];
 }
 
 /** A path the manifest names, relative to the plugin folder (`./hooks/x.json` → `hooks/x.json`). */
@@ -81,79 +81,120 @@ const insideFolder = (relative: string) => relative.replace(/^\.\//, '');
 
 const isBundle = (value: string) => /\.(mcpb|dxt)$/i.test(value) || /^https?:\/\//i.test(value);
 
-/** A JSON object file of the plugin, or `null`. */
-const jsonFileOf = (byPath: ReadonlyMap<string, CollectedFile>, relative: string) => {
-  const file = byPath.get(relative);
-  return file === undefined ? null : valueOrNull(parseJsonWith(Json, file.content));
-};
-
 /** An MCP file's servers: under `mcpServers`, or the whole file when the wrapper is left out. */
 const serversIn = (json: Record<string, unknown>) =>
   'mcpServers' in json ? json['mcpServers'] : json;
+
+/** Reads one plugin folder's declarations, one part at a time: a bad part hides no other (SEC-01). */
+function readPlugin(folder: string, name: string, inside: readonly CollectedFile[]): PluginFolder {
+  const byPath = new Map(inside.map((file) => [file.path.slice(folder.length), file]));
+  const hooks: HooksSource[] = [];
+  const servers: ServerSource[] = [];
+  const modules: string[] = [];
+  const unreadable: Unreadable[] = [];
+  const read = new Set<string>();
+
+  /** A JSON object file of the plugin; `undefined` when there is no such file, `null` when not JSON. */
+  const jsonFileOf = (relative: string) => {
+    const file = byPath.get(relative);
+    return file === undefined ? undefined : valueOrNull(parseJsonWith(Json, file.content));
+  };
+
+  // A hooks file wraps the event map in `hooks` (a file without the wrapper does not load) and
+  // may name `modules`. A file named twice (the manifest naming the default) is read once.
+  const hooksFile = (relative: string, named: boolean) => {
+    if (read.has(relative)) return;
+    read.add(relative);
+    const json = jsonFileOf(relative);
+    if (json === undefined) {
+      if (named) unreadable.push({ label: relative, value: 'no such file' });
+      return;
+    }
+    if (json === null) {
+      unreadable.push({ label: relative, value: 'not JSON' });
+      return;
+    }
+    hooks.push({ label: relative, hooks: json['hooks'] });
+    const list = json['modules'];
+    if (list === undefined) return;
+    const names = Array.isArray(list) ? list.filter((item) => typeof item === 'string') : [];
+    modules.push(...names);
+    if (!Array.isArray(list) || names.length !== list.length) {
+      unreadable.push({ label: `${relative} modules`, value: list });
+    }
+  };
+  hooksFile(DEFAULT_HOOKS_PATH, false);
+
+  const manifest = jsonFileOf(MANIFEST_PATH);
+  if (manifest === null || manifest === undefined) {
+    unreadable.push({ label: MANIFEST_PATH, value: 'not JSON' });
+  } else {
+    // Each field on its own: a bad `hooks` never hides a valid `mcpServers`.
+    const hooksField = HooksFieldSchema.safeParse(manifest['hooks']);
+    if (manifest['hooks'] !== undefined && !hooksField.success) {
+      unreadable.push({ label: `${MANIFEST_PATH} hooks`, value: manifest['hooks'] });
+    }
+    const declaredHooks = hooksField.success ? hooksField.data : undefined;
+    for (const item of Array.isArray(declaredHooks) ? declaredHooks : [declaredHooks]) {
+      if (typeof item === 'string') hooksFile(insideFolder(item), true);
+      // An inline object is the event map itself, with no wrapper.
+      else if (item !== undefined) hooks.push({ label: MANIFEST_PATH, hooks: item });
+    }
+
+    const serversField = ServersFieldSchema.safeParse(manifest['mcpServers']);
+    if (manifest['mcpServers'] !== undefined && !serversField.success) {
+      unreadable.push({ label: `${MANIFEST_PATH} mcpServers`, value: manifest['mcpServers'] });
+    }
+    const declaredServers = serversField.success ? serversField.data : undefined;
+    for (const item of Array.isArray(declaredServers) ? declaredServers : [declaredServers]) {
+      if (item === undefined) continue;
+      if (typeof item !== 'string') servers.push({ label: MANIFEST_PATH, servers: item });
+      else if (isBundle(item)) servers.push({ label: MANIFEST_PATH, bundle: item });
+      else {
+        const relative = insideFolder(item);
+        if (read.has(relative)) continue;
+        read.add(relative);
+        const json = jsonFileOf(relative);
+        // A file that is not there or not JSON is shown as it is named, never dropped.
+        servers.push({ label: relative, servers: json ? serversIn(json) : item });
+      }
+    }
+  }
+  if (!read.has(DEFAULT_MCP_PATH)) {
+    const mcpJson = jsonFileOf(DEFAULT_MCP_PATH);
+    if (mcpJson === null) unreadable.push({ label: DEFAULT_MCP_PATH, value: 'not JSON' });
+    else if (mcpJson !== undefined) {
+      servers.push({ label: DEFAULT_MCP_PATH, servers: serversIn(mcpJson) });
+    }
+  }
+  return {
+    folder,
+    name,
+    files: inside,
+    hooks,
+    servers,
+    modules: [...new Set(modules)],
+    unreadable,
+  };
+}
 
 /**
  * The plugin folders among `files`: each `skills/<name>/` with a manifest, with the hooks and
  * MCP servers it declares (the default files, and whatever the manifest names) and its modules.
  */
 export function pluginFolders(files: readonly CollectedFile[]): PluginFolder[] {
-  const byFolder = new Map<string, CollectedFile[]>();
+  const byFolder = new Map<string, { name: string; files: CollectedFile[] }>();
   for (const file of files) {
-    const match = PLUGIN_FOLDER.exec(file.path);
-    if (match === null || match[2] === 'synced') continue;
-    const folder = `${match[1] ?? ''}${match[2] ?? ''}/`;
-    byFolder.set(folder, [...(byFolder.get(folder) ?? []), file]);
+    const found = pluginFolderOf(file.path);
+    if (found === null) continue;
+    const group = byFolder.get(found.folder);
+    if (group) group.files.push(file);
+    else byFolder.set(found.folder, { name: found.name, files: [file] });
   }
   const plugins: PluginFolder[] = [];
-  for (const [folder, inside] of byFolder) {
-    const manifestFile = inside.find((file) => file.path === folder + MANIFEST_PATH);
-    if (manifestFile === undefined) continue;
-    const byPath = new Map(inside.map((file) => [file.path.slice(folder.length), file]));
-    const manifest = valueOrNull(parseJsonWith(ManifestSchema, manifestFile.content));
-
-    const hooks: HooksSource[] = [];
-    const modules: string[] = [];
-    // A hooks file wraps the event map in `hooks` (a file without the wrapper does not load).
-    const hooksFile = (relative: string) => {
-      const json = jsonFileOf(byPath, relative);
-      if (json === null) return;
-      hooks.push({ label: relative, hooks: json['hooks'] });
-      const named = HooksFileSchema.safeParse(json);
-      if (named.success) modules.push(...(named.data.modules ?? []));
-    };
-    hooksFile(DEFAULT_HOOKS_PATH);
-    const declaredHooks = manifest?.hooks;
-    for (const item of Array.isArray(declaredHooks) ? declaredHooks : [declaredHooks]) {
-      if (typeof item === 'string') hooksFile(insideFolder(item));
-      // An inline object is the event map itself, with no wrapper.
-      else if (item !== undefined) hooks.push({ label: MANIFEST_PATH, hooks: item });
-    }
-
-    const servers: ServerSource[] = [];
-    const mcpJson = jsonFileOf(byPath, DEFAULT_MCP_PATH);
-    if (mcpJson !== null) servers.push({ label: DEFAULT_MCP_PATH, servers: serversIn(mcpJson) });
-    const declaredServers = manifest?.mcpServers;
-    for (const item of Array.isArray(declaredServers) ? declaredServers : [declaredServers]) {
-      if (item === undefined) continue;
-      if (typeof item !== 'string') servers.push({ label: MANIFEST_PATH, servers: item });
-      else if (isBundle(item)) servers.push({ label: MANIFEST_PATH, bundle: item });
-      else {
-        const json = jsonFileOf(byPath, insideFolder(item));
-        // A file that is not there or not JSON is shown as it is named, never dropped (SEC-01).
-        servers.push({
-          label: insideFolder(item),
-          servers: json === null ? item : serversIn(json),
-        });
-      }
-    }
-
-    plugins.push({
-      folder,
-      name: folder.split('/').at(-2) ?? '',
-      files: inside,
-      hooks,
-      servers,
-      modules: [...new Set(modules)],
-    });
+  for (const [folder, group] of byFolder) {
+    if (!group.files.some((file) => file.path === folder + MANIFEST_PATH)) continue;
+    plugins.push(readPlugin(folder, group.name, group.files));
   }
   return plugins.sort((a, b) => (a.folder < b.folder ? -1 : 1));
 }
@@ -192,16 +233,14 @@ export type PluginValidator = (plugin: PluginFolder) => Promise<PluginValidation
 /** The report `claude plugin validate --json` prints; only what the review reads is checked. */
 const Problem = z.looseObject({ path: z.string().nullable().optional(), message: z.string() });
 const ReportSchema = z.looseObject({
-  manifest: z.looseObject({ errors: z.array(Problem).catch([]) }).optional(),
-  contents: z
-    .array(
-      z.looseObject({
-        type: z.string(),
-        errors: z.array(Problem).catch([]),
-        notes: z.array(z.string()).catch([]),
-      }),
-    )
-    .catch([]),
+  manifest: z.looseObject({ errors: z.array(Problem).catch([]) }),
+  contents: z.array(
+    z.looseObject({
+      type: z.string(),
+      errors: z.array(Problem).catch([]),
+      notes: z.array(z.string()).catch([]),
+    }),
+  ),
 });
 
 /** `./register.ts hooks: a, b` and `./register.ts calls: $.x, $.y`, as validate notes them (T95). */
@@ -212,7 +251,7 @@ export function readValidateReport(stdout: string): PluginValidation | null {
   const report = valueOrNull(parseJsonWith(ReportSchema, stdout.trim()));
   if (report === null) return null;
   const errors = [
-    ...(report.manifest?.errors ?? []),
+    ...report.manifest.errors,
     ...report.contents.flatMap((content) => content.errors),
   ].map((problem) => (problem.path ? `${problem.path}: ${problem.message}` : problem.message));
   const modules = new Map<string, { hooks: string; calls: string }>();
@@ -248,7 +287,9 @@ async function pluginEntries(
   plugin: PluginFolder,
   validate: PluginValidator | undefined,
 ): Promise<RunnableEntry[]> {
-  const entries: RunnableEntry[] = [];
+  const entries: RunnableEntry[] = plugin.unreadable.map((part) =>
+    unreadableEntry(plugin.folder, label(plugin, part.label), part.value),
+  );
   for (const source of plugin.hooks) {
     for (const found of hookEntries(source.label, source.hooks)) {
       entries.push({ ...found, file: plugin.folder, label: label(plugin, found.label) });
@@ -317,12 +358,7 @@ export async function reviewPlugins(
 ): Promise<ReviewedEntry[]> {
   // Lookup tables, not a search per plugin or file: a setup may hold thousands (PERF-01).
   const here = new Map(current.map((file) => [file.path, file]));
-  const hereFolders = new Set(
-    current.flatMap((file) => {
-      const match = PLUGIN_FOLDER.exec(file.path);
-      return match === null ? [] : [`${match[1] ?? ''}${match[2] ?? ''}/`];
-    }),
-  );
+  const hereFolders = new Set(current.flatMap((file) => pluginFolderOf(file.path)?.folder ?? []));
   const entries: ReviewedEntry[] = [];
   for (const plugin of pluginFolders(incoming)) {
     const existing = hereFolders.has(plugin.folder);

@@ -8,10 +8,9 @@ import {
   jsonFile,
   uniqueByPath,
 } from '../shared/file-gathering.ts';
-import { PLUGINS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
+import { isPluginGenerated, PLUGINS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
 import { projectHookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
-import { isPluginGenerated } from './skills-dir-plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
   PROJECT_CLAUDE_FILES,

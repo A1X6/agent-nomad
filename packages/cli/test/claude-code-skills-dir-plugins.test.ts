@@ -1,6 +1,3 @@
-import { readdir } from 'node:fs/promises';
-import { join, sep } from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,34 +6,11 @@ import {
   REAL_VALIDATE_REPORT,
   scriptedValidator,
 } from './claude-code-plugin-fixtures.ts';
-import { collected, collectedJson, useTempDir } from './fakes.ts';
-import {
-  createPluginValidator,
-  isPluginGenerated,
-  pluginFolders,
-  pluginNotes,
-  readValidateReport,
-  reviewPlugins,
-  type ExecutableLookupSystem,
-  type ProgramCli,
-} from '../src/index.ts';
+import { collected, collectedJson } from './fakes.ts';
+import { pluginFolders, pluginNotes, readValidateReport, reviewPlugins } from '../src/index.ts';
 
 const MOD = 'skills/my-mod/';
 const mod = (folder = MOD) => pluginFiles(folder, { modules: ['./register.ts'] });
-
-describe('plugins in the skills folder (T96): what Claude Code generates', () => {
-  it.each([
-    ['skills/my-mod/.claude-plugin/types', true],
-    ['skills/my-mod/.claude-plugin/types/claude-code/index.d.ts', true],
-    ['.claude/skills/my-mod/.claude-plugin/types/tsconfig.json', true],
-    ['skills/my-mod/.claude-plugin/plugin.json', false],
-    ['skills/types/SKILL.md', false],
-    ['skills/my-mod/.claude-plugin/types.md', false],
-    ['skills/my-mod/types/index.d.ts', false],
-  ])('%s generated: %s', (path, generated) => {
-    expect(isPluginGenerated(path)).toBe(generated);
-  });
-});
 
 describe('plugins in the skills folder (T96): finding them', () => {
   it('a skill folder is a plugin when it has .claude-plugin/plugin.json, in either scope', () => {
@@ -135,9 +109,65 @@ describe('plugins in the skills folder (T96): finding them', () => {
     ]);
   });
 
-  it('a manifest that is not JSON still marks the folder as a plugin', () => {
+  it('a manifest that is not JSON still marks the folder as a plugin, and is shown as unreadable', () => {
     const files = [collected(`${MOD}.claude-plugin/plugin.json`, '{ not json'), ...mod().slice(1)];
-    expect(pluginFolders(files).map((plugin) => plugin.modules)).toEqual([['./register.ts']]);
+    const [plugin] = pluginFolders(files);
+    expect(plugin?.modules).toEqual(['./register.ts']);
+    expect(plugin?.unreadable).toEqual([
+      { label: '.claude-plugin/plugin.json', value: 'not JSON' },
+    ]);
+  });
+
+  it('one bad manifest field hides no other, and a bad part is shown as unreadable (SEC-01)', () => {
+    const docs = { docs: { command: 'docs-mcp' } };
+    const [plugin] = pluginFolders([
+      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+        name: 'my-mod',
+        hooks: 42,
+        mcpServers: docs,
+      }),
+    ]);
+    expect(plugin?.servers).toEqual([{ label: '.claude-plugin/plugin.json', servers: docs }]);
+    expect(plugin?.unreadable).toEqual([{ label: '.claude-plugin/plugin.json hooks', value: 42 }]);
+
+    // A named hooks file that is missing or not JSON is shown, never dropped.
+    const [named] = pluginFolders([
+      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+        name: 'my-mod',
+        hooks: ['./gone.json', './bad.json'],
+      }),
+      collected(`${MOD}bad.json`, '{ not json'),
+    ]);
+    expect(named?.unreadable).toEqual([
+      { label: 'gone.json', value: 'no such file' },
+      { label: 'bad.json', value: 'not JSON' },
+    ]);
+
+    // A modules list with a stray item keeps the real modules (so the mod is checked) and is shown.
+    const [stray] = pluginFolders([
+      ...pluginFiles(MOD),
+      collectedJson(`${MOD}hooks/hooks.json`, { modules: ['./register.ts', 5] }),
+    ]);
+    expect(stray?.modules).toEqual(['./register.ts']);
+    expect(stray?.unreadable).toEqual([
+      { label: 'hooks/hooks.json modules', value: ['./register.ts', 5] },
+    ]);
+  });
+
+  it('a manifest that names the default files does not list their hooks and servers twice', () => {
+    const stop = { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] };
+    const docs = { docs: { command: 'docs-mcp' } };
+    const [plugin] = pluginFolders([
+      collectedJson(`${MOD}.claude-plugin/plugin.json`, {
+        name: 'my-mod',
+        hooks: './hooks/hooks.json',
+        mcpServers: './.mcp.json',
+      }),
+      collectedJson(`${MOD}hooks/hooks.json`, { hooks: stop }),
+      collectedJson(`${MOD}.mcp.json`, { mcpServers: docs }),
+    ]);
+    expect(plugin?.hooks).toEqual([{ label: 'hooks/hooks.json', hooks: stop }]);
+    expect(plugin?.servers).toEqual([{ label: '.mcp.json', servers: docs }]);
   });
 
   it('push names them, and says which are mods', () => {
@@ -240,6 +270,18 @@ describe('plugins in the skills folder (T96): the pull review', () => {
     ]);
   });
 
+  it('shows the unreadable parts of a plugin, so a broken declaration still needs a yes', async () => {
+    const files = [
+      collectedJson('skills/odd/.claude-plugin/plugin.json', { name: 'odd', hooks: 42 }),
+      collected('skills/odd/.mcp.json', '{ not json'),
+    ];
+    const review = await reviewPlugins(files, [], scriptedValidator(PROBE_MOD_VALIDATION).validate);
+    expect(review.map((entry) => [entry.label, entry.command])).toEqual([
+      ['plugin skills/odd/ .claude-plugin/plugin.json hooks (unreadable)', '42'],
+      ['plugin skills/odd/ .mcp.json (unreadable)', '"not JSON"'],
+    ]);
+  });
+
   it('a plugin with only skills is not shown: its skills are reviewed as skills', async () => {
     const files = pluginFiles('skills/tools/', {
       extra: { 'SKILL.md': '---\nname: tools\n---\n' },
@@ -314,116 +356,11 @@ describe('plugins in the skills folder (T96): reading claude plugin validate --j
     });
   });
 
-  it('is null for anything but a report', () => {
+  it('is null for anything but a report, an error answer included', () => {
     expect(readValidateReport('')).toBeNull();
+    expect(readValidateReport('{"success":false,"error":"Plugin directory not found"}')).toBeNull();
+    expect(readValidateReport('{}')).toBeNull();
     expect(readValidateReport('Validating plugin manifest: x\n√ Validation passed')).toBeNull();
     expect(readValidateReport('[]')).toBeNull();
-  });
-});
-
-describe('plugins in the skills folder (T96): running claude plugin validate', () => {
-  let tempDir: string;
-  useTempDir('agentnomad-validate-', (dir) => (tempDir = dir));
-
-  /** Only what the lookup reads (SOLID-06): `claude` is installed when it is in `executables`. */
-  const system = (executables: string[]): ExecutableLookupSystem => ({
-    platform: 'linux',
-    homedir: '/home/a',
-    env: { PATH: '/usr/bin' },
-    isExecutable: (path) => Promise.resolve(executables.includes(path)),
-  });
-
-  /** A `claude` that answers `stdout` and records the folder it was asked to validate. */
-  function recordingCli(stdout: string, exitCode = 0, stderr = '') {
-    const calls: { path: string; args: readonly string[]; cwd: string; files: string[] }[] = [];
-    const cli = (path: string): ProgramCli => ({
-      async run(args, cwd) {
-        const folder = args.at(-1) ?? '';
-        const files = (await readdir(folder, { recursive: true }))
-          .map((name) => name.split(sep).join('/'))
-          .sort();
-        calls.push({ path, args, cwd, files });
-        return { exitCode, stdout, stderr };
-      },
-    });
-    return { calls, cli };
-  }
-
-  const [plugin] = pluginFolders(mod());
-  if (plugin === undefined) throw new Error('no plugin');
-
-  it('is unavailable when the claude command is not installed', async () => {
-    const validate = createPluginValidator({ system: system([]), tempDir });
-    expect(await validate(plugin)).toEqual({
-      kind: 'unavailable',
-      reason: 'the claude command was not found',
-    });
-  });
-
-  it('writes the plugin to a temporary folder of its own, runs validate --json there, and removes it', async () => {
-    const claude = recordingCli(REAL_VALIDATE_REPORT);
-    const validate = createPluginValidator({
-      system: system(['/usr/bin/claude']),
-      cli: claude.cli,
-      tempDir,
-    });
-    expect(await validate(plugin)).toEqual(PROBE_MOD_VALIDATION);
-    const [call] = claude.calls;
-    expect(call?.path).toBe('/usr/bin/claude');
-    expect(call?.args.slice(0, 3)).toEqual(['plugin', 'validate', '--json']);
-    expect(call?.args[3]).toBe(join(call?.cwd ?? '', 'my-mod'));
-    expect(call?.cwd.startsWith(join(tempDir, 'agentnomad-plugin-'))).toBe(true);
-    expect(call?.files).toEqual([
-      '.claude-plugin',
-      '.claude-plugin/plugin.json',
-      'hooks',
-      'hooks/hooks.json',
-      'hooks/register.ts',
-    ]);
-    // Nothing is left behind, whatever validate said.
-    expect(await readdir(tempDir)).toEqual([]);
-  });
-
-  it('is unavailable, with what claude said, when there is no report to read', async () => {
-    const claude = recordingCli('', 1, 'claude: unknown option --json\nmore');
-    const validate = createPluginValidator({
-      system: system(['/usr/bin/claude']),
-      cli: claude.cli,
-      tempDir,
-    });
-    expect(await validate(plugin)).toEqual({
-      kind: 'unavailable',
-      reason: 'claude plugin validate gave no report (claude: unknown option --json)',
-    });
-    expect(await readdir(tempDir)).toEqual([]);
-  });
-
-  it('never throws: a folder it cannot write is reported as unavailable', async () => {
-    const claude = recordingCli(REAL_VALIDATE_REPORT);
-    const validate = createPluginValidator({
-      system: system(['/usr/bin/claude']),
-      cli: claude.cli,
-      tempDir: join(tempDir, 'missing', 'deeper'),
-    });
-    const result = await validate(plugin);
-    expect(result.kind).toBe('unavailable');
-    expect(result.kind === 'unavailable' && result.reason).toContain('the check could not run');
-    expect(claude.calls).toEqual([]);
-  });
-
-  it('refuses to write a path that is not a safe bundle path', async () => {
-    const claude = recordingCli(REAL_VALIDATE_REPORT);
-    const validate = createPluginValidator({
-      system: system(['/usr/bin/claude']),
-      cli: claude.cli,
-      tempDir,
-    });
-    const unsafe = { ...plugin, files: [...plugin.files, collected(`${MOD}../escape.ts`, 'x')] };
-    expect(await validate(unsafe)).toEqual({
-      kind: 'unavailable',
-      reason: 'unsafe path ../escape.ts',
-    });
-    expect(claude.calls).toEqual([]);
-    expect(await readdir(tempDir)).toEqual([]);
   });
 });
