@@ -397,6 +397,22 @@ Nothing found blocks what is on `dev`.
 2. **Pull's decline filter, files × blocked** (PERF-01, `pull-command.ts:353-356`): a large skills folder with many flagged files makes declining slow.
 3. **The hand-built probe mod in five test files** (DUP-01): every change to the mod's shape (T97 to T102 will add files) is a five-file edit until the fixture exists.
 
+## Where each finding belongs among the open tasks
+
+Eight tasks of the plugin and mod work are still open (T97 to T104), and several of them own the ground a finding sits on. Fixing those findings now would be done twice or would conflict with the task; the rest has no owner and needs one.
+
+| Finding                                                                                                                                                               | Belongs to                                                             | Why                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| READ-05, READ-06, READ-07, READ-08, READ-10, READ-16, UX-03                                                                                                           | **T103** (docs, threat model and cross-OS e2e for plugin and mod sync) | T103 is the planned docs pass for the whole plugin work; each of these is a table, header or help line that moves again when T97 to T102 land. Doing them in T103 writes them once.                                                               |
+| READ-01                                                                                                                                                               | **T103**, but worth doing now                                          | The adapter guide misleads today (a synchronous `reviewRunnable` does not compile). A one-paragraph fix now, and T103 rereads it.                                                                                                                 |
+| READ-11, DUP-05                                                                                                                                                       | **T104** (claude.ai skills backup on 2.1.295)                          | Both are the account-skills test and fixtures T104 rewrites; the T104 reference becomes resolvable the moment T104 has a commit.                                                                                                                  |
+| SEC-01, UX-02, DUP-04                                                                                                                                                 | **Before T97** (local-folder marketplaces)                             | T97 and T98 reuse the validator and the `claude` runner for every restored marketplace and plugin folder: the fixed inner folder name, the surfaced timeout reason and the shared lookup fake should be in place before more code builds on them. |
+| READ-02                                                                                                                                                               | **The next drift task** (T94's successor)                              | `reviewedVersion` moves when the changelog entries 2.1.293 to 2.1.295 are read, which is a drift review, not a plugin task. T102 reads the changelog for the 2.1.287 mod minimum and could do it.                                                 |
+| "What will break first" item 1 (sequential validates) and "Not reviewed" item 2 (no real `claude plugin validate` in CI)                                              | **T103**                                                               | Its cross-OS e2e for plugin and mod sync is the place to decide whether a CI runner gets a real `claude`, and a setup with several mods would show the sequential cost.                                                                           |
+| BUG-01, SEC-02, SEC-03, PERF-01, UX-01, QA-01 to QA-06, DUP-01, DUP-02, DUP-03, DUP-06, READ-03, READ-04, READ-12, READ-13, READ-14, READ-15, REF-01 to REF-03, BP-01 | **No owner: a new task**                                               | These are fixes to T95 and T96 as merged, and the repo's practice is one task per review's fixes (T43 to T93). They should land before T97 builds on `skills-dir-plugins.ts` and the review, so that T97 starts from the fixed reader.            |
+
+The order of work below follows this: the unowned fixes first (batches 1 to 7), the T103 and T104 items left to their tasks, with READ-01 pulled forward.
+
 ## Suggested order of work
 
 1. **BUG-01, SEC-02, READ-03, QA-03** — the plugin reader: fix the silent drop and the report shape, remove the unreachable branch, and add the branch tests in one change to `skills-dir-plugins.ts` and its test.
@@ -404,9 +420,9 @@ Nothing found blocks what is on `dev`.
 3. **SEC-03** — case-insensitive refusal on restore, with the table cases.
 4. **PERF-01, UX-01, QA-05, QA-06, READ-14, DUP-06, REF-03** — pull's decline path and its tests.
 5. **QA-01, QA-02, READ-15, REF-02** — the wiring tests: the adapter's note and the restorer's combined review in their own files.
-6. **DUP-01, DUP-04, DUP-05, READ-12, REF-01** — the test fixtures: one probe mod, one lookup fake, two synced-fixture helpers.
+6. **DUP-01, DUP-04, READ-12, REF-01** — the test fixtures: one probe mod, one lookup fake (DUP-05 waits for T104, which rewrites those fixtures).
 7. **DUP-02, DUP-03, BP-01, READ-04** — source and lint consolidation.
-8. **READ-01, READ-02, READ-05 to READ-11, READ-13, READ-16, UX-03** — docs, comments and help text.
+8. **READ-01 now; READ-05 to READ-08, READ-10, READ-16, UX-03 in T103; READ-11 in T104; READ-02 in the next drift task** — docs, comments and help text, each where the table above puts it.
 
 ## Not reviewed
 
