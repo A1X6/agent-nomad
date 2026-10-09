@@ -94,3 +94,20 @@ export const fileManagedSettings: ManagedSettings = {
   restrictsPlugins: true,
   restrictsMcpServers: true,
 };
+
+/**
+ * Plugin ids and the folder Claude Code 2.1.295 made for each in `plugins/data/` (T95): from a
+ * marketplace, from `skills/<name>/` and from `--plugin-dir`.
+ */
+export const REAL_DATA_DIRS: Readonly<Record<string, string>> = {
+  'lm-plugin@my-local.mkt': 'lm-plugin-my-local-mkt',
+  'Odd.Name_v2@my-local.mkt': 'Odd-Name_v2-my-local-mkt',
+  'probe-init@skills-dir': 'probe-init-skills-dir',
+  'inline-plug@inline': 'inline-plug-inline',
+};
+
+/** Mod ids and the file Claude Code 2.1.295 kept each one's `$.store` in, in `plugins/store/` (T95). */
+export const REAL_STORE_FILES: Readonly<Record<string, string>> = {
+  'probe-mod@skills-dir': 'probe-mod_skills-dir-e89169932969.json',
+  'Odd.Mod_v2@skills-dir': 'Odd_Mod_v2_skills-dir-bc7e6d4978f9.json',
+};

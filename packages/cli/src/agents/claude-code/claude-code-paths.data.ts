@@ -61,6 +61,8 @@ const RAW = {
       'feedback',
       'feedback-bundles',
       'policy-limits.json',
+      // Written next to it since 2.1.295 (T95): when the cached limits were last confirmed.
+      'policy-limits.json.stamp.json',
     ],
     /**
      * Other things Claude Code keeps in the base folder that are known and deliberately
@@ -97,6 +99,45 @@ const RAW = {
     neverSynced: ['.git', '.claude/agent-memory-local', '.claude/worktrees'],
     /** Known entries in `<project>/.claude/` that are left out on purpose. */
     knownState: ['hooks'],
+  },
+
+  /**
+   * Where Claude Code keeps plugins and mods (T95, checked on Claude Code 2.1.295; the names
+   * it made are in `test/claude-code-plugin-fixtures.ts`). A plugin id is `<name>@<source>`.
+   * Read by the plugin and mod sync (T96 to T102); `plugins/` itself stays never synced.
+   */
+  plugins: {
+    /** The source of a plugin in `skills/<name>/` with a `.claude-plugin/plugin.json`. */
+    skillsDirSource: 'skills-dir',
+    /** The source of a plugin loaded with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`. */
+    inlineSource: 'inline',
+    /**
+     * Written by Claude Code inside a mod's folder when it hot-reloads the mod (dev-mods,
+     * `--plugin-dir`); not written in a normal session, but never worth syncing.
+     */
+    generatedInPlugin: ['.claude-plugin/types'],
+    /**
+     * A plugin's own folder (`CLAUDE_PLUGIN_DATA`), from the base folder: the id with every
+     * character outside `A-Za-z0-9_-` turned into `-` (`a.b@my.mkt` is `a-b-my-mkt`).
+     */
+    dataDir: 'plugins/data',
+    /**
+     * A mod's `$.store` (its saved choices), one file per plugin, from the base folder: the
+     * id with every character outside `A-Za-z0-9_-` turned into `_`, then `-`, the first 12
+     * hex digits of the SHA-256 of the id and `.json`. Folder 700, file 600.
+     */
+    storeDir: 'plugins/store',
+    /** claude.ai account plugins, one folder per account; Claude Code manages it. */
+    syncedDir: 'plugins/synced',
+    /**
+     * The claude.ai marketplaces in an account folder, from Claude Code's own code (no real
+     * file seen yet): `rows` of `{ name, scope, source: { source: 'claudeai' }, id }`.
+     */
+    syncedMarketplacesFile: '.marketplaces.json',
+    /** The marketplace `scope` of the user's own uploads ("My Uploads"); others: org, default. */
+    accountScope: 'account',
+    /** Every `installationPreference`; `required` means the organization requires the plugin. */
+    installationPreferences: ['available', 'required', 'auto_install', 'not_available'],
   },
 
   /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
@@ -223,6 +264,17 @@ const PathsDataSchema = z.strictObject({
     memoryFolders: names,
     neverSynced: names,
     knownState: names,
+  }),
+  plugins: z.strictObject({
+    skillsDirSource: z.string().min(1),
+    inlineSource: z.string().min(1),
+    generatedInPlugin: names,
+    dataDir: z.string().min(1),
+    storeDir: z.string().min(1),
+    syncedDir: z.string().min(1),
+    syncedMarketplacesFile: z.string().min(1),
+    accountScope: z.string().min(1),
+    installationPreferences: names,
   }),
   skippedNames: names,
   ignoredCopyPatterns: z.array(

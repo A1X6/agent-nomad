@@ -7,6 +7,7 @@ import {
   home,
   synced,
   syncedSetup,
+  syncedSetup2_1_295,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
 import {
@@ -41,6 +42,14 @@ describe('claude.ai skills (T42): reading and saving', () => {
     expect(found.problem).toBeNull();
     expect(found.own.map((skill) => skill.name)).toEqual(['my-skill']);
     expect([...found.allNames].sort()).toEqual(['my-skill', 'pdf', 'synced', 'team-skill']);
+  });
+
+  it('finds none on Claude Code 2.1.295, which writes no creatorType (T95; T104 fixes it)', async () => {
+    await syncedSetup2_1_295();
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
+    expect(found.problem).toBeNull();
+    expect(found.own).toEqual([]);
+    expect([...found.allNames].sort()).toEqual(['docs', 'my-skill', 'pdf']);
   });
 
   it('saves them under the reserved folder, never as skills/synced', async () => {
