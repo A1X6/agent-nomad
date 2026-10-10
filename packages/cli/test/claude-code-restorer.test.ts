@@ -814,9 +814,7 @@ describe('restorer: a folder of its own, e.g. a local marketplace (T98)', () => 
       answer('overwrite').resolve,
     );
     expect(report.skipped).toEqual(['.git/hooks/pre-commit']);
-    expect(report.warnings).toEqual([
-      'Refused ".git/hooks/pre-commit": git keeps its own files.',
-    ]);
+    expect(report.warnings).toEqual(['Refused ".git/hooks/pre-commit": git keeps its own files.']);
     await expect(stat(join(folder(), '.git'))).rejects.toThrow();
   });
 

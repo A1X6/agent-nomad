@@ -35,6 +35,7 @@ import {
   readSavedLocalMarketplace,
   type CollectedFile,
   type ConflictChoice,
+  type LocalMarketplaceRestoreDeps,
   type ProgramCli,
 } from '../src/index.ts';
 
@@ -193,7 +194,7 @@ async function pull(
     answers?: unknown[];
     conflict?: ConflictChoice;
     flags?: { assumeYes: boolean; allowCommands: boolean };
-    known?: Record<string, { source: { source: string; path?: string } }>;
+    known?: LocalMarketplaceRestoreDeps['known'];
   } = {},
 ) {
   const fake = validateCli(validatePassWithWarning);
@@ -327,7 +328,7 @@ describe('pull writes a saved local marketplace (T98)', () => {
 
   it('skips a marketplace this PC adds from another source, and says so', async () => {
     const { plan, lines } = await pull([savedTools()], {
-      known: { [TOOLS]: { source: { source: 'github', repo: 'me/tools' } } },
+      known: { [TOOLS]: { source: { source: 'github' } } },
     });
     expect(plan.plugins).toEqual([]);
     expect(lines).toContain(
