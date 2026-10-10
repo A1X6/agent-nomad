@@ -1,4 +1,5 @@
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import type { PlatformPath } from 'node:path';
 
 import { BACKUP_MARKER, INCOMING_MARKER } from '@agentnomad/core';
@@ -71,10 +72,8 @@ export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimi
   const realHome = limits.homedir === undefined ? null : realOrSelf(limits.homedir);
   const realWithin = limits.within === undefined ? null : realOrSelf(limits.within);
 
-  /** Why the real file behind `nativePath` must not be read, or `null` (T45). */
-  async function linkProblem(nativePath: string): Promise<string | null> {
-    const real = await realpath(nativePath).catch(() => null);
-    if (real === null) return null;
+  /** Why the real file or folder `real` must not be read, or `null` (T45). */
+  async function linkProblem(real: string): Promise<string | null> {
     if (realWithin !== null) {
       const within = await realWithin;
       if (real !== within && relativeInside(within, real) === null) {
@@ -95,8 +94,7 @@ export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimi
     return null;
   }
 
-  async function fileEntry(nativePath: string, bundlePath: string) {
-    const info = await stat(nativePath);
+  async function fileEntry(nativePath: string, bundlePath: string, info: Stats) {
     if (info.size > MAX_FILE_BYTES) return skip(bundlePath, 'it is larger than 10 MB');
     return {
       path: bundlePath,
@@ -106,11 +104,16 @@ export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimi
     };
   }
 
+  /** A file found through a link or named directly: where it really is is checked first. */
+  async function linkedFileEntry(nativePath: string, bundlePath: string, info: Stats) {
+    const real = await realpath(nativePath).catch(() => null);
+    const problem = real === null ? null : await linkProblem(real);
+    return problem === null ? fileEntry(nativePath, bundlePath, info) : skip(bundlePath, problem);
+  }
+
   async function readIfFile(nativePath: string, bundlePath: string) {
     const info = await stat(nativePath).catch(() => null);
-    if (!info?.isFile()) return null;
-    const problem = await linkProblem(nativePath);
-    return problem === null ? fileEntry(nativePath, bundlePath) : skip(bundlePath, problem);
+    return info?.isFile() === true ? linkedFileEntry(nativePath, bundlePath, info) : null;
   }
 
   async function walk(
@@ -127,7 +130,7 @@ export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimi
     }
     if (seen.has(real)) return [];
     seen.add(real);
-    const problem = await linkProblem(folder);
+    const problem = await linkProblem(real);
     if (problem !== null) {
       skip(bundlePrefix, problem);
       return [];
@@ -139,13 +142,17 @@ export function createFileGatherer(platform: NodeJS.Platform, limits: GatherLimi
       const bundlePath = `${bundlePrefix}/${entry.name}`;
       if (excluded(bundlePath) || !BundlePathSchema.safeParse(bundlePath).success) continue;
       const nativePath = path.join(folder, entry.name);
-      // stat follows links, so linked folders (e.g. from a dotfiles repo) come along, as far
-      // as the limits allow.
-      const info = await stat(nativePath).catch(() => null);
+      // The listing gives each entry's type: a plain entry needs one lstat (size, permissions);
+      // only a link is followed and checked for where it leads, so linked folders (e.g. from a
+      // dotfiles repo) come along as far as the limits allow.
+      const linked = entry.isSymbolicLink();
+      const info = await (linked ? stat(nativePath) : lstat(nativePath)).catch(() => null);
       if (info?.isDirectory()) {
         files.push(...(await walk(nativePath, bundlePath, excluded, seen)));
       } else if (info?.isFile()) {
-        const file = await readIfFile(nativePath, bundlePath);
+        const file = linked
+          ? await linkedFileEntry(nativePath, bundlePath, info)
+          : await fileEntry(nativePath, bundlePath, info);
         if (file) files.push(file);
       }
     }
