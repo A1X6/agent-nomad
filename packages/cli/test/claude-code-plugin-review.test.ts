@@ -86,6 +86,13 @@ describe('claude plugin validate on a plugin folder (T97)', () => {
     ]);
   });
 
+  it("runs Claude Code with an empty config folder of its own, so this PC's setup is untouched", async () => {
+    const { validator, calls } = await validatorFor(validatePassWithWarning);
+    await validator.validate(mod());
+    const [call] = calls;
+    expect(call?.configDir).toBe(join(call?.args[3] ?? '', '..', 'config'));
+  });
+
   it('removes the copy afterwards', async () => {
     const { validator, calls } = await validatorFor(validatePassWithWarning);
     await validator.validate(mod());

@@ -67,12 +67,19 @@ const staysInside = (path: string) =>
   path.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
 
 /**
- * A validator running `claude plugin validate --json` (`claude`: the found program, `null` when
- * Claude Code is not installed here) on a copy of the folder that pull writes into a new
- * temporary folder of its own, never on a path read from the bundle. Paths of that copy are
- * shown as the folder's own (`skills/probe-mod`).
+ * Runs the found `claude` with `CLAUDE_CONFIG_DIR` set to `configDir`, an empty folder of the
+ * review's own: Claude Code rewrites settings when it starts (2.1.296 turned `"model": "opus"`
+ * into `"opus[1m]"`), and pull's review must leave this PC's setup as it is (T97).
  */
-export function createPluginValidator(claude: ProgramCli | null): PluginValidator {
+export type ValidateCli = (configDir: string) => ProgramCli;
+
+/**
+ * A validator running `claude plugin validate --json` (`claude`: how to run the found program,
+ * `null` when Claude Code is not installed here) on a copy of the folder that pull writes into
+ * a new temporary folder of its own, never on a path read from the bundle. Paths of that copy
+ * are shown as the folder's own (`skills/probe-mod`).
+ */
+export function createPluginValidator(claude: ValidateCli | null): PluginValidator {
   return {
     async validate(folder) {
       if (claude === null) {
@@ -81,13 +88,15 @@ export function createPluginValidator(claude: ProgramCli | null): PluginValidato
       const temp = await mkdtemp(join(tmpdir(), 'agentnomad-plugin-review-'));
       try {
         const copy = join(temp, 'plugin');
+        const configDir = join(temp, 'config');
+        await mkdir(configDir);
         for (const file of folder.files) {
           if (!staysInside(file.path)) continue;
           const path = join(copy, ...file.path.split('/'));
           await mkdir(dirname(path), { recursive: true });
           await writeFile(path, file.content);
         }
-        const run = await claude.run(['plugin', 'validate', '--json', copy], temp);
+        const run = await claude(configDir).run(['plugin', 'validate', '--json', copy], temp);
         const report =
           run.exitCode === 0 || run.exitCode === 1
             ? valueOrNull(parseJsonWith(ReportSchema, run.stdout))
@@ -124,15 +133,23 @@ const VALIDATE_TIMEOUT_MS = 60_000;
 
 /**
  * The validator of this PC's Claude Code, found as the plugin reinstall finds it; without
- * one, every folder is unreviewed. `cli` runs the found program (injected in tests).
+ * one, every folder is unreviewed. `cli` runs the found program with an environment
+ * (injected in tests).
  */
 export async function findPluginValidator(
   system: ExecutableLookupSystem,
-  cli: (path: string) => ProgramCli = (path) =>
-    createProgramCli(path, system, { timeoutMs: VALIDATE_TIMEOUT_MS }),
+  cli: (path: string, env: Readonly<Record<string, string | undefined>>) => ProgramCli = (
+    path,
+    env,
+  ) =>
+    createProgramCli(path, { platform: system.platform, env }, { timeoutMs: VALIDATE_TIMEOUT_MS }),
 ): Promise<PluginValidator> {
   const claude = await findClaudeExecutable(system);
-  return createPluginValidator(claude === null ? null : cli(claude));
+  return createPluginValidator(
+    claude === null
+      ? null
+      : (configDir) => cli(claude, { ...system.env, CLAUDE_CONFIG_DIR: configDir }),
+  );
 }
 
 /** One module of a mod: what it hooks into and the `$` methods it calls. */

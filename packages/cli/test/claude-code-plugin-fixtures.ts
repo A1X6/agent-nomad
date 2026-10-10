@@ -275,18 +275,20 @@ export function validatePassCalling(calls: readonly string[]): ValidateRun {
 
 /**
  * A `claude` that answers `plugin validate --json <folder>` with `run`, the folder written in
- * place of `VALIDATED_MOD`, and records each call's arguments and the files the folder held.
+ * place of `VALIDATED_MOD`, and records each call's arguments, the files the folder held and
+ * the `CLAUDE_CONFIG_DIR` it ran with.
  */
 export function validateCli(run: ValidateRun) {
-  const calls: { args: readonly string[]; files: readonly string[] }[] = [];
-  const cli = (): ProgramCli => ({
+  const calls: { args: readonly string[]; files: readonly string[]; configDir?: string }[] = [];
+  const cli = (_path: string, env: Readonly<Record<string, string | undefined>>): ProgramCli => ({
     async run(args) {
       const folder = args.at(-1) ?? '';
       const entries = await readdir(folder, { recursive: true, withFileTypes: true });
       const files = entries
         .filter((entry) => entry.isFile())
         .map((entry) => relative(folder, join(entry.parentPath, entry.name)).replace(/\\/g, '/'));
-      calls.push({ args, files: files.sort() });
+      const configDir = env['CLAUDE_CONFIG_DIR'];
+      calls.push({ args, files: files.sort(), ...(configDir !== undefined && { configDir }) });
       const shown = JSON.stringify(folder.replace(/\\/g, '/')).slice(1, -1);
       return {
         exitCode: run.exitCode,
