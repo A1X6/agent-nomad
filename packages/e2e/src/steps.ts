@@ -370,7 +370,7 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     await write(join(pc.project, 'CLAUDE.md'), 'Project rules.\n');
     await write(join(pc.project, '.mcp.json'), JSON.stringify(MCP_JSON));
     await write(memoryFile(pc), MEMORY);
-    // Skills Claude Code 2.1.295 synced from claude.ai (T42, T105): no creatorType; the
+    // Skills Claude Code 2.1.295 and 2.1.296 sync from claude.ai (T42, T105): no creatorType; the
     // user's own upload, one of Anthropic's and one of an organization's plugins.
     const synced = (...parts: string[]) => claude(pc, 'skills', 'synced', ACCOUNT_DIR, ...parts);
     const syncedPlugins = (file: string) =>

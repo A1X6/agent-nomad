@@ -8,6 +8,7 @@ import {
   PLUGIN_STORE_FILES,
   PLUGIN_STORE_MODES,
   SKILLS_DIR_MARKETPLACE,
+  STORE_NAME_LENGTH,
   SYNCED_ACCOUNT,
   VALIDATED_MOD,
   type ValidateRun,
@@ -23,15 +24,16 @@ import {
 import { readJson, readText, useTempDir } from './fakes.ts';
 
 /*
- * The plugin source fixtures (T96) hold what Claude Code 2.1.295 and 2.1.296 were seen to do;
+ * The plugin source fixtures (T96) hold what Claude Code 2.1.295 and 2.1.296 were seen to do
+ * (each checked again on the 2.1.296 program, T107);
  * these tests keep each fixture true to the rule it stands for.
  */
 
 describe('plugin data folders and store files (T96)', () => {
   it.each(PLUGIN_DATA_FOLDERS)(
-    '%s: every other character than A-Za-z0-9_*- becomes -',
+    '%s: every other character than A-Za-z0-9_- becomes -',
     (id, folder) => {
-      expect(id.replace(/[^A-Za-z0-9_*-]/g, '-')).toBe(folder);
+      expect(id.replace(/[^A-Za-z0-9_-]/g, '-')).toBe(folder);
     },
   );
 
@@ -39,12 +41,15 @@ describe('plugin data folders and store files (T96)', () => {
     '%s: the safe id, then the first 12 hex of its SHA-256',
     (id, file) => {
       const hash = createHash('sha256').update(id).digest('hex').slice(0, 12);
-      expect(`${id.replace(/[^A-Za-z0-9_*-]/g, '_')}-${hash}.json`).toBe(file);
+      const name = id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, STORE_NAME_LENGTH);
+      expect(`${name}-${hash}.json`).toBe(file);
     },
   );
 
   it('the store ids are mods in skills folders', () => {
     expect(PLUGIN_STORE_FILES.map(([id]) => id.split('@')[1])).toEqual([
+      SKILLS_DIR_MARKETPLACE,
+      SKILLS_DIR_MARKETPLACE,
       SKILLS_DIR_MARKETPLACE,
       SKILLS_DIR_MARKETPLACE,
     ]);

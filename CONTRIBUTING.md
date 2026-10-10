@@ -141,8 +141,9 @@ open, such as a chat or an option letter from a discussion.
   - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
     `putJson`, `realisticPlugins`), managed settings (`fakeManagedSystem` with
     `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`) and the plugin sources Claude
-    Code 2.1.295 keeps (T96): the names `SKILLS_DIR_MARKETPLACE`, `PLUGIN_DATA_FOLDERS`,
-    `PLUGIN_STORE_FILES` and `PLUGIN_STORE_MODES`; `claude plugin validate` runs as
+    Code 2.1.295 keeps (T96, checked on 2.1.296 in T107): the names `SKILLS_DIR_MARKETPLACE`,
+    `PLUGIN_DATA_FOLDERS`, `PLUGIN_STORE_FILES` (names cut at `STORE_NAME_LENGTH`) and
+    `PLUGIN_STORE_MODES`; `claude plugin validate` runs as
     `ValidateRun` (`validatePassWithWarning`, `validateBrokenManifest`, the mod folder shown
     as `VALIDATED_MOD`); and the claude.ai synced files of `SYNCED_ACCOUNT`
     (`syncedSkillsManifest`, `olderSyncedSkillsManifest`, `syncedPluginsManifest`,

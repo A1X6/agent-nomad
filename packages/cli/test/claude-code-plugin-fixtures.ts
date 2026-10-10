@@ -110,24 +110,37 @@ export const fileManagedSettings: ManagedSettings = {
 /** The marketplace of a plugin or mod found in `~/.claude/skills/<name>/` (T97 moved it to src). */
 export { SKILLS_DIR_MARKETPLACE } from '../src/index.ts';
 
-/** The `plugins/data/<folder>` name of each plugin id, as Claude Code 2.1.295 made them. */
+/**
+ * The `plugins/data/<folder>` name of each plugin id, as Claude Code 2.1.295 made them; the
+ * `*` one as the 2.1.296 program makes it (T107).
+ */
 export const PLUGIN_DATA_FOLDERS = [
   ['lm-plugin@my-local.mkt', 'lm-plugin-my-local-mkt'],
   ['Odd.Name_v2@my-local.mkt', 'Odd-Name_v2-my-local-mkt'],
   ['probe-init@skills-dir', 'probe-init-skills-dir'],
   ['inline-plug@inline', 'inline-plug-inline'],
+  ['star*plug@my-local.mkt', 'star-plug-my-local-mkt'],
 ] as const;
 
+/** Where the 2.1.296 program cuts the safe id in a store file's name (T107). */
+export const STORE_NAME_LENGTH = 64;
+
 /**
- * The `plugins/store/<file>` a mod's `$.store` is kept in, for each plugin id: the id made safe,
- * `-`, then the first 12 hex digits of the id's SHA-256 (Claude Code 2.1.295).
+ * The `plugins/store/<file>` a mod's `$.store` is kept in, for each plugin id: the id made safe
+ * and cut to {@link STORE_NAME_LENGTH}, `-`, then the first 12 hex digits of the id's SHA-256
+ * (Claude Code 2.1.295; the last two as the 2.1.296 program makes them, T107).
  */
 export const PLUGIN_STORE_FILES = [
   ['probe-mod@skills-dir', 'probe-mod_skills-dir-e89169932969.json'],
   ['Odd.Mod_v2@skills-dir', 'Odd_Mod_v2_skills-dir-bc7e6d4978f9.json'],
+  ['star*mod@skills-dir', 'star_mod_skills-dir-75e74eede77a.json'],
+  [
+    'a-mod-whose-name-runs-on-and-on-well-past-the-sixty-four-limit@skills-dir',
+    'a-mod-whose-name-runs-on-and-on-well-past-the-sixty-four-limit_s-37bd611052eb.json',
+  ],
 ] as const;
 
-/** The modes Claude Code 2.1.295 gives `plugins/store/` and the files in it. */
+/** The modes Claude Code 2.1.295 gives `plugins/store/` and the files in it (2.1.296 too). */
 export const PLUGIN_STORE_MODES = { folder: 0o700, file: 0o600 } as const;
 
 /** The mod folder in the validate reports below, in place of the absolute path of the run. */

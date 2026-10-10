@@ -57,7 +57,7 @@ export interface SyncedPlugin {
   readonly name: string | undefined;
   /** The `scope` of its marketplace; `undefined` when `.marketplaces.json` cannot tell. */
   readonly scope: string | undefined;
-  /** `available`, `required`, `auto_install` or `not_available` (2.1.295). */
+  /** `available`, `required`, `auto_install` or `not_available` (2.1.295; checked on 2.1.296). */
   readonly installationPreference: string | undefined;
   /** How claude.ai presents the plugin (2.1.296); read, not used yet. */
   readonly presentsAs: string | undefined;
