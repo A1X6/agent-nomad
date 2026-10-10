@@ -94,3 +94,302 @@ export const fileManagedSettings: ManagedSettings = {
   restrictsPlugins: true,
   restrictsMcpServers: true,
 };
+
+/*
+ * Plugin sources as Claude Code 2.1.295 and 2.1.296 keep them (T96), for T97 to T103 and T105.
+ * Every account, skill and plugin id below is made up.
+ */
+
+/** The marketplace of a plugin or mod found in `~/.claude/skills/<name>/`: `<name>@skills-dir`. */
+export const SKILLS_DIR_MARKETPLACE = 'skills-dir';
+
+/** The `plugins/data/<folder>` name of each plugin id, as Claude Code 2.1.295 made them. */
+export const PLUGIN_DATA_FOLDERS = [
+  ['lm-plugin@my-local.mkt', 'lm-plugin-my-local-mkt'],
+  ['Odd.Name_v2@my-local.mkt', 'Odd-Name_v2-my-local-mkt'],
+  ['probe-init@skills-dir', 'probe-init-skills-dir'],
+  ['inline-plug@inline', 'inline-plug-inline'],
+] as const;
+
+/**
+ * The `plugins/store/<file>` a mod's `$.store` is kept in, for each plugin id: the id made safe,
+ * `-`, then the first 12 hex digits of the id's SHA-256 (Claude Code 2.1.295).
+ */
+export const PLUGIN_STORE_FILES = [
+  ['probe-mod@skills-dir', 'probe-mod_skills-dir-e89169932969.json'],
+  ['Odd.Mod_v2@skills-dir', 'Odd_Mod_v2_skills-dir-bc7e6d4978f9.json'],
+] as const;
+
+/** The modes Claude Code 2.1.295 gives `plugins/store/` and the files in it. */
+export const PLUGIN_STORE_MODES = { folder: 0o700, file: 0o600 } as const;
+
+/** The mod folder in the validate reports below, in place of the absolute path of the run. */
+export const VALIDATED_MOD = '<mod>';
+
+/** A `claude plugin validate` run: its exit code, its text and its `--json` report. */
+export interface ValidateRun {
+  exitCode: number;
+  text: string;
+  json: Record<string, unknown>;
+}
+
+const validatedManifest = `${VALIDATED_MOD}/.claude-plugin/plugin.json`;
+const validatedHooks = `${VALIDATED_MOD}/hooks/hooks.json`;
+const authorWarning =
+  'No author information provided. Consider adding author details for plugin attribution';
+const moduleNotes = [
+  './register.ts hooks: session.start',
+  './register.ts calls: $.store.get, $.store.set, $.ui.status',
+];
+
+/** The report's entry for `hooks/hooks.json`: the module's one `hooks:` and one `calls:` line. */
+const hooksContents = [
+  {
+    file: validatedHooks,
+    type: 'hooks',
+    errors: [],
+    warnings: [],
+    notes: moduleNotes,
+    gatingHooks: [],
+  },
+];
+
+/**
+ * `claude plugin validate` of a mod with one module (`hooks/hooks.json` naming
+ * `./register.ts`), captured from Claude Code 2.1.296 on Windows with no author in the
+ * manifest: it passes with a warning and exits 0. Paths use `/` here.
+ */
+export const validatePassWithWarning: ValidateRun = {
+  exitCode: 0,
+  text: [
+    `Validating plugin manifest: ${validatedManifest}`,
+    '',
+    '⚠ Found 1 warning:',
+    '',
+    `  ❯ author: ${authorWarning}`,
+    '',
+    `Validating hooks: ${validatedHooks}`,
+    '',
+    ...moduleNotes.map((note) => `  ❯ ${note}`),
+    '',
+    '✔ Validation passed with warnings',
+    '',
+  ].join('\n'),
+  json: {
+    success: true,
+    strict: false,
+    target: validatedManifest,
+    manifest: {
+      file: validatedManifest,
+      type: 'plugin',
+      errors: [],
+      warnings: [{ path: 'author', message: authorWarning, code: null }],
+      notes: [],
+      gatingHooks: [],
+    },
+    contents: hooksContents,
+    advice: [],
+  },
+};
+
+/** The same mod with a cut-off `plugin.json`: it fails and exits 1, and still lists the module. */
+export const validateBrokenManifest: ValidateRun = {
+  exitCode: 1,
+  text: [
+    `Validating plugin manifest: ${validatedManifest}`,
+    '',
+    '✘ Found 1 error:',
+    '',
+    '  ❯ json: Invalid JSON syntax: JSON Parse error: Unexpected EOF',
+    '',
+    `Validating hooks: ${validatedHooks}`,
+    '',
+    ...moduleNotes.map((note) => `  ❯ ${note}`),
+    '',
+    '✘ Validation failed',
+    '',
+  ].join('\n'),
+  json: {
+    success: false,
+    strict: false,
+    target: validatedManifest,
+    manifest: {
+      file: validatedManifest,
+      type: 'plugin',
+      errors: [
+        {
+          path: 'json',
+          message: 'Invalid JSON syntax: JSON Parse error: Unexpected EOF',
+          code: null,
+        },
+      ],
+      warnings: [],
+      notes: [],
+      gatingHooks: [],
+    },
+    contents: hooksContents,
+    advice: [],
+  },
+};
+
+/** The claude.ai account of the synced files below. */
+export const SYNCED_ACCOUNT =
+  '22222222-2222-4222-8222-222222222222_33333333-3333-4333-8333-333333333333';
+
+/**
+ * `skills/synced/<account>/manifest.json` as Claude Code 2.1.295 writes it: no `creatorType`,
+ * one entry for each `source` (`custom` when the server sends none); the user's uploads are
+ * `plugin` entries with a `backingPluginId`.
+ */
+export const syncedSkillsManifest = {
+  lastUpdated: 1760000000000,
+  skills: [
+    {
+      skillId: 'skill_01upload',
+      name: 'my-upload',
+      description: 'A skill the user uploaded.',
+      source: 'plugin',
+      backingPluginId: 'plugin_01upload',
+      updatedAt: '2026-10-09T00:00:00Z',
+    },
+    {
+      skillId: 'pdf',
+      name: 'pdf',
+      description: 'Anthropic PDF skill.',
+      source: 'anthropic',
+      updatedAt: '2026-10-09T00:00:00Z',
+    },
+    {
+      skillId: 'example-skill',
+      name: 'example-skill',
+      description: 'An Anthropic example skill.',
+      source: 'anthropic-example',
+      updatedAt: '2026-10-09T00:00:00Z',
+    },
+    {
+      skillId: 'skill_02custom',
+      name: 'my-custom',
+      description: 'A skill with no source from the server.',
+      source: 'custom',
+      updatedAt: '2026-10-09T00:00:00Z',
+    },
+    {
+      skillId: 'skill_03session',
+      name: 'session-skill',
+      description: 'A skill a session refers to.',
+      source: 'session-refs',
+      updatedAt: '2026-10-09T00:00:00Z',
+    },
+  ],
+};
+
+/** The same file from a Claude Code before 2.1.295: its entries still have `creatorType`. */
+export const olderSyncedSkillsManifest = {
+  lastUpdated: 1759000000000,
+  skills: [
+    {
+      skillId: 'skill_04older',
+      name: 'older-skill',
+      description: 'A skill the user made.',
+      source: 'plugin',
+      updatedAt: '2026-09-21T00:00:00Z',
+      creatorType: 'user',
+    },
+  ],
+};
+
+/**
+ * `plugins/synced/<account>/manifest.json` (Claude Code 2.1.295, fields from the T101 notes;
+ * the `plugins` list around the entries is assumed, like the skills manifest's), one entry for
+ * each `installationPreference`.
+ */
+export const syncedPluginsManifest = {
+  lastUpdated: 1760000000000,
+  plugins: [
+    {
+      pluginId: 'plugin_01upload',
+      name: 'my-upload',
+      description: 'A plugin the user uploaded.',
+      version: '1.0.0',
+      updatedAt: '2026-10-09T00:00:00Z',
+      marketplaceName: 'my-uploads',
+      installationPreference: 'available',
+    },
+    {
+      pluginId: 'plugin_02required',
+      name: 'team-required',
+      description: 'A plugin the organization requires.',
+      version: '2.0.0',
+      updatedAt: '2026-10-09T00:00:00Z',
+      marketplaceName: 'team-org',
+      installationPreference: 'required',
+      requestedVersion: '2.0.0',
+    },
+    {
+      pluginId: 'plugin_03auto',
+      name: 'team-auto',
+      description: 'A plugin installed for everyone.',
+      version: '1.1.0',
+      updatedAt: '2026-10-09T00:00:00Z',
+      marketplaceName: 'team-org',
+      installationPreference: 'auto_install',
+    },
+    {
+      pluginId: 'plugin_04blocked',
+      name: 'directory-off',
+      description: 'A plugin not offered to this account.',
+      version: '0.9.0',
+      updatedAt: '2026-10-09T00:00:00Z',
+      marketplaceName: 'anthropic-directory',
+      installationPreference: 'not_available',
+    },
+  ],
+};
+
+/** The `<name>.meta.json` next to a synced plugin, repeating three manifest fields. */
+export const syncedPluginMeta = {
+  server_plugin_id: 'plugin_01upload',
+  marketplace_name: 'my-uploads',
+  installation_preference: 'available',
+};
+
+/**
+ * `plugins/synced/<account>/.marketplaces.json`, from Claude Code's code (no account had one):
+ * one row for each `scope`; `account` is My Uploads. A list is assumed around the rows.
+ */
+export const syncedMarketplaces = [
+  {
+    name: 'team-org',
+    display_name: 'Team',
+    scope: 'org',
+    source: { source: 'claudeai' },
+    id: 'mkt_01org',
+  },
+  {
+    name: 'anthropic-directory',
+    display_name: 'Anthropic Directory',
+    scope: 'default',
+    source: { source: 'claudeai' },
+    id: 'mkt_02default',
+  },
+  {
+    name: 'my-uploads',
+    display_name: 'My Uploads',
+    scope: 'account',
+    source: { source: 'claudeai' },
+    id: 'mkt_03account',
+  },
+];
+
+/**
+ * The claude.ai synced files of Claude Code 2.1.295 in the base folder `base`: the skills and
+ * plugins manifests, the marketplaces and one plugin's `.meta.json`.
+ */
+export async function syncedSources(base: string): Promise<void> {
+  const skills = join(base, 'skills', 'synced', SYNCED_ACCOUNT);
+  const plugins = join(base, 'plugins', 'synced', SYNCED_ACCOUNT);
+  await putJson(join(skills, 'manifest.json'), syncedSkillsManifest);
+  await putJson(join(plugins, 'manifest.json'), syncedPluginsManifest);
+  await putJson(join(plugins, '.marketplaces.json'), syncedMarketplaces);
+  await putJson(join(plugins, 'my-upload.meta.json'), syncedPluginMeta);
+}
