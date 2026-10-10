@@ -33,6 +33,7 @@ import {
   PROJECT_NEVER_SYNCED,
   PROJECT_ROOT_FILES,
 } from './project-paths.ts';
+import { isGeneratedInSkillsPlugin } from './skills-dir-plugins.ts';
 
 /** Where a bundle entry belongs, or why it is refused. */
 export type RestoreDestination =
@@ -117,6 +118,8 @@ export function globalDestination(
   }
   if (underAnyCase(path, RESERVED_DIR)) return refused('unknown agentnomad entry');
   if (GLOBAL_REFUSED.some((entry) => underAnyCase(path, entry))) return refused('never synced');
+  // Claude Code writes it when it reloads a mod (T97), so push never takes it.
+  if (isGeneratedInSkillsPlugin(path)) return refused('Claude Code generates it');
 
   const allowed =
     GLOBAL_FILES.includes(path) || GLOBAL_FOLDER_PREFIXES.some((prefix) => path.startsWith(prefix));

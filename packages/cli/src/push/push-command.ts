@@ -39,6 +39,7 @@ import { listSavedRevisions } from '../pull/saved-setups.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
 import { formatSize } from '../ui/format-size.ts';
+import { printableLine } from '../ui/printable.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { localPathResolver, toBundleFiles } from './bundle-files.ts';
 
@@ -99,6 +100,8 @@ export interface PlannedUpload {
   readonly scopeKey: string;
   readonly bundle: Omit<Bundle, 'revision'>;
   readonly expectedRevision: number;
+  /** What the summary adds about the files, from the agent (T97: the plugins among them). */
+  readonly notes: readonly string[];
 }
 
 /** Every answer push needs, gathered before the first upload (T59). */
@@ -252,6 +255,7 @@ export function createPushPlanner(deps: PushDeps) {
         if (!saving || flag === false) continue;
         const found = await part.available();
         if (found.problem) reporter.warn(part.unreadable(found.problem));
+        if (found.notice) reporter.warn(found.notice);
         if (found.names.length > 0) {
           const yes =
             flag ?? (!options.yes && (await prompter.confirm(part.question(found.names), false)));
@@ -264,12 +268,15 @@ export function createPushPlanner(deps: PushDeps) {
     return { includeMemory, include };
   }
 
-  /** Collects one setup and asks which environment values go with it; `null`: nothing to save. */
+  /**
+   * Collects one setup and asks which environment values go with it, with what the summary
+   * says about its files; `null`: nothing to save.
+   */
   async function collectItem(
     item: PushItem,
     contents: Contents,
     options: PushOptions,
-  ): Promise<Omit<Bundle, 'revision'> | null> {
+  ): Promise<{ bundle: Omit<Bundle, 'revision'>; notes: readonly string[] } | null> {
     const leftOut: string[] = [];
     const parts = new Set(
       (item.adapter.optionalParts ?? [])
@@ -308,12 +315,15 @@ export function createPushPlanner(deps: PushDeps) {
 
     const resolver = localPathResolver(deps.platform, deps.homedir);
     return {
-      formatVersion: BUNDLE_FORMAT_VERSION,
-      agent: item.adapter.id,
-      scope: item.scope,
-      sourceOs: sourceOsOf(deps.platform),
-      agentVersion: item.version,
-      files: toBundleFiles(collected, resolver),
+      bundle: {
+        formatVersion: BUNDLE_FORMAT_VERSION,
+        agent: item.adapter.id,
+        scope: item.scope,
+        sourceOs: sourceOsOf(deps.platform),
+        agentVersion: item.version,
+        files: toBundleFiles(collected, resolver),
+      },
+      notes: item.adapter.inspector?.pushNotes?.(collected) ?? [],
     };
   }
 
@@ -381,17 +391,21 @@ export function createPushPlanner(deps: PushDeps) {
       );
 
       const outcomes: SetupOutcome[] = [];
-      const collected: { item: PushItem; bundle: Omit<Bundle, 'revision'> }[] = [];
+      const collected: {
+        item: PushItem;
+        bundle: Omit<Bundle, 'revision'>;
+        notes: readonly string[];
+      }[] = [];
       for (const item of items) {
-        const bundle = await collectItem(item, contents, options);
-        if (bundle === null) outcomes.push({ setup: describe(item), result: 'done' });
-        else collected.push({ item, bundle });
+        const found = await collectItem(item, contents, options);
+        if (found === null) outcomes.push({ setup: describe(item), result: 'done' });
+        else collected.push({ item, ...found });
       }
       if (collected.length === 0) return { uploads: [], outcomes };
 
       const saved = await withSession(keys.secrets, () => listSavedRevisions(deps.api()));
       const uploads: PlannedUpload[] = [];
-      for (const { item, bundle } of collected) {
+      for (const { item, bundle, notes } of collected) {
         const scopeKey = scopeKeyFor(keys.crypto, keys.dataKey, item.scope);
         const decision = await decide(item, scopeKey, saved, options);
         if ('result' in decision) outcomes.push(decision);
@@ -403,6 +417,7 @@ export function createPushPlanner(deps: PushDeps) {
             scopeKey,
             bundle,
             expectedRevision: decision.expectedRevision,
+            notes,
           });
       }
       return { uploads, outcomes };
@@ -492,7 +507,10 @@ export function createPushApplier(deps: PushApplyDeps) {
     }
     const count = bundle.files.length;
     reporter.success(
-      `Saved the ${setup}: ${String(count)} file${count === 1 ? '' : 's'}, ${formatSize(result.size)} (revision ${String(result.revision)}).`,
+      [
+        `Saved the ${setup}: ${String(count)} file${count === 1 ? '' : 's'}, ${formatSize(result.size)} (revision ${String(result.revision)}).`,
+        ...planned.notes.map((note) => `  ${printableLine(note)}`),
+      ].join('\n'),
     );
     return { setup, result: 'done' };
   }

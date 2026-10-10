@@ -73,6 +73,8 @@ function collectingAdapter(
     project?: CollectedFile[];
     unknown?: string[];
     notices?: string[];
+    /** What the inspector adds to the summary (T97). */
+    pushNotes?: string[];
   } = {},
 ): AgentAdapter {
   return {
@@ -96,6 +98,7 @@ function collectingAdapter(
     inspector: {
       unknownEntries: () => Promise.resolve(options.unknown ?? []),
       notices: () => Promise.resolve(options.notices ?? []),
+      pushNotes: () => options.pushNotes ?? [],
     },
   };
 }
@@ -198,6 +201,15 @@ describe('agentnomad push', () => {
     );
   });
 
+  it("adds the agent's notes on the saved files to the summary (T97)", async () => {
+    const note = 'Plugins in skills/: probe-mod@skills-dir (runs code)';
+    const t = setup(['global', false], { adapter: collectingAdapter({ pushNotes: [note] }) });
+    await t.command.push(noFlags);
+    expect(t.lines.at(-1)).toMatch(
+      /^success: Saved the Claude Code global setup: 1 file, \d+ B \(revision 1\)\.\n {2}Plugins in skills\/: probe-mod@skills-dir \(runs code\)$/,
+    );
+  });
+
   it('never sends a readable byte of the setup', async () => {
     const t = setup(['global', false], {
       adapter: collectingAdapter({ global: [collected('CLAUDE.md', 'SECRET-PLAN-XYZ')] }),
@@ -261,7 +273,11 @@ describe('agentnomad push', () => {
     // Claude Code's own optional part (its texts), with what this fake PC has.
     const claudePart = claudeCodeAdapter(HOME).optionalParts?.[0];
 
-    function withAccountSkills(names: string[], problem: string | null = null) {
+    function withAccountSkills(
+      names: string[],
+      problem: string | null = null,
+      notice: string | null = null,
+    ) {
       const seen: boolean[] = [];
       const base = collectingAdapter();
       if (claudePart === undefined) throw new Error('no account skills part');
@@ -273,10 +289,20 @@ describe('agentnomad push', () => {
             return base.collector.collect(target, options);
           },
         },
-        optionalParts: [{ ...claudePart, available: () => Promise.resolve({ names, problem }) }],
+        optionalParts: [
+          { ...claudePart, available: () => Promise.resolve({ names, problem, notice }) },
+        ],
       };
       return { adapter, seen };
     }
+
+    it('says what was left out, and why, before asking (T105)', async () => {
+      const some = withAccountSkills(['my-skill'], null, 'Not saved from claude.ai account a: x.');
+      const t = setup([false], { adapter: some.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
+      expect(t.lines).toContain('warn: Not saved from claude.ai account a: x.');
+      expect(t.script.asked).toHaveLength(1);
+    });
 
     it('says when they cannot be read, and that they were not saved', async () => {
       const broken = withAccountSkills([], 'The synced skills folder could not be read.');

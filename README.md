@@ -74,7 +74,9 @@ new PC, and shows you anything that would run programs before writing it.
 - **Opt-in memory and secrets.** Include Claude's memory, and save environment variable
   values (such as API keys for MCP servers) inside the encrypted setup.
 - **Your claude.ai skills too (opt-in).** Save a copy of the skills you made on claude.ai and
-  add them as local skills on a PC that uses another claude.ai account, or none.
+  add them as local skills on a PC that uses another claude.ai account, or none. Anthropic's
+  are never saved, and neither are your organization's when Claude Code's files tell them
+  apart; push names any skill it leaves out, and says when it cannot tell.
 - **Scriptable.** Every command runs from a script or CI with flags and clear exit codes.
 
 ## Install
@@ -167,16 +169,28 @@ The other setups are still done first, and one message lists what was not.
 
 ## What is synced
 
-|                          | Synced                                                                                                                                                                              | Never synced                                                                                                                         |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, scripts your hooks and status line run    | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
-| **`~/.claude.json`**     | Your MCP servers and documented preferences, merged in                                                                                                                              | Your login, project list, usage and onboarding state                                                                                 |
-| **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed) | Plugin files and caches                                                                                                              |
-| **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings and folders, scripts the project's hooks run                                      | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
-| **Opt-in**               | Memory (subagent and auto memory), environment variable values, a copy of your own claude.ai skills (`--account-skills`; never Anthropic's or your organization's)                  |                                                                                                                                      |
+|                          | Synced                                                                                                                                                                                         | Never synced                                                                                                                         |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, scripts your hooks and status line run               | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
+| **`~/.claude.json`**     | Your MCP servers and documented preferences, merged in                                                                                                                                         | Your login, project list, usage and onboarding state                                                                                 |
+| **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed)            | Plugin files and caches                                                                                                              |
+| **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings and folders, scripts the project's hooks run                                                 | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
+| **Opt-in**               | Memory (subagent and auto memory), environment variable values, a copy of your own claude.ai skills (`--account-skills`; never Anthropic's, nor your organization's when it can be told apart) |                                                                                                                                      |
 
 Settings your organization manages on a PC are never synced; agentnomad tells you when they
 exist.
+
+### Plugins and mods in `skills/`
+
+A folder in `~/.claude/skills/` with `.claude-plugin/plugin.json` is a plugin Claude Code
+loads as `<name>@skills-dir`; with `hooks/hooks.json` it is a mod that runs code inside Claude
+Code. Push saves it with the rest of `skills/` (never `.claude-plugin/types/`, which Claude
+Code generates) and names it in its summary. Before pull writes a new or changed one, it runs
+`claude plugin validate` on a copy and shows what each module hooks into and calls, flagging
+programs, file writes, model and network calls; you can read the module first. A plugin with
+code is written only after your yes or with `--allow-commands`; `--yes` alone never writes
+it, and one that validate finds broken needs your yes. Without Claude Code on the PC, the
+plugin counts as unreviewed code.
 
 ## Security
 

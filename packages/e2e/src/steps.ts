@@ -39,6 +39,17 @@ const PRESET_ENV: Readonly<Record<string, string>> =
   process.platform === 'win32' ? { [ENV_NAME]: ENV_VALUE } : {};
 /** Built by `tsc --build`, like the CLI: Node 22 cannot run the TypeScript source. */
 const PUSH_ENV_VALUE = fileURLToPath(new URL('../dist/src/push-env-value.js', import.meta.url));
+/**
+ * A mod in `~/.claude/skills/` (T97): it loads as `probe-mod@skills-dir` and runs code inside
+ * Claude Code. Claude Code 2.1.296's validate passes it; `types/` is what Claude Code
+ * generates when it reloads the mod, and never leaves the PC.
+ */
+const MOD_MANIFEST = JSON.stringify({ name: 'probe-mod' });
+const MOD_HOOKS = JSON.stringify({ modules: ['./register.ts'] });
+const MOD_MODULE =
+  'export function register(on, options) {\n  on("session.start", async ($, e) => {\n    await $.store.get("e2e-mod-seen");\n  });\n}\n';
+const MOD_TYPES = 'declare const generatedByClaudeCode: true;\n';
+const mod = (pc: Pc, ...parts: string[]) => claude(pc, 'skills', 'probe-mod', ...parts);
 /** The `claude` command of the PCs that pull (T100): installs plugins at version 9.9.0. */
 const FAKE_CLAUDE = fileURLToPath(new URL('../dist/src/fake-claude.js', import.meta.url));
 /** A marketplace plugin installed on the first PC, at an older version than pull gets. */
@@ -99,6 +110,8 @@ function expectNothingReadable(server: LocalServer, known: Known): void {
     EDIT.trim(),
     'Old notes on the third PC',
     'Write release notes.',
+    'e2e-mod-seen',
+    'generatedByClaudeCode',
     // What the stale PC uploads in step 3 (QA-07).
     'Stale notes',
     'Stale project',
@@ -181,6 +194,11 @@ async function expectRestored(pc: Pc, edited: boolean): Promise<void> {
   expect(cmd.replace(/\r/g, '')).toBe(CMD_LF);
   if (!posix) expect(cmd).toBe(CMD_LF.replace(/\n/g, '\r\n'));
   if (edited) expect(await read(claude(pc, 'skills', 'review', 'SKILL.md'))).toBe(REVIEW_SKILL);
+  // The mod (T97), without what Claude Code generates in it.
+  expect(await read(mod(pc, '.claude-plugin', 'plugin.json'))).toBe(MOD_MANIFEST);
+  expect(await read(mod(pc, 'hooks', 'hooks.json'))).toBe(MOD_HOOKS);
+  expect(await read(mod(pc, 'hooks', 'register.ts'))).toBe(MOD_MODULE);
+  await expect(read(mod(pc, '.claude-plugin', 'types', 'register.d.ts'))).rejects.toThrow();
   if (!claudeRunningHere) {
     const claudeJson = JSON.parse(await read(join(pc.home, '.claude.json'))) as {
       mcpServers?: Record<string, unknown>;
@@ -259,6 +277,10 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     );
     await write(claude(pc, 'hooks', 'check.sh'), HOOK_SCRIPT, true);
     await write(claude(pc, 'skills', 'deploy', 'SKILL.md'), SKILL);
+    await write(mod(pc, '.claude-plugin', 'plugin.json'), MOD_MANIFEST);
+    await write(mod(pc, 'hooks', 'hooks.json'), MOD_HOOKS);
+    await write(mod(pc, 'hooks', 'register.ts'), MOD_MODULE);
+    await write(mod(pc, '.claude-plugin', 'types', 'register.d.ts'), MOD_TYPES);
     await write(
       join(pc.home, '.claude.json'),
       JSON.stringify({
@@ -269,19 +291,39 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     await write(join(pc.project, 'CLAUDE.md'), 'Project rules.\n');
     await write(join(pc.project, '.mcp.json'), JSON.stringify(MCP_JSON));
     await write(memoryFile(pc), MEMORY);
-    // Skills Claude Code synced from claude.ai (T42): the user's own and one of Anthropic's.
+    // Skills Claude Code 2.1.295 synced from claude.ai (T42, T105): no creatorType; the
+    // user's own upload, one of Anthropic's and one of an organization's plugins.
     const synced = (...parts: string[]) => claude(pc, 'skills', 'synced', 'account-1', ...parts);
+    const syncedPlugins = (file: string) => claude(pc, 'plugins', 'synced', 'account-1', file);
     await write(
       synced('manifest.json'),
       JSON.stringify({
         skills: [
-          { name: 'my-account-skill', creatorType: 'user' },
-          { name: 'pdf', creatorType: 'anthropic' },
+          { name: 'my-account-skill', source: 'plugin', backingPluginId: 'plugin_mine' },
+          { name: 'pdf', source: 'anthropic' },
+          { name: 'team-skill', source: 'plugin', backingPluginId: 'plugin_team' },
         ],
       }),
     );
+    await write(
+      syncedPlugins('manifest.json'),
+      JSON.stringify({
+        plugins: [
+          { pluginId: 'plugin_mine', marketplaceName: 'my-uploads' },
+          { pluginId: 'plugin_team', marketplaceName: 'team-org' },
+        ],
+      }),
+    );
+    await write(
+      syncedPlugins('.marketplaces.json'),
+      JSON.stringify([
+        { name: 'my-uploads', scope: 'account' },
+        { name: 'team-org', scope: 'org' },
+      ]),
+    );
     await write(synced('my-account-skill', 'SKILL.md'), ACCOUNT_SKILL);
     await write(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic.\n');
+    await write(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nTeam.\n');
     // A plugin from a GitHub marketplace (T29), with its version (T100).
     await write(
       claude(pc, 'plugins', 'installed_plugins.json'),
@@ -319,9 +361,14 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
       ]),
     );
     expect(pushed.stdout).toContain('Saved the Claude Code global setup');
+    expect(pushed.stdout).toContain('Plugins in skills/: probe-mod@skills-dir (runs code)');
     expect(pushed.stdout).toContain('Saved the Claude Code project "demo"');
     // T49: a normal setup gets no false "not saved" warning (its hook script is saved).
     expect(pushed.stderr).not.toContain('left out, because agentnomad does not know');
+    // T105: the organization's skill is named as left out.
+    expect(pushed.stderr).toContain(
+      'Not saved from claude.ai account account-1: team-skill (it comes from your organization or claude.ai, not from you).',
+    );
 
     const status = ok(await pc.run(['status']));
     expect(status.stdout).toContain('Claude Code global setup: up to date (revision 1)');
@@ -389,13 +436,18 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
     );
     expect(pulled.stdout).toContain('Restored the Claude Code global setup');
     expect(pulled.stdout).toContain('Restored the Claude Code project "demo"');
+    // The mod was reviewed before it was written (T97), and types/ never came along.
+    expect(pulled.stdout).toContain('+ probe-mod@skills-dir (skills/probe-mod)');
+    expect(`${pulled.stdout}${pulled.stderr}`).not.toContain('types/register.d.ts');
     await expectRestored(pc, false);
     // T100: Claude Code installs only the latest plugin version, so pull names the change.
     expect(pulled.stdout).toContain(`Reinstalled ${PLUGIN_ID}.`);
     expect(pulled.stdout).toContain(`  ${PLUGIN_ID}  was ${PLUGIN_VERSION}, now 9.9.0`);
-    // T42: the user's own claude.ai skill is a local skill here; Anthropic's never came along.
+    // T42: the user's own claude.ai skill is a local skill here; Anthropic's and the
+    // organization's never came along.
     expect(await read(claude(pc, 'skills', 'my-account-skill', 'SKILL.md'))).toBe(ACCOUNT_SKILL);
     await expect(read(claude(pc, 'skills', 'pdf', 'SKILL.md'))).rejects.toThrow();
+    await expect(read(claude(pc, 'skills', 'team-skill', 'SKILL.md'))).rejects.toThrow();
     await expect(
       read(claude(pc, 'skills', 'synced', 'account-1', 'manifest.json')),
     ).rejects.toThrow();

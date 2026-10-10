@@ -519,7 +519,7 @@ export function createPullApplier(deps: PullApplyDeps) {
     // Declined commands and files left unasked are noted, so a later push asks before
     // replacing them (T46, BUG-05).
     await deps.localState().setRevision(adapter.id, setup.scopeKey, revision, {
-      partial: declined || notAsked.length > 0,
+      partial: declined || planned.agentPlan.declined === true || notAsked.length > 0,
     });
     if (setup.projectName !== null)
       await deps.localState().rememberProject(deps.cwd, setup.projectName);

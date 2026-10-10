@@ -30,6 +30,7 @@ import { hookScripts } from './hook-scripts.ts';
 import { pluginFiles } from './plugins.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
 import { commandsInSettings, programOf } from './settings-commands.ts';
+import { isGeneratedInSkillsPlugin } from './skills-dir-plugins.ts';
 
 export interface GlobalCollectorOptions {
   /** Claude Code's base folder, from the detector (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -46,6 +47,10 @@ export interface GlobalCollectorOptions {
 
 /** True when `bundlePath` is a never-synced entry or inside one. */
 const isNeverSynced = underAnyFolder(NEVER_SYNCED);
+
+/** Left out of a walk: never-synced entries and what Claude Code generates in a plugin (T97). */
+const isLeftOut = (bundlePath: string) =>
+  isNeverSynced(bundlePath) || isGeneratedInSkillsPlugin(bundlePath);
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {
@@ -163,7 +168,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         ? [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS]
         : GLOBAL_FOLDERS;
       for (const name of folders) {
-        found.push(...(await files.walk(path.join(baseDir, name), name, isNeverSynced, seen)));
+        found.push(...(await files.walk(path.join(baseDir, name), name, isLeftOut, seen)));
       }
 
       const settingsJsons = found
