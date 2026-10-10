@@ -58,6 +58,8 @@ const PLUGIN_VERSION = '9.8.7-e2e';
 /** A skill from the user's claude.ai account, as Claude Code syncs it (T42). */
 const ACCOUNT_SKILL =
   '---\nname: my-account-skill\ndescription: From claude.ai\n---\nWrite release notes.\n';
+/** The manifest of a plugin the user uploaded to claude.ai, as Claude Code syncs it (T101). */
+const ACCOUNT_PLUGIN = '{"name":"my-account-plugin","version":"1.0.0"}';
 
 interface StepContext {
   readonly server: LocalServer;
@@ -241,6 +243,7 @@ async function expectSecondPullChangesNothing(pc: Pc, conflict: '--merge' | '--o
       conflict,
       '--allow-commands',
       '--account-skills',
+      '--account-plugins',
       // Only where Claude Code runs (never CI): its "close Claude Code" question needs --yes.
       ...(claudeRunningHere ? ['--yes'] : []),
     ]),
@@ -294,7 +297,8 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     // Skills Claude Code 2.1.295 synced from claude.ai (T42, T105): no creatorType; the
     // user's own upload, one of Anthropic's and one of an organization's plugins.
     const synced = (...parts: string[]) => claude(pc, 'skills', 'synced', 'account-1', ...parts);
-    const syncedPlugins = (file: string) => claude(pc, 'plugins', 'synced', 'account-1', file);
+    const syncedPlugins = (file: string) =>
+      claude(pc, 'plugins', 'synced', 'account-1', ...file.split('/'));
     await write(
       synced('manifest.json'),
       JSON.stringify({
@@ -311,6 +315,19 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
         plugins: [
           { pluginId: 'plugin_mine', marketplaceName: 'my-uploads' },
           { pluginId: 'plugin_team', marketplaceName: 'team-org' },
+          // T101: the user's uploaded plugin, and a plugin the organization shares.
+          {
+            pluginId: 'plugin_upload',
+            name: 'my-account-plugin',
+            marketplaceName: 'my-uploads',
+            installationPreference: 'available',
+          },
+          {
+            pluginId: 'plugin_org',
+            name: 'team-plugin',
+            marketplaceName: 'team-org',
+            installationPreference: 'available',
+          },
         ],
       }),
     );
@@ -324,6 +341,8 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     await write(synced('my-account-skill', 'SKILL.md'), ACCOUNT_SKILL);
     await write(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic.\n');
     await write(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nTeam.\n');
+    await write(syncedPlugins('my-account-plugin/.claude-plugin/plugin.json'), ACCOUNT_PLUGIN);
+    await write(syncedPlugins('team-plugin/.claude-plugin/plugin.json'), '{"name":"team-plugin"}');
     // A plugin from a GitHub marketplace (T29), with its version (T100).
     await write(
       claude(pc, 'plugins', 'installed_plugins.json'),
@@ -357,6 +376,7 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
         'demo',
         '--memory',
         '--account-skills',
+        '--account-plugins',
         '--yes',
       ]),
     );
@@ -368,6 +388,10 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     // T105: the organization's skill is named as left out.
     expect(pushed.stderr).toContain(
       'Not saved from claude.ai account account-1: team-skill (it comes from your organization or claude.ai, not from you).',
+    );
+    // T101: so is the organization's plugin; only the uploaded one is saved.
+    expect(pushed.stderr).toContain(
+      'Plugins not saved from claude.ai account account-1: team-plugin (it comes from your organization or claude.ai, not from you).',
     );
 
     const status = ok(await pc.run(['status']));
@@ -432,6 +456,7 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
         '--yes',
         '--allow-commands',
         '--account-skills',
+        '--account-plugins',
       ]),
     );
     expect(pulled.stdout).toContain('Restored the Claude Code global setup');
@@ -450,6 +475,15 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
     await expect(read(claude(pc, 'skills', 'team-skill', 'SKILL.md'))).rejects.toThrow();
     await expect(
       read(claude(pc, 'skills', 'synced', 'account-1', 'manifest.json')),
+    ).rejects.toThrow();
+    // T101: the uploaded claude.ai plugin is a local plugin here, reviewed first; the
+    // organization's never left the first PC.
+    expect(pulled.stdout).toContain('+ my-account-plugin@skills-dir (skills/my-account-plugin)');
+    expect(
+      await read(claude(pc, 'skills', 'my-account-plugin', '.claude-plugin', 'plugin.json')),
+    ).toBe(ACCOUNT_PLUGIN);
+    await expect(
+      read(claude(pc, 'skills', 'team-plugin', '.claude-plugin', 'plugin.json')),
     ).rejects.toThrow();
     // --merge: incoming keys win, this PC's other keys stay.
     expect(settingsOf(await read(claude(pc, 'settings.json')))).toMatchObject({ model: 'opus' });
