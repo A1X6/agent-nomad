@@ -312,6 +312,15 @@ describe('pull writes a saved plugin folder (T99)', () => {
     );
   });
 
+  it('keeps a drive letter the home path brought into a value saved with : (T104)', async () => {
+    const entry = `C:/pc/home/dev/${MOD_NAME}`;
+    const { plan } = await pull([savedMod({ entry, separator: ':' })]);
+    const value = `${entry}:/not/saved`;
+    expect(valueIn(plan.withPluginDirs([settingsWith(value)]))).toBe(
+      `${modFolder()}${delimiter}/not/saved`,
+    );
+  });
+
   it('finds a folder the value names in another form of the same path', async () => {
     const { plan } = await pull([savedMod()]);
     const value = `${SAVED_PLUGIN_DIR_ENTRY}/`;

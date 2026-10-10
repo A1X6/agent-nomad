@@ -171,6 +171,21 @@ export interface PluginDirPlan {
   restore(onConflict: ConflictResolver): Promise<RestoreReport>;
 }
 
+/**
+ * `entries` split on `:` with a Windows drive letter joined back to its path (T104): a value
+ * saved on macOS or Linux reaches a Windows PC with its home paths already written as
+ * `C:/Users/…`, so `C` and `/Users/…` are one folder. A one-letter entry is never a full path,
+ * so Claude Code would skip it anyway.
+ */
+const keepDriveLetters = (entries: readonly string[]): string[] =>
+  entries.reduce<string[]>((joined, entry) => {
+    const last = joined.at(-1);
+    if (last !== undefined && /^[A-Za-z]$/.test(last) && /^[\\/]/.test(entry)) {
+      joined[joined.length - 1] = `${last}:${entry}`;
+    } else joined.push(entry);
+    return joined;
+  }, []);
+
 /** How Claude Code names a folder it loads this way: its manifest's name, `@inline`. */
 function inlineId(files: readonly CollectedFile[], name: string): string {
   const manifest = files.find((file) => file.path === PLUGIN_MANIFEST);
@@ -294,7 +309,7 @@ export async function planPluginDirs(
         return deps.platform === 'linux' ? full : full.toLowerCase();
       };
       const replace = (value: string) => {
-        const entries = splitPluginDirs(value, from);
+        const entries = keepDriveLetters(splitPluginDirs(value, from));
         const writeOf = (entry: string) =>
           toWrite.find((each) => folderOf(each.saved.entry) === folderOf(entry));
         // Already naming the folders pull writes (pulled onto the same places): as it is.
