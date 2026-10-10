@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { stopHook } from './claude-code-project-fixtures.ts';
 import {
+  ACCOUNT_PLUGINS_PREFIX,
   ACCOUNT_SKILLS_PREFIX,
   CLAUDE_JSON_BUNDLE_PATH,
   globalDestination,
@@ -208,5 +209,13 @@ describe('claude.ai skills (T42)', () => {
     expect(globalDestination(`${ACCOUNT_SKILLS_PREFIX}my-skill/SKILL.md`, new Set())).toEqual({
       kind: 'metadata',
     });
+  });
+});
+
+describe('claude.ai plugins (T101)', () => {
+  it("restore never writes them directly: pull's plan step offers them as skills/<name>/", () => {
+    expect(
+      globalDestination(`${ACCOUNT_PLUGINS_PREFIX}my-upload/.claude-plugin/plugin.json`, new Set()),
+    ).toEqual({ kind: 'metadata' });
   });
 });

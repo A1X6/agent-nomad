@@ -10,6 +10,11 @@ import {
   jsonFile,
   uniqueByPath,
 } from '../shared/file-gathering.ts';
+import {
+  ACCOUNT_PLUGINS_PART,
+  collectAccountPlugins,
+  readSyncedPlugins,
+} from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { ClaudeJsonError } from './claude-json-merge.ts';
 import {
@@ -197,6 +202,10 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       // Opt-in (T42): a copy of the user's own claude.ai skills, never skills/synced itself.
       if (collectOptions.include?.has(ACCOUNT_SKILLS_PART) === true) {
         found.push(...(await collectAccountSkills(files, await readSyncedSkills(path, baseDir))));
+      }
+      // Opt-in (T101): the user's own claude.ai plugins, never plugins/synced itself.
+      if (collectOptions.include?.has(ACCOUNT_PLUGINS_PART) === true) {
+        found.push(...(await collectAccountPlugins(files, await readSyncedPlugins(path, baseDir))));
       }
 
       // A hook may name a file already in a synced folder.

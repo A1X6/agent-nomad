@@ -198,6 +198,16 @@ export const validatePassWithWarning: ValidateRun = {
   },
 };
 
+/**
+ * `validatePassWithWarning` for a plugin without `hooks/hooks.json` (T101): only the manifest
+ * is validated, so nothing in the report runs code.
+ */
+export const validatePassNoHooks: ValidateRun = {
+  exitCode: 0,
+  text: validatePassWithWarning.text.split(`Validating hooks: ${validatedHooks}`)[0] ?? '',
+  json: { ...validatePassWithWarning.json, contents: [] },
+};
+
 /** The same mod with a cut-off `plugin.json`: it fails and exits 1, and still lists the module. */
 export const validateBrokenManifest: ValidateRun = {
   exitCode: 1,
@@ -584,4 +594,44 @@ export function scriptedGit(answers: Readonly<Record<string, GitAnswer>>) {
     },
   };
   return { git, calls };
+}
+
+/** An entry of `plugins/synced/<account>/manifest.json`: a plugin id, a name and any fields. */
+export interface SyncedPluginEntry {
+  readonly pluginId: string;
+  readonly name: string;
+  readonly [field: string]: unknown;
+}
+
+/**
+ * The files of each synced plugin's folder, `plugins/synced/<account>/<name>/` (T101, assumed
+ * like a plugin anywhere): its manifest and one skill, plus what push leaves out, a folder
+ * Claude Code generates (`.claude-plugin/types/`) and OS clutter (`.DS_Store`).
+ */
+export const syncedPluginFiles = (name: string): Record<string, string> => ({
+  '.claude-plugin/plugin.json': JSON.stringify({ name, version: '1.0.0' }),
+  [`skills/${name}/SKILL.md`]: `---\nname: ${name}\n---\nFrom the ${name} plugin.\n`,
+  '.claude-plugin/types/index.d.ts': 'declare const generated: true;\n',
+  '.DS_Store': 'clutter',
+});
+
+/**
+ * {@link syncedSources} in the base folder `base` with `plugins` (by default those of
+ * {@link syncedPluginsManifest}) in the plugins manifest, a folder for each
+ * ({@link syncedPluginFiles}), and, with `marketplaces: false`, no `.marketplaces.json` (T101).
+ */
+export async function syncedAccountPlugins(
+  base: string,
+  options: { plugins?: readonly SyncedPluginEntry[]; marketplaces?: boolean } = {},
+): Promise<void> {
+  const plugins = options.plugins ?? syncedPluginsManifest.plugins;
+  const dir = join(base, 'plugins', 'synced', SYNCED_ACCOUNT);
+  await syncedSources(base);
+  await putJson(join(dir, 'manifest.json'), { ...syncedPluginsManifest, plugins });
+  if (options.marketplaces === false) await rm(join(dir, '.marketplaces.json'));
+  for (const plugin of plugins) {
+    for (const [file, content] of Object.entries(syncedPluginFiles(plugin.name))) {
+      await writeTestFile(join(dir, plugin.name, ...file.split('/')), content);
+    }
+  }
 }

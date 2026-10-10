@@ -212,6 +212,21 @@ describe('routing and flags', () => {
     ]);
   });
 
+  it.each([
+    ['push', '--account-plugins', true],
+    ['push', '--no-account-plugins', false],
+    ['pull', '--account-plugins', true],
+    ['pull', '--no-account-plugins', false],
+  ])('passes %s %s as the account-plugins part (T101)', async (command, flag, value) => {
+    const { calls } = await run([command, '--global', flag]);
+    expect(calls).toEqual([
+      {
+        command,
+        options: { global: true, yes: false, parts: new Map([['account-plugins', value]]) },
+      },
+    ]);
+  });
+
   it('gives every optional part of an agent its flags, help and hint (ARCH-02)', async () => {
     const parts: PartFlags[] = [
       ...REGISTERED_PARTS,
@@ -256,7 +271,7 @@ describe('routing and flags', () => {
       parts,
     );
     expect(messages[0]).toContain(
-      '--account-skills or --no-account-skills, --prompts or --no-prompts, and --yes.',
+      '--account-skills or --no-account-skills, --account-plugins or --no-account-plugins, --prompts or --no-prompts, and --yes.',
     );
   });
 
@@ -374,11 +389,11 @@ describe('outcomes', () => {
   it.each([
     [
       ['push'],
-      'Use --agent, --global or --project <name>, --memory or --no-memory, --account-skills or --no-account-skills, and --yes. See `agentnomad push --help`.',
+      'Use --agent, --global or --project <name>, --memory or --no-memory, --account-skills or --no-account-skills, --account-plugins or --no-account-plugins, and --yes. See `agentnomad push --help`.',
     ],
     [
       ['pull', '--global'],
-      'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, --account-skills or --no-account-skills, and --yes. See `agentnomad pull --help`.',
+      'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, --account-skills or --no-account-skills, --account-plugins or --no-account-plugins, and --yes. See `agentnomad pull --help`.',
     ],
     [
       ['account', 'delete'],

@@ -253,3 +253,54 @@ describe('Claude Code plan step: plugin folders in skills/ (T97)', () => {
     ]);
   });
 });
+
+describe("Claude Code pull's version warning with mods (T103)", () => {
+  const versionNotice = (savedWith: string | null, here: string | null) =>
+    claudeCodeAdapter(home).inspector?.versionNotice?.(savedWith, here, modFiles());
+
+  it('warns about the mods when this PC is older than the first version with mods', () => {
+    expect(versionNotice('2.1.296', '2.1.286')).toBe(
+      [
+        'This setup was saved from Claude Code 2.1.296, but this PC has 2.1.286. Update Claude Code so every setting works.',
+        'This setup has mods (probe-mod@skills-dir), which need Claude Code 2.1.287 or newer, but this PC has 2.1.286. Update Claude Code so they load.',
+      ].join('\n'),
+    );
+  });
+
+  it('says nothing about mods on a version that loads them', () => {
+    expect(versionNotice('2.1.287', '2.1.287')).toBeNull();
+  });
+
+  it('keeps the unknown-version notice when the version here is unknown', () => {
+    expect(versionNotice('2.1.296', null)).toBe(
+      'This setup was saved from Claude Code 2.1.296; the version here is unknown.',
+    );
+  });
+});
+
+describe('Claude Code push notice on mods in development (T103)', () => {
+  /** A mod Claude Code keeps for one session: `dev-mods/<session>/<mod>/`. */
+  const devMod = (session: string, mod: string) =>
+    writeTestFile(join(home, '.claude', 'dev-mods', session, mod, '.claude-plugin', 'plugin.json'));
+  const notices = (command: 'push' | 'pull') =>
+    claudeCodeAdapter(home, {
+      managedSystem: fakeManagedSystem({ platform: 'linux' }),
+    }).inspector?.notices(command);
+
+  it('names the mods in development on push', async () => {
+    await devMod('session-a', 'probe-mod');
+    expect(await notices('push')).toEqual([
+      'Mods in development (dev-mods/) are not saved, and Claude Code deletes them after a while: probe-mod. To keep one, move it to skills/ or a marketplace.',
+    ]);
+  });
+
+  it('says nothing when dev-mods/ has no mod', async () => {
+    await writeTestFile(join(home, '.claude', 'dev-mods', 'session-a', 'notes.txt'));
+    expect(await notices('push')).toEqual([]);
+  });
+
+  it('says nothing about them on pull', async () => {
+    await devMod('session-a', 'probe-mod');
+    expect(await notices('pull')).toEqual([]);
+  });
+});

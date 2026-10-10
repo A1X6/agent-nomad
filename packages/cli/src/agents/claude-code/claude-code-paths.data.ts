@@ -6,6 +6,9 @@
  */
 import * as z from 'zod';
 
+/** Where Claude Code keeps mods one session is developing: `dev-mods/<session>/<mod>/` (T103). */
+const DEV_MODS = 'dev-mods';
+
 const RAW = {
   /** Bumped when the meaning of an entry changes. */
   version: 1,
@@ -83,6 +86,9 @@ const RAW = {
       'local',
       'usage-data',
       'stats-cache.json',
+      // Mods Claude Code writes while one session develops them, deleted after
+      // `cleanupPeriodDays`: never pushed; push names them (T103).
+      DEV_MODS,
     ],
   },
 
@@ -108,6 +114,13 @@ const RAW = {
      * pushed, never written by pull.
      */
     generatedInPlugin: ['.claude-plugin/types'],
+    /**
+     * The first Claude Code that loads mods: its changelog for 2.1.287 says "Added Claude Mods:
+     * plugins may now modify deeper behavior" (T103). Pull warns when this PC's is older.
+     */
+    modsSince: '2.1.287',
+    /** The folder of mods in development, in the base folder (also known state above). */
+    devMods: DEV_MODS,
   },
 
   /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
@@ -235,7 +248,11 @@ const PathsDataSchema = z.strictObject({
     neverSynced: names,
     knownState: names,
   }),
-  plugins: z.strictObject({ generatedInPlugin: names }),
+  plugins: z.strictObject({
+    generatedInPlugin: names,
+    modsSince: z.string().regex(/^\d+\.\d+\.\d+$/),
+    devMods: z.string().min(1),
+  }),
   skippedNames: names,
   ignoredCopyPatterns: z.array(
     z.string().refine((pattern) => {

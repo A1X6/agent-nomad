@@ -148,12 +148,14 @@ open, such as a chat or an option letter from a discussion.
     (`syncedSkillsManifest`, `olderSyncedSkillsManifest`, `syncedPluginsManifest`,
     `syncedPluginMeta`, `syncedMarketplaces`, all written by `syncedSources`), with more skill
     entries (`SyncedSkillEntry`: `syncedOrganizationSkill`, `syncedDirectorySkill`) and
-    `syncedAccount`, which also writes each skill's folder (T105); and a mod in `skills/`
-    (T97: `MOD_NAME`, `MOD_MODULE`, `modFiles`), a validate report with other `$` calls
-    (`validatePassCalling`) and a `claude` that answers validate with a report (`validateCli`,
-    for `findPluginValidator` with `executableLookup`); a marketplace added from a local folder
-    (T98: `writeLocalMarketplace`, `addedFromFolders`, `localModId`) and a scripted `git`
-    (`scriptedGit` with `GitAnswer`).
+    `syncedAccount`, which also writes each skill's folder (T105), and `syncedAccountPlugins`,
+    which writes each plugin's folder (T101: `syncedPluginFiles`, entries as
+    `SyncedPluginEntry`); and a mod in `skills/` (T97: `MOD_NAME`, `MOD_MODULE`, `modFiles`),
+    a validate report with other `$` calls (`validatePassCalling`) or for a plugin without
+    hooks (`validatePassNoHooks`, T101) and a `claude` that answers validate with a report
+    (`validateCli`, for `findPluginValidator` with `executableLookup`); a marketplace added
+    from a local folder (T98: `writeLocalMarketplace`, `addedFromFolders`, `localModId`) and
+    a scripted `git` (`scriptedGit` with `GitAnswer`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).
   - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`

@@ -3,12 +3,12 @@ import type { PlatformPath } from 'node:path';
 
 import * as z from 'zod';
 
-import { isMissing } from '../../system/files.ts';
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import type { CollectedFile } from '../adapter.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
 import { ACCOUNT_SKILLS_PREFIX } from './global-paths.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
+import { NOT_OWN_SCOPES, readSyncedPluginsOf, SYNCED_PLUGINS_DIR } from './synced-plugins.ts';
 
 /**
  * Skills from the user's claude.ai account (T42). Claude Code downloads them into
@@ -21,8 +21,6 @@ import { runnableInMarkdown } from './runnable-markdown.ts';
 const SYNCED_SKILLS_DIR = 'skills/synced';
 /** The id of the optional part for saved claude.ai skills (T42, T61); also the flag name. */
 export const ACCOUNT_SKILLS_PART = 'account-skills';
-
-const SYNCED_PLUGINS_DIR = 'plugins/synced';
 
 /**
  * Claude Code's `manifest.json` for one account's synced skills (an internal file, so only
@@ -45,19 +43,6 @@ type SyncedSkillEntry = z.infer<typeof EntrySchema>;
 const NOT_OWN_SOURCES = new Set(['anthropic', 'anthropic-example', 'session-refs']);
 
 /**
- * `plugins/synced/<account>/manifest.json` and `.marketplaces.json` (Claude Code 2.1.295):
- * which claude.ai marketplace each synced plugin is from, and each marketplace's `scope`
- * (`account`: the user's uploads; `org`: an organization's; `default`: claude.ai's
- * directory). The lists around the entries are not seen on a real account yet, so each entry
- * is checked on its own, and anything else means agentnomad cannot tell.
- */
-const PluginsManifestSchema = z.looseObject({ plugins: z.array(z.unknown()) });
-const PluginEntrySchema = z.looseObject({ pluginId: z.string(), marketplaceName: z.string() });
-const MarketplacesSchema = z.array(z.unknown());
-const MarketplaceSchema = z.looseObject({ name: z.string(), scope: z.string() });
-const NOT_OWN_SCOPES = new Set(['org', 'default']);
-
-/**
  * The marketplace scope of each synced plugin of one account, by plugin id; `'no list'` when
  * Claude Code keeps no `.marketplaces.json` there, `'unreadable'` when one is there but cannot
  * be read.
@@ -65,30 +50,11 @@ const NOT_OWN_SCOPES = new Set(['org', 'default']);
 type PluginScopes = ReadonlyMap<string, string> | 'no list' | 'unreadable';
 
 async function readPluginScopes(path: PlatformPath, accountDir: string): Promise<PluginScopes> {
-  const read = (file: string) => readFile(path.join(accountDir, file), 'utf8');
-  // `undefined`: no file; `null`: a file that cannot be read.
-  const marketplacesText = await read('.marketplaces.json').catch((error: unknown) =>
-    isMissing(error) ? undefined : null,
-  );
-  if (marketplacesText === undefined) return 'no list';
-  const pluginsText = await read('manifest.json').catch(() => null);
-  const marketplaces =
-    marketplacesText === null
-      ? null
-      : valueOrNull(parseJsonWith(MarketplacesSchema, marketplacesText));
-  const plugins =
-    pluginsText === null ? null : valueOrNull(parseJsonWith(PluginsManifestSchema, pluginsText));
-  if (marketplaces === null || plugins === null) return 'unreadable';
-  const scopeOf = new Map<string, string>();
-  for (const row of marketplaces) {
-    const marketplace = MarketplaceSchema.safeParse(row);
-    if (marketplace.success) scopeOf.set(marketplace.data.name, marketplace.data.scope);
-  }
+  const plugins = await readSyncedPluginsOf(path, accountDir);
+  if (typeof plugins === 'string') return plugins;
   const scopes = new Map<string, string>();
-  for (const entry of plugins.plugins) {
-    const plugin = PluginEntrySchema.safeParse(entry);
-    const scope = plugin.success ? scopeOf.get(plugin.data.marketplaceName) : undefined;
-    if (plugin.success && scope !== undefined) scopes.set(plugin.data.pluginId, scope);
+  for (const { pluginId, scope } of plugins) {
+    if (pluginId !== undefined && scope !== undefined) scopes.set(pluginId, scope);
   }
   return scopes;
 }
@@ -120,10 +86,13 @@ function ownershipOf(skill: SyncedSkillEntry, scopes: PluginScopes): Ownership {
   return { leftOut: 'agentnomad cannot tell which claude.ai marketplace it comes from' };
 }
 
-/** A skill folder name that is safe everywhere and not one Claude Code reserves. */
+/**
+ * A folder name in `~/.claude/skills/` that is safe everywhere and not one Claude Code
+ * reserves; also checked for saved claude.ai plugins (T101).
+ */
 const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const RESERVED_NAMES = new Set(['synced', 'anthropic-skills']);
-const isUsableSkillName = (name: string) =>
+export const isUsableSkillName = (name: string) =>
   SKILL_NAME.test(name) && !RESERVED_NAMES.has(name.toLowerCase());
 
 export interface SyncedSkills {
