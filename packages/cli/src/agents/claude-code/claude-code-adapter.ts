@@ -1,7 +1,19 @@
-import type { AgentAdapter, CollectedFile, Collector, OptionalPart } from '../adapter.ts';
+import type {
+  AgentAdapter,
+  CollectedFile,
+  Collector,
+  OptionalPart,
+  RestorePlanContext,
+} from '../adapter.ts';
 import { agentVersionNotice } from '../notices.ts';
 import { underFolder } from '../shared/bundle-paths.ts';
 import { nodeDetectorSystem, pathsOf } from '../shared/detector-system.ts';
+import {
+  ACCOUNT_PLUGINS_PART,
+  askAccountPlugins,
+  namesHere,
+  readSyncedPlugins,
+} from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
 import { claudeConfigDir, createClaudeCodeDetector } from './detector.ts';
@@ -139,6 +151,45 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     },
   };
 
+  /** A copy of the user's own claude.ai plugins (T101), saved only after a yes. */
+  const accountPlugins: OptionalPart = {
+    id: ACCOUNT_PLUGINS_PART,
+    scope: 'global',
+    async available() {
+      const synced = await readSyncedPlugins(pathsOf(options.platform), baseDir);
+      return {
+        names: synced.own.map((plugin) => plugin.name),
+        problem: synced.problem,
+        notice: synced.notice,
+      };
+    },
+    question: (names) =>
+      `Also save a copy of your ${String(names.length)} claude.ai plugin${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account.`,
+    unreadable: (problem) => `${problem} Your claude.ai plugins were not saved.`,
+    noneFound: 'No claude.ai plugins of your own were found on this PC.',
+    flagHelp: {
+      push: {
+        include: 'save a copy of your own claude.ai plugins (normally synced by your account)',
+        leaveOut: 'leave claude.ai plugins out',
+      },
+      pull: {
+        include:
+          'add saved claude.ai plugins as local plugins (for a PC without that claude.ai account)',
+        leaveOut: 'do not add saved claude.ai plugins',
+      },
+    },
+  };
+
+  /**
+   * Saved claude.ai plugins (T101) the user agreed to add, as `skills/<name>/` files next to
+   * the setup's own, so the plugin review (T97) checks them like any plugin folder.
+   */
+  async function withAccountPlugins(context: RestorePlanContext) {
+    const path = pathsOf(options.platform);
+    const added = await askAccountPlugins(context, await namesHere(path, baseDir, context.files));
+    return { files: [...context.files, ...added], added };
+  }
+
   return {
     id: 'claude-code',
     displayName: 'Claude Code',
@@ -147,7 +198,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     collector,
     restorer,
     envReferences: CLAUDE_ENV_REFERENCES,
-    optionalParts: [accountSkills],
+    optionalParts: [accountSkills, accountPlugins],
     inspector: {
       unknownEntries: (target) =>
         findUnknownEntries(target, {
@@ -179,8 +230,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     /**
      * Pull's Claude Code questions (T61), before anything is written: closing Claude Code
      * when `~/.claude.json` would change (it rewrites the file while open), plugin folders in
-     * `skills/` (T97), then plugins, programs and claude.ai skills. `--yes` never waits: the
-     * file is left with a warning.
+     * `skills/` (T97) with saved claude.ai plugins (T101), then plugins, programs and claude.ai
+     * skills. `--yes` never waits: the file is left with a warning.
      */
     async planRestore(context) {
       let leaveClaudeJson = false;
@@ -203,10 +254,21 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
           }
         }
       }
-      const plugins =
-        context.target.kind === 'global'
-          ? await reviewSkillsPlugins(context.files, context)
-          : { files: context.files, declined: false };
+      const global = context.target.kind === 'global';
+      const withSaved = global
+        ? await withAccountPlugins(context)
+        : { files: context.files, added: [] };
+      const plugins = global
+        ? await reviewSkillsPlugins(withSaved.files, context)
+        : { files: context.files, declined: false };
+      const kept = skillsPluginFolders(withSaved.added).filter((folder) =>
+        plugins.files.some((file) => underFolder(file.path, folder.folder)),
+      );
+      if (kept.length > 0) {
+        context.reporter.info(
+          `Adding ${kept.map((folder) => folder.id).join(', ')} as local plugins. If this PC later signs in to the claude.ai account they came from, Claude Code prefers the local copy.`,
+        );
+      }
       const afterRestore = await followUp({ ...context, files: plugins.files });
       return {
         restore: (onConflict, restoreContext) =>

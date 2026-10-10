@@ -1,5 +1,6 @@
 export * from './agents/adapter.ts';
 export * from './agents/agents-command.ts';
+export * from './agents/claude-code/account-plugins.ts';
 export * from './agents/claude-code/account-skills.ts';
 export * from './agents/claude-code/after-restore.ts';
 export * from './agents/claude-code/auto-memory.ts';
@@ -27,6 +28,7 @@ export * from './agents/claude-code/runnable-markdown.ts';
 export * from './agents/claude-code/running-claude.ts';
 export * from './agents/claude-code/settings-commands.ts';
 export * from './agents/claude-code/skills-dir-plugins.ts';
+export * from './agents/claude-code/synced-plugins.ts';
 export * from './agents/claude-code/unknown-files.ts';
 export * from './agents/notices.ts';
 export * from './agents/registry.ts';

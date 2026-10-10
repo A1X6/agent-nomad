@@ -1,5 +1,3 @@
-import { readdir } from 'node:fs/promises';
-
 import type {
   AfterRestoreContext,
   CollectedFile,
@@ -7,6 +5,7 @@ import type {
   Restorer,
 } from '../adapter.ts';
 import { findExecutable, pathsOf, type ExecutableLookupSystem } from '../shared/detector-system.ts';
+import { localSkillNames } from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, planAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { claudeConfigDir, findClaudeExecutable } from './detector.ts';
 import {
@@ -197,16 +196,13 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
    * claude.ai sync, never over a local skill. `incoming`: local skills the restore is about
    * to write, which count as local too.
    */
-  async function accountSkillsHere(files: readonly CollectedFile[], incoming: readonly string[]) {
+  async function accountSkillsHere(
+    files: readonly CollectedFile[],
+    incoming: readonly CollectedFile[],
+  ) {
     const baseDir = claudeConfigDir(deps.system);
     const path = pathsOf(deps.system.platform);
-    const skillsDir = path.join(baseDir, 'skills');
-    const localNames = new Set([
-      ...(await readdir(skillsDir, { withFileTypes: true }).catch(() => []))
-        .filter((entry) => entry.isDirectory() && entry.name !== 'synced')
-        .map((entry) => entry.name.toLowerCase()),
-      ...incoming.map((name) => name.toLowerCase()),
-    ]);
+    const localNames = await localSkillNames(path, baseDir, incoming);
     const synced = await readSyncedSkills(path, baseDir);
     return planAccountSkills(files, { syncedNames: synced.allNames, localNames });
   }
@@ -223,13 +219,7 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
     if (!context.files.some((file) => file.path.startsWith(ACCOUNT_SKILLS_PREFIX))) {
       return nothingToDo;
     }
-    const restoredSkills = context.files.flatMap((file) => {
-      const [folder, name, rest] = file.path.split('/');
-      return folder === 'skills' && name !== undefined && name !== 'synced' && rest !== undefined
-        ? [name]
-        : [];
-    });
-    const plan = await accountSkillsHere(context.files, restoredSkills);
+    const plan = await accountSkillsHere(context.files, context.files);
     if (plan.toAdd.length === 0 && plan.skipped.length === 0) return nothingToDo;
 
     context.reporter.info(

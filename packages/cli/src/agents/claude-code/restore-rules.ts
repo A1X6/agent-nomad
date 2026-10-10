@@ -10,6 +10,7 @@ import { ENV_BUNDLE_PATH } from '../../env/env-section.ts';
 import { RESERVED_DIR } from '../adapter.ts';
 import { underFolder } from '../shared/bundle-paths.ts';
 import {
+  ACCOUNT_PLUGINS_PREFIX,
   ACCOUNT_SKILLS_PREFIX,
   CLAUDE_JSON_BUNDLE_PATH,
   GLOBAL_FILES,
@@ -113,6 +114,8 @@ export function globalDestination(
   if (GLOBAL_METADATA.has(path)) return { kind: 'metadata' };
   // Saved claude.ai skills (T42): written only by pull's follow-up, after asking.
   if (path.startsWith(ACCOUNT_SKILLS_PREFIX)) return { kind: 'metadata' };
+  // Saved claude.ai plugins (T101): pull's plan step offers them as `skills/<name>/`.
+  if (path.startsWith(ACCOUNT_PLUGINS_PREFIX)) return { kind: 'metadata' };
   if (path.startsWith(HOME_SCRIPTS_PREFIX)) {
     return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length), allowedScripts);
   }
