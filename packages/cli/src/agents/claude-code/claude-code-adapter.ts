@@ -28,6 +28,7 @@ import {
   nodeManagedSettingsSystem,
   type ManagedSettingsSystem,
 } from './managed-settings.ts';
+import { planPluginDirs } from './plugin-dirs.ts';
 import {
   askPluginFolders,
   findPluginValidator,
@@ -315,23 +316,43 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
         restorer,
         git: findGitHere,
       });
-      const afterRestore = await followUp({ ...context, files: plugins.files }, local);
+      const dirs = await planPluginDirs(context, {
+        ...shared,
+        validator,
+        restorer,
+        git: findGitHere,
+      });
+      // The settings as written: `CLAUDE_CODE_PLUGIN_DIRS` names the folders pull writes (T99).
+      const files = dirs.withPluginDirs(plugins.files);
+      const settingsRewritten = files.some((file, index) => file !== plugins.files[index]);
+      const afterRestore = await followUp({ ...context, files }, local);
       const data = global
         ? await planPluginData(context, { baseDir, platform: options.platform, restorer })
         : null;
       return {
-        // The marketplace folders first: Claude Code adds them after the setup is written.
+        // The folders first: Claude Code adds the marketplaces after the setup is written.
         async restore(onConflict, restoreContext) {
-          const folders = await local.restore(onConflict);
-          const setup = await restorer.restore(context.target, plugins.files, onConflict, {
-            ...restoreContext,
-            leaveClaudeJson,
-          });
+          // Settings pull did not ask about were the same here, so only the rewritten value
+          // differs: written with a backup, as that is what pull is for.
+          const answer: typeof onConflict = (path, question) =>
+            settingsRewritten && path === 'settings.json' && !context.conflicts.has(path)
+              ? Promise.resolve(
+                  context.conflictAnswer ?? (question.overwriteAllowed ? 'overwrite' : 'merge'),
+                )
+              : onConflict(path, question);
+          const reports = [
+            await local.restore(onConflict),
+            await dirs.restore(onConflict),
+            await restorer.restore(context.target, files, answer, {
+              ...restoreContext,
+              leaveClaudeJson,
+            }),
+          ];
           return {
-            written: [...folders.written, ...setup.written],
-            skipped: [...folders.skipped, ...setup.skipped],
-            backups: [...folders.backups, ...setup.backups],
-            warnings: [...folders.warnings, ...setup.warnings],
+            written: reports.flatMap((report) => report.written),
+            skipped: reports.flatMap((report) => report.skipped),
+            backups: reports.flatMap((report) => report.backups),
+            warnings: reports.flatMap((report) => report.warnings),
           };
         },
         // Plugin data last (T102): it goes only to plugins installed by then.
@@ -339,7 +360,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
           await afterRestore(afterContext);
           await data?.(afterContext);
         },
-        declined: plugins.declined || local.declined,
+        declined: plugins.declined || local.declined || dirs.declined,
       };
     },
   };

@@ -58,18 +58,24 @@ const GitSourceSchema = z.strictObject({
 });
 type GitSource = z.infer<typeof GitSourceSchema>;
 
-const SavedLocalMarketplaceSchema = z.strictObject({
-  name: MarketplaceNameSchema,
+/** A saved folder (T98, T99): where it was, where it can be re-cloned from, and its files. */
+export const SAVED_FOLDER_SHAPE = {
   /** The folder by path from home, `/`-separated; `null` when it was outside home. */
   path: BundlePathSchema.nullable(),
   /** Where pull can re-clone it from; `null` outside git, or when the commit was not pushed. */
   git: GitSourceSchema.nullable(),
-  /** Its plugins installed in this setup's scope, installed again by pull (T29). */
-  plugins: z.array(PluginEntrySchema),
   /** Its files, with paths from the folder. */
   files: z.array(
     z.strictObject({ path: BundlePathSchema, content: z.base64(), executable: z.boolean() }),
   ),
+};
+export type SavedFolder = z.infer<z.ZodObject<typeof SAVED_FOLDER_SHAPE>>;
+
+const SavedLocalMarketplaceSchema = z.strictObject({
+  name: MarketplaceNameSchema,
+  ...SAVED_FOLDER_SHAPE,
+  /** Its plugins installed in this setup's scope, installed again by pull (T29). */
+  plugins: z.array(PluginEntrySchema),
 });
 type SavedLocalMarketplace = z.infer<typeof SavedLocalMarketplaceSchema>;
 
@@ -149,103 +155,151 @@ async function gitFiles(git: ProgramCli, folder: string): Promise<string[] | nul
   return [...new Set(listed.stdout.split('\0'))].filter((path) => path !== '').sort();
 }
 
+/** What `saveFolder` needs besides the folder. */
+export interface FolderSave {
+  readonly platform: NodeJS.Platform;
+  readonly homedir: string;
+  /** `git` from `findGit`; `null`: the folder is walked. */
+  readonly git: ProgramCli | null;
+  readonly onSkipped?: ((what: string, reason: string) => void) | undefined;
+}
+
+/**
+ * A folder's files as push saves them (T98, T99). In a git repository, only what git lists
+ * (tracked files with their current edits, and new files that are not ignored); elsewhere the
+ * whole folder. Never `.git/` or the names push always skips; links stay inside the folder.
+ * `null`, said as `what`, when the folder is gone or larger than the server takes.
+ */
+export async function saveFolder(
+  folder: string,
+  named: { readonly name: string; readonly what: string },
+  options: FolderSave,
+): Promise<SavedFolder | null> {
+  const path = pathsOf(options.platform);
+  const { git } = options;
+  const { what } = named;
+  const info = await stat(folder).catch(() => null);
+  if (!info?.isDirectory()) {
+    options.onSkipped?.(what, `its folder ${folder} is missing`);
+    return null;
+  }
+  const gatherer = createFileGatherer(options.platform, {
+    skippedNames: SKIPPED_NAMES,
+    homedir: options.homedir,
+    within: folder,
+    ...(options.onSkipped && {
+      onSkipped: (file: string, reason: string) => options.onSkipped?.(`${what}: ${file}`, reason),
+    }),
+  });
+  // `--show-prefix` is empty at the top of a repository, and fails outside one.
+  const repo = git === null ? null : await git.run(['rev-parse', '--show-prefix'], folder);
+  const listed = git !== null && repo?.exitCode === 0 ? await gitFiles(git, folder) : null;
+  const files: CollectedFile[] = [];
+  if (listed === null) {
+    const prefix = named.name;
+    for (const file of await gatherer.walk(folder, prefix, leftOut)) {
+      files.push({ ...file, path: file.path.slice(prefix.length + 1) });
+    }
+  } else {
+    for (const relative of listed.filter((file) => !leftOut(file))) {
+      if (!BundlePathSchema.safeParse(relative).success) continue;
+      const file = await gatherer.readIfFile(path.join(folder, ...relative.split('/')), relative);
+      if (file) files.push(file);
+    }
+  }
+  const size = files.reduce((total, file) => total + file.content.byteLength, 0);
+  if (size > MAX_BUNDLE_BYTES) {
+    options.onSkipped?.(
+      what,
+      `its files are ${formatSize(size)}, more than the ${formatSize(MAX_BUNDLE_BYTES)} a saved setup can hold. Ignore large files in git or move them out of the folder, then push again`,
+    );
+    return null;
+  }
+  const top = listed !== null && repo?.stdout.trim() === '';
+  return {
+    path: bundlePathInside(path, options.homedir, folder),
+    git: top && git !== null ? await gitSourceOf(git, folder) : null,
+    files: files.map((file) => ({
+      path: file.path,
+      content: Buffer.from(file.content).toString('base64'),
+      executable: file.executable,
+    })),
+  };
+}
+
 /**
  * The saved files of each local marketplace with a plugin installed in the setup's scope
- * (T98), one reserved entry each. In a git repository, only what git lists (tracked files with
- * their current edits, and new files that are not ignored); elsewhere the whole folder. Never
- * `.git/` or the names push always skips; links stay inside the folder. A marketplace larger
- * than the server takes, or whose folder is gone, is left out and said.
+ * (T98), one reserved entry each, as `saveFolder` saves them. A marketplace larger than the
+ * server takes, or whose folder is gone, is left out and said.
  */
 export async function localMarketplaceFiles(
   input: PluginManifestInput,
   options: LocalMarketplaceCollect,
 ): Promise<CollectedFile[]> {
-  const path = pathsOf(input.platform);
   const marketplaces = await readLocalMarketplaces(input);
   if (marketplaces.length === 0) return [];
-  const git = (await options.git?.()) ?? null;
+  const save: FolderSave = {
+    platform: input.platform,
+    homedir: options.homedir,
+    git: (await options.git?.()) ?? null,
+    onSkipped: options.onSkipped,
+  };
   const saved: CollectedFile[] = [];
   for (const marketplace of marketplaces) {
-    const what = `marketplace ${marketplace.name}`;
-    const info = await stat(marketplace.folder).catch(() => null);
-    if (!info?.isDirectory()) {
-      options.onSkipped?.(what, `its folder ${marketplace.folder} is missing`);
-      continue;
-    }
-    const gatherer = createFileGatherer(input.platform, {
-      skippedNames: SKIPPED_NAMES,
-      homedir: options.homedir,
-      within: marketplace.folder,
-      ...(options.onSkipped && {
-        onSkipped: (file: string, reason: string) =>
-          options.onSkipped?.(`${what}: ${file}`, reason),
-      }),
-    });
-    // `--show-prefix` is empty at the top of a repository, and fails outside one.
-    const repo =
-      git === null ? null : await git.run(['rev-parse', '--show-prefix'], marketplace.folder);
-    const listed =
-      git !== null && repo?.exitCode === 0 ? await gitFiles(git, marketplace.folder) : null;
-    const files: CollectedFile[] = [];
-    if (listed === null) {
-      const prefix = marketplace.name;
-      for (const file of await gatherer.walk(marketplace.folder, prefix, leftOut)) {
-        files.push({ ...file, path: file.path.slice(prefix.length + 1) });
-      }
-    } else {
-      for (const relative of listed.filter((file) => !leftOut(file))) {
-        if (!BundlePathSchema.safeParse(relative).success) continue;
-        const file = await gatherer.readIfFile(
-          path.join(marketplace.folder, ...relative.split('/')),
-          relative,
-        );
-        if (file) files.push(file);
-      }
-    }
-    const size = files.reduce((total, file) => total + file.content.byteLength, 0);
-    if (size > MAX_BUNDLE_BYTES) {
-      options.onSkipped?.(
-        what,
-        `its files are ${formatSize(size)}, more than the ${formatSize(MAX_BUNDLE_BYTES)} a saved setup can hold. Ignore large files in git or move them out of the folder, then push again`,
-      );
-      continue;
-    }
-    const top = listed !== null && repo?.stdout.trim() === '';
+    const folder = await saveFolder(
+      marketplace.folder,
+      { name: marketplace.name, what: `marketplace ${marketplace.name}` },
+      save,
+    );
+    if (folder === null) continue;
     const value: SavedLocalMarketplace = {
       name: marketplace.name,
-      path: bundlePathInside(path, options.homedir, marketplace.folder),
-      git: top && git !== null ? await gitSourceOf(git, marketplace.folder) : null,
+      ...folder,
       plugins: [...marketplace.plugins],
-      files: files.map((file) => ({
-        path: file.path,
-        content: Buffer.from(file.content).toString('base64'),
-        executable: file.executable,
-      })),
     };
     saved.push(jsonFile(bundlePathOf(marketplace.name), value));
   }
   return saved;
 }
 
-/** A saved local marketplace pull writes, and where. */
-interface MarketplaceToWrite {
-  readonly name: string;
+/** A saved folder pull writes (T98, T99), and where. */
+export interface FolderToWrite {
+  /** How messages name it, e.g. `marketplace tools`. */
+  readonly what: string;
   /** The folder pull writes, chosen here: never a path read from the bundle as it is (T44). */
   readonly dir: string;
   readonly files: readonly CollectedFile[];
-  readonly plugins: readonly PluginEntry[];
   /** Re-cloned first; `null` when the folder is already there or nothing to clone from. */
   readonly clone: GitSource | null;
+  /** The conflict key of one of its files, e.g. `.agentnomad/local-marketplaces/tools/x`. */
+  keyOf(file: string): string;
+}
+
+/** A saved local marketplace pull writes, and where. */
+interface MarketplaceToWrite extends FolderToWrite {
+  readonly name: string;
+  readonly plugins: readonly PluginEntry[];
   /** Not a marketplace here yet: Claude Code adds it from `dir`. */
   readonly add: boolean;
 }
 
-/** What pull needs to write local marketplaces on this PC. */
-export interface LocalMarketplaceRestoreDeps {
+/** Where pull may write a saved folder on this PC (T98, T99). */
+export interface FolderPlaceDeps {
   readonly homedir: string;
   /** Claude Code's base folder: a saved folder is never written inside it. */
   readonly baseDir: string;
   readonly platform: NodeJS.Platform;
+}
+
+/** What pull needs to write saved folders on this PC. */
+export interface FolderWriteDeps {
+  readonly platform: NodeJS.Platform;
+  readonly restorer: Pick<ClaudeCodeRestorer, 'restoreFolder'>;
+  readonly git: () => Promise<ProgramCli | null>;
+}
+
+/** What pull needs to write local marketplaces on this PC. */
+export interface LocalMarketplaceRestoreDeps extends FolderPlaceDeps, FolderWriteDeps {
   /** This PC's `known_marketplaces.json` (`readKnownMarketplaces`). */
   readonly known: Readonly<
     Record<
@@ -254,8 +308,6 @@ export interface LocalMarketplaceRestoreDeps {
     >
   >;
   readonly validator: () => Promise<PluginValidator>;
-  readonly restorer: Pick<ClaudeCodeRestorer, 'restoreFolder'>;
-  readonly git: () => Promise<ProgramCli | null>;
 }
 
 /** What pull's plan step decided about the saved local marketplaces of one setup. */
@@ -297,6 +349,14 @@ const filesUnder = (files: readonly CollectedFile[], folder: string): CollectedF
         .filter((file) => file.path.startsWith(`${folder}/`))
         .map((file) => ({ ...file, path: file.path.slice(folder.length + 1) }));
 
+/** A saved folder's files as pull writes them. */
+export const savedFolderFiles = (saved: SavedFolder): CollectedFile[] =>
+  saved.files.map((file) => ({
+    path: file.path,
+    content: new Uint8Array(Buffer.from(file.content, 'base64')),
+    executable: file.executable,
+  }));
+
 /**
  * Re-clones `source` into `dir`, which is not there: git's history and the saved commit, with
  * no files checked out, as pull writes the saved files next. On failure, `dir` is removed and
@@ -331,32 +391,47 @@ async function cloneInto(
 }
 
 /**
- * The folder for a saved marketplace on this PC: the one it is already added from here, the
- * same path from home, or `~/.agentnomad/marketplaces/<name>` for one that was outside home
- * or would land in a refused place (keys, autostart folders, Claude Code's own folder).
+ * The folder for a saved folder on this PC: the same path from home, or `fallback` for one
+ * that was outside home or would land in a refused place (keys, autostart folders, Claude
+ * Code's own folder).
+ */
+export function homeFolderFor(
+  savedPath: string | null,
+  fallback: string,
+  deps: FolderPlaceDeps,
+): string {
+  const path = pathsOf(deps.platform);
+  if (savedPath === null || homePathProblem(savedPath) !== null) return fallback;
+  const dir = path.join(deps.homedir, ...savedPath.split('/'));
+  const inClaude =
+    bundlePathInside(path, deps.baseDir, dir) !== null || path.relative(dir, deps.baseDir) === '';
+  return inClaude ? fallback : dir;
+}
+
+/**
+ * The folder for a saved marketplace on this PC: the one it is already added from here, or
+ * `homeFolderFor` with `~/.agentnomad/marketplaces/<name>`.
  */
 function folderFor(
   saved: SavedLocalMarketplace,
   deps: LocalMarketplaceRestoreDeps,
 ): { dir: string; add: boolean } | { problem: string } {
-  const path = pathsOf(deps.platform);
   const here = deps.known[saved.name];
   if (here !== undefined) {
     return here.source.source === 'directory' && here.source.path !== undefined
       ? { dir: here.source.path, add: false }
       : { problem: 'a marketplace with that name is already added here from another source' };
   }
-  const fallback = path.join(deps.homedir, '.agentnomad', 'marketplaces', saved.name);
-  if (saved.path === null || homePathProblem(saved.path) !== null) {
-    return { dir: fallback, add: true };
-  }
-  const dir = path.join(deps.homedir, ...saved.path.split('/'));
-  const inClaude =
-    bundlePathInside(path, deps.baseDir, dir) !== null || path.relative(dir, deps.baseDir) === '';
-  return { dir: inClaude ? fallback : dir, add: true };
+  const fallback = pathsOf(deps.platform).join(
+    deps.homedir,
+    '.agentnomad',
+    'marketplaces',
+    saved.name,
+  );
+  return { dir: homeFolderFor(saved.path, fallback, deps), add: true };
 }
 
-const exists = (path: string) =>
+export const exists = (path: string) =>
   stat(path).then(
     () => true,
     () => false,
@@ -367,6 +442,81 @@ export type LocalMarketplaceContext = Pick<
   RestorePlanContext,
   'files' | 'prompter' | 'reporter' | 'assumeYes' | 'allowCommands' | 'askConflict'
 >;
+
+/**
+ * Each file of `folders` that is here and differs, asked as pull asks about the setup's files
+ * (T34): the answers by conflict key.
+ */
+export async function askFolderConflicts(
+  folders: readonly FolderToWrite[],
+  context: Pick<RestorePlanContext, 'askConflict'>,
+  platform: NodeJS.Platform,
+): Promise<Map<string, ConflictChoice>> {
+  const path = pathsOf(platform);
+  const answers = new Map<string, ConflictChoice>();
+  for (const folder of folders) {
+    for (const file of folder.files) {
+      const native = path.join(folder.dir, ...file.path.split('/'));
+      const here = await readFile(native).catch(() => null);
+      if (here === null || sameForRestore(platform, file.path, here, file.content)) continue;
+      const key = folder.keyOf(file.path);
+      const answer = await context.askConflict?.(key, {
+        overwriteAllowed: true,
+        message: `${printableLine(native)} already exists here and is different.`,
+      });
+      if (answer !== undefined) answers.set(key, answer);
+    }
+  }
+  return answers;
+}
+
+/**
+ * Writes `folders`, re-cloning a repository first where it can and writing the saved files
+ * whatever happens, with the plan's `answers` (`askFolderConflicts`); asks nothing.
+ */
+export async function writeFolders(
+  folders: readonly FolderToWrite[],
+  answers: ReadonlyMap<string, ConflictChoice>,
+  onConflict: ConflictResolver,
+  deps: FolderWriteDeps,
+): Promise<RestoreReport> {
+  const report = {
+    written: [] as string[],
+    skipped: [] as string[],
+    backups: [] as string[],
+    warnings: [] as string[],
+  };
+  for (const folder of folders) {
+    if (folder.files.length === 0) continue;
+    if (folder.clone !== null) {
+      const git = await deps.git();
+      const failed =
+        git === null
+          ? 'git is not installed here'
+          : await cloneInto(git, folder.clone, folder.dir, deps.platform);
+      if (failed !== null) {
+        report.warnings.push(
+          `Could not re-clone the ${folder.what} from ${printableLine(folder.clone.remote)} (${printableLine(failed)}), so its saved files were written without git.`,
+        );
+      }
+    }
+    const written = await deps.restorer.restoreFolder(
+      folder.dir,
+      folder.files,
+      (file, question) => {
+        const key = folder.keyOf(file);
+        const answer = answers.get(key);
+        return answer === undefined ? onConflict(key, question) : Promise.resolve(answer);
+      },
+    );
+    const named = (paths: readonly string[]) => paths.map((file) => folder.keyOf(file));
+    report.written.push(...named(written.written));
+    report.skipped.push(...named(written.skipped));
+    report.backups.push(...named(written.backups));
+    report.warnings.push(...written.warnings);
+  }
+  return report;
+}
 
 /**
  * Pull's questions about saved local marketplaces (T98), before anything is written: the
@@ -400,15 +550,13 @@ export async function planLocalMarketplaces(
     const there = await exists(place.dir);
     toWrite.push({
       name: saved.name,
+      what: `marketplace ${saved.name}`,
       dir: place.dir,
-      files: saved.files.map((file) => ({
-        path: file.path,
-        content: new Uint8Array(Buffer.from(file.content, 'base64')),
-        executable: file.executable,
-      })),
+      files: savedFolderFiles(saved),
       plugins: saved.plugins,
       clone: there ? null : saved.git,
       add: place.add,
+      keyOf: (file) => `${LOCAL_MARKETPLACES_PREFIX}${saved.name}/${file}`,
     });
   }
 
@@ -453,67 +601,13 @@ export async function planLocalMarketplaces(
     };
   });
 
-  // Each file that is here and differs, asked as pull asks about the setup's files (T34).
-  const answers = new Map<string, ConflictChoice>();
-  const keyOf = (name: string, file: string) => `${LOCAL_MARKETPLACES_PREFIX}${name}/${file}`;
-  for (const marketplace of plans) {
-    for (const file of marketplace.files) {
-      const native = path.join(marketplace.dir, ...file.path.split('/'));
-      const here = await readFile(native).catch(() => null);
-      if (here === null || sameForRestore(deps.platform, file.path, here, file.content)) continue;
-      const key = keyOf(marketplace.name, file.path);
-      const answer = await context.askConflict?.(key, {
-        overwriteAllowed: true,
-        message: `${printableLine(native)} already exists here and is different.`,
-      });
-      if (answer !== undefined) answers.set(key, answer);
-    }
-  }
-
+  const answers = await askFolderConflicts(plans, context, deps.platform);
   return {
     marketplaces: plans
       .filter((marketplace) => marketplace.add && marketplace.plugins.length > 0)
       .map((marketplace) => ({ name: marketplace.name, add: marketplace.dir })),
     plugins: plans.flatMap((marketplace) => marketplace.plugins),
     declined: declinedIds.size > 0,
-    async restore(onConflict) {
-      const report = {
-        written: [] as string[],
-        skipped: [] as string[],
-        backups: [] as string[],
-        warnings: [] as string[],
-      };
-      for (const marketplace of plans) {
-        if (marketplace.files.length === 0) continue;
-        const git = marketplace.clone === null ? null : await deps.git();
-        if (marketplace.clone !== null) {
-          const failed =
-            git === null
-              ? 'git is not installed here'
-              : await cloneInto(git, marketplace.clone, marketplace.dir, deps.platform);
-          if (failed !== null) {
-            report.warnings.push(
-              `Could not re-clone the marketplace ${marketplace.name} from ${printableLine(marketplace.clone.remote)} (${printableLine(failed)}), so its saved files were written without git.`,
-            );
-          }
-        }
-        const written = await deps.restorer.restoreFolder(
-          marketplace.dir,
-          marketplace.files,
-          (file, question) => {
-            const key = keyOf(marketplace.name, file);
-            const answer = answers.get(key);
-            return answer === undefined ? onConflict(key, question) : Promise.resolve(answer);
-          },
-        );
-        const named = (paths: readonly string[]) =>
-          paths.map((file) => keyOf(marketplace.name, file));
-        report.written.push(...named(written.written));
-        report.skipped.push(...named(written.skipped));
-        report.backups.push(...named(written.backups));
-        report.warnings.push(...written.warnings);
-      }
-      return report;
-    },
+    restore: (onConflict) => writeFolders(plans, answers, onConflict, deps),
   };
 }

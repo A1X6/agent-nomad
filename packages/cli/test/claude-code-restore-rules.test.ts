@@ -12,6 +12,7 @@ import {
   isPullMetadata,
   LOCAL_MARKETPLACES_PREFIX,
   PLUGIN_DATA_PREFIX,
+  PLUGIN_DIRS_PREFIX,
   PLUGIN_STORE_PREFIX,
   PLUGIN_VERSIONS_BUNDLE_PATH,
   projectDestination,
@@ -59,6 +60,8 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['.agentnomad/other.json', 'unknown agentnomad entry'],
     // A saved local marketplace is one file (T98): never a folder of loose files.
     [`${LOCAL_MARKETPLACES_PREFIX}tools/run.sh`, 'unknown agentnomad entry'],
+    // A saved plugin folder is one file too (T99).
+    [`${PLUGIN_DIRS_PREFIX}0/run.sh`, 'unknown agentnomad entry'],
     // Windows and macOS ignore case: another spelling of a refused folder is refused too (T43).
     ['Plugins/cache/m/p/1.0.0/hooks/run.sh', 'never synced'],
     ['Skills/Synced/x/run.sh', 'never synced'],
@@ -109,6 +112,8 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['.GIT/hooks/pre-commit.sh', 'never synced'],
     ['.agentnomad/x.sh', 'unknown agentnomad entry'],
     [`${LOCAL_MARKETPLACES_PREFIX}tools/run.sh`, 'unknown agentnomad entry'],
+    // Only the user settings load plugin folders this way (T99): never a project's.
+    [`${PLUGIN_DIRS_PREFIX}0.json`, 'unknown agentnomad entry'],
     ['.agentnomad/auto-memory/run.sh', 'auto memory holds only Markdown files'],
     ['.agentnomad/auto-memory/.bashrc', 'auto memory holds only Markdown files'],
     ['../outside.md', 'not a safe path'],
@@ -167,6 +172,8 @@ describe('restore rules: places what a collector produces', () => {
     [PLUGIN_VERSIONS_BUNDLE_PATH, { kind: 'metadata' }],
     // Written by pull to a folder of its own choosing (T98), never as it is.
     [`${LOCAL_MARKETPLACES_PREFIX}tools.json`, { kind: 'metadata' }],
+    // Written by pull to a folder of its own choosing (T99), never as it is.
+    [`${PLUGIN_DIRS_PREFIX}0.json`, { kind: 'metadata' }],
     // Written by pull's follow-up for plugins installed here (T102), never as it is.
     [`${PLUGIN_DATA_PREFIX}probe-mod-skills-dir/settings.json`, { kind: 'metadata' }],
     [`${PLUGIN_STORE_PREFIX}probe-mod_skills-dir-e89169932969.json`, { kind: 'metadata' }],
@@ -193,6 +200,7 @@ describe('isPullMetadata', () => {
     ['.agentnomad/plugins.json', true],
     ['.agentnomad/programs.json', true],
     [`${LOCAL_MARKETPLACES_PREFIX}tools.json`, true],
+    [`${PLUGIN_DIRS_PREFIX}0.json`, true],
     ['CLAUDE.md', false],
     [`${LOCAL_MARKETPLACES_PREFIX}tools/run.sh`, false],
   ])('%s: %s', (path, metadata) => {

@@ -100,6 +100,13 @@ export const PLUGIN_VERSIONS_BUNDLE_PATH = `${RESERVED_DIR}/plugin-versions.json
 export const LOCAL_MARKETPLACES_PREFIX = `${RESERVED_DIR}/local-marketplaces/`;
 
 /**
+ * The plugin folders `env.CLAUDE_CODE_PLUGIN_DIRS` names in the user's settings (T99), one
+ * `<n>.json` each (`n`: its place in the value), read by pull, never written as they are; one
+ * file per folder for the same reason as the local marketplaces.
+ */
+export const PLUGIN_DIRS_PREFIX = `${RESERVED_DIR}/plugin-dirs/`;
+
+/**
  * Saved plugin data (T102, opt-in): `plugin-data/<folder>/...` holds a plugin's
  * `plugins/data/<folder>/` and `plugin-store/<file>.json` a mod's `plugins/store/<file>.json`,
  * by the names Claude Code gives them. Read by pull, written only for plugins installed here.

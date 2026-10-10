@@ -13,7 +13,7 @@ import {
   syncedSetup,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
-import { syncedAccountPlugins } from './claude-code-plugin-fixtures.ts';
+import { syncedAccountPlugins, writeModFolder } from './claude-code-plugin-fixtures.ts';
 import { linkFolder, paths, text, withTempDir, writeTestFile } from './fakes.ts';
 import {
   ACCOUNT_PLUGINS_PREFIX,
@@ -484,5 +484,14 @@ describe('global collector: claude.ai plugins (T101)', () => {
       `${ACCOUNT_PLUGINS_PREFIX}my-upload/skills/my-upload/SKILL.md`,
     ]);
     expect(withPlugins.some((file) => file.path.startsWith('plugins/synced'))).toBe(false);
+  });
+});
+
+describe('global collector: plugin folders in CLAUDE_CODE_PLUGIN_DIRS (T99)', () => {
+  it('saves each folder the user settings name', async () => {
+    await writeModFolder(join(home, 'dev', 'probe-mod'));
+    await writeSettings({ env: { CLAUDE_CODE_PLUGIN_DIRS: join(home, 'dev', 'probe-mod') } });
+    const files = await collect();
+    expect(files.map((file) => file.path)).toContain('.agentnomad/plugin-dirs/0.json');
   });
 });
