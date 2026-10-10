@@ -32,17 +32,26 @@ const savedPrograms = (programs: object[]) =>
 /** brag@brag, a user plugin whose marketplace builds it without running a command. */
 const brag = { id: 'brag@brag', scope: 'user', commandSource: false };
 
+/** A marketplace pull writes from a saved local folder (T98), with its one plugin. */
+const LOCAL_TOOLS = {
+  marketplaces: [{ name: 'tools', add: '/home/a/markets/tools' }],
+  plugins: [{ id: 'mod@tools', scope: 'user', commandSource: false }],
+} as const;
+
 /** The plan step (it asks), then the follow-up it returns (it gets no prompter). */
 function afterRestore(deps: {
   system: ExecutableLookupSystem;
   cli: (path: string) => ProgramCli;
   managed?: ManagedSettings;
 }) {
-  return async (ctx: FollowUpPlanContext) => {
+  return async (
+    ctx: FollowUpPlanContext,
+    local?: Parameters<ReturnType<typeof createClaudeCodeAfterRestore>>[1],
+  ) => {
     const followUp = await createClaudeCodeAfterRestore({
       ...deps,
       managedSettings: () => Promise.resolve(deps.managed ?? noPolicy),
-    })(ctx);
+    })(ctx, local);
     await followUp({ reporter: ctx.reporter });
   };
 }
@@ -230,6 +239,24 @@ describe('after a Claude Code restore', () => {
     expect(t.lines).toContain(
       "Could not install brag@brag: blocked by your organization's Claude Code policy (/etc/claude-code/managed-settings.json). Ask your admin to allow it. Details: /usr/bin/claude install: blocked by policy",
     );
+  });
+
+  it('adds a saved local marketplace from the folder pull wrote, and installs its plugin (T98)', async () => {
+    const { cli, runs } = recordingCli();
+    const t = context([]);
+    await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx, LOCAL_TOOLS);
+    expect(runs).toEqual([
+      '/usr/bin/claude plugin marketplace add /home/a/markets/tools',
+      '/usr/bin/claude plugin install mod@tools --scope user --json',
+    ]);
+  });
+
+  it('asks once about the saved plugins and those of saved local marketplaces (T98)', async () => {
+    const { cli } = recordingCli();
+    const plugins = savedPlugins([{ name: 'brag', add: 'latent-spaces/brag' }], [brag]);
+    const t = context([plugins]);
+    await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx, LOCAL_TOOLS);
+    expect(t.asked).toEqual(['Reinstall 2 plugins?']);
   });
 
   it('says so when Claude Code is not installed, instead of failing', async () => {

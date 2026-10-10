@@ -19,6 +19,7 @@ import { collected, readJson, readText, writeTestFile } from './fakes.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   createClaudeCodeRestorer,
+  LOCAL_MARKETPLACES_PREFIX,
   hooksForOtherOs,
   lineEndingsFor,
   sameForRestore,
@@ -793,6 +794,56 @@ describe('restorer: project scripts', () => {
   });
 });
 
+describe('restorer: a folder of its own, e.g. a local marketplace (T98)', () => {
+  const folder = () => join(home, 'markets', 'tools');
+
+  it('writes the files into the folder, paths from it', async () => {
+    const report = await restorer().restoreFolder(
+      folder(),
+      [collected('plugins/a/README.md', 'a')],
+      answer('skip').resolve,
+    );
+    expect(report.written).toEqual(['plugins/a/README.md']);
+    expect(await readText(join(folder(), 'plugins', 'a', 'README.md'))).toBe('a');
+  });
+
+  it('never writes into a .git folder, and says so', async () => {
+    const report = await restorer().restoreFolder(
+      folder(),
+      [collected('.git/hooks/pre-commit', 'x'), collected('README.md', 'ok')],
+      answer('overwrite').resolve,
+    );
+    expect(report.skipped).toEqual(['.git/hooks/pre-commit']);
+    expect(report.warnings).toEqual([
+      'Refused ".git/hooks/pre-commit": git keeps its own files.',
+    ]);
+    await expect(stat(join(folder(), '.git'))).rejects.toThrow();
+  });
+
+  it('refuses a path that leaves the folder', async () => {
+    const report = await restorer().restoreFolder(
+      folder(),
+      [collected('../outside.md', 'x')],
+      answer('overwrite').resolve,
+    );
+    expect(report.warnings).toEqual(['Refused "../outside.md": not a safe path.']);
+    await expect(stat(join(home, 'markets', 'outside.md'))).rejects.toThrow();
+  });
+
+  it('asks about a file there that differs, and overwrite keeps a backup', async () => {
+    await writeTestFile(join(folder(), 'README.md'), 'mine');
+    const { questions, resolve } = answer('overwrite');
+    const report = await restorer().restoreFolder(
+      folder(),
+      [collected('README.md', 'theirs')],
+      resolve,
+    );
+    expect(questions).toEqual([['README.md', { overwriteAllowed: true }]]);
+    expect(report.backups).toEqual([`README.md.agentnomad-backup-${STAMP}`]);
+    expect(await readText(join(folder(), 'README.md'))).toBe('theirs');
+  });
+});
+
 describe('restorer: what pull asks before writing (T61)', () => {
   it('lists each file here that differs, in order, and ~/.claude.json whenever it is pulled', () => {
     const r = restorer();
@@ -817,6 +868,13 @@ describe('restorer: what pull asks before writing (T61)', () => {
     ]);
     expect(conflicts[0]?.question.overwriteAllowed).toBe(false);
     expect(conflicts[1]?.question).toEqual({ overwriteAllowed: true });
+  });
+
+  it('never asks about a saved local marketplace, which pull writes elsewhere (T98)', () => {
+    const saved = `${LOCAL_MARKETPLACES_PREFIX}tools.json`;
+    expect(restorer().conflicts([collected(saved, 'theirs')], [collected(saved, 'mine')])).toEqual(
+      [],
+    );
   });
 
   it('reviews runnable entries that are new here', () => {
