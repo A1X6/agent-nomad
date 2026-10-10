@@ -662,3 +662,18 @@ export const savedPluginDir = (separator: string, overrides: object = {}, n = 0)
     })),
     ...overrides,
   });
+
+/** A plugin's data folder in the base folder `base`, `plugins/data/<folder>/`, with `files` (T102). */
+export async function writePluginData(
+  base: string,
+  folder: string,
+  files: Readonly<Record<string, string>>,
+): Promise<void> {
+  for (const [file, content] of Object.entries(files)) {
+    await writeTestFile(join(base, 'plugins', 'data', folder, ...file.split('/')), content);
+  }
+}
+
+/** A mod's `$.store` in the base folder `base`, `plugins/store/<file>`, holding `value` (T102). */
+export const writePluginStore = (base: string, file: string, value: unknown) =>
+  putJson(join(base, 'plugins', 'store', file), value);

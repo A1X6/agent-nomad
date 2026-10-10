@@ -19,7 +19,9 @@ import {
   GLOBAL_REFUSED,
   HOME_SCRIPTS_PREFIX,
   LOCAL_MARKETPLACES_PREFIX,
+  PLUGIN_DATA_PREFIX,
   PLUGIN_DIRS_PREFIX,
+  PLUGIN_STORE_PREFIX,
   PLUGIN_VERSIONS_BUNDLE_PATH,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
@@ -129,6 +131,10 @@ export function globalDestination(
   if (path.startsWith(ACCOUNT_SKILLS_PREFIX)) return { kind: 'metadata' };
   // Saved claude.ai plugins (T101): pull's plan step offers them as `skills/<name>/`.
   if (path.startsWith(ACCOUNT_PLUGINS_PREFIX)) return { kind: 'metadata' };
+  // Saved plugin data (T102): pull's follow-up writes it for plugins installed here.
+  if (path.startsWith(PLUGIN_DATA_PREFIX) || path.startsWith(PLUGIN_STORE_PREFIX)) {
+    return { kind: 'metadata' };
+  }
   if (path.startsWith(HOME_SCRIPTS_PREFIX)) {
     return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length), allowedScripts);
   }
