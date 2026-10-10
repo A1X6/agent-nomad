@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   collected,
+  executableLookup,
   paths,
   readJson,
   readText,
@@ -12,12 +13,18 @@ import {
   useTempDir,
   writeTestFile,
 } from './fakes.ts';
-import { fakeManagedSystem } from './claude-code-plugin-fixtures.ts';
+import {
+  fakeManagedSystem,
+  modFiles,
+  validateCli,
+  validatePassWithWarning,
+} from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import {
   AnswerNeededError,
   CLAUDE_JSON_BUNDLE_PATH,
   createNoTerminalPrompter,
+  findPluginValidator,
   type ConflictChoice,
   type Prompter,
   type RestorePlanContext,
@@ -177,5 +184,72 @@ describe('Claude Code adapter', () => {
     expect((await claude.detector.detect()).baseDir).toBe(custom);
     const files = await claude.collector.collect({ kind: 'global' }, { includeMemory: false });
     expect(new TextDecoder().decode(files[0]?.content)).toBe('custom');
+  });
+});
+
+describe('Claude Code plan step: plugin folders in skills/ (T97)', () => {
+  const base = () => join(home, '.claude');
+
+  /** The plan step with `claude` answering validate with a passing report, and these answers. */
+  async function planStep(answers: boolean[], overrides: Partial<RestorePlanContext> = {}) {
+    const script = scriptedPrompter(answers);
+    const { reporter } = recordingReporter({ levels: false });
+    const system = executableLookup({
+      platform: 'linux',
+      homedir: home,
+      env: { PATH: '/usr/bin' },
+      executables: ['/usr/bin/claude'],
+    });
+    const adapter = claudeCodeAdapter(home, {
+      managedSystem: fakeManagedSystem({ platform: 'linux' }),
+      pluginValidator: await findPluginValidator(system, validateCli(validatePassWithWarning).cli),
+    });
+    if (!adapter.planRestore) throw new Error('no plan step');
+    const planned = await adapter.planRestore({
+      target: { kind: 'global' },
+      files: modFiles(),
+      conflicts: new Map(),
+      conflictAnswer: undefined,
+      prompter: script.prompter,
+      reporter,
+      assumeYes: false,
+      allowCommands: false,
+      parts: new Map(),
+      ...overrides,
+    });
+    return { planned, asked: script.asked };
+  }
+
+  it('writes a mod after a yes', async () => {
+    const t = await planStep([true]);
+    const report = await t.planned.restore(answer('skip'), {});
+    expect(report.written).toContain('skills/probe-mod/register.ts');
+    expect(t.planned.declined).toBe(false);
+  });
+
+  it('leaves a declined mod out, and says the setup is partial', async () => {
+    const t = await planStep([false]);
+    const report = await t.planned.restore(answer('skip'), {});
+    expect(report.written).toEqual([]);
+    expect(t.planned.declined).toBe(true);
+  });
+
+  it('does not ask about a plugin folder that is here as it is', async () => {
+    for (const file of modFiles()) {
+      await writeTestFile(join(base(), ...file.path.split('/')), file.content);
+    }
+    const t = await planStep([]);
+    expect(t.asked).toEqual([]);
+  });
+
+  it('reviews no plugin folder in a project setup', async () => {
+    const t = await planStep([], { target: { kind: 'project', projectDir: join(home, 'app') } });
+    expect(t.asked).toEqual([]);
+  });
+
+  it("names the plugins in push's summary", () => {
+    expect(claudeCodeAdapter(home).inspector?.pushNotes?.(modFiles())).toEqual([
+      'Plugins in skills/: probe-mod@skills-dir (runs code)',
+    ]);
   });
 });

@@ -73,6 +73,8 @@ function collectingAdapter(
     project?: CollectedFile[];
     unknown?: string[];
     notices?: string[];
+    /** What the inspector adds to the summary (T97). */
+    pushNotes?: string[];
   } = {},
 ): AgentAdapter {
   return {
@@ -96,6 +98,7 @@ function collectingAdapter(
     inspector: {
       unknownEntries: () => Promise.resolve(options.unknown ?? []),
       notices: () => Promise.resolve(options.notices ?? []),
+      pushNotes: () => options.pushNotes ?? [],
     },
   };
 }
@@ -195,6 +198,15 @@ describe('agentnomad push', () => {
     expect(revision).toBe(1);
     expect(t.lines.at(-1)).toMatch(
       /^success: Saved the Claude Code global setup: 1 file, \d+ B \(revision 1\)\.$/,
+    );
+  });
+
+  it("adds the agent's notes on the saved files to the summary (T97)", async () => {
+    const note = 'Plugins in skills/: probe-mod@skills-dir (runs code)';
+    const t = setup(['global', false], { adapter: collectingAdapter({ pushNotes: [note] }) });
+    await t.command.push(noFlags);
+    expect(t.lines.at(-1)).toMatch(
+      /^success: Saved the Claude Code global setup: 1 file, \d+ B \(revision 1\)\.\n {2}Plugins in skills\/: probe-mod@skills-dir \(runs code\)$/,
     );
   });
 

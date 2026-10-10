@@ -4,7 +4,7 @@ import { underFolder } from '../shared/bundle-paths.ts';
 import { nodeDetectorSystem, pathsOf } from '../shared/detector-system.ts';
 import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
-import { claudeConfigDir, createClaudeCodeDetector, findClaudeExecutable } from './detector.ts';
+import { claudeConfigDir, createClaudeCodeDetector } from './detector.ts';
 import { CLAUDE_ENV_REFERENCES } from './env-files.ts';
 import { createClaudeCodeGlobalCollector } from './global-collector.ts';
 import { CLAUDE_JSON_BUNDLE_PATH } from './global-paths.ts';
@@ -16,12 +16,11 @@ import {
 } from './managed-settings.ts';
 import {
   askPluginFolders,
-  createPluginValidator,
+  findPluginValidator,
   pluginFolderChange,
   type PluginGateContext,
   type PluginValidator,
 } from './plugin-review.ts';
-import { createProgramCli } from './plugin-sync.ts';
 import { createProgramLocator } from './programs.ts';
 import { createClaudeCodeProjectCollector } from './project-collector.ts';
 import { createClaudeCodeRestorer } from './restorer.ts';
@@ -44,9 +43,6 @@ export interface ClaudeCodeAdapterOptions {
   /** Runs `claude plugin validate` for pull's plugin review (T97); defaults to this PC's. */
   readonly pluginValidator?: PluginValidator;
 }
-
-/** `claude plugin validate` gets this long before the folder counts as unreviewed. */
-const VALIDATE_TIMEOUT_MS = 60_000;
 
 /**
  * The Claude Code adapter (T28): the detector (T24), the global and project collectors
@@ -84,14 +80,6 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
   });
   const followUp = createClaudeCodeAfterRestore({ system, restorer, managedSettings });
 
-  async function pluginValidator(): Promise<PluginValidator> {
-    if (options.pluginValidator) return options.pluginValidator;
-    const claude = await findClaudeExecutable(system);
-    return createPluginValidator(
-      claude === null ? null : createProgramCli(claude, system, { timeoutMs: VALIDATE_TIMEOUT_MS }),
-    );
-  }
-
   /**
    * The plugin folders in `skills/` that a global setup would add or change (T97), reviewed and
    * asked about; the files of the declined ones are left out.
@@ -107,7 +95,11 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       if (change !== null) toReview.push({ folder, change });
     }
     if (toReview.length === 0) return { files, declined: false };
-    const accepted = await askPluginFolders(toReview, await pluginValidator(), gate);
+    const accepted = await askPluginFolders(
+      toReview,
+      options.pluginValidator ?? (await findPluginValidator(system)),
+      gate,
+    );
     const leftOut = toReview
       .map(({ folder }) => folder.folder)
       .filter((folder) => !accepted.has(folder));

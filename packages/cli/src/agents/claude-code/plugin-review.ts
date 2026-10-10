@@ -9,7 +9,9 @@ import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.
 import { printable, printableLine } from '../../ui/printable.ts';
 import type { Prompter, Reporter } from '../../ui/prompter.ts';
 import type { CollectedFile } from '../adapter.ts';
-import type { ProgramCli } from './plugin-sync.ts';
+import type { ExecutableLookupSystem } from '../shared/detector-system.ts';
+import { findClaudeExecutable } from './detector.ts';
+import { createProgramCli, type ProgramCli } from './plugin-sync.ts';
 import { riskOfCall } from './reviewed-settings.ts';
 import { commandText, hookItems } from './settings-commands.ts';
 import { PLUGIN_HOOKS } from './skills-dir-plugins.ts';
@@ -115,6 +117,22 @@ export function createPluginValidator(claude: ProgramCli | null): PluginValidato
       }
     },
   };
+}
+
+/** `claude plugin validate` gets this long before the folder counts as unreviewed. */
+const VALIDATE_TIMEOUT_MS = 60_000;
+
+/**
+ * The validator of this PC's Claude Code, found as the plugin reinstall finds it; without
+ * one, every folder is unreviewed. `cli` runs the found program (injected in tests).
+ */
+export async function findPluginValidator(
+  system: ExecutableLookupSystem,
+  cli: (path: string) => ProgramCli = (path) =>
+    createProgramCli(path, system, { timeoutMs: VALIDATE_TIMEOUT_MS }),
+): Promise<PluginValidator> {
+  const claude = await findClaudeExecutable(system);
+  return createPluginValidator(claude === null ? null : cli(claude));
 }
 
 /** One module of a mod: what it hooks into and the `$` methods it calls. */
