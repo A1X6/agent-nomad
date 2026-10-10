@@ -68,3 +68,38 @@ export const WATCHED_SETTINGS: readonly string[] = [
   ...LOOSENING_SETTINGS,
   ...REDIRECT_VARIABLES,
 ];
+
+/**
+ * `$` methods a mod's module calls (the `calls:` line of `claude plugin validate`, T96) that
+ * the pull review flags (T97): what each group does on this PC. `calls` names only the method,
+ * never the program, path or prompt, so the review offers the module's source.
+ */
+export const RISKY_MOD_CALLS: readonly { readonly prefix: string; readonly does: string }[] = [
+  { prefix: '$.process', does: 'runs programs' },
+  { prefix: '$.model', does: 'calls the model' },
+  { prefix: '$.net', does: 'uses the network' },
+  { prefix: '$.http', does: 'uses the network' },
+  { prefix: '$.fetch', does: 'uses the network' },
+  { prefix: '$.web', does: 'uses the network' },
+  { prefix: '$.ws', does: 'uses the network' },
+];
+
+/** `$.fs` methods that only read; every other `$.fs` method counts as a file write. */
+export const READING_FS_CALLS: readonly string[] = [
+  '$.fs.read',
+  '$.fs.readFile',
+  '$.fs.readText',
+  '$.fs.readJson',
+  '$.fs.readdir',
+  '$.fs.list',
+  '$.fs.exists',
+  '$.fs.stat',
+  '$.fs.glob',
+];
+
+/** What a `$` call does that the review flags, or `null` (`$.store.get`, `$.ui.status`). */
+export function riskOfCall(call: string): string | null {
+  const under = (prefix: string) => call === prefix || call.startsWith(`${prefix}.`);
+  if (under('$.fs')) return READING_FS_CALLS.includes(call) ? null : 'writes files';
+  return RISKY_MOD_CALLS.find((risky) => under(risky.prefix))?.does ?? null;
+}

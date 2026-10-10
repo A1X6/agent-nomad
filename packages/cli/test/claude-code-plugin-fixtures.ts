@@ -100,8 +100,8 @@ export const fileManagedSettings: ManagedSettings = {
  * Every account, skill and plugin id below is made up.
  */
 
-/** The marketplace of a plugin or mod found in `~/.claude/skills/<name>/`: `<name>@skills-dir`. */
-export const SKILLS_DIR_MARKETPLACE = 'skills-dir';
+/** The marketplace of a plugin or mod found in `~/.claude/skills/<name>/` (T97 moved it to src). */
+export { SKILLS_DIR_MARKETPLACE } from '../src/index.ts';
 
 /** The `plugins/data/<folder>` name of each plugin id, as Claude Code 2.1.295 made them. */
 export const PLUGIN_DATA_FOLDERS = [

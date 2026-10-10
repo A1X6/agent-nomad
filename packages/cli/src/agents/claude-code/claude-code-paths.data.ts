@@ -101,6 +101,15 @@ const RAW = {
     knownState: ['hooks'],
   },
 
+  plugins: {
+    /**
+     * Folders inside a plugin or mod in `skills/<name>/` (T97) that Claude Code writes itself:
+     * `.claude-plugin/types/` when it hot-reloads a mod (Claude Code 2.1.295, T96). Never
+     * pushed, never written by pull.
+     */
+    generatedInPlugin: ['.claude-plugin/types'],
+  },
+
   /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
   skippedNames: [
     '.git',
@@ -226,6 +235,7 @@ const PathsDataSchema = z.strictObject({
     neverSynced: names,
     knownState: names,
   }),
+  plugins: z.strictObject({ generatedInPlugin: names }),
   skippedNames: names,
   ignoredCopyPatterns: z.array(
     z.string().refine((pattern) => {
