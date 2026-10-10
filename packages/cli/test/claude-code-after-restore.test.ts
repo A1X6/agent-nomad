@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { noManagedSettings as noPolicy } from './claude-code-plugin-fixtures.ts';
+import {
+  fileManagedSettings,
+  noManagedSettings as noPolicy,
+} from './claude-code-plugin-fixtures.ts';
 import { collected, collectedJson, recordingReporter, scriptedPrompter } from './fakes.ts';
 
 import {
@@ -11,14 +14,6 @@ import {
   type FollowUpPlanContext,
   type ManagedSettings,
 } from '../src/index.ts';
-
-/** Organization-managed settings, injected so no test reads this PC's (SOLID-01). */
-const blockedByPolicy: ManagedSettings = {
-  sources: [{ kind: 'file', where: '/etc/claude-code/managed-settings.json' }],
-  keys: ['strictKnownMarketplaces'],
-  restrictsPlugins: true,
-  restrictsMcpServers: false,
-};
 
 /** A saved `.agentnomad/plugins.json` with these marketplaces and plugins. */
 const savedPlugins = (marketplaces: object[], plugins: object[]) =>
@@ -125,6 +120,35 @@ describe('after a Claude Code restore', () => {
     },
   );
 
+  it('names the npm command when npm is not found', async () => {
+    const { cli, runs } = recordingCli();
+    const t = context([programs]);
+    await afterRestore({ system: system(['/usr/bin/terminal-notifier']), cli })(t.ctx);
+    expect(runs).toEqual([]);
+    expect(t.lines).toContain(
+      '"ccstatusline" is missing and npm was not found. Install it with: npm install -g ccstatusline@2.2.22',
+    );
+  });
+
+  it('says why a program could not be installed', async () => {
+    const t = context([programs]);
+    const failing = (): ProgramCli => ({
+      run: () =>
+        Promise.resolve({ exitCode: 1, stdout: '', stderr: 'EACCES: permission denied\n' }),
+    });
+    await afterRestore({ system: system(['/usr/bin/npm']), cli: failing })(t.ctx);
+    expect(t.lines).toContain('Could not install ccstatusline@2.2.22: EACCES: permission denied');
+  });
+
+  it('gives the exit code when a failed install says nothing', async () => {
+    const t = context([programs]);
+    const silent = (): ProgramCli => ({
+      run: () => Promise.resolve({ exitCode: 243, stdout: '', stderr: '' }),
+    });
+    await afterRestore({ system: system(['/usr/bin/npm']), cli: silent })(t.ctx);
+    expect(t.lines).toContain('Could not install ccstatusline@2.2.22: exit code 243');
+  });
+
   it('does nothing for programs already installed', async () => {
     const { cli, runs } = recordingCli();
     const t = context([programs]);
@@ -194,7 +218,8 @@ describe('after a Claude Code restore', () => {
     await afterRestore({
       system: system(['/usr/bin/claude']),
       cli: blocked,
-      managed: blockedByPolicy,
+      // Injected, so no test reads this PC's managed settings (SOLID-01).
+      managed: fileManagedSettings,
     })(t.ctx);
     // The injected source is named: with no managed settings, no policy is named at all.
     expect(t.lines).toContain(
