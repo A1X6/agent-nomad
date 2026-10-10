@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { STATE_NAMES, STATE_NAMES_VERSION } from './claude-code-state-names.ts';
 import {
   CLAUDE_CODE_PATHS,
   GLOBAL_FOLDERS,
+  GLOBAL_KNOWN_STATE,
   GLOBAL_SETTINGS_FILES,
   NEVER_SYNCED,
   PROJECT_SETTINGS_FILES,
@@ -24,6 +26,71 @@ describe('paths data file', () => {
     expect(CLAUDE_CODE_PATHS.global.neverSynced.filter((entry) => synced.has(entry))).toEqual([]);
     const known = new Set(CLAUDE_CODE_PATHS.global.knownState);
     expect(CLAUDE_CODE_PATHS.global.neverSynced.filter((entry) => known.has(entry))).toEqual([]);
+  });
+
+  it('knows every state name of the Claude Code program it was read from (T108)', () => {
+    expect(STATE_NAMES_VERSION).toBe(CLAUDE_CODE_PATHS.reviewedVersion);
+    const known = new Set([
+      ...CLAUDE_CODE_PATHS.global.files,
+      ...CLAUDE_CODE_PATHS.global.folders,
+      ...CLAUDE_CODE_PATHS.global.memoryFolders,
+      ...NEVER_SYNCED,
+      ...GLOBAL_KNOWN_STATE,
+      // In the base folder when CLAUDE_CONFIG_DIR is set; the unknown-file check handles it apart.
+      '.claude.json',
+    ]);
+    expect(STATE_NAMES.filter((name) => !known.has(name))).toEqual([]);
+  });
+
+  // T108: logins, account state, session content and what may be the user's own (loop.md to
+  // project-settings, for a later decision) are never synced.
+  it.each([
+    '.session_ingress_token',
+    'hfi-auth.json',
+    '.claude.json.backup',
+    'policy-limits.json.signature.json',
+    'policy-limits.json.signature-iat.json',
+    'remote-settings.json.signature.json',
+    'remote-settings.json.signature-iat.json',
+    'remote-settings-consent.json',
+    'remote-settings-helper-consent',
+    'dump-prompts',
+    'api-dumps',
+    'file-transfers',
+    'remote',
+    'remote-control',
+    'ccr',
+    'ccr-home-seed.json',
+    'server-sessions.json',
+    'teams',
+    'storage-v2',
+    'cowork_plugins',
+    'loop.md',
+    'shares',
+    'scratch',
+    'agent-memory-local',
+    'agent-memory-project',
+    'local-settings',
+    'project-settings',
+  ])('never syncs %s (Claude Code 2.1.296, T108)', (name) => {
+    expect(NEVER_SYNCED).toContain(name);
+  });
+
+  // T108: Claude Code's own caches, profiles, traces, locks and markers are known state.
+  it.each([
+    'mcp-discovery-cache',
+    'mcp-skill-archives',
+    'startup-perf',
+    'traces',
+    'systemd',
+    'active-time.json',
+    'antproto.json',
+    'bridge-spawn',
+    'computer-use.lock',
+    'server.lock',
+    '.cc-writes',
+  ])('keeps %s as known state (Claude Code 2.1.296, T108)', (name) => {
+    expect(GLOBAL_KNOWN_STATE).toContain(name);
   });
 
   it('names every settings file of the data file in the settings lists (DUP-01)', () => {

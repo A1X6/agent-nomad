@@ -5,6 +5,7 @@ import { BACKUP_MARKER } from '@agentnomad/core';
 import { describe, expect, it } from 'vitest';
 
 import { stopHook } from './claude-code-project-fixtures.ts';
+import { STATE_FOLDER_NAMES, STATE_NAMES } from './claude-code-state-names.ts';
 import { useTempDir, writeTestFile } from './fakes.ts';
 import { findUnknownEntries } from '../src/index.ts';
 
@@ -84,6 +85,15 @@ describe('unknown-file check (T32 done-when)', () => {
     await writeTestFile(join(base, 'settings.json.bak'));
     await writeTestFile(join(base, `CLAUDE.md${BACKUP_MARKER}20260925T120000Z`));
     await writeTestFile(join(base, '.claude.json'));
+    expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([]);
+  });
+
+  it('does not report any state name of the Claude Code program (2.1.296, T108)', async () => {
+    // The folder list as folders; the names only the copy list has, as files.
+    const folders = new Set<string>(STATE_FOLDER_NAMES);
+    for (const name of STATE_NAMES) {
+      await writeTestFile(folders.has(name) ? join(base, name, 'x') : join(base, name));
+    }
     expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([]);
   });
 
