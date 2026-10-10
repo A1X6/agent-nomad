@@ -252,6 +252,7 @@ export function createPushPlanner(deps: PushDeps) {
         if (!saving || flag === false) continue;
         const found = await part.available();
         if (found.problem) reporter.warn(part.unreadable(found.problem));
+        if (found.notice) reporter.warn(found.notice);
         if (found.names.length > 0) {
           const yes =
             flag ?? (!options.yes && (await prompter.confirm(part.question(found.names), false)));
