@@ -112,12 +112,20 @@ describe('global collector: what is taken', () => {
     }
   });
 
-  it('never takes skills/synced/, even through a link or a hook', async () => {
+  it('never takes skills/synced/, even when a hook runs a script there', async () => {
     await writeTestFile(join(base, 'skills', 'synced', 'a', 'SKILL.md'));
     await writeTestFile(join(base, 'skills', 'synced', 'a', 'helper.sh'));
     await writeSettings(stopHook(`bash ${join(base, 'skills', 'synced', 'a', 'helper.sh')}`));
     const files = paths(await collect(true));
     expect(files.some((path) => path.startsWith('skills/synced'))).toBe(false);
+  });
+
+  it('never takes skills/synced/, even when it is a link to another folder', async () => {
+    const elsewhere = join(home, 'synced-elsewhere');
+    await writeTestFile(join(elsewhere, 'a', 'SKILL.md'));
+    await writeTestFile(join(base, 'skills', 'mine', 'SKILL.md'));
+    await linkFolder(elsewhere, join(base, 'skills', 'synced'));
+    expect(paths(await collect(true))).toEqual(['skills/mine/SKILL.md']);
   });
 
   it('skips .git, node_modules, OS clutter and agentnomad backup copies', async () => {
@@ -204,6 +212,11 @@ describe('global collector: ~/.claude.json', () => {
 
   it('stops with a clear message when the file is half-written', async () => {
     await writeTestFile(join(home, '.claude.json'), '{"mcpServers": {');
+    await expect(collect()).rejects.toBeInstanceOf(ClaudeJsonError);
+  });
+
+  it('stops with a clear message when the file is not a JSON object', async () => {
+    await writeTestFile(join(home, '.claude.json'), '["mcpServers"]');
     await expect(collect()).rejects.toBeInstanceOf(ClaudeJsonError);
   });
 });
@@ -373,6 +386,14 @@ describe('global collector: programs the status line and hooks need', () => {
   it('records a program that is not from npm without install details', async () => {
     await writeSettings(stopHook('terminal-notifier -message done'));
     const files = await collectWith((command) => Promise.resolve({ command, npm: null }));
+    expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
+      programs: [{ command: 'terminal-notifier', npm: null }],
+    });
+  });
+
+  it('records a program the lookup does not find, without install details', async () => {
+    await writeSettings(stopHook('terminal-notifier -message done'));
+    const files = await collectWith(() => Promise.resolve(null));
     expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
       programs: [{ command: 'terminal-notifier', npm: null }],
     });
