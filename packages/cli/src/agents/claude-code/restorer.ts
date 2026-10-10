@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 
-import { sameBytes } from '@agentnomad/contracts';
+import { BundlePathSchema, sameBytes } from '@agentnomad/contracts';
 import {
   BACKUP_MARKER,
   createMergeStrategies,
@@ -34,7 +34,12 @@ import { reviewRunnable } from './command-review.ts';
 import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
 import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
-import { globalDestination, projectDestination, type RestoreDestination } from './restore-rules.ts';
+import {
+  globalDestination,
+  isPullMetadata,
+  projectDestination,
+  type RestoreDestination,
+} from './restore-rules.ts';
 import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
 import { pathWords, settingsCommands } from './settings-commands.ts';
@@ -61,6 +66,16 @@ export interface ClaudeCodeRestorer extends Restorer {
    * it, or merge into it (only after the answer to its conflict question).
    */
   claudeJsonChange(files: readonly CollectedFile[]): Promise<'none' | 'new' | 'merge'>;
+  /**
+   * Writes `files` (paths from `dir`) into the folder `dir` as `restore` writes a setup's
+   * files: the same conflict answers, backups, line endings and permissions (T98: a local
+   * marketplace). Never writes into a `.git` folder.
+   */
+  restoreFolder(
+    dir: string,
+    files: readonly CollectedFile[],
+    onConflict: ConflictResolver,
+  ): Promise<RestoreReport>;
 }
 
 export interface RestorerOptions {
@@ -339,6 +354,96 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       );
   }
 
+  /** Says that `file` is refused, and why. */
+  function refuse(file: CollectedFile, reason: string, report: MutableReport): void {
+    report.skipped.push(file.path);
+    report.warnings.push(`Refused "${printableLine(file.path)}": ${printableLine(reason)}.`);
+  }
+
+  /** Why a file of a folder (paths from it) must not be written there, or `null`. */
+  function folderEntryProblem(path: string): string | null {
+    if (!BundlePathSchema.safeParse(path).success) return 'not a safe path';
+    if (path.split('/').some((part) => part.toLowerCase() === '.git')) {
+      return 'git keeps its own files';
+    }
+    return options.platform === 'win32' ? windowsNameProblem(path) : null;
+  }
+
+  /** Writes `file` to `nativePath` with the user's answer if one is there and differs. */
+  async function writeEntry(
+    file: CollectedFile,
+    nativePath: string,
+    ask: ConflictResolver,
+    report: MutableReport,
+  ): Promise<void> {
+    const existing = await readExistingFile(nativePath);
+    if (existing === 'folder') {
+      report.skipped.push(file.path);
+      report.warnings.push(
+        `Skipped "${printableLine(file.path)}": a folder with that name exists.`,
+      );
+      return;
+    }
+    const content = lineEndingsFor(options.platform, file.path, file.content);
+    const writes = await writesFor(file, content, existing?.content ?? null, ask);
+    if (writes === null) {
+      report.skipped.push(file.path);
+      return;
+    }
+    await writeAll(file, nativePath, writes, existing?.mode ?? null, report);
+  }
+
+  /**
+   * Writes each of `incoming` with `writeOne`, in path order. A question the user cancelled
+   * (Ctrl+C) or that cannot be asked without a terminal stops the whole restore; only a
+   * problem with the entry itself is skipped (T53).
+   */
+  async function writeEach(
+    incoming: readonly CollectedFile[],
+    onConflict: ConflictResolver,
+    report: MutableReport,
+    writeOne: (file: CollectedFile, ask: ConflictResolver) => Promise<void>,
+  ): Promise<void> {
+    let stopped: { readonly error: unknown } | undefined;
+    const ask: ConflictResolver = async (...args) => {
+      try {
+        return await onConflict(...args);
+      } catch (error) {
+        stopped = { error };
+        throw error;
+      }
+    };
+    // Windows and macOS ignore case and Unicode form, so two entries a Linux PC keeps apart
+    // (`Notes.md`, `notes.md`) would land on one file here: only the first is written (T43).
+    const foldsNames = options.platform === 'win32' || options.platform === 'darwin';
+    const seen = new Map<string, string>();
+    for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+      if (foldsNames) {
+        const folded = file.path.normalize('NFC').toLowerCase();
+        const first = seen.get(folded);
+        if (first !== undefined) {
+          report.skipped.push(file.path);
+          report.warnings.push(
+            `Skipped "${printableLine(file.path)}": on this PC it is the same file as "${printableLine(first)}".`,
+          );
+          continue;
+        }
+        seen.set(folded, file.path);
+      }
+      // One bad entry is skipped with a warning; it never stops the rest of the restore.
+      try {
+        await writeOne(file, ask);
+      } catch (error) {
+        if (stopped !== undefined) throw stopped.error;
+        report.skipped.push(file.path);
+        report.warnings.push(
+          // A file error quotes the path as it is: its message is kept on one line too.
+          `Skipped "${printableLine(file.path)}": ${printableLine(error instanceof Error ? error.message : String(error))}.`,
+        );
+      }
+    }
+  }
+
   return {
     reviewRunnable,
     isRedirectVariable,
@@ -353,6 +458,9 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       // One lookup table, not a search per file: a setup may hold thousands (PERF-01).
       const byPath = new Map(current.map((entry) => [entry.path, entry]));
       for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+        // Read by pull, never written as it is (`plugins.json`, a saved marketplace): nothing
+        // to ask about, even when this PC would save another one.
+        if (isPullMetadata(file.path)) continue;
         const here = byPath.get(file.path);
         const claudeJson = file.path === CLAUDE_JSON_BUNDLE_PATH;
         if (here === undefined && !claudeJson) continue;
@@ -376,28 +484,14 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
 
     async restore(target, incoming, onConflict, context: ClaudeRestoreContext = {}) {
       const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
-      // A question the user cancelled (Ctrl+C) or that cannot be asked without a terminal
-      // stops the whole restore; only a problem with the entry itself is skipped (T53).
-      let stopped: { readonly error: unknown } | undefined;
-      const ask: ConflictResolver = async (...args) => {
-        try {
-          return await onConflict(...args);
-        } catch (error) {
-          stopped = { error };
-          throw error;
-        }
-      };
       const destinationOf = destinations(target, incoming);
       const memoryDir = autoMemoryFolder(target, report);
 
-      /** Writes one entry; a problem with it is thrown and reported by the loop below. */
-      async function restoreEntry(file: CollectedFile): Promise<void> {
+      /** Writes one entry; a problem with it is thrown and reported by `writeEach`. */
+      async function restoreEntry(file: CollectedFile, ask: ConflictResolver): Promise<void> {
         const destination = destinationOf(file.path);
         if (destination.kind === 'refused') {
-          report.skipped.push(file.path);
-          report.warnings.push(
-            `Refused "${printableLine(file.path)}": ${printableLine(destination.reason)}.`,
-          );
+          refuse(file, destination.reason, report);
           return;
         }
         if (destination.kind === 'metadata') return;
@@ -411,54 +505,21 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           report.skipped.push(file.path);
           return;
         }
-        const existing = await readExistingFile(nativePath);
-        if (existing === 'folder') {
-          report.skipped.push(file.path);
-          report.warnings.push(
-            `Skipped "${printableLine(file.path)}": a folder with that name exists.`,
-          );
-          return;
-        }
-        const content = lineEndingsFor(options.platform, file.path, file.content);
-        const writes = await writesFor(file, content, existing?.content ?? null, ask);
-        if (writes === null) {
-          report.skipped.push(file.path);
-          return;
-        }
-        await writeAll(file, nativePath, writes, existing?.mode ?? null, report);
+        await writeEntry(file, nativePath, ask, report);
       }
 
-      // Windows and macOS ignore case and Unicode form, so two entries a Linux PC keeps apart
-      // (`Notes.md`, `notes.md`) would land on one file here: only the first is written (T43).
-      const foldsNames = options.platform === 'win32' || options.platform === 'darwin';
-      const seen = new Map<string, string>();
-      for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
-        if (foldsNames) {
-          const folded = file.path.normalize('NFC').toLowerCase();
-          const first = seen.get(folded);
-          if (first !== undefined) {
-            report.skipped.push(file.path);
-            report.warnings.push(
-              `Skipped "${printableLine(file.path)}": on this PC it is the same file as "${printableLine(first)}".`,
-            );
-            continue;
-          }
-          seen.set(folded, file.path);
-        }
-        // One bad entry is skipped with a warning; it never stops the rest of the restore.
-        try {
-          await restoreEntry(file);
-        } catch (error) {
-          if (stopped !== undefined) throw stopped.error;
-          report.skipped.push(file.path);
-          report.warnings.push(
-            // A file error quotes the path as it is: its message is kept on one line too.
-            `Skipped "${printableLine(file.path)}": ${printableLine(error instanceof Error ? error.message : String(error))}.`,
-          );
-        }
-      }
-
+      await writeEach(incoming, onConflict, report, restoreEntry);
       report.warnings.push(...otherOsWarnings(target, incoming, context.sourceOs));
+      return report;
+    },
+
+    async restoreFolder(dir, files, onConflict) {
+      const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
+      await writeEach(files, onConflict, report, async (file, ask) => {
+        const problem = folderEntryProblem(file.path);
+        if (problem !== null) refuse(file, problem, report);
+        else await writeEntry(file, resolver.toNativePath(dir, file.path), ask, report);
+      });
       return report;
     },
   };

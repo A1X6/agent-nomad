@@ -213,6 +213,12 @@ export interface RestorePlanContext {
   readonly conflicts: ReadonlyMap<string, ConflictChoice>;
   /** The answer for every other file (flags or "… all remaining files"), if one was given. */
   readonly conflictAnswer: ConflictChoice | undefined;
+  /**
+   * Asks about one more file that is here and differs, as pull asks about the setup's files
+   * (T98: a file the agent writes outside its folders); the same "… all remaining files"
+   * answer holds. Without it, such a file gets `conflictAnswer`, or is left as it is.
+   */
+  readonly askConflict?: ConflictResolver;
   readonly prompter: Prompter;
   readonly reporter: Reporter;
   /** `--yes`: accept without asking where that is safe. */

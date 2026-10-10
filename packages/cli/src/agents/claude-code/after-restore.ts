@@ -27,6 +27,7 @@ import {
   readPluginVersions,
   readSavedPlugins,
   readSavedPluginVersions,
+  type PluginManifest,
   type PluginVersions,
 } from './plugins.ts';
 import { readSavedPrograms } from './programs.ts';
@@ -52,6 +53,9 @@ export type FollowUp = (context: AfterRestoreContext) => Promise<void>;
 
 const nothingToDo: FollowUp = () => Promise.resolve();
 
+/** Marketplaces to add and plugins to install besides the ones in `plugins.json` (T98). */
+type LocalPlugins = Pick<PluginManifest, 'marketplaces' | 'plugins'>;
+
 /**
  * What pull does after writing a Claude Code setup (T34): reinstall its plugins (T29), offer
  * to install programs its hooks or status line need (T25), and offer saved claude.ai skills
@@ -61,14 +65,15 @@ const nothingToDo: FollowUp = () => Promise.resolve();
 export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
   const cli = deps.cli ?? ((path: string) => createProgramCli(path, deps.system));
 
-  async function plugins(context: FollowUpPlanContext): Promise<FollowUp> {
+  /** The saved `plugins.json` (T29); `null` when there is none, or it cannot be read (said). */
+  function savedPlugins(context: FollowUpPlanContext): PluginManifest | null {
     const file = context.files.find((entry) => entry.path === PLUGINS_BUNDLE_PATH);
-    if (!file) return nothingToDo;
+    if (!file) return null;
     // Said, never dropped silently (BUG-01): the rest of the file is still offered.
     const saved = readSavedPlugins(file.content);
     if (!('value' in saved)) {
       context.reporter.warn(`Saved plugins could not be read: ${saved.problem}`);
-      return nothingToDo;
+      return null;
     }
     const { manifest, refused } = saved.value;
     for (const entry of refused) {
@@ -76,6 +81,17 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
         `A saved plugin entry was left out, as it is not safe to pass to Claude Code: ${entry}`,
       );
     }
+    return manifest;
+  }
+
+  async function plugins(context: FollowUpPlanContext, local: LocalPlugins): Promise<FollowUp> {
+    const saved = savedPlugins(context);
+    // The plugins of saved local marketplaces (T98), added from the folders pull writes.
+    const manifest: PluginManifest = {
+      marketplaces: [...(saved?.marketplaces ?? []), ...local.marketplaces],
+      plugins: [...(saved?.plugins ?? []), ...local.plugins],
+      skipped: saved?.skipped ?? [],
+    };
     if (manifest.plugins.length === 0) return nothingToDo;
     const claudePath = await findClaudeExecutable(deps.system);
     if (claudePath === null) {
@@ -296,9 +312,19 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
     };
   }
 
-  /** Asks every question of the follow-up, in order, and returns what to do after writing. */
-  return async (context: FollowUpPlanContext): Promise<FollowUp> => {
-    const steps = [await plugins(context), await programs(context), await accountSkills(context)];
+  /**
+   * Asks every question of the follow-up, in order, and returns what to do after writing.
+   * `local`: the marketplaces and plugins of the saved local marketplaces pull writes (T98).
+   */
+  return async (
+    context: FollowUpPlanContext,
+    local: LocalPlugins = { marketplaces: [], plugins: [] },
+  ): Promise<FollowUp> => {
+    const steps = [
+      await plugins(context, local),
+      await programs(context),
+      await accountSkills(context),
+    ];
     return async (applyContext) => {
       for (const step of steps) await step(applyContext);
     };

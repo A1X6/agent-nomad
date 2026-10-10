@@ -5,6 +5,8 @@ import { createFileGatherer, type FileGatherer, uniqueByPath } from '../shared/f
 import { findAutoMemory } from './auto-memory.ts';
 import { SKIPPED_NAMES } from './global-paths.ts';
 import { projectHookScripts } from './hook-scripts.ts';
+import { localMarketplaceFiles } from './local-marketplaces.ts';
+import type { ProgramCli } from './plugin-sync.ts';
 import { pluginFiles } from './plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
@@ -22,6 +24,8 @@ export interface ProjectCollectorOptions {
   readonly homedir: string;
   readonly platform: NodeJS.Platform;
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** Finds `git` for saved local marketplaces (T98); without it their folders are walked. */
+  readonly findGit?: () => Promise<ProgramCli | null>;
 }
 
 /** True when `bundlePath` is a never-synced project entry or inside one. */
@@ -118,11 +122,17 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
         found.push(...(await autoMemory(projectDir, collectOptions.onSkipped)));
       }
 
+      const plugins = {
+        baseDir: options.baseDir,
+        platform: options.platform,
+        scope: { kind: 'project', projectDir },
+      } as const;
+      found.push(...(await pluginFiles(plugins)));
       found.push(
-        ...(await pluginFiles({
-          baseDir: options.baseDir,
-          platform: options.platform,
-          scope: { kind: 'project', projectDir },
+        ...(await localMarketplaceFiles(plugins, {
+          homedir: options.homedir,
+          ...(options.findGit && { git: options.findGit }),
+          ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),
         })),
       );
 
