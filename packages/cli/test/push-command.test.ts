@@ -16,10 +16,14 @@ import {
   collected,
   crypto,
   dataKey,
+  fakeAdapter,
   fakeBundleServer,
+  installedAgent,
   localStateIn,
   memorySecretStore,
+  missingAgent,
   recordingReporter,
+  revisionOn,
   scriptedPrompter,
   storedOn,
   useDataKey,
@@ -660,6 +664,79 @@ describe('agentnomad push', () => {
     // Push keeps its own wording with the shared error (T62).
     await expect(setup([], { secrets: empty }).command.push(noFlags)).rejects.toThrow(
       /^You are not logged in on this PC\. Run `agentnomad login` first\.$/,
+    );
+  });
+});
+
+describe('push: which agents, the project name and what is left out (T95)', () => {
+  /** `t`'s push with these agents registered instead of its one adapter. */
+  const pushWith = (t: ReturnType<typeof setup>, adapters: AgentAdapter[]) =>
+    createPushCommand({ ...t.deps, registry: () => createAgentRegistry(adapters) }).push;
+
+  it('asks which agents when several are installed, and saves only the chosen', async () => {
+    const t = setup([['claude-code'], false]);
+    const other = fakeAdapter('other', 'Other CLI', installedAgent);
+    await pushWith(t, [collectingAdapter(), other])({ global: true, yes: false });
+    expect(t.script.asked).toEqual([
+      'Which agents?',
+      'Include memory (what Claude learned: subagent and auto memory)?',
+    ]);
+    expect(revisionOn(t.server, GLOBAL_SCOPE_KEY)).toBe(1);
+    expect(t.server.stored.size).toBe(1);
+  });
+
+  it('--agent with an unknown id names the next step', async () => {
+    const t = setup([]);
+    await expect(t.command.push({ global: true, yes: true, agents: ['nope'] })).rejects.toThrow(
+      'Unknown agent "nope". Run `agentnomad agents` to see the supported ones.',
+    );
+  });
+
+  it('--agent with an agent that is not installed here says so', async () => {
+    const t = setup([]);
+    const other = fakeAdapter('other', 'Other CLI', missingAgent);
+    await expect(
+      pushWith(t, [collectingAdapter(), other])({ global: true, yes: true, agents: ['other'] }),
+    ).rejects.toThrow('Other CLI is not installed on this PC.');
+  });
+
+  it('says so when no supported agent is installed', async () => {
+    const t = setup([], { adapter: fakeAdapter('claude-code', 'Claude Code', missingAgent) });
+    await t.command.push(noFlags);
+    expect(t.lines).toEqual([
+      'info: No supported agent is installed on this PC, so there is nothing to push.',
+    ]);
+  });
+
+  it('asks again for a project name the server would refuse', async () => {
+    const t = setup(['project', 'my\u0007app', 'my-app', false]);
+    await t.command.push(noFlags);
+    expect(t.script.rejected).toEqual(['Project name must not contain control characters']);
+    expect(await t.state.projectNameFor(PROJECT)).toBe('my-app');
+  });
+
+  it('says when a setup has nothing to save, and uploads nothing', async () => {
+    const t = setup([], { adapter: collectingAdapter({ global: [] }) });
+    await t.command.push({ global: true, yes: true });
+    expect(t.lines).toContain('info: Nothing to save for the Claude Code global setup.');
+    expect(t.server.stored.size).toBe(0);
+  });
+
+  it('names each file the collector left out, with why', async () => {
+    const base = collectingAdapter();
+    const adapter: AgentAdapter = {
+      ...base,
+      collector: {
+        collect: (target, options) => {
+          options.onSkipped?.('big.bin', 'it is larger than 10 MB');
+          return base.collector.collect(target, options);
+        },
+      },
+    };
+    const t = setup([], { adapter });
+    await t.command.push({ global: true, yes: true });
+    expect(t.lines).toContain(
+      'warn: Claude Code global setup: left out\n  - big.bin: it is larger than 10 MB',
     );
   });
 });
