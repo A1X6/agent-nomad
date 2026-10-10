@@ -47,18 +47,18 @@ async function validate(folder: string) {
     ...extra,
   });
   /** A JSON file of the folder, or why it does not parse (also when it is missing). */
-  const json = async <T>(path: string): Promise<{ value: T } | { problem: string }> => {
+  const json = async (path: string): Promise<{ value: unknown } | { problem: string }> => {
     try {
-      return { value: JSON.parse((await text(path)) ?? '') as T };
+      return { value: JSON.parse((await text(path)) ?? '') };
     } catch (error) {
       return { problem: `Invalid JSON syntax: ${error instanceof Error ? error.message : ''}` };
     }
   };
-  const read = await json<{ author?: unknown }>('.claude-plugin/plugin.json');
-  const manifest = 'value' in read ? read.value : null;
+  const read = await json('.claude-plugin/plugin.json');
+  const manifest = 'value' in read ? (read.value as { author?: unknown }) : null;
   const problem = 'problem' in read ? read.problem : '';
-  const hooksRead = await json<{ modules?: string[] }>('hooks/hooks.json');
-  const hooks = 'value' in hooksRead ? hooksRead.value : null;
+  const hooksRead = await json('hooks/hooks.json');
+  const hooks = 'value' in hooksRead ? (hooksRead.value as { modules?: string[] }) : null;
   const notes: string[] = [];
   for (const module of hooks?.modules ?? []) {
     const source = (await text(`hooks/${module.replace(/^\.\//, '')}`)) ?? '';

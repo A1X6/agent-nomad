@@ -683,8 +683,8 @@ async function thirdPc({ server, keychain }: StepContext): Promise<void> {
  * A plugin without hooks, a mod and a mod whose manifest does not parse, in `skills/`.
  */
 const GATE_LOGIN = ['--username', 'e2e-gate', '--password-stdin'];
-const GATE_PLUGINS = ['gate-broken', 'gate-mod', 'gate-plain'] as const;
-const gatePlugin = (pc: Pc, name: (typeof GATE_PLUGINS)[number], ...parts: string[]) =>
+type GatePlugin = 'gate-broken' | 'gate-mod' | 'gate-plain';
+const gatePlugin = (pc: Pc, name: GatePlugin, ...parts: string[]) =>
   claude(pc, 'skills', name, ...parts);
 
 /** Step 1, after the first PC: the gate's setup is pushed from this OS. */
