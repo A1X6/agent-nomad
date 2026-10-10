@@ -121,7 +121,7 @@ describe('claude.ai synced files (T96)', () => {
   });
 
   it('the marketplaces have every scope', () => {
-    expect(syncedMarketplaces.map((marketplace) => marketplace.scope)).toEqual([
+    expect(syncedMarketplaces.rows.map((marketplace) => marketplace.scope)).toEqual([
       'org',
       'default',
       'account',
@@ -142,7 +142,7 @@ describe('syncedSources (T96)', () => {
     expect(JSON.parse(await readText(join(plugins, '.marketplaces.json')))).toEqual(
       syncedMarketplaces,
     );
-    expect(await readJson(join(plugins, 'my-upload.meta.json'))).toEqual({
+    expect(await readJson(join(plugins, 'my-upload~g2.meta.json'))).toEqual({
       server_plugin_id: 'plugin_01upload',
       marketplace_name: 'my-uploads',
       installation_preference: 'available',
