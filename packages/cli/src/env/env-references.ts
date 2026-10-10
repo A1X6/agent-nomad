@@ -1,7 +1,5 @@
-import * as z from 'zod';
-
 import type { EnvReferenceFiles } from '../agents/adapter.ts';
-import { parseJsonWith, valueOrNull } from '../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../system/json.ts';
 
 /** A file of a collected setup (only path and bytes are needed here). */
 export interface ScannedFile {
@@ -26,8 +24,6 @@ export interface EnvScan {
   /** Set by an `env` block in the agent's settings, so it has them without the shell. */
   readonly setBySettings: ReadonlySet<string>;
 }
-
-const JsonObjectSchema = z.record(z.string(), z.unknown());
 
 /** Every `${VAR}` in a JSON value, in any string at any depth, but the agent's own. */
 function referencesIn(value: unknown, ownVariables: ReadonlySet<string>): string[] {

@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-import * as z from 'zod';
-
+import { JsonObjectSchema } from '../../system/json.ts';
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { underAnyFolder } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
@@ -128,7 +127,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
     } catch (error) {
       throw new ClaudeJsonError(file, { cause: error });
     }
-    const all = z.record(z.string(), z.unknown()).safeParse(parsed);
+    const all = JsonObjectSchema.safeParse(parsed);
     if (!all.success) throw new ClaudeJsonError(file, { cause: all.error });
 
     const selected: Record<string, unknown> = {};

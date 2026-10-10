@@ -3,7 +3,7 @@ import { win32 } from 'node:path';
 
 import * as z from 'zod';
 
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { runProgram } from '../../system/run-program.ts';
 import type { Prompter, Reporter } from '../../ui/prompter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
@@ -75,10 +75,7 @@ export async function readCurrentPlugins(
     path.join(baseDir, 'plugins', 'known_marketplaces.json'),
     'utf8',
   ).catch(() => null);
-  const known =
-    knownText === null
-      ? null
-      : valueOrNull(parseJsonWith(z.record(z.string(), z.unknown()), knownText));
+  const known = knownText === null ? null : valueOrNull(parseJsonWith(JsonObjectSchema, knownText));
   const keys = new Set<string>();
   for (const [id, installs] of Object.entries(
     (await readInstalledPlugins(baseDir, platform)) ?? {},

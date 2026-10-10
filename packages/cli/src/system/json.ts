@@ -1,4 +1,7 @@
-import type * as z from 'zod';
+import * as z from 'zod';
+
+/** Any JSON object, its values unchecked: the first check of a settings or state file. */
+export const JsonObjectSchema = z.record(z.string(), z.unknown());
 
 /** JSON read with a schema: the value, or why it could not be read (DUP-04). */
 export type JsonResult<T> = { readonly value: T } | { readonly problem: string };
