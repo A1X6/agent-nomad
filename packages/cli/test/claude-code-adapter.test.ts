@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -18,6 +18,9 @@ import {
   modFiles,
   validateCli,
   validatePassWithWarning,
+  writeModFolder,
+  SAVED_PLUGIN_DIR_ENTRY,
+  savedPluginDir,
 } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import {
@@ -187,38 +190,41 @@ describe('Claude Code adapter', () => {
   });
 });
 
+/**
+ * The global plan step for `modFiles()` (or `overrides.files`), with `claude` answering
+ * validate with a passing report, and these answers.
+ */
+async function planStep(answers: boolean[], overrides: Partial<RestorePlanContext> = {}) {
+  const script = scriptedPrompter(answers);
+  const { reporter } = recordingReporter({ levels: false });
+  const system = executableLookup({
+    platform: 'linux',
+    homedir: home,
+    env: { PATH: '/usr/bin' },
+    executables: ['/usr/bin/claude'],
+  });
+  const adapter = claudeCodeAdapter(home, {
+    managedSystem: fakeManagedSystem({ platform: 'linux' }),
+    pluginValidator: await findPluginValidator(system, validateCli(validatePassWithWarning).cli),
+  });
+  if (!adapter.planRestore) throw new Error('no plan step');
+  const planned = await adapter.planRestore({
+    target: { kind: 'global' },
+    files: modFiles(),
+    conflicts: new Map(),
+    conflictAnswer: undefined,
+    prompter: script.prompter,
+    reporter,
+    assumeYes: false,
+    allowCommands: false,
+    parts: new Map(),
+    ...overrides,
+  });
+  return { planned, asked: script.asked };
+}
+
 describe('Claude Code plan step: plugin folders in skills/ (T97)', () => {
   const base = () => join(home, '.claude');
-
-  /** The plan step with `claude` answering validate with a passing report, and these answers. */
-  async function planStep(answers: boolean[], overrides: Partial<RestorePlanContext> = {}) {
-    const script = scriptedPrompter(answers);
-    const { reporter } = recordingReporter({ levels: false });
-    const system = executableLookup({
-      platform: 'linux',
-      homedir: home,
-      env: { PATH: '/usr/bin' },
-      executables: ['/usr/bin/claude'],
-    });
-    const adapter = claudeCodeAdapter(home, {
-      managedSystem: fakeManagedSystem({ platform: 'linux' }),
-      pluginValidator: await findPluginValidator(system, validateCli(validatePassWithWarning).cli),
-    });
-    if (!adapter.planRestore) throw new Error('no plan step');
-    const planned = await adapter.planRestore({
-      target: { kind: 'global' },
-      files: modFiles(),
-      conflicts: new Map(),
-      conflictAnswer: undefined,
-      prompter: script.prompter,
-      reporter,
-      assumeYes: false,
-      allowCommands: false,
-      parts: new Map(),
-      ...overrides,
-    });
-    return { planned, asked: script.asked };
-  }
 
   it('writes a mod after a yes', async () => {
     const t = await planStep([true]);
@@ -302,5 +308,42 @@ describe('Claude Code push notice on mods in development (T103)', () => {
   it('says nothing about them on pull', async () => {
     await devMod('session-a', 'probe-mod');
     expect(await notices('pull')).toEqual([]);
+  });
+});
+
+describe('Claude Code plan step: plugin folders in CLAUDE_CODE_PLUGIN_DIRS (T99)', () => {
+  const settingsPath = () => join(home, '.claude', 'settings.json');
+  const pulled = () =>
+    collected(
+      'settings.json',
+      JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: SAVED_PLUGIN_DIR_ENTRY } }),
+    );
+  const files = () => [pulled(), savedPluginDir(delimiter === ';' ? ':' : ';')];
+
+  it('writes the settings with the value naming the folder pull wrote', async () => {
+    const t = await planStep([true], { files: files() });
+    await t.planned.restore(answer('skip'), {});
+    expect(await readJson(settingsPath())).toEqual({
+      env: { CLAUDE_CODE_PLUGIN_DIRS: join(home, 'dev', 'probe-mod') },
+    });
+  });
+
+  it('rewrites settings that are here as they were saved without asking, keeping a backup', async () => {
+    await writeTestFile(settingsPath(), pulled().content);
+    const t = await planStep([true], { files: files() });
+    const report = await t.planned.restore(answer('skip'), {});
+    expect(report.backups).toHaveLength(1);
+  });
+
+  it('writes the folder before the setup', async () => {
+    const t = await planStep([true], { files: files() });
+    const report = await t.planned.restore(answer('skip'), {});
+    expect(report.written[0]).toMatch(/^\.agentnomad\/plugin-dirs\/0\//);
+  });
+
+  it('leaves a folder that is here as it is without asking', async () => {
+    await writeModFolder(join(home, 'dev', 'probe-mod'));
+    const t = await planStep([], { files: files() });
+    expect(t.asked).toEqual([]);
   });
 });

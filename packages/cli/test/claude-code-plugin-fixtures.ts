@@ -536,9 +536,7 @@ export async function writeLocalMarketplace(dir: string, name: string): Promise<
     owner: { name: 'me' },
     plugins: [{ name: MOD_NAME, source: `./${MOD_NAME}` }],
   });
-  for (const file of modFiles(`${MOD_NAME}/`)) {
-    await writeTestFile(join(dir, ...file.path.split('/')), file.content);
-  }
+  await writeModFolder(join(dir, MOD_NAME));
 }
 
 /**
@@ -635,3 +633,32 @@ export async function syncedAccountPlugins(
     }
   }
 }
+
+/** The mod of {@link modFiles} as a plugin folder `dir` of its own (T98, T99). */
+export async function writeModFolder(dir: string): Promise<void> {
+  for (const file of modFiles('')) {
+    await writeTestFile(join(dir, ...file.path.split('/')), file.content);
+  }
+}
+
+/** Where the saving PC had the mod folder in {@link savedPluginDir}: another PC's path. */
+export const SAVED_PLUGIN_DIR_ENTRY = `/other/pc/dev/${MOD_NAME}`;
+
+/**
+ * The saved entry `n` of the mod folder named in `CLAUDE_CODE_PLUGIN_DIRS` (T99), as push
+ * writes it on a PC whose separator is `separator`, with `overrides`.
+ */
+export const savedPluginDir = (separator: string, overrides: object = {}, n = 0) =>
+  collectedJson(`.agentnomad/plugin-dirs/${String(n)}.json`, {
+    name: MOD_NAME,
+    entry: SAVED_PLUGIN_DIR_ENTRY,
+    separator,
+    path: `dev/${MOD_NAME}`,
+    git: null,
+    files: modFiles('').map((file) => ({
+      path: file.path,
+      content: Buffer.from(file.content).toString('base64'),
+      executable: false,
+    })),
+    ...overrides,
+  });
