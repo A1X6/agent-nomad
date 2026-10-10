@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import { collected, collectedJson, writeTestFile } from './fakes.ts';
@@ -460,4 +460,55 @@ export async function syncedSources(base: string): Promise<void> {
   await putJson(join(plugins, 'manifest.json'), syncedPluginsManifest);
   await putJson(join(plugins, '.marketplaces.json'), syncedMarketplaces);
   await putJson(join(plugins, 'my-upload.meta.json'), syncedPluginMeta);
+}
+
+/** An entry of `skills/synced/<account>/manifest.json`: a name, a description and any fields. */
+export interface SyncedSkillEntry {
+  readonly name: string;
+  readonly description: string;
+  readonly [field: string]: unknown;
+}
+
+/** A skill the organization shares: a `plugin` entry backed by a plugin of its `team-org`. */
+export const syncedOrganizationSkill: SyncedSkillEntry = {
+  skillId: 'skill_05org',
+  name: 'team-skill',
+  description: 'A skill the organization shares.',
+  source: 'plugin',
+  backingPluginId: 'plugin_02required',
+  updatedAt: '2026-10-09T00:00:00Z',
+};
+
+/** A skill from claude.ai's directory: a `plugin` entry backed by `anthropic-directory`. */
+export const syncedDirectorySkill: SyncedSkillEntry = {
+  skillId: 'skill_06directory',
+  name: 'directory-skill',
+  description: 'A skill from the claude.ai directory.',
+  source: 'plugin',
+  backingPluginId: 'plugin_04blocked',
+  updatedAt: '2026-10-09T00:00:00Z',
+};
+
+/**
+ * {@link syncedSources} in the base folder `base` with `skills` (by default those of
+ * {@link syncedSkillsManifest}) in the skills manifest, a `SKILL.md` folder for each, and,
+ * with `marketplaces: false`, no `.marketplaces.json`.
+ */
+export async function syncedAccount(
+  base: string,
+  options: { skills?: readonly SyncedSkillEntry[]; marketplaces?: boolean } = {},
+): Promise<void> {
+  const skills = options.skills ?? syncedSkillsManifest.skills;
+  const dir = join(base, 'skills', 'synced', SYNCED_ACCOUNT);
+  await syncedSources(base);
+  await putJson(join(dir, 'manifest.json'), { ...syncedSkillsManifest, skills });
+  if (options.marketplaces === false) {
+    await rm(join(base, 'plugins', 'synced', SYNCED_ACCOUNT, '.marketplaces.json'));
+  }
+  for (const skill of skills) {
+    await writeTestFile(
+      join(dir, skill.name, 'SKILL.md'),
+      `---\nname: ${skill.name}\n---\n${skill.description}\n`,
+    );
+  }
 }

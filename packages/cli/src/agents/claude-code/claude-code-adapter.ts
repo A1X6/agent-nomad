@@ -115,7 +115,11 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     scope: 'global',
     async available() {
       const synced = await readSyncedSkills(pathsOf(options.platform), baseDir);
-      return { names: synced.own.map((skill) => skill.name), problem: synced.problem };
+      return {
+        names: synced.own.map((skill) => skill.name),
+        problem: synced.problem,
+        notice: synced.notice,
+      };
     },
     question: (names) =>
       `Also save a copy of your ${String(names.length)} claude.ai skill${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account.`,
