@@ -2,14 +2,14 @@ import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { stopHook } from './claude-code-project-fixtures.ts';
 import {
   ACCOUNT_SKILLS_PREFIX,
+  CLAUDE_JSON_BUNDLE_PATH,
   globalDestination,
   hookScripts,
   projectDestination,
 } from '../src/index.ts';
-
-import { stopHook } from './claude-code-project-fixtures.ts';
 
 // The rules read no file, so these folders need not exist.
 const home = resolve('/home/a');
@@ -98,6 +98,7 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['.agentnomad/x.sh', 'unknown agentnomad entry'],
     ['.agentnomad/auto-memory/run.sh', 'auto memory holds only Markdown files'],
     ['.agentnomad/auto-memory/.bashrc', 'auto memory holds only Markdown files'],
+    ['../outside.md', 'not a safe path'],
   ])('project: %s', (path, reason) => {
     expect(projectDestination(path)).toEqual({ kind: 'refused', reason });
   });
@@ -140,6 +141,28 @@ describe('restore rules: refuses what a collector never produces', () => {
         new Set(['chrome/chrome-native-host.bat']),
       ),
     ).toEqual({ kind: 'refused', reason: 'never synced' });
+  });
+});
+
+describe('restore rules: places what a collector produces', () => {
+  it.each([
+    [CLAUDE_JSON_BUNDLE_PATH, { kind: 'claude-json' }],
+    [
+      'agent-memory/reviewer/MEMORY.md',
+      { kind: 'target', path: 'agent-memory/reviewer/MEMORY.md' },
+    ],
+  ])('global: %s', (path, destination) => {
+    expect(globalDestination(path, new Set())).toEqual(destination);
+  });
+
+  it.each([
+    [
+      '.claude/agent-memory/reviewer/MEMORY.md',
+      { kind: 'target', path: '.claude/agent-memory/reviewer/MEMORY.md' },
+    ],
+    ['.agentnomad/auto-memory/MEMORY.md', { kind: 'auto-memory', path: 'MEMORY.md' }],
+  ])('project: %s', (path, destination) => {
+    expect(projectDestination(path)).toEqual(destination);
   });
 });
 
