@@ -11,6 +11,8 @@ import {
   hookScripts,
   isPullMetadata,
   LOCAL_MARKETPLACES_PREFIX,
+  PLUGIN_DATA_PREFIX,
+  PLUGIN_STORE_PREFIX,
   PLUGIN_VERSIONS_BUNDLE_PATH,
   projectDestination,
 } from '../src/index.ts';
@@ -165,6 +167,9 @@ describe('restore rules: places what a collector produces', () => {
     [PLUGIN_VERSIONS_BUNDLE_PATH, { kind: 'metadata' }],
     // Written by pull to a folder of its own choosing (T98), never as it is.
     [`${LOCAL_MARKETPLACES_PREFIX}tools.json`, { kind: 'metadata' }],
+    // Written by pull's follow-up for plugins installed here (T102), never as it is.
+    [`${PLUGIN_DATA_PREFIX}probe-mod-skills-dir/settings.json`, { kind: 'metadata' }],
+    [`${PLUGIN_STORE_PREFIX}probe-mod_skills-dir-e89169932969.json`, { kind: 'metadata' }],
   ])('global: %s', (path, destination) => {
     expect(globalDestination(path, new Set())).toEqual(destination);
   });

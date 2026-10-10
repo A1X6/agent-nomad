@@ -82,6 +82,9 @@ new PC, and shows you anything that would run programs before writing it.
   claude.ai account, or none. Plugins from claude.ai's directory or your organization, and
   ones claude.ai installs by itself, are never saved; push names each one it leaves out, and
   pull reviews each plugin before writing it.
+- **Plugin data too (opt-in).** Save what your plugins and mods keep between sessions, such
+  as a mod's saved choices, for the plugins the setup puts back; data a removed plugin left
+  behind is never saved. Pull puts it back once the plugin is installed.
 - **Scriptable.** Every command runs from a script or CI with flags and clear exit codes.
 
 ## Install
@@ -152,6 +155,7 @@ Run `agentnomad <command> --help` for every option.
 | `--memory` / `--no-memory`                   | push                                                | Include Claude's memory, or not.                                                                                                                 |
 | `--account-skills` / `--no-account-skills`   | push, pull                                          | Push: save a copy of your own claude.ai skills. Pull: add them as local skills (for a PC without that claude.ai account).                        |
 | `--account-plugins` / `--no-account-plugins` | push, pull                                          | Push: save a copy of the plugins you uploaded to claude.ai. Pull: add them as local plugins (for a PC without that claude.ai account).           |
+| `--plugin-data` / `--no-plugin-data`         | push, pull                                          | Push: save the data of the plugins the setup puts back (e.g. a mod's saved choices). Pull: put it back, for plugins installed here.              |
 | `--merge` / `--overwrite`                    | pull                                                | One answer for every existing file (overwrite keeps a backup).                                                                                   |
 | `--allow-commands`                           | pull                                                | Accept new hooks, MCP servers, scripts and anything else that runs, and install plugins and programs, without asking. Only for setups you trust. |
 | `-y`, `--yes`                                | push, pull, delete, register, login, account delete | Accept the safe defaults instead of asking. It never accepts new commands or installs.                                                           |
@@ -179,7 +183,7 @@ The other setups are still done first, and one message lists what was not.
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, scripts your hooks and status line run                                                                                                                                      | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
 | **`~/.claude.json`**     | Your MCP servers and documented preferences, merged in                                                                                                                                                                                                                                                                | Your login, project list, usage and onboarding state                                                                                 |
-| **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed); a marketplace added from a local folder, with its files                                                                          | Plugin caches; a local marketplace's `.git` and the files git ignores                                                                |
+| **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed); a marketplace added from a local folder, with its files; their data on request (`--plugin-data`)                                 | Plugin caches; a local marketplace's `.git` and the files git ignores                                                                |
 | **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings and folders, scripts the project's hooks run                                                                                                                                                                        | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
 | **Opt-in**               | Memory (subagent and auto memory), environment variable values, a copy of your own claude.ai skills (`--account-skills`; never Anthropic's, nor your organization's when it can be told apart) and of the plugins you uploaded to claude.ai (`--account-plugins`; never claude.ai's directory or your organization's) |                                                                                                                                      |
 
@@ -215,6 +219,21 @@ that was outside it goes to `~/.agentnomad/marketplaces/<name>`), re-cloning it 
 can and writing the saved files whatever happens, reviews each mod in it as above, then adds
 the marketplace and installs its plugins. A marketplace over 5 MB is left out, and push says
 why.
+
+### Plugin data
+
+Claude Code keeps a plugin's own state in `~/.claude/plugins/data/` and a mod's saved
+choices (`$.store`) in `~/.claude/plugins/store/`, and leaves both behind when the plugin is
+removed. With `--plugin-data` (or a yes to push's question), push saves them only for the
+plugins the setup puts back: those it reinstalls, the plugins of saved local marketplaces,
+plugins and mods in `skills/`, and saved claude.ai plugins. It looks them up by the names
+Claude Code gives them and never lists those folders, so a removed plugin's leftovers are
+never saved. A plugin whose data passes 5 MB is left out, and push says why. Pull lists what
+was saved and puts it back only after a yes or `--plugin-data` (`--yes` alone never), after
+the setup is written and its plugins installed, and only for a plugin installed here under the
+same id; a file here that differs is asked about like the setup's files, and the store keeps
+its permissions (only you can read it). Older agentnomad versions skip saved plugin data with
+one warning per file and restore the rest.
 
 ## Security
 

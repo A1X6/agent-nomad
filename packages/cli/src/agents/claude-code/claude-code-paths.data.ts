@@ -121,6 +121,26 @@ const RAW = {
     modsSince: '2.1.287',
     /** The folder of mods in development, in the base folder (also known state above). */
     devMods: DEV_MODS,
+    /**
+     * A plugin's own folder, `plugins/data/<folder>` (`CLAUDE_PLUGIN_DATA`), named from its id
+     * `<name>@<source>` with every character `unsafe` matches turned into `replaceWith`
+     * (Claude Code 2.1.295, T96): `lm-plugin@my-local.mkt` → `lm-plugin-my-local-mkt`. Pushed
+     * on request, only for a plugin the setup restores (T102).
+     */
+    data: { folder: 'plugins/data', unsafe: '[^A-Za-z0-9_*-]', replaceWith: '-' },
+    /**
+     * A mod's `$.store`, one file per plugin in `plugins/store/` (folder 700, file 600): the id
+     * with every character `unsafe` matches turned into `replaceWith`, `-`, the first
+     * `hashDigits` hex digits of the id's SHA-256 and `.json` (2.1.295, T96):
+     * `probe-mod@skills-dir` → `probe-mod_skills-dir-e89169932969.json`. Pushed as `data` (T102).
+     */
+    store: {
+      folder: 'plugins/store',
+      unsafe: '[^A-Za-z0-9_*-]',
+      replaceWith: '_',
+      hashDigits: 12,
+      extension: '.json',
+    },
   },
 
   /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
@@ -230,6 +250,16 @@ const names = z.array(
     .regex(/^[^\\]+$/, 'Use forward slashes'),
 );
 
+/** A regular expression as text. */
+const Pattern = z.string().refine((pattern) => {
+  try {
+    new RegExp(pattern);
+    return true;
+  } catch {
+    return false;
+  }
+}, 'Not a valid pattern');
+
 const PathsDataSchema = z.strictObject({
   version: z.literal(1),
   reviewedVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
@@ -252,18 +282,17 @@ const PathsDataSchema = z.strictObject({
     generatedInPlugin: names,
     modsSince: z.string().regex(/^\d+\.\d+\.\d+$/),
     devMods: z.string().min(1),
+    data: z.strictObject({ folder: z.string().min(1), unsafe: Pattern, replaceWith: z.string() }),
+    store: z.strictObject({
+      folder: z.string().min(1),
+      unsafe: Pattern,
+      replaceWith: z.string(),
+      hashDigits: z.number().int().min(1).max(64),
+      extension: z.string().regex(/^\.[a-z]+$/),
+    }),
   }),
   skippedNames: names,
-  ignoredCopyPatterns: z.array(
-    z.string().refine((pattern) => {
-      try {
-        new RegExp(pattern);
-        return true;
-      } catch {
-        return false;
-      }
-    }, 'Not a valid pattern'),
-  ),
+  ignoredCopyPatterns: z.array(Pattern),
   claudeJsonPreferenceKeys: names,
   scriptExtensions: z.array(z.string().regex(/^\.[a-z0-9]+$/)),
   autostartHomeDirs: names,

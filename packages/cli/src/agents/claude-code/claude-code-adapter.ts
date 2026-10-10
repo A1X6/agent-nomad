@@ -35,6 +35,12 @@ import {
   type PluginGateContext,
   type PluginValidator,
 } from './plugin-review.ts';
+import {
+  idsWithPluginData,
+  PLUGIN_DATA_PART,
+  planPluginData,
+  restoredPluginIds,
+} from './plugin-data.ts';
 import { readKnownMarketplaces } from './plugins.ts';
 import { createProgramLocator } from './programs.ts';
 import { createClaudeCodeProjectCollector } from './project-collector.ts';
@@ -185,6 +191,33 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     },
   };
 
+  /** The data of the plugins a setup restores (T102), saved only after a yes. */
+  const pluginData: OptionalPart = {
+    id: PLUGIN_DATA_PART,
+    scope: 'global',
+    async available() {
+      const ids = await restoredPluginIds(shared, { accountPlugins: true });
+      return {
+        names: await idsWithPluginData(pathsOf(options.platform), baseDir, ids),
+        problem: null,
+      };
+    },
+    question: (names) =>
+      `Also save the data of ${String(names.length)} plugin${names.length === 1 ? '' : 's'} (${names.join(', ')})? It holds what plugins and mods keep, e.g. a mod's saved choices; only for plugins this setup puts back.`,
+    unreadable: (problem) => `${problem} Plugin data was not saved.`,
+    noneFound: 'No data was found for the plugins this setup puts back.',
+    flagHelp: {
+      push: {
+        include: "save the data of the plugins this setup puts back (e.g. a mod's saved choices)",
+        leaveOut: 'leave plugin data out',
+      },
+      pull: {
+        include: 'put back saved plugin data, for plugins installed here',
+        leaveOut: 'do not put back saved plugin data',
+      },
+    },
+  };
+
   /**
    * Saved claude.ai plugins (T101) the user agreed to add, as `skills/<name>/` files next to
    * the setup's own, so the plugin review (T97) checks them like any plugin folder.
@@ -203,7 +236,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     collector,
     restorer,
     envReferences: CLAUDE_ENV_REFERENCES,
-    optionalParts: [accountSkills, accountPlugins],
+    optionalParts: [accountSkills, accountPlugins, pluginData],
     inspector: {
       unknownEntries: (target) =>
         findUnknownEntries(target, {
@@ -236,8 +269,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
      * Pull's Claude Code questions (T61), before anything is written: closing Claude Code
      * when `~/.claude.json` would change (it rewrites the file while open), plugin folders in
      * `skills/` (T97) with saved claude.ai plugins (T101), saved local marketplaces (T98),
-     * then plugins, programs and claude.ai skills. `--yes` never waits: the file is left with
-     * a warning.
+     * then plugins, programs, claude.ai skills and plugin data (T102). `--yes` never waits: the
+     * file is left with a warning.
      */
     async planRestore(context) {
       let leaveClaudeJson = false;
@@ -283,6 +316,9 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
         git: findGitHere,
       });
       const afterRestore = await followUp({ ...context, files: plugins.files }, local);
+      const data = global
+        ? await planPluginData(context, { baseDir, platform: options.platform, restorer })
+        : null;
       return {
         // The marketplace folders first: Claude Code adds them after the setup is written.
         async restore(onConflict, restoreContext) {
@@ -298,7 +334,11 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
             warnings: [...folders.warnings, ...setup.warnings],
           };
         },
-        afterRestore,
+        // Plugin data last (T102): it goes only to plugins installed by then.
+        async afterRestore(afterContext) {
+          await afterRestore(afterContext);
+          await data?.(afterContext);
+        },
         declined: plugins.declined || local.declined,
       };
     },
