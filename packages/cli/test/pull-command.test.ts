@@ -9,8 +9,10 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   crypto,
   dataKey,
+  fakeAdapter,
   fakeBundleServer,
   fakeEnvWriter,
+  installedAgent,
   localStateIn,
   memorySecretStore,
   paths,
@@ -781,5 +783,88 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(second.lines.join('\n')).toContain('already set here');
     expect(await readText(profile)).toBe(after);
     expect((await readdir(b.home, { recursive: true })).sort()).toEqual(files.sort());
+  });
+});
+
+describe('pull: which agents and setups, and when there is none to pull (T95)', () => {
+  /** An agent that is installed here but has nothing of its own to restore. */
+  const other = fakeAdapter('other', 'Other CLI', installedAgent);
+
+  /** `server` also holds a global setup for `other` (its content is never opened). */
+  async function alsoSavedForOther(server: ReturnType<typeof fakeBundleServer>) {
+    const saved = storedOn(server, GLOBAL_SCOPE_KEY);
+    if (!saved) throw new Error('no global setup to copy');
+    await server.api.bundles.put({ agent: 'other', scopeKey: GLOBAL_SCOPE_KEY }, saved.upload);
+  }
+
+  it('asks which agents when several have saved setups, and pulls only the chosen', async () => {
+    const { server } = await pushedSetup();
+    await alsoSavedForOther(server);
+    const b = pc('desktop');
+    const t = pullOn(b, server, [['claude-code'], true]);
+    await createPullCommand({
+      ...t.deps,
+      registry: () => createAgentRegistry([claudeAdapter(b.home), other]),
+    }).pull({ global: true, yes: false });
+    expect(t.asked).toEqual(['Which agents?', 'Allow them?']);
+    expect(await readText(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
+  });
+
+  it('--agent with no saved setup for it names the next step', async () => {
+    const { server } = await pushedSetup();
+    const t = pullOn(pc('desktop'), server, []);
+    await expect(t.pull({ global: true, yes: true, agents: ['other'] })).rejects.toThrow(
+      'No saved setup for agent "other". Run `agentnomad list` to see your saved setups.',
+    );
+  });
+
+  it('says so when no saved setup is for an agent it supports here', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, [], { adapter: other });
+    await t.pull(none);
+    expect(t.lines).toEqual([
+      'info: None of the saved setups are for an agent agentnomad supports here.',
+    ]);
+  });
+
+  it('--global with only a project saved says there is no global setup', async () => {
+    const server = fakeBundleServer();
+    const a = pc('laptop');
+    await mkdir(a.base, { recursive: true });
+    await writeTestFile(join(a.project, 'CLAUDE.md'), 'Project rules.');
+    await pushFrom(a, server, ['project', 'my-app', false])(none);
+    const t = pullOn(pc('desktop'), server, []);
+    await expect(t.pull({ global: true, yes: true })).rejects.toThrow(
+      'There is no saved Claude Code global setup.',
+    );
+  });
+
+  it('asks which project when several are saved, marking the one saved from this folder', async () => {
+    const { server, a } = await pushedSetup();
+    const site = { ...a, project: join(root, 'laptop', 'code', 'site') };
+    await writeTestFile(join(site.project, 'CLAUDE.md'), 'Site rules.');
+    await pushFrom(site, server, ['project', 'site', false])(none);
+    const offered: { label: string; hint?: string }[] = [];
+    const script = scriptedPrompter(['project']);
+    const prompter: Prompter = {
+      ...script.prompter,
+      select: (message, choices) => {
+        if (message !== 'Which project? It is restored into this folder.') {
+          return script.prompter.select(message, choices);
+        }
+        offered.push(...choices.map(({ label, hint }) => ({ label, ...(hint && { hint }) })));
+        const mine = choices.find((choice) => choice.label === 'my-app');
+        if (!mine) throw new Error('my-app not offered');
+        return Promise.resolve(mine.value);
+      },
+    };
+    const t = pullOn(a, server, [], { prompter });
+    await t.pull(none);
+    expect(offered).toEqual([
+      { label: 'my-app', hint: 'saved from this folder' },
+      { label: 'site' },
+    ]);
+    expect(await readText(join(a.project, 'CLAUDE.md'))).toBe('Project rules.');
   });
 });
