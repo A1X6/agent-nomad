@@ -12,6 +12,8 @@ import {
   type PlannedWrite,
 } from '@agentnomad/core';
 
+import { freeSuffix, writeFileAtomically } from '../../system/files.ts';
+import { printableLine } from '../../ui/printable.ts';
 import type {
   CollectedFile,
   ConflictResolver,
@@ -21,23 +23,21 @@ import type {
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
-import { freeSuffix, writeFileAtomically } from '../../system/files.ts';
-import { printableLine } from '../../ui/printable.ts';
 import { pathsOf } from '../shared/detector-system.ts';
-import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { findAutoMemory } from './auto-memory.ts';
-import { reviewRunnable } from './command-review.ts';
 import {
   CLAUDE_JSON_QUESTION,
   createClaudeJsonMerge,
   type MutableReport,
 } from './claude-json-merge.ts';
-import { pathWords, settingsCommands } from './settings-commands.ts';
+import { reviewRunnable } from './command-review.ts';
 import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
+import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
 import { globalDestination, projectDestination, type RestoreDestination } from './restore-rules.ts';
 import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
+import { pathWords, settingsCommands } from './settings-commands.ts';
 
 /** What pull's plan step decided for this restore (T61). */
 interface ClaudeRestoreContext extends RestoreContext {

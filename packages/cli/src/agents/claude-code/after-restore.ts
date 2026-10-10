@@ -6,8 +6,8 @@ import type {
   RestorePlanContext,
   Restorer,
 } from '../adapter.ts';
-import { ACCOUNT_SKILLS_PART, planAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { findExecutable, pathsOf, type ExecutableLookupSystem } from '../shared/detector-system.ts';
+import { ACCOUNT_SKILLS_PART, planAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { claudeConfigDir, findClaudeExecutable } from './detector.ts';
 import {
   ACCOUNT_SKILLS_PREFIX,

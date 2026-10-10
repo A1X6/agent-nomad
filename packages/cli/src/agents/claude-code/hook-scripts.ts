@@ -1,7 +1,6 @@
 import { underFolder } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import { bundlePathInside } from '../shared/file-gathering.ts';
-import { commandsInSettings, pathWords } from './settings-commands.ts';
 import {
   GLOBAL_REFUSED,
   HOME_SCRIPTS_PREFIX,
@@ -9,6 +8,7 @@ import {
   SCRIPT_EXTENSIONS,
 } from './global-paths.ts';
 import { PROJECT_NEVER_SYNCED } from './project-paths.ts';
+import { commandsInSettings, pathWords } from './settings-commands.ts';
 
 export interface HookScriptContext {
   readonly homedir: string;

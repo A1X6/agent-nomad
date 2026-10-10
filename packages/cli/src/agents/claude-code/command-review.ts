@@ -1,17 +1,10 @@
 import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
-import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
 import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
+import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
-import {
-  commandsInSettings,
-  commandText,
-  commandWords,
-  hookItems,
-  pathWords,
-} from './settings-commands.ts';
 import {
   GLOBAL_SETTINGS_FILES,
   HOME_SCRIPTS_PREFIX,
@@ -20,6 +13,13 @@ import {
 } from './global-paths.ts';
 import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
+import {
+  commandsInSettings,
+  commandText,
+  commandWords,
+  hookItems,
+  pathWords,
+} from './settings-commands.ts';
 
 /*
  * Things in a Claude Code setup that run programs on this PC (T34, T44), as Claude Code's

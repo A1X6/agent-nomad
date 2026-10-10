@@ -36,9 +36,9 @@ import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { scanEnvReferences } from '../env/env-references.ts';
 import { chooseEnvValues, envSectionFile } from '../env/env-section.ts';
+import { listSavedRevisions } from '../pull/saved-setups.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
-import { listSavedRevisions } from '../pull/saved-setups.ts';
 import { formatSize } from '../ui/format-size.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { toBundleFiles } from './bundle-files.ts';

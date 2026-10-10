@@ -2,8 +2,8 @@
  * What the Claude Code project collector takes from a project folder (T26). The lists come
  * from the paths data file (T32).
  */
-import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 import { RESERVED_DIR } from '../adapter.ts';
+import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 
 /** Files in the project root. `CLAUDE.local.md` is personal and usually gitignored. */
 export const PROJECT_ROOT_FILES: readonly string[] = DATA.project.rootFiles;
