@@ -34,6 +34,12 @@ function referencesIn(value: unknown, ownVariables: ReadonlySet<string>): string
     .filter((name) => name !== '' && !ownVariables.has(name));
 }
 
+/** Each variable with the places that use it, both sorted. */
+const sortedUsage = (usage: ReadonlyMap<string, ReadonlySet<string>>): EnvScan['variables'] =>
+  [...usage.entries()]
+    .map(([name, where]) => ({ name, usedBy: [...where].sort() }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
 /**
  * Finds the environment variables a setup depends on (T30): `${VAR}` in the MCP servers and
  * settings files the agent names (ARCH-01), with where each one is used. Never reads or
@@ -75,10 +81,7 @@ export function scanEnvReferences(
     for (const name of referencesIn(rest, ownVariables)) use(name, label);
   }
 
-  const variables = [...usage.entries()]
-    .map(([name, where]) => ({ name, usedBy: [...where].sort() }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  return { variables, setBySettings };
+  return { variables: sortedUsage(usage), setBySettings };
 }
 
 /** Joins scans of several setups (e.g. global and project) into one list. */
@@ -93,10 +96,5 @@ export function mergeEnvScans(scans: readonly EnvScan[]): EnvScan {
     }
     for (const name of scan.setBySettings) setBySettings.add(name);
   }
-  return {
-    variables: [...usage.entries()]
-      .map(([name, where]) => ({ name, usedBy: [...where].sort() }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
-    setBySettings,
-  };
+  return { variables: sortedUsage(usage), setBySettings };
 }
