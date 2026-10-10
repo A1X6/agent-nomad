@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fakeManagedSystem as fakeSystem,
   fileManagedSettings,
+  noManagedSettings,
 } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import { recordingReporter } from './fakes.ts';
@@ -197,5 +198,15 @@ describe('warnings (T31 done-when)', () => {
 
   it('other failures keep their own reason', () => {
     expect(explainPluginFailure('Repository not found', found)).toBe('Repository not found');
+  });
+
+  it('a policy word keeps its own reason when nothing was looked for', () => {
+    expect(explainPluginFailure('Marketplace y is blocked', null)).toBe('Marketplace y is blocked');
+  });
+
+  it('a policy word keeps its own reason when this PC has no managed settings', () => {
+    expect(explainPluginFailure('Plugin x is not allowed', noManagedSettings)).toBe(
+      'Plugin x is not allowed',
+    );
   });
 });
