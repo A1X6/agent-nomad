@@ -61,6 +61,8 @@ const RAW = {
       'feedback',
       'feedback-bundles',
       'policy-limits.json',
+      // When the limits above were last fetched (Claude Code 2.1.295, T96).
+      'policy-limits.json.stamp.json',
     ],
     /**
      * Other things Claude Code keeps in the base folder that are known and deliberately

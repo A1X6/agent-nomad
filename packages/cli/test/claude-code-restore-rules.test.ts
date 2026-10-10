@@ -26,6 +26,8 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['.credentials.json', 'never synced'],
     ['history.jsonl', 'never synced'],
     ['projects/C--x/abc.jsonl', 'never synced'],
+    // State file Claude Code 2.1.295 added next to policy-limits.json (T96).
+    ['policy-limits.json.stamp.json', 'never synced'],
     ['unknown.json', 'not part of a Claude Code setup'],
     ['.agentnomad/home/.ssh/id_ed25519', 'a folder for keys and logins'],
     ['.agentnomad/home/.bashrc', 'no hook or status line in this setup runs it'],
