@@ -269,17 +269,33 @@ export async function planPluginDirs(
     withPluginDirs(files) {
       if (toWrite.length === 0) return [...files];
       const from = toWrite[0]?.saved.separator ?? separator;
-      const replace = (value: string) =>
-        splitPluginDirs(value, from)
+      // A folder by its full path; Windows and macOS ignore case. Compared so, an entry still
+      // matches when pull kept this PC's own copy of a saved file (`/` and `\` in its path).
+      const folderOf = (entry: string) => {
+        const full = path.resolve(fromHome(entry, deps.homedir, deps.platform));
+        return deps.platform === 'linux' ? full : full.toLowerCase();
+      };
+      const replace = (value: string) => {
+        const entries = splitPluginDirs(value, from);
+        const writeOf = (entry: string) =>
+          toWrite.find((each) => folderOf(each.saved.entry) === folderOf(entry));
+        // Already naming the folders pull writes (pulled onto the same places): as it is.
+        const same = entries.every((entry) => {
+          const write = writeOf(entry);
+          return (
+            write === undefined ||
+            (!declined.has(printableLine(write.dir)) && folderOf(entry) === folderOf(write.dir))
+          );
+        });
+        if (same && from === separator) return value;
+        return entries
           .flatMap((entry) => {
-            const write = toWrite.find((each) => each.saved.entry === entry);
+            const write = writeOf(entry);
             if (write === undefined) return [entry];
-            if (declined.has(printableLine(write.dir))) return [];
-            // Already naming that folder (pulled onto the same place): left as it is.
-            const same = path.resolve(fromHome(entry, deps.homedir, deps.platform)) === write.dir;
-            return [same ? entry : write.dir];
+            return declined.has(printableLine(write.dir)) ? [] : [write.dir];
           })
           .join(separator);
+      };
       return files.map((file) =>
         file.path === USER_SETTINGS ? rewriteSettings(file, replace) : file,
       );

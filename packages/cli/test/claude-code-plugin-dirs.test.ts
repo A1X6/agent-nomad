@@ -293,6 +293,12 @@ describe('pull writes a saved plugin folder (T99)', () => {
     );
   });
 
+  it('finds a folder the value names in another form of the same path', async () => {
+    const { plan } = await pull([savedMod()]);
+    const value = `${SAVED_PLUGIN_DIR_ENTRY}/`;
+    expect(valueIn(plan.withPluginDirs([settingsWith(value)]))).toBe(modFolder());
+  });
+
   it('leaves the settings as they are when the value already names the folder', async () => {
     const { plan } = await pull([savedMod({ entry: modFolder(), separator: delimiter })]);
     const settings = settingsWith(modFolder());
@@ -301,7 +307,7 @@ describe('pull writes a saved plugin folder (T99)', () => {
 
   it('keeps the rest of the settings when it rewrites the value', async () => {
     const { plan } = await pull([savedMod()]);
-    const [settings] = plan.withPluginDirs([settingsWith(`${SAVED_PLUGIN_DIR_ENTRY}`)]);
+    const [settings] = plan.withPluginDirs([settingsWith(SAVED_PLUGIN_DIR_ENTRY)]);
     expect(JSON.parse(new TextDecoder().decode(settings?.content))).toEqual({
       model: 'opus',
       env: { [VARIABLE]: modFolder() },
