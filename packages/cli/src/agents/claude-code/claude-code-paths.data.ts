@@ -69,6 +69,48 @@ const RAW = {
       // Scratch copies of a repository an /ultrareview upload makes (its changelog for
       // 2.1.295; the 2.1.296 program makes the folder with mode 700, T107).
       'seed-admin',
+      // T108: the 2.1.296 program's own lists of state in its folder (the names it skips when
+      // it walks a .claude folder, and the ones a self-hosted runner leaves out when it copies
+      // this folder; the test fixture `claude-code-state-names.ts` keeps both). Logins: the
+      // session ingress token (kept with .oauth_token and .api_key) and the HFI login.
+      '.session_ingress_token',
+      'hfi-auth.json',
+      // `~/.claude.json` (account and project state) as it was before a write.
+      '.claude.json.backup',
+      // The signatures of the two files above that come from claude.ai, and the account's
+      // answer when the organization's settings asked for consent.
+      'policy-limits.json.signature.json',
+      'policy-limits.json.signature-iat.json',
+      'remote-settings.json.signature.json',
+      'remote-settings.json.signature-iat.json',
+      'remote-settings-consent.json',
+      'remote-settings-helper-consent',
+      // Sessions and what they send: prompt dumps (`dump-prompts/<session>.jsonl`), API dumps,
+      // files sent between PCs, Remote Control drafts and fork seeds, cloud (`ccr`) sessions
+      // and the home a cloud session starts from, the sessions a server runs, agent team
+      // mailboxes and tasks, and the session storage (`storage-v2`).
+      'dump-prompts',
+      'api-dumps',
+      'file-transfers',
+      'remote',
+      'remote-control',
+      'ccr',
+      'ccr-home-seed.json',
+      'server-sessions.json',
+      'teams',
+      'storage-v2',
+      // Plugins installed for Cowork, used instead of `plugins/` there.
+      'cowork_plugins',
+      // May be the user's own (T108, for a later decision): /loop's task list, shared zips,
+      // session scratch, local agent memory (when the project is the home folder) and the
+      // program's local and project settings folders. Never synced until then.
+      'loop.md',
+      'shares',
+      'scratch',
+      'agent-memory-local',
+      'agent-memory-project',
+      'local-settings',
+      'project-settings',
     ],
     /**
      * Other things Claude Code keeps in the base folder that are known and deliberately
@@ -89,6 +131,19 @@ const RAW = {
       'local',
       'usage-data',
       'stats-cache.json',
+      // T108, from the same 2.1.296 lists: caches (MCP tools found, MCP skill archives),
+      // startup profiles, traces, a systemd folder, activity times, locks and a write marker.
+      'mcp-discovery-cache',
+      'mcp-skill-archives',
+      'startup-perf',
+      'traces',
+      'systemd',
+      'active-time.json',
+      'antproto.json',
+      'bridge-spawn',
+      'computer-use.lock',
+      'server.lock',
+      '.cc-writes',
       // Mods Claude Code writes while one session develops them, deleted after
       // `cleanupPeriodDays`: never pushed; push names them (T103).
       DEV_MODS,
