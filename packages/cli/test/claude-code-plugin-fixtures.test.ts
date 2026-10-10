@@ -131,7 +131,7 @@ describe('claude.ai synced files (T96)', () => {
 
 describe('syncedSources (T96)', () => {
   let base = '';
-  useTempDir('an-synced-', (dir) => (base = dir));
+  useTempDir('agentnomad-synced-', (dir) => (base = dir));
 
   it('writes the four files where Claude Code keeps them', async () => {
     await syncedSources(base);
