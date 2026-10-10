@@ -310,7 +310,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(t.lines.some((line) => line.includes('add --allow-commands to accept them'))).toBe(true);
   });
 
-  /** Settings that redirect and loosen Claude Code, pushed from the laptop; a desktop with its own. */
+  /** Settings that redirect and loosen Claude Code, pushed; a desktop with settings of its own. */
   async function loosenedSetup() {
     const server = fakeBundleServer();
     const a = pc('laptop');

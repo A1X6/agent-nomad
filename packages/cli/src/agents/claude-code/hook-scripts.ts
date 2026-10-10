@@ -30,8 +30,8 @@ const under = (path: string, folder: string) => underFolder(path, folder, { igno
 /**
  * The scripts that the hooks and status line in a global `settings.json` run (T25), as push
  * collects them and pull allows them back (T38): script files in the base folder (not never-
- * synced ones nor Claude Code's own state, T55) or elsewhere in the home folder (never in folders for keys and logins, nor
- * in ones whose files run by themselves, T43).
+ * synced ones nor Claude Code's own state, T55) or elsewhere in the home folder (never in
+ * folders for keys and logins, nor in ones whose files run by themselves, T43).
  * Push saves only these; pull writes a home-folder file only when it is one of these, so a
  * bundle cannot place other files that run by themselves (a Startup folder, a shell profile).
  */

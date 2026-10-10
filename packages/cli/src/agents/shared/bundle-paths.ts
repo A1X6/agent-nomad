@@ -17,7 +17,7 @@ export function underFolder(
   return inside === entry || inside.startsWith(`${entry}/`);
 }
 
-/** Whether a bundle path is one of `folders` or inside one (case kept), e.g. a never-synced list. */
+/** Whether a bundle path is one of `folders` or inside one (case kept). */
 export const underAnyFolder =
   (folders: readonly string[]) =>
   (path: string): boolean =>

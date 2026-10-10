@@ -96,7 +96,7 @@ export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
  */
 export const TOOL_CONFIG_FILES: Readonly<Record<string, readonly string[]>> = DATA.toolConfigFiles;
 
-/** The bundle paths of those tool settings files (`.agentnomad/home/...`): restored and reviewed. */
+/** The bundle paths of those tool settings files (`.agentnomad/home/...`). */
 export const TOOL_SETTINGS_BUNDLE_PATHS: ReadonlySet<string> = new Set(
   Object.values(TOOL_CONFIG_FILES)
     .flat()

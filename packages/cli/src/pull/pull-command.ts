@@ -485,8 +485,8 @@ export function createPullPlanner(deps: PullDeps) {
 /**
  * Pull's apply step (T59): writes each planned setup with the answers from the plan, adds the
  * chosen environment values, remembers the revision, then runs each agent's follow-up. It has
- * no prompter, so it never asks: a file that differs but was not asked about (only the restorer saw it) is left as it
- * is, and the setup is not done.
+ * no prompter, so it never asks: a file that differs but was not asked about (only the
+ * restorer saw it) is left as it is, and the setup is not done.
  */
 export function createPullApplier(deps: PullApplyDeps) {
   const { reporter } = deps;
