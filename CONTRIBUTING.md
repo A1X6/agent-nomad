@@ -124,7 +124,8 @@ open, such as a chat or an option letter from a discussion.
     and `dataKey`) and the real password checker (`useZxcvbnChecker`, then `zxcvbn`);
     collected files (`collected`, `collectedJson`, `paths`, `text`); files on disk
     (`writeTestFile`, `linkFolder`, `readText`, `readJson`, `exists`); a secret store
-    (`memorySecretStore`, `memorySecrets`), a scripted prompter (`scriptedPrompter`), a
+    (`memorySecretStore`, `memorySecrets`, and `loggedInStore` for one already logged in), a
+    PC that finds only the programs it is given (`executableLookup`), a scripted prompter (`scriptedPrompter`), a
     recording reporter (`recordingReporter`), an env writer (`fakeEnvWriter`), a typed
     partial API client (`fakeApi`), a bundle server (`fakeBundleServer`, read with
     `storedOn` and `revisionOn`), a local state in a temporary folder (`localStateIn`), an

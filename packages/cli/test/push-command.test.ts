@@ -20,6 +20,7 @@ import {
   fakeBundleServer,
   installedAgent,
   localStateIn,
+  loggedInStore,
   memorySecretStore,
   missingAgent,
   recordingReporter,
@@ -56,7 +57,6 @@ const HOME = posix ? '/home/ahmed' : 'C:\\Users\\ahmed';
 const PROJECT = posix ? '/home/ahmed/work/my-app' : 'C:\\Users\\ahmed\\work\\my-app';
 
 useDataKey();
-const loggedIn = () => memorySecretStore({ loggedIn: dataKey });
 
 let dir: string;
 useTempDir('agentnomad-push-', (temp) => (dir = temp));
@@ -122,7 +122,7 @@ function setup(
   const applyDeps: PushApplyDeps = {
     reporter,
     registry: () => createAgentRegistry([options.adapter ?? collectingAdapter()]),
-    secrets: () => Promise.resolve(options.secrets ?? loggedIn()),
+    secrets: () => Promise.resolve(options.secrets ?? loggedInStore()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
     codec: options.codec ?? createGzipBundleCodec(),
@@ -547,7 +547,7 @@ describe('agentnomad push', () => {
   it('the plan step asks every question and uploads nothing; apply uploads and asks nothing (T59)', async () => {
     const server = await savedFromLaptop();
     const desktop = setup(['global', false, true], { server, pc: 'desktop' });
-    const keys = { secrets: loggedIn(), crypto, dataKey };
+    const keys = { secrets: loggedInStore(), crypto, dataKey };
 
     const plan = await createPushPlanner(desktop.deps).plan(noFlags, keys);
     expect(desktop.script.asked).toEqual([
@@ -571,7 +571,7 @@ describe('agentnomad push', () => {
   it('apply never asks: a copy saved from another PC after the plan is not done (T59)', async () => {
     const server = fakeBundleServer();
     const t = setup(['global', false], { server });
-    const keys = { secrets: loggedIn(), crypto, dataKey };
+    const keys = { secrets: loggedInStore(), crypto, dataKey };
     const plan = await createPushPlanner(t.deps).plan(noFlags, keys);
     // Another PC saves while this push is between its plan and its upload.
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);

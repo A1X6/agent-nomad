@@ -4,7 +4,13 @@ import {
   fileManagedSettings,
   noManagedSettings as noPolicy,
 } from './claude-code-plugin-fixtures.ts';
-import { collected, collectedJson, recordingReporter, scriptedPrompter } from './fakes.ts';
+import {
+  collected,
+  collectedJson,
+  executableLookup,
+  recordingReporter,
+  scriptedPrompter,
+} from './fakes.ts';
 
 import {
   createClaudeCodeAfterRestore,
@@ -42,14 +48,13 @@ function afterRestore(deps: {
 }
 
 /** Only what after-restore reads (SOLID-06): no full detector system to fake. */
-function system(executables: string[]): ExecutableLookupSystem {
-  return {
+const system = (executables: string[]): ExecutableLookupSystem =>
+  executableLookup({
     platform: 'linux',
     homedir: '/home/a',
     env: { PATH: '/usr/bin' },
-    isExecutable: (path) => Promise.resolve(executables.includes(path)),
-  };
-}
+    executables,
+  });
 
 function context(files: CollectedFile[], answers: boolean[] = [true, true]) {
   const script = scriptedPrompter(answers);

@@ -11,6 +11,7 @@ import {
 } from './claude-code-project-fixtures.ts';
 import {
   collected,
+  executableLookup,
   paths,
   readText,
   recordingReporter,
@@ -29,7 +30,6 @@ import {
   readSyncedSkills,
   SKIPPED_NAMES,
   type CollectedFile,
-  type ExecutableLookupSystem,
 } from '../src/index.ts';
 
 useProjectFolders('agentnomad-account-skills-');
@@ -125,12 +125,11 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
   ) {
     const script = scriptedPrompter(answers);
     const { reporter, lines } = recordingReporter({ levels: false });
-    const system: ExecutableLookupSystem = {
+    const system = executableLookup({
       platform: process.platform,
       homedir: home,
       env: { PATH: '' },
-      isExecutable: () => Promise.resolve(false),
-    };
+    });
     const restorer = createClaudeCodeRestorer({
       baseDir: base,
       homedir: home,

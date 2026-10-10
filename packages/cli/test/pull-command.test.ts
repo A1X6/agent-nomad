@@ -14,6 +14,7 @@ import {
   fakeEnvWriter,
   installedAgent,
   localStateIn,
+  loggedInStore,
   memorySecretStore,
   paths,
   readText,
@@ -52,7 +53,6 @@ import {
 import type { AgentRestorePlan } from '../src/agents/adapter.ts';
 
 useDataKey();
-const loggedIn = (key = dataKey) => memorySecretStore({ loggedIn: key });
 
 let root: string;
 useTempDir('agentnomad-pull-', (dir) => (root = dir));
@@ -83,7 +83,7 @@ function pushFrom(
     prompter: scriptedPrompter(answers).prompter,
     reporter: options.reporter ?? recordingReporter().reporter,
     registry: () => createAgentRegistry([options.adapter ?? claudeAdapter(machine.home)]),
-    secrets: () => Promise.resolve(loggedIn()),
+    secrets: () => Promise.resolve(loggedInStore()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
     codec: createGzipBundleCodec(),
@@ -115,7 +115,7 @@ function pullOn(
   const applyDeps: PullApplyDeps = {
     reporter,
     registry: () => createAgentRegistry([options.adapter ?? claudeAdapter(machine.home)]),
-    secrets: () => Promise.resolve(options.secrets ?? loggedIn()),
+    secrets: () => Promise.resolve(options.secrets ?? loggedInStore()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
     codec: createGzipBundleCodec(),
@@ -132,7 +132,7 @@ function pullOn(
 }
 
 /** The session and data key the plan step gets from the handler. */
-const keysOf = () => ({ secrets: loggedIn(), crypto, dataKey });
+const keysOf = () => ({ secrets: loggedInStore(), crypto, dataKey });
 
 /** The review pull shows of what would run programs, or `''` when it shows none. */
 const reviewShown = (lines: readonly string[]) =>
@@ -715,7 +715,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('a setup that cannot be opened with this key writes nothing', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    const wrongKey = loggedIn(crypto.randomBytes(DATA_KEY_BYTES));
+    const wrongKey = loggedInStore(crypto.randomBytes(DATA_KEY_BYTES));
     // The project name opens with neither key, so only the global setup is offered.
     const t = pullOn(b, server, [], { secrets: wrongKey });
     await expect(t.pull({ global: true, yes: true })).rejects.toBeInstanceOf(SetupUnreadableError);
