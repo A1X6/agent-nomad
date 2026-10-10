@@ -299,7 +299,7 @@ describe('agentnomad push', () => {
       expect(t.lines).toContain('info: No claude.ai skills of your own were found on this PC.');
     });
 
-    it('asks about them only when there are some; no by default', async () => {
+    it('asks about them when there are some; no by default', async () => {
       const some = withAccountSkills(['my-skill']);
       const t = setup([false], { adapter: some.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
@@ -307,7 +307,9 @@ describe('agentnomad push', () => {
         'Also save a copy of your 1 claude.ai skill (my-skill)? Your claude.ai account already syncs them; the copy is for PCs without that account.',
       ]);
       expect(some.seen).toEqual([false]);
+    });
 
+    it('does not ask about them when there are none', async () => {
       const none = withAccountSkills([]);
       const quiet = setup([], { adapter: none.adapter, pc: 'no-account-skills' });
       await quiet.command.push({ global: true, yes: false, memory: false });

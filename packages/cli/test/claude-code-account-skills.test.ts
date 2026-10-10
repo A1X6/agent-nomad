@@ -172,10 +172,13 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     expect(t.lines.at(-1)).toContain('Added mine as local skills.');
   });
 
-  it('no by default; --yes alone never adds them and never asks', async () => {
+  it('a no adds none', async () => {
     const no = run([saved('mine', 'Plain.')], {}, [false]);
     await no.done;
     await expect(skillFile('mine')).rejects.toThrow();
+  });
+
+  it('--yes alone never adds them and never asks', async () => {
     const yes = run([saved('mine', 'Plain.')], { assumeYes: true });
     await yes.done;
     expect(yes.asked).toEqual([]);
@@ -209,18 +212,21 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     expect(t.lines.at(-1)).toContain('Added mine as local skills.');
   });
 
-  it('skips a skill this PC already gets from claude.ai, and never touches a local one', async () => {
+  it('skips a skill this PC already gets from claude.ai', async () => {
     await syncedSetup();
-    await writeTestFile(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
-    const t = run([saved('my-skill', 'From the other PC.'), saved('local-one', 'Theirs.')], {
-      accountSkills: true,
-    });
+    const t = run([saved('my-skill', 'From the other PC.')], { accountSkills: true });
     await t.done;
-    expect(await skillFile('local-one')).toBe('My own local version.');
     await expect(skillFile('my-skill')).rejects.toThrow();
     expect(t.lines.join('\n')).toContain(
       'my-skill: skipped, this PC already gets it from claude.ai',
     );
+  });
+
+  it('never touches a local skill of the same name', async () => {
+    await writeTestFile(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
+    const t = run([saved('local-one', 'Theirs.')], { accountSkills: true });
+    await t.done;
+    expect(await skillFile('local-one')).toBe('My own local version.');
   });
 });
 
