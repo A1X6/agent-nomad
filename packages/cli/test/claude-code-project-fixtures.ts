@@ -110,7 +110,10 @@ const ACCOUNT = '00000000-0000-4000-8000-000000000000_11111111-1111-4111-8111-11
 
 export const synced = (...parts: string[]) => join(base, 'skills', 'synced', ACCOUNT, ...parts);
 
-/** A synced folder as Claude Code 2.1.283 writes it: the user's skill, Anthropic's, an organization's. */
+/**
+ * A synced folder as Claude Code 2.1.283 writes it (its `.bucket-`, `.last-complete-round` and
+ * `.staging` names still in the 2.1.296 program): the user's skill, Anthropic's, an organization's.
+ */
 export async function syncedSetup(): Promise<void> {
   await writeTestFile(join(base, 'skills', 'synced', `.bucket-${ACCOUNT}`), '');
   await writeTestFile(synced('.last-complete-round'), '1');

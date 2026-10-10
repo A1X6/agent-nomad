@@ -97,14 +97,14 @@ describe('claude.ai skills (T42): reading and saving', () => {
   });
 });
 
-/** One entry of the 2.1.295 skills manifest, by name. */
+/** One entry of the 2.1.295 skills manifest (the 2.1.296 shape too), by name. */
 function syncedSkill(name: string): SyncedSkillEntry {
   const skill = syncedSkillsManifest.skills.find((entry) => entry.name === name);
   if (skill === undefined) throw new Error(`no synced skill ${name} in the fixture`);
   return skill;
 }
 
-/** What push finds after Claude Code 2.1.295 synced `skills` (see `syncedAccount`). */
+/** What push finds after Claude Code 2.1.295 or 2.1.296 synced `skills` (see `syncedAccount`). */
 async function syncedWith(skills: readonly SyncedSkillEntry[], marketplaces = true) {
   await syncedAccount(base, { skills, marketplaces });
   const found = await readSyncedSkills(pathsOf(process.platform), base);

@@ -26,7 +26,7 @@ export const ACCOUNT_SKILLS_PART = 'account-skills';
  * Claude Code's `manifest.json` for one account's synced skills (an internal file, so only
  * the fields used here are checked, and each entry on its own). Before 2.1.295 an entry's
  * `creatorType` said who made it (`user`: the user). Claude Code 2.1.295 writes no
- * `creatorType`; `source` says where a skill comes from instead: `custom` (the server sent
+ * `creatorType` (the 2.1.296 program never names it, T107); `source` says where a skill comes from instead: `custom` (the server sent
  * none) and `plugin` (backed by the claude.ai plugin `backingPluginId`) can be the user's;
  * `anthropic`, `anthropic-example` and `session-refs` never are.
  */
