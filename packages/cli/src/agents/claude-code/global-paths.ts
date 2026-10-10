@@ -9,8 +9,12 @@ import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.
 /** Single files in the base folder. */
 export const GLOBAL_FILES: readonly string[] = DATA.global.files;
 
-/** The settings files among the single files (DUP-01): hooks and the status line live there. */
-export const GLOBAL_SETTINGS_FILES: readonly string[] = settingsFilesIn(GLOBAL_FILES);
+/** The settings files among `files` (DUP-01): hooks and the status line live there. */
+export const globalSettingsFiles = (files: readonly string[]): readonly string[] =>
+  settingsFilesIn(files);
+
+/** The settings files among the single files. */
+export const GLOBAL_SETTINGS_FILES: readonly string[] = globalSettingsFiles(GLOBAL_FILES);
 
 /** Folders in the base folder, taken whole (minus the skips below). */
 export const GLOBAL_FOLDERS: readonly string[] = DATA.global.folders;

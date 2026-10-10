@@ -17,6 +17,12 @@ export function underFolder(
   return inside === entry || inside.startsWith(`${entry}/`);
 }
 
+/** Whether a bundle path is one of `folders` or inside one (case kept), e.g. a never-synced list. */
+export const underAnyFolder =
+  (folders: readonly string[]) =>
+  (path: string): boolean =>
+    folders.some((folder) => underFolder(path, folder));
+
 /** Home folders for keys and cloud logins: never read for a setup, whatever links there. */
 const SENSITIVE_HOME_DIRS: readonly string[] = [
   '.ssh',

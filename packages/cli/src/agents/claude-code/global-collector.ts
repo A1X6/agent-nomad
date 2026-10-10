@@ -3,16 +3,16 @@ import { readFile } from 'node:fs/promises';
 import * as z from 'zod';
 
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
+import { underAnyFolder } from '../shared/bundle-paths.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 import {
   createFileGatherer,
   type FileGatherer,
   jsonFile,
   uniqueByPath,
 } from '../shared/file-gathering.ts';
-import { pathsOf } from '../shared/detector-system.ts';
-import { underFolder } from '../shared/bundle-paths.ts';
-import { commandsInSettings, programOf } from './settings-commands.ts';
-import { settingsFilesIn } from './claude-code-paths.data.ts';
+import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
+import { ClaudeJsonError } from './claude-json-merge.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
@@ -20,6 +20,7 @@ import {
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
   GLOBAL_MEMORY_FOLDERS,
+  globalSettingsFiles,
   HOME_SCRIPTS_PREFIX,
   NEVER_SYNCED,
   PLUGINS_BUNDLE_PATH,
@@ -27,11 +28,10 @@ import {
   SKIPPED_NAMES,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
-import { ClaudeJsonError } from './claude-json-merge.ts';
-import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { readPluginManifest } from './plugins.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
+import { commandsInSettings, programOf } from './settings-commands.ts';
 
 export interface GlobalCollectorOptions {
   /** Claude Code's base folder, from the detector (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -47,16 +47,15 @@ export interface GlobalCollectorOptions {
 }
 
 /** True when `bundlePath` is a never-synced entry or inside one. */
-const isNeverSynced = (bundlePath: string) =>
-  NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry));
+const isNeverSynced = underAnyFolder(NEVER_SYNCED);
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {
   const path = pathsOf(options.platform);
   const { baseDir, homedir } = options;
   const globalFiles = options.globalFiles ?? GLOBAL_FILES;
-  // The settings files among them (DUP-01), as `GLOBAL_SETTINGS_FILES` is made.
-  const settingsFiles = settingsFilesIn(globalFiles);
+  // The settings files among them, as `GLOBAL_SETTINGS_FILES` is made.
+  const settingsFiles = globalSettingsFiles(globalFiles);
 
   /** Script files that hooks and the status line run, if they are in the home folder. */
   async function hookScriptFiles(
