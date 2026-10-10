@@ -39,6 +39,17 @@ const PRESET_ENV: Readonly<Record<string, string>> =
   process.platform === 'win32' ? { [ENV_NAME]: ENV_VALUE } : {};
 /** Built by `tsc --build`, like the CLI: Node 22 cannot run the TypeScript source. */
 const PUSH_ENV_VALUE = fileURLToPath(new URL('../dist/src/push-env-value.js', import.meta.url));
+/**
+ * A mod in `~/.claude/skills/` (T97): it loads as `probe-mod@skills-dir` and runs code inside
+ * Claude Code. Claude Code 2.1.296's validate passes it; `types/` is what Claude Code
+ * generates when it reloads the mod, and never leaves the PC.
+ */
+const MOD_MANIFEST = JSON.stringify({ name: 'probe-mod' });
+const MOD_HOOKS = JSON.stringify({ modules: ['./register.ts'] });
+const MOD_MODULE =
+  'export function register(on, options) {\n  on("session.start", async ($, e) => {\n    await $.store.get("e2e-mod-seen");\n  });\n}\n';
+const MOD_TYPES = 'declare const generatedByClaudeCode: true;\n';
+const mod = (pc: Pc, ...parts: string[]) => claude(pc, 'skills', 'probe-mod', ...parts);
 /** A skill from the user's claude.ai account, as Claude Code syncs it (T42). */
 const ACCOUNT_SKILL =
   '---\nname: my-account-skill\ndescription: From claude.ai\n---\nWrite release notes.\n';
@@ -94,6 +105,8 @@ function expectNothingReadable(server: LocalServer, known: Known): void {
     EDIT.trim(),
     'Old notes on the third PC',
     'Write release notes.',
+    'e2e-mod-seen',
+    'generatedByClaudeCode',
     // What the stale PC uploads in step 3 (QA-07).
     'Stale notes',
     'Stale project',
@@ -174,6 +187,11 @@ async function expectRestored(pc: Pc, edited: boolean): Promise<void> {
   expect(cmd.replace(/\r/g, '')).toBe(CMD_LF);
   if (!posix) expect(cmd).toBe(CMD_LF.replace(/\n/g, '\r\n'));
   if (edited) expect(await read(claude(pc, 'skills', 'review', 'SKILL.md'))).toBe(REVIEW_SKILL);
+  // The mod (T97), without what Claude Code generates in it.
+  expect(await read(mod(pc, '.claude-plugin', 'plugin.json'))).toBe(MOD_MANIFEST);
+  expect(await read(mod(pc, 'hooks', 'hooks.json'))).toBe(MOD_HOOKS);
+  expect(await read(mod(pc, 'hooks', 'register.ts'))).toBe(MOD_MODULE);
+  await expect(read(mod(pc, '.claude-plugin', 'types', 'register.d.ts'))).rejects.toThrow();
   if (!claudeRunningHere) {
     const claudeJson = JSON.parse(await read(join(pc.home, '.claude.json'))) as {
       mcpServers?: Record<string, unknown>;
@@ -252,6 +270,10 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     );
     await write(claude(pc, 'hooks', 'check.sh'), HOOK_SCRIPT, true);
     await write(claude(pc, 'skills', 'deploy', 'SKILL.md'), SKILL);
+    await write(mod(pc, '.claude-plugin', 'plugin.json'), MOD_MANIFEST);
+    await write(mod(pc, 'hooks', 'hooks.json'), MOD_HOOKS);
+    await write(mod(pc, 'hooks', 'register.ts'), MOD_MODULE);
+    await write(mod(pc, '.claude-plugin', 'types', 'register.d.ts'), MOD_TYPES);
     await write(
       join(pc.home, '.claude.json'),
       JSON.stringify({
@@ -318,6 +340,7 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
       ]),
     );
     expect(pushed.stdout).toContain('Saved the Claude Code global setup');
+    expect(pushed.stdout).toContain('Plugins in skills/: probe-mod@skills-dir (runs code)');
     expect(pushed.stdout).toContain('Saved the Claude Code project "demo"');
     // T49: a normal setup gets no false "not saved" warning (its hook script is saved).
     expect(pushed.stderr).not.toContain('left out, because agentnomad does not know');
@@ -387,6 +410,9 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
     );
     expect(pulled.stdout).toContain('Restored the Claude Code global setup');
     expect(pulled.stdout).toContain('Restored the Claude Code project "demo"');
+    // The mod was reviewed before it was written (T97), and types/ never came along.
+    expect(pulled.stdout).toContain('+ probe-mod@skills-dir (skills/probe-mod)');
+    expect(`${pulled.stdout}${pulled.stderr}`).not.toContain('types/register.d.ts');
     await expectRestored(pc, false);
     // T42: the user's own claude.ai skill is a local skill here; Anthropic's and the
     // organization's never came along.

@@ -1,8 +1,13 @@
-import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readdir, rm } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 
-import { writeTestFile } from './fakes.ts';
-import type { ManagedSettings, ManagedSettingsSystem } from '../src/index.ts';
+import { collected, collectedJson, writeTestFile } from './fakes.ts';
+import type {
+  CollectedFile,
+  ManagedSettings,
+  ManagedSettingsSystem,
+  ProgramCli,
+} from '../src/index.ts';
 
 /** Plugin files shared by the plugin and plugin sync tests (review 7 READ-01). */
 
@@ -101,8 +106,8 @@ export const fileManagedSettings: ManagedSettings = {
  * Every account, skill and plugin id below is made up.
  */
 
-/** The marketplace of a plugin or mod found in `~/.claude/skills/<name>/`: `<name>@skills-dir`. */
-export const SKILLS_DIR_MARKETPLACE = 'skills-dir';
+/** The marketplace of a plugin or mod found in `~/.claude/skills/<name>/` (T97 moved it to src). */
+export { SKILLS_DIR_MARKETPLACE } from '../src/index.ts';
 
 /** The `plugins/data/<folder>` name of each plugin id, as Claude Code 2.1.295 made them. */
 export const PLUGIN_DATA_FOLDERS = [
@@ -232,6 +237,68 @@ export const validateBrokenManifest: ValidateRun = {
     advice: [],
   },
 };
+
+/** The mod of the T97 tests, in `skills/<MOD_NAME>/`. */
+export const MOD_NAME = 'probe-mod';
+
+/**
+ * A mod's module as Claude Code 2.1.296 takes it (T97 probe): a `register` export, and `$` as
+ * the first parameter of each hook (else validate lists `calls: nothing on $`).
+ */
+export const MOD_MODULE = [
+  'export function register(on, options) {',
+  '  on("session.start", async ($, e) => {',
+  '    await $.store.get("seen");',
+  '  });',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * A mod's files under `prefix` (`skills/probe-mod/` by default; `''` for paths from the mod's
+ * folder): its manifest, `hooks/hooks.json` with `{"modules": ["./register.ts"]}` and the
+ * module, which validate finds from the `hooks/` folder (2.1.296, T97 probe).
+ */
+export const modFiles = (prefix = `skills/${MOD_NAME}/`): CollectedFile[] => [
+  collectedJson(`${prefix}.claude-plugin/plugin.json`, { name: MOD_NAME }),
+  collectedJson(`${prefix}hooks/hooks.json`, { modules: ['./register.ts'] }),
+  collected(`${prefix}hooks/register.ts`, MOD_MODULE),
+];
+
+/** `validatePassWithWarning` with these `$` calls on the module's `calls:` line (T97). */
+export function validatePassCalling(calls: readonly string[]): ValidateRun {
+  const notes = ['./register.ts hooks: session.start', `./register.ts calls: ${calls.join(', ')}`];
+  const json = structuredClone(validatePassWithWarning.json);
+  json['contents'] = [{ ...hooksContents[0], notes }];
+  return { ...validatePassWithWarning, json };
+}
+
+/**
+ * A `claude` that answers `plugin validate --json <folder>` with `run`, the folder written in
+ * place of `VALIDATED_MOD`, and records each call's arguments, the files the folder held and
+ * the `CLAUDE_CONFIG_DIR` it ran with.
+ */
+export function validateCli(run: ValidateRun) {
+  const calls: { args: readonly string[]; files: readonly string[]; configDir?: string }[] = [];
+  const cli = (_path: string, env: Readonly<Record<string, string | undefined>>): ProgramCli => ({
+    async run(args) {
+      const folder = args.at(-1) ?? '';
+      const entries = await readdir(folder, { recursive: true, withFileTypes: true });
+      const files = entries
+        .filter((entry) => entry.isFile())
+        .map((entry) => relative(folder, join(entry.parentPath, entry.name)).replace(/\\/g, '/'));
+      const configDir = env['CLAUDE_CONFIG_DIR'];
+      calls.push({ args, files: files.sort(), ...(configDir !== undefined && { configDir }) });
+      const shown = JSON.stringify(folder.replace(/\\/g, '/')).slice(1, -1);
+      return {
+        exitCode: run.exitCode,
+        stdout: JSON.stringify(run.json).split(VALIDATED_MOD).join(shown),
+        stderr: '',
+      };
+    },
+  });
+  return { cli, calls };
+}
 
 /** The claude.ai account of the synced files below. */
 export const SYNCED_ACCOUNT =

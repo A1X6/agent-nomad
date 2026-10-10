@@ -103,7 +103,7 @@ export default defineConfig(
   },
   {
     files: [
-      'packages/cli/src/agents/claude-code/{global-paths,restore-rules,command-review,settings-commands}.ts',
+      'packages/cli/src/agents/claude-code/{global-paths,restore-rules,command-review,settings-commands,skills-dir-plugins}.ts',
     ],
     rules: {
       ...restrictedImports([otherAgentFolder, fileWalker, nodeModules]),

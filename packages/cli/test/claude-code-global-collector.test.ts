@@ -120,6 +120,14 @@ describe('global collector: what is taken', () => {
     expect(files.some((path) => path.startsWith('skills/synced'))).toBe(false);
   });
 
+  it('never takes .claude-plugin/types/ of a plugin in skills/ (T97)', async () => {
+    const mod = join(base, 'skills', 'probe-mod', '.claude-plugin');
+    await writeTestFile(join(mod, 'plugin.json'), '{}');
+    await writeTestFile(join(mod, 'types', 'register.d.ts'));
+    const files = paths(await collect()).filter((path) => path.startsWith('skills/probe-mod/'));
+    expect(files).toEqual(['skills/probe-mod/.claude-plugin/plugin.json']);
+  });
+
   it('never takes skills/synced/, even when it is a link to another folder', async () => {
     const elsewhere = join(home, 'synced-elsewhere');
     await writeTestFile(join(elsewhere, 'a', 'SKILL.md'));

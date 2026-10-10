@@ -200,6 +200,8 @@ export interface AgentInspector {
   notices(command: 'push' | 'pull' | 'agents'): Promise<readonly string[]>;
   /** What pull says about the version a setup was saved with; `null`: nothing to say. */
   versionNotice?(savedWith: string | null, here: string | null): string | null;
+  /** Lines push's summary adds about collected files, e.g. the plugins among them (T97). */
+  pushNotes?(files: readonly CollectedFile[]): readonly string[];
 }
 
 /** What an agent's part of pull's plan step gets for one setup (T61). Nothing is written yet. */
@@ -235,6 +237,11 @@ export interface AgentRestorePlan {
   restore(onConflict: ConflictResolver, context: RestoreContext): Promise<RestoreReport>;
   /** Runs after every planned setup was written, e.g. plugin reinstalls (T34). */
   afterRestore(context: AfterRestoreContext): Promise<void>;
+  /**
+   * The agent's questions left part of the setup out (T97: a declined plugin folder), so a
+   * later push asks first, as after declined commands.
+   */
+  readonly declined?: boolean;
 }
 
 /**

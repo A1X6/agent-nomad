@@ -12,6 +12,7 @@ import {
   fakeAdapter,
   fakeBundleServer,
   fakeEnvWriter,
+  exists,
   installedAgent,
   localStateIn,
   loggedInStore,
@@ -26,6 +27,7 @@ import {
   useTempDir,
   writeTestFile,
 } from './fakes.ts';
+import { modFiles } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter as claudeAdapter, stopHook } from './claude-code-project-fixtures.ts';
 import {
   createAgentRegistry,
@@ -675,6 +677,21 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
 
   it('a pull that left out declined commands is remembered (T46)', async () => {
     const { t } = await partlyPulled();
+    expect(await t.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(true);
+  });
+
+  it('a pull that left out a plugin folder is remembered (T97)', async () => {
+    const server = fakeBundleServer();
+    const a = pc('laptop');
+    for (const file of modFiles()) {
+      await writeTestFile(join(a.base, ...file.path.split('/')), file.content);
+    }
+    await pushFrom(a, server, ['global', false])(none);
+    const b = pc('desktop');
+    const t = pullOn(b, server, []);
+    // No claude on this PC's PATH: the mod is unreviewed code, which --yes never writes.
+    await t.pull({ global: true, yes: true });
+    expect(await exists(join(b.base, 'skills', 'probe-mod', 'hooks', 'register.ts'))).toBe(false);
     expect(await t.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(true);
   });
 
