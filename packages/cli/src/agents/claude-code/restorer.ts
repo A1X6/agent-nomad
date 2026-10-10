@@ -158,11 +158,20 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     ? path.join(options.baseDir, '.claude.json')
     : path.join(options.homedir, '.claude.json');
 
-  async function readExisting(nativePath: string): Promise<Uint8Array | 'folder' | null> {
+  /** The file at `nativePath` with its permissions, `'folder'` for anything else, or `null`. */
+  async function readExistingFile(
+    nativePath: string,
+  ): Promise<{ readonly content: Uint8Array; readonly mode: number } | 'folder' | null> {
+    // One stat decides and gives the permissions (T95).
     const info = await stat(nativePath).catch(() => null);
     if (info === null) return null;
     if (!info.isFile()) return 'folder';
-    return new Uint8Array(await readFile(nativePath));
+    return { content: new Uint8Array(await readFile(nativePath)), mode: info.mode & 0o777 };
+  }
+
+  async function readExisting(nativePath: string): Promise<Uint8Array | 'folder' | null> {
+    const existing = await readExistingFile(nativePath);
+    return existing === null || existing === 'folder' ? existing : existing.content;
   }
 
   /**
@@ -218,6 +227,118 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     }
   }
 
+  /** Where each entry of `incoming` belongs, given the scripts its own hooks run. */
+  function destinations(target: ScopeTarget, incoming: readonly CollectedFile[]) {
+    const scriptsIn = (settingsFiles: readonly string[], scriptsOf: (json: string) => string[]) =>
+      new Set(
+        incoming
+          .filter((entry) => settingsFiles.includes(entry.path))
+          .flatMap((entry) => scriptsOf(new TextDecoder().decode(entry.content))),
+      );
+    const globalScripts = scriptsIn(GLOBAL_SETTINGS_FILES, (json) =>
+      hookScripts(json, options).map((script) => script.bundlePath),
+    );
+    const projectScripts =
+      target.kind === 'project'
+        ? scriptsIn(PROJECT_SETTINGS_FILES, (json) =>
+            projectHookScripts(json, {
+              projectDir: target.projectDir,
+              platform: options.platform,
+            }).map((script) => script.bundlePath),
+          )
+        : new Set<string>();
+    return (bundlePath: string): RestoreDestination => {
+      const windowsProblem = options.platform === 'win32' ? windowsNameProblem(bundlePath) : null;
+      if (windowsProblem !== null) return { kind: 'refused', reason: windowsProblem };
+      return target.kind === 'global'
+        ? globalDestination(bundlePath, globalScripts)
+        : projectDestination(bundlePath, projectScripts);
+    };
+  }
+
+  /** The project's auto memory folder, looked up once and only when an entry needs it. */
+  function autoMemoryFolder(target: ScopeTarget, report: MutableReport) {
+    let memory: Promise<string | null> | undefined;
+    return () =>
+      (memory ??= (async () => {
+        if (target.kind !== 'project') return null;
+        const location = await findAutoMemory({ ...options, projectDir: target.projectDir });
+        if (location.kind === 'folder') return location.dir;
+        report.warnings.push(
+          location.kind === 'shared'
+            ? 'Auto memory was not restored: autoMemoryDirectory in your user settings is shared by every project.'
+            : location.kind === 'refused'
+              ? `Auto memory was not restored to ${printableLine(location.dir)}, the folder autoMemoryDirectory names: ${location.reason}.`
+              : 'Auto memory was not restored: this project path is too long to find its memory folder.',
+        );
+        return null;
+      })());
+  }
+
+  /**
+   * What to write for `file`, given what is there: the file itself when nothing is, nothing
+   * when the same file is, else the user's answer to its conflict (`null`: skipped).
+   */
+  async function writesFor(
+    file: CollectedFile,
+    content: Uint8Array,
+    existing: Uint8Array | null,
+    ask: ConflictResolver,
+  ): Promise<readonly PlannedWrite[] | null> {
+    if (existing === null) return [{ path: file.path, content }];
+    if (sameForRestore(options.platform, file.path, existing, file.content)) return [];
+    const choice = await ask(file.path, { overwriteAllowed: true });
+    if (choice === 'skip') return null;
+    return selectMergeStrategy(mergeChoices, choice, file.path).resolve({
+      path: file.path,
+      existing,
+      incoming: content,
+    });
+  }
+
+  /** Writes the planned files next to `nativePath` and records each in the report. */
+  async function writeAll(
+    file: CollectedFile,
+    nativePath: string,
+    writes: readonly PlannedWrite[],
+    existingMode: number | null,
+    report: MutableReport,
+  ): Promise<void> {
+    for (const write of writes) {
+      // Backups and side-by-side copies sit next to the file, with a marker suffix; a
+      // name already taken (two pulls in one second) gets a number, never replaced (T45).
+      const replacing = write.path === file.path;
+      const suffix = replacing
+        ? ''
+        : await freeSuffix(nativePath + write.path.slice(file.path.length));
+      const writePath = nativePath + write.path.slice(file.path.length) + suffix;
+      await writeAtomically(
+        writePath,
+        write.content,
+        replacing ? modeFor(file, write.content, existingMode) : existingMode,
+      );
+      if (write.path.includes(BACKUP_MARKER)) report.backups.push(write.path + suffix);
+      else report.written.push(write.path + suffix);
+    }
+  }
+
+  /** Warnings for hooks and the status line that came from another OS. */
+  function otherOsWarnings(
+    target: ScopeTarget,
+    incoming: readonly CollectedFile[],
+    sourceOs: RestoreContext['sourceOs'],
+  ): string[] {
+    if (sourceOs === undefined || sourceOs === os) return [];
+    const settingsPaths = target.kind === 'global' ? GLOBAL_SETTINGS_FILES : PROJECT_SETTINGS_FILES;
+    return incoming
+      .filter((entry) => settingsPaths.includes(entry.path))
+      .flatMap((file) => hooksForOtherOs(new TextDecoder().decode(file.content), options.platform))
+      .map(
+        (command) =>
+          `This hook or status line came from ${sourceOs} and will likely not run here: ${printableLine(command)}`,
+      );
+  }
+
   return {
     reviewRunnable,
     isRedirectVariable,
@@ -258,61 +379,16 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       // A question the user cancelled (Ctrl+C) or that cannot be asked without a terminal
       // stops the whole restore; only a problem with the entry itself is skipped (T53).
       let stopped: { readonly error: unknown } | undefined;
-      const stopping =
-        <A extends unknown[], R>(question: (...args: A) => Promise<R>) =>
-        async (...args: A): Promise<R> => {
-          try {
-            return await question(...args);
-          } catch (error) {
-            stopped = { error };
-            throw error;
-          }
-        };
-      const ask = stopping(onConflict);
-      const projectScripts = new Set(
-        target.kind === 'project'
-          ? incoming
-              .filter((entry) => PROJECT_SETTINGS_FILES.includes(entry.path))
-              .flatMap((entry) =>
-                projectHookScripts(new TextDecoder().decode(entry.content), {
-                  projectDir: target.projectDir,
-                  platform: options.platform,
-                }).map((script) => script.bundlePath),
-              )
-          : [],
-      );
-      const globalScripts = new Set(
-        incoming
-          .filter((entry) => GLOBAL_SETTINGS_FILES.includes(entry.path))
-          .flatMap((entry) =>
-            hookScripts(new TextDecoder().decode(entry.content), options).map(
-              (script) => script.bundlePath,
-            ),
-          ),
-      );
-      const destinationOf = (path: string): RestoreDestination => {
-        const windowsProblem = options.platform === 'win32' ? windowsNameProblem(path) : null;
-        if (windowsProblem !== null) return { kind: 'refused', reason: windowsProblem };
-        return target.kind === 'global'
-          ? globalDestination(path, globalScripts)
-          : projectDestination(path, projectScripts);
+      const ask: ConflictResolver = async (...args) => {
+        try {
+          return await onConflict(...args);
+        } catch (error) {
+          stopped = { error };
+          throw error;
+        }
       };
-
-      let memory: Promise<string | null> | undefined;
-      const memoryDir = () =>
-        (memory ??= (async () => {
-          if (target.kind !== 'project') return null;
-          const location = await findAutoMemory({ ...options, projectDir: target.projectDir });
-          if (location.kind === 'folder') return location.dir;
-          report.warnings.push(
-            location.kind === 'shared'
-              ? 'Auto memory was not restored: autoMemoryDirectory in your user settings is shared by every project.'
-              : location.kind === 'refused'
-                ? `Auto memory was not restored to ${printableLine(location.dir)}, the folder autoMemoryDirectory names: ${location.reason}.`
-                : 'Auto memory was not restored: this project path is too long to find its memory folder.',
-          );
-          return null;
-        })());
+      const destinationOf = destinations(target, incoming);
+      const memoryDir = autoMemoryFolder(target, report);
 
       /** Writes one entry; a problem with it is thrown and reported by the loop below. */
       async function restoreEntry(file: CollectedFile): Promise<void> {
@@ -335,9 +411,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           report.skipped.push(file.path);
           return;
         }
-
-        const content = lineEndingsFor(options.platform, file.path, file.content);
-        const existing = await readExisting(nativePath);
+        const existing = await readExistingFile(nativePath);
         if (existing === 'folder') {
           report.skipped.push(file.path);
           report.warnings.push(
@@ -345,42 +419,13 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           );
           return;
         }
-        const existingMode = existing === null ? null : (await stat(nativePath)).mode & 0o777;
-
-        let writes: readonly PlannedWrite[];
-        if (existing === null) {
-          writes = [{ path: file.path, content }];
-        } else if (sameForRestore(options.platform, file.path, existing, file.content)) {
+        const content = lineEndingsFor(options.platform, file.path, file.content);
+        const writes = await writesFor(file, content, existing?.content ?? null, ask);
+        if (writes === null) {
+          report.skipped.push(file.path);
           return;
-        } else {
-          const choice = await ask(file.path, { overwriteAllowed: true });
-          if (choice === 'skip') {
-            report.skipped.push(file.path);
-            return;
-          }
-          writes = selectMergeStrategy(mergeChoices, choice, file.path).resolve({
-            path: file.path,
-            existing,
-            incoming: content,
-          });
         }
-
-        for (const write of writes) {
-          // Backups and side-by-side copies sit next to the file, with a marker suffix; a
-          // name already taken (two pulls in one second) gets a number, never replaced (T45).
-          const replacing = write.path === file.path;
-          const suffix = replacing
-            ? ''
-            : await freeSuffix(nativePath + write.path.slice(file.path.length));
-          const writePath = nativePath + write.path.slice(file.path.length) + suffix;
-          await writeAtomically(
-            writePath,
-            write.content,
-            replacing ? modeFor(file, write.content, existingMode) : existingMode,
-          );
-          if (write.path.includes(BACKUP_MARKER)) report.backups.push(write.path + suffix);
-          else report.written.push(write.path + suffix);
-        }
+        await writeAll(file, nativePath, writes, existing?.mode ?? null, report);
       }
 
       // Windows and macOS ignore case and Unicode form, so two entries a Linux PC keeps apart
@@ -413,20 +458,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         }
       }
 
-      if (context.sourceOs !== undefined && context.sourceOs !== os) {
-        const settingsPaths =
-          target.kind === 'global' ? GLOBAL_SETTINGS_FILES : PROJECT_SETTINGS_FILES;
-        for (const file of incoming.filter((entry) => settingsPaths.includes(entry.path))) {
-          for (const command of hooksForOtherOs(
-            new TextDecoder().decode(file.content),
-            options.platform,
-          )) {
-            report.warnings.push(
-              `This hook or status line came from ${context.sourceOs} and will likely not run here: ${printableLine(command)}`,
-            );
-          }
-        }
-      }
+      report.warnings.push(...otherOsWarnings(target, incoming, context.sourceOs));
       return report;
     },
   };
