@@ -3,7 +3,7 @@
   "includeEntryExports": true,
   "workspaces": {
     "packages/e2e": {
-      "entry": ["src/push-env-value.ts"]
+      "entry": ["src/push-env-value.ts", "src/fake-claude.ts"]
     },
     "packages/cli": {
       "entry": ["scripts/build-release.ts", "scripts/drift/check-claude-code.ts"],
