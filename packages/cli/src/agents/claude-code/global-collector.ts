@@ -34,6 +34,7 @@ import {
 import { hookScripts } from './hook-scripts.ts';
 import { localMarketplaceFiles } from './local-marketplaces.ts';
 import type { ProgramCli } from './plugin-sync.ts';
+import { collectPluginData, PLUGIN_DATA_PART, restoredPluginIds } from './plugin-data.ts';
 import { pluginFiles } from './plugins.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
 import { commandsInSettings, programOf } from './settings-commands.ts';
@@ -206,6 +207,13 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       // Opt-in (T101): the user's own claude.ai plugins, never plugins/synced itself.
       if (collectOptions.include?.has(ACCOUNT_PLUGINS_PART) === true) {
         found.push(...(await collectAccountPlugins(files, await readSyncedPlugins(path, baseDir))));
+      }
+      // Opt-in (T102): the data of the plugins this setup restores, never plugins/data itself.
+      if (collectOptions.include?.has(PLUGIN_DATA_PART) === true) {
+        const ids = await restoredPluginIds(plugins, {
+          accountPlugins: collectOptions.include.has(ACCOUNT_PLUGINS_PART),
+        });
+        found.push(...(await collectPluginData(files, baseDir, ids, collectOptions.onSkipped)));
       }
 
       // A hook may name a file already in a synced folder.
