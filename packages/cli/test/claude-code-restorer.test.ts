@@ -74,11 +74,16 @@ function restoreGlobal(
 }
 
 /** Restores `files` into the test's project, answering every conflict question `choice`. */
-function restoreProject(files: readonly CollectedFile[], choice: ConflictChoice) {
+function restoreProject(
+  files: readonly CollectedFile[],
+  choice: ConflictChoice,
+  context?: Parameters<ClaudeCodeRestorer['restore']>[3],
+) {
   return restorer().restore(
     { kind: 'project', projectDir: project },
     files,
     answer(choice).resolve,
+    context,
   );
 }
 
@@ -662,29 +667,43 @@ describe('restorer: per-OS fixes', () => {
     expect((await stat(join(base, 'CLAUDE.md'))).mode & 0o777).toBe(0o600);
   });
 
+  /** Hooks for Windows, for macOS and Linux, and for any OS. */
+  const mixedHooks = JSON.stringify({
+    hooks: {
+      Stop: [
+        { hooks: [{ type: 'command', command: 'powershell -File C:/hooks/notify.ps1' }] },
+        { hooks: [{ type: 'command', command: '~/.claude/hooks/check.sh' }] },
+        { hooks: [{ type: 'command', command: 'node ~/tool.js' }] },
+      ],
+    },
+  });
+  const otherOs = posix ? 'win32' : 'linux';
+  /** The hook of `mixedHooks` that will likely not run on this OS. */
+  const foreignHook = posix ? 'powershell -File C:/hooks/notify.ps1' : '~/.claude/hooks/check.sh';
+
   it('warns about hooks from another OS that will likely not run here', async () => {
-    const settings = JSON.stringify({
-      hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: 'powershell -File C:/hooks/notify.ps1' }] },
-          { hooks: [{ type: 'command', command: '~/.claude/hooks/check.sh' }] },
-          { hooks: [{ type: 'command', command: 'node ~/tool.js' }] },
-        ],
-      },
-    });
-    const otherOs = posix ? 'win32' : 'linux';
-    const report = await restoreGlobal([collected('settings.json', settings)], 'skip', {
+    const report = await restoreGlobal([collected('settings.json', mixedHooks)], 'skip', {
       sourceOs: otherOs,
     });
-    const expected = posix ? 'powershell -File C:/hooks/notify.ps1' : '~/.claude/hooks/check.sh';
     expect(report.warnings).toEqual([
-      `This hook or status line came from ${otherOs} and will likely not run here: ${expected}`,
+      `This hook or status line came from ${otherOs} and will likely not run here: ${foreignHook}`,
     ]);
-    // Nothing to warn about from the same OS.
-    const same = await restoreGlobal([collected('settings.json', settings)], 'skip', {
+  });
+
+  it('warns about project hooks from another OS too', async () => {
+    const report = await restoreProject([collected('.claude/settings.json', mixedHooks)], 'skip', {
+      sourceOs: otherOs,
+    });
+    expect(report.warnings).toEqual([
+      `This hook or status line came from ${otherOs} and will likely not run here: ${foreignHook}`,
+    ]);
+  });
+
+  it('gives no other-OS warning for hooks from this OS', async () => {
+    const report = await restoreGlobal([collected('settings.json', mixedHooks)], 'skip', {
       sourceOs: process.platform === 'darwin' ? 'darwin' : posix ? 'linux' : 'win32',
     });
-    expect(same.warnings).toEqual([]);
+    expect(report.warnings).toEqual([]);
   });
 
   it('shows a hook command with a line break on one warning line (SEC-01)', async () => {
@@ -800,11 +819,15 @@ describe('restorer: what pull asks before writing (T61)', () => {
     expect(conflicts[1]?.question).toEqual({ overwriteAllowed: true });
   });
 
-  it('reviews runnable entries and knows the variables that redirect Claude Code', () => {
+  it('reviews runnable entries that are new here', () => {
     const r = restorer();
     const settings = collected('settings.json', statusLine('ccstatusline'));
     expect(r.reviewRunnable([settings], []).map((entry) => entry.label)).toEqual(['status line']);
     expect(r.reviewRunnable([settings], [settings])).toEqual([]);
+  });
+
+  it('knows the variables that redirect Claude Code', () => {
+    const r = restorer();
     expect(r.isRedirectVariable('ANTHROPIC_BASE_URL')).toBe(true);
     expect(r.isRedirectVariable('https_proxy')).toBe(true);
     expect(r.isRedirectVariable('GITHUB_TOKEN')).toBe(false);
