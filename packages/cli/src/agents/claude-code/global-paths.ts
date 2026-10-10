@@ -99,6 +99,13 @@ export const PLUGIN_VERSIONS_BUNDLE_PATH = `${RESERVED_DIR}/plugin-versions.json
  */
 export const LOCAL_MARKETPLACES_PREFIX = `${RESERVED_DIR}/local-marketplaces/`;
 
+/**
+ * The plugin folders `env.CLAUDE_CODE_PLUGIN_DIRS` names in the user's settings (T99), one
+ * `<n>.json` each (`n`: its place in the value), read by pull, never written as they are; one
+ * file per folder for the same reason as the local marketplaces.
+ */
+export const PLUGIN_DIRS_PREFIX = `${RESERVED_DIR}/plugin-dirs/`;
+
 /** Programs a hook or the status line needs, with install details (`.agentnomad/programs.json`). */
 export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
 

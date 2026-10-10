@@ -33,6 +33,7 @@ import {
 } from './global-paths.ts';
 import { hookScripts } from './hook-scripts.ts';
 import { localMarketplaceFiles } from './local-marketplaces.ts';
+import { pluginDirFiles } from './plugin-dirs.ts';
 import type { ProgramCli } from './plugin-sync.ts';
 import { pluginFiles } from './plugins.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
@@ -48,7 +49,10 @@ export interface GlobalCollectorOptions {
   readonly customConfigDir: boolean;
   /** Looks up programs hooks and the status line run; without it none are recorded. */
   readonly findProgram?: ProgramLocator;
-  /** Finds `git` for saved local marketplaces (T98); without it their folders are walked. */
+  /**
+   * Finds `git` for saved local marketplaces (T98) and plugin folders (T99); without it their
+   * folders are walked.
+   */
   readonly findGit?: () => Promise<ProgramCli | null>;
   /** Single files in the base folder; the paths data file's list unless a test gives one. */
   readonly globalFiles?: readonly string[];
@@ -197,6 +201,18 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
           ...(options.findGit && { git: options.findGit }),
           ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),
         })),
+      );
+      // Plugin folders the user settings load through `env.CLAUDE_CODE_PLUGIN_DIRS` (T99).
+      found.push(
+        ...(await pluginDirFiles(
+          found.find((file) => file.path === 'settings.json'),
+          {
+            homedir,
+            platform: options.platform,
+            ...(options.findGit && { git: options.findGit }),
+            ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),
+          },
+        )),
       );
 
       // Opt-in (T42): a copy of the user's own claude.ai skills, never skills/synced itself.

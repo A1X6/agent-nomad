@@ -19,6 +19,7 @@ import {
   GLOBAL_REFUSED,
   HOME_SCRIPTS_PREFIX,
   LOCAL_MARKETPLACES_PREFIX,
+  PLUGIN_DIRS_PREFIX,
   PLUGIN_VERSIONS_BUNDLE_PATH,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
@@ -71,6 +72,10 @@ const isLocalMarketplace = (path: string) =>
   path.startsWith(LOCAL_MARKETPLACES_PREFIX) &&
   !path.slice(LOCAL_MARKETPLACES_PREFIX.length).includes('/');
 
+/** A saved plugin folder (T99): pull writes its files to a folder of its own choosing. */
+const isPluginDir = (path: string) =>
+  path.startsWith(PLUGIN_DIRS_PREFIX) && !path.slice(PLUGIN_DIRS_PREFIX.length).includes('/');
+
 /** What a global entry may be written under, built once: the synced folders. */
 const GLOBAL_FOLDER_PREFIXES: readonly string[] = [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].map(
   (folder) => `${folder}/`,
@@ -117,7 +122,9 @@ export function globalDestination(
 ): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
   if (path === CLAUDE_JSON_BUNDLE_PATH) return { kind: 'claude-json' };
-  if (GLOBAL_METADATA.has(path) || isLocalMarketplace(path)) return { kind: 'metadata' };
+  if (GLOBAL_METADATA.has(path) || isLocalMarketplace(path) || isPluginDir(path)) {
+    return { kind: 'metadata' };
+  }
   // Saved claude.ai skills (T42): written only by pull's follow-up, after asking.
   if (path.startsWith(ACCOUNT_SKILLS_PREFIX)) return { kind: 'metadata' };
   // Saved claude.ai plugins (T101): pull's plan step offers them as `skills/<name>/`.
@@ -172,7 +179,8 @@ export function projectDestination(
 
 /**
  * Whether pull reads `path` and never writes it as a file, in a global or a project setup:
- * `plugins.json`, `programs.json`, a saved local marketplace (T98) and the like.
+ * `plugins.json`, `programs.json`, a saved local marketplace (T98) or plugin folder (T99) and
+ * the like.
  */
 export const isPullMetadata = (path: string): boolean =>
   globalDestination(path, new Set()).kind === 'metadata' ||
