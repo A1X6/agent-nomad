@@ -198,8 +198,15 @@ export interface AgentInspector {
   unknownEntries(target: ScopeTarget): Promise<readonly string[]>;
   /** Things to point out before push, pull or `agents`, e.g. organization-managed settings. */
   notices(command: 'push' | 'pull' | 'agents'): Promise<readonly string[]>;
-  /** What pull says about the version a setup was saved with; `null`: nothing to say. */
-  versionNotice?(savedWith: string | null, here: string | null): string | null;
+  /**
+   * What pull says about the version a setup was saved with, and about what in its `files`
+   * this PC's version cannot run (T103: mods); `null`: nothing to say.
+   */
+  versionNotice?(
+    savedWith: string | null,
+    here: string | null,
+    files: readonly CollectedFile[],
+  ): string | null;
   /** Lines push's summary adds about collected files, e.g. the plugins among them (T97). */
   pushNotes?(files: readonly CollectedFile[]): readonly string[];
 }
