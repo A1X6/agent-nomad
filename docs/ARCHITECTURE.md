@@ -684,7 +684,7 @@ of these:
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `commands.ts`       | The option types for every command and the `CommandHandlers` interface.                                                                             |
 | `program.ts`        | Every command, flag and help text (commander); parsing only. The optional parts' flags come from the adapters.                                      |
-| `project-folder.ts` | The home folder and the agent's own folder are never a project (push, pull and `env`).                                                              |
+| `project-folder.ts` | The home folder and the agent's own folder are never a project (push, pull and `env`); `checkProjectFolder` is the check push and pull share.       |
 | `flags.ts`          | Validating `--agent`, `--project` and `--username` values.                                                                                          |
 | `run.ts`            | Runs one invocation: exit codes, Ctrl+C, and the "needs an answer" message with the flags per command.                                              |
 | `setup-outcomes.ts` | What happened to each setup in push and pull, the one "Not saved / Not restored" error (exit 1), and `setupLabel`, how every message names a setup. |
@@ -744,7 +744,7 @@ of these:
 | File                         | Responsible for                                                                                                                                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `push/push-command.ts`       | `push`: a plan step (choose, collect, every question) and an apply step with no prompter (encrypt, upload).                                                                                       |
-| `push/bundle-files.ts`       | Collected files ↔ bundle entries (UTF-8 with `{{HOME}}` or base64); keeps local files that only differ in slash style.                                                                            |
+| `push/bundle-files.ts`       | Collected files ↔ bundle entries (UTF-8 with `{{HOME}}` or base64); keeps local files that only differ in slash style; `localPathResolver`, the path rules both use on this PC.                   |
 | `pull/pull-command.ts`       | `pull`: a plan step (choose, download, verify, every question, the agents' own ones too), an apply step with no prompter.                                                                         |
 | `pull/saved-setups.ts`       | Listing setups with decrypted names, every page (stopping at a repeated cursor or a page limit); the revisions push checks against; downloading and checking one (agent, scope, sealed revision). |
 | `commands/setup-commands.ts` | `list`, `status` and `delete`; `timeAgo`, how long ago a setup was saved.                                                                                                                         |

@@ -1,3 +1,4 @@
+import type { ChosenAgent } from '../agents/adapter.ts';
 import { samePath } from '../system/paths.ts';
 
 export interface ProjectFolderContext {
@@ -19,6 +20,26 @@ export function projectFolderRefusal(folder: string, context: ProjectFolderConte
     return `${context.agentName}'s own folder`;
   }
   return null;
+}
+
+/**
+ * Why `cwd` cannot be a project of `agent` (BUG-05), or `null`, for push and pull alike;
+ * throws {@link ProjectFolderError} when a project was asked for there.
+ */
+export function checkProjectFolder(
+  cwd: string,
+  agent: ChosenAgent,
+  here: { readonly homedir: string; readonly platform: NodeJS.Platform },
+  projectAsked: boolean,
+): string | null {
+  const refusal = projectFolderRefusal(cwd, {
+    homedir: here.homedir,
+    baseDir: agent.baseDir,
+    agentName: agent.adapter.displayName,
+    platform: here.platform,
+  });
+  if (projectAsked && refusal !== null) throw new ProjectFolderError(cwd, refusal);
+  return refusal;
 }
 
 /** A project was asked for in a folder that holds the global setup. */

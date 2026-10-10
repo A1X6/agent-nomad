@@ -10,7 +10,6 @@ import {
   type BundleScope,
 } from '@agentnomad/contracts';
 import {
-  createPathResolver,
   encryptProjectName,
   scopeKeyFor,
   sealBundle,
@@ -32,7 +31,7 @@ import type { ApiClient } from '../api/api-client.ts';
 import { ApiError } from '../api/api-errors.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PushOptions } from '../cli/commands.ts';
-import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
+import { checkProjectFolder } from '../cli/project-folder.ts';
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { scanEnvReferences } from '../env/env-references.ts';
 import { chooseEnvValues, envSectionFile } from '../env/env-section.ts';
@@ -41,7 +40,7 @@ import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
 import { formatSize } from '../ui/format-size.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
-import { toBundleFiles } from './bundle-files.ts';
+import { localPathResolver, toBundleFiles } from './bundle-files.ts';
 
 export interface PushDeps {
   readonly prompter: Prompter;
@@ -160,15 +159,7 @@ export function createPushPlanner(deps: PushDeps) {
     const { adapter } = agent;
     // The home folder and the agent's own folder are never a project: their `.claude/` is the
     // global setup (BUG-05).
-    const refusal = projectFolderRefusal(deps.cwd, {
-      homedir: deps.homedir,
-      baseDir: agent.baseDir,
-      agentName: adapter.displayName,
-      platform: deps.platform,
-    });
-    if (options.project !== undefined && refusal !== null) {
-      throw new ProjectFolderError(deps.cwd, refusal);
-    }
+    const refusal = checkProjectFolder(deps.cwd, agent, deps, options.project !== undefined);
     if (options.global && options.project !== undefined) return 'both';
     if (options.global) return 'global';
     if (options.project !== undefined) return 'project';
@@ -315,7 +306,7 @@ export function createPushPlanner(deps: PushDeps) {
         });
     if (envSection) collected.push(envSectionFile(envSection));
 
-    const resolver = createPathResolver({ os: sourceOsOf(deps.platform), homeDir: deps.homedir });
+    const resolver = localPathResolver(deps.platform, deps.homedir);
     return {
       formatVersion: BUNDLE_FORMAT_VERSION,
       agent: item.adapter.id,
@@ -329,8 +320,8 @@ export function createPushPlanner(deps: PushDeps) {
   /**
    * Whether to upload one collected setup, and over which revision. Asks before pushing a
    * setup whose last pull did not restore everything (T46, BUG-05) and before replacing a
-   * copy the server has in another revision than this PC knows (T38); a no from the user is their choice, a skip by
-   * `--yes` is not done.
+   * copy the server has in another revision than this PC knows (T38); a no from the user is
+   * their choice, a skip by `--yes` is not done.
    */
   async function decide(
     item: PushItem,
