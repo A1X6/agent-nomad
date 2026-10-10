@@ -1,6 +1,6 @@
 /*
- * Rules for bundle paths (relative, `/`-separated), for any adapter (DUP-01): pure text, so
- * the pure modules may use them too.
+ * Rules for bundle paths and paths from the home folder (relative, `/`-separated), for any
+ * adapter (DUP-01): pure text, so the pure modules may use them too.
  */
 
 /**
@@ -15,4 +15,28 @@ export function underFolder(
 ): boolean {
   const [inside, entry] = ignoreCase ? [path.toLowerCase(), folder.toLowerCase()] : [path, folder];
   return inside === entry || inside.startsWith(`${entry}/`);
+}
+
+/** Home folders for keys and cloud logins: never read for a setup, whatever links there. */
+const SENSITIVE_HOME_DIRS: readonly string[] = [
+  '.ssh',
+  '.gnupg',
+  '.aws',
+  '.azure',
+  '.kube',
+  '.docker',
+  '.config/gcloud',
+  '.config/gh',
+  '.password-store',
+];
+
+/** `relative` (from home, `/`-separated) is `dir` or inside a `dir` folder; any case. */
+export function inHomeFolder(relative: string, dir: string): boolean {
+  const [lower, folder] = [relative.toLowerCase(), dir.toLowerCase()];
+  return lower === folder || lower.startsWith(`${folder}/`) || lower.includes(`/${folder}/`);
+}
+
+/** A path from the home folder inside a folder for keys and logins (any case). */
+export function isSensitiveHomePath(relative: string): boolean {
+  return SENSITIVE_HOME_DIRS.some((dir) => inHomeFolder(relative, dir));
 }

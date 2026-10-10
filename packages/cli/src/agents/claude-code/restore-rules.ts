@@ -8,8 +8,9 @@ import { BundlePathSchema } from '@agentnomad/contracts';
 
 import { ENV_BUNDLE_PATH } from '../../env/env-section.ts';
 import { RESERVED_DIR } from '../adapter.ts';
-
+import { underFolder } from '../shared/bundle-paths.ts';
 import {
+  ACCOUNT_SKILLS_PREFIX,
   CLAUDE_JSON_BUNDLE_PATH,
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
@@ -23,8 +24,6 @@ import {
   isScript,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
-import { underFolder } from '../shared/bundle-paths.ts';
-import { ACCOUNT_SKILLS_PREFIX } from './account-skills.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
   PROJECT_CLAUDE_FILES,

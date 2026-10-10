@@ -4,8 +4,9 @@ import type { PlatformPath } from 'node:path';
 import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
-import { RESERVED_DIR, type CollectedFile } from '../adapter.ts';
+import type { CollectedFile } from '../adapter.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
+import { ACCOUNT_SKILLS_PREFIX } from './global-paths.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 
 /**
@@ -18,7 +19,6 @@ import { runnableInMarkdown } from './runnable-markdown.ts';
 const SYNCED_SKILLS_DIR = 'skills/synced';
 /** The id of the optional part for saved claude.ai skills (T42, T61); also the flag name. */
 export const ACCOUNT_SKILLS_PART = 'account-skills';
-export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
 
 /**
  * Claude Code's `manifest.json` for one account's synced skills (an internal file, so only

@@ -3,7 +3,7 @@
  * the paths data file (T32); this module only gives them names and fast lookups.
  */
 import { RESERVED_DIR } from '../adapter.ts';
-import { inHomeFolder, isSensitiveHomePath } from '../shared/file-gathering.ts';
+import { inHomeFolder, isSensitiveHomePath } from '../shared/bundle-paths.ts';
 import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 
 /** Single files in the base folder. */
@@ -50,6 +50,8 @@ export const CLAUDE_JSON_MCP_KEY = 'mcpServers';
 
 /** The selected `~/.claude.json` keys. */
 export const CLAUDE_JSON_BUNDLE_PATH = `${RESERVED_DIR}/claude.json`;
+/** The user's own claude.ai skills, saved on request (T42). */
+export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
 /** Hook and status line scripts elsewhere in the home folder, by path from home. */
 export const HOME_SCRIPTS_PREFIX = `${RESERVED_DIR}/home/`;
 

@@ -20,10 +20,10 @@ const fileWalker = {
   message: 'This module is pure: it gets file contents, it does not read them.',
 };
 
-/** Settings parsing has no file access at all (SOLID-05, ARCH-04). */
+/** The pure path and text-rule modules have no file access at all (SOLID-05, ARCH-04). */
 const nodeModules = {
   group: ['node:*'],
-  message: 'Settings parsing works on text only, with no file or process access.',
+  message: 'This module works on text only, with no file or process access.',
 };
 
 /** @param {readonly object[]} patterns */
@@ -98,11 +98,13 @@ export default defineConfig(
   },
   {
     // Later blocks replace the rule's options, so each repeats the agent boundary.
-    files: ['packages/cli/src/agents/claude-code/{restore-rules,command-review,auto-memory}.ts'],
+    files: ['packages/cli/src/agents/claude-code/auto-memory.ts'],
     rules: { ...restrictedImports([otherAgentFolder, fileWalker]), ...noDynamicImport },
   },
   {
-    files: ['packages/cli/src/agents/claude-code/settings-commands.ts'],
+    files: [
+      'packages/cli/src/agents/claude-code/{global-paths,restore-rules,command-review,settings-commands}.ts',
+    ],
     rules: {
       ...restrictedImports([otherAgentFolder, fileWalker, nodeModules]),
       ...noDynamicImport,
