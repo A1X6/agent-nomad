@@ -67,6 +67,10 @@ URL-encoded, hex or base64 at any alignment, and inside gzip or deflate data, al
 fields (T48). Every upload must not start like gzip, so a bundle that were only compressed fails
 too. A control check confirms the same search does find the username, which is sent readable.
 
+**Claude Code's own logins are never saved.** `.credentials.json`, `.session_ingress_token` and
+`hfi-auth.json` in its folder are in the data file's `neverSynced` list: push never takes them,
+even when a hook names one, and pull refuses them (T108).
+
 ## Findings
 
 Found in the T38 review, all fixed:
