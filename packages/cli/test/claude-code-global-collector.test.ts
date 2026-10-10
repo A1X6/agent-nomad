@@ -13,8 +13,10 @@ import {
   syncedSetup,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
+import { syncedAccountPlugins } from './claude-code-plugin-fixtures.ts';
 import { linkFolder, paths, text, withTempDir, writeTestFile } from './fakes.ts';
 import {
+  ACCOUNT_PLUGINS_PREFIX,
   ACCOUNT_SKILLS_PREFIX,
   ClaudeJsonError,
   TEMP_MARKER,
@@ -459,5 +461,28 @@ describe('global collector: claude.ai skills (T42)', () => {
       2,
     );
     expect(withSkills.some((file) => file.path.startsWith('skills/synced'))).toBe(false);
+  });
+});
+
+describe('global collector: claude.ai plugins (T101)', () => {
+  it('leaves them out unless asked', async () => {
+    await syncedAccountPlugins(base);
+    const plain = await collector().collect({ kind: 'global' }, { includeMemory: false });
+    expect(plain.some((file) => file.path.startsWith(ACCOUNT_PLUGINS_PREFIX))).toBe(false);
+  });
+
+  it('adds your own when asked, never plugins/synced itself', async () => {
+    await syncedAccountPlugins(base);
+    const withPlugins = await collector().collect(
+      { kind: 'global' },
+      { includeMemory: false, include: new Set(['account-plugins']) },
+    );
+    expect(
+      paths(withPlugins.filter((file) => file.path.startsWith(ACCOUNT_PLUGINS_PREFIX))).sort(),
+    ).toEqual([
+      `${ACCOUNT_PLUGINS_PREFIX}my-upload/.claude-plugin/plugin.json`,
+      `${ACCOUNT_PLUGINS_PREFIX}my-upload/skills/my-upload/SKILL.md`,
+    ]);
+    expect(withPlugins.some((file) => file.path.startsWith('plugins/synced'))).toBe(false);
   });
 });

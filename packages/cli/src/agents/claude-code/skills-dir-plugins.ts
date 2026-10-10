@@ -12,7 +12,7 @@ import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
 export const SKILLS_DIR_MARKETPLACE = 'skills-dir';
 
 /** A plugin's manifest, from the plugin's folder. */
-const PLUGIN_MANIFEST = '.claude-plugin/plugin.json';
+export const PLUGIN_MANIFEST = '.claude-plugin/plugin.json';
 
 /** The hooks file of a plugin: classic command hooks, or a mod's modules. */
 export const PLUGIN_HOOKS = 'hooks/hooks.json';
@@ -32,8 +32,16 @@ function splitSkillsPath(path: string): readonly [string, string] | null {
  * without case, as Windows and macOS see one folder.
  */
 export function isGeneratedInSkillsPlugin(path: string): boolean {
-  const rest = splitSkillsPath(path)?.[1].toLowerCase();
-  if (rest === undefined) return false;
+  const rest = splitSkillsPath(path)?.[1];
+  return rest !== undefined && isGeneratedInPlugin(rest);
+}
+
+/**
+ * Whether a path from a plugin's folder (`.claude-plugin/types/x.d.ts`) is inside a folder
+ * Claude Code generates there; also for saved claude.ai plugins (T101). Without case.
+ */
+export function isGeneratedInPlugin(pathInPlugin: string): boolean {
+  const rest = pathInPlugin.toLowerCase();
   return GENERATED_IN_PLUGIN.some((folder) => {
     const lower = folder.toLowerCase();
     return rest === lower || rest.startsWith(`${lower}/`);
