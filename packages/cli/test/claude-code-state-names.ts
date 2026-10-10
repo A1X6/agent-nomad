@@ -63,7 +63,7 @@ export const STATE_FOLDER_NAMES = [
  * the program's order, with the names it builds from constants written out (e.g. `ZFe(name)` is
  * `<name>.signature.json`).
  */
-export const STATE_LEFT_OUT_OF_COPIES = [
+const STATE_LEFT_OUT_OF_COPIES = [
   '.claude.json',
   '.claude.json.backup',
   '.credentials.json',

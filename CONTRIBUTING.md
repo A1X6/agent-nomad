@@ -140,7 +140,7 @@ open, such as a chat or an option letter from a discussion.
     `syncedSetup`).
   - `packages/cli/test/claude-code-state-names.ts`: the state names the Claude Code program
     lists for its own folder, read from the version in `STATE_NAMES_VERSION` (T108):
-    `STATE_FOLDER_NAMES`, `STATE_LEFT_OUT_OF_COPIES` and both as one list, `STATE_NAMES`.
+    `STATE_FOLDER_NAMES`, and with the names a self-hosted runner leaves out, `STATE_NAMES`.
     A newer Claude Code's lists replace them, with the new version.
   - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
     `putJson`, `realisticPlugins`), managed settings (`fakeManagedSystem` with
