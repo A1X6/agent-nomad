@@ -414,9 +414,9 @@ run a command (`apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`, `gcpAuth
 (`ANTHROPIC_BASE_URL` and the other endpoints, proxies, `NODE_EXTRA_CA_CERTS`, its shell
 variables, OpenTelemetry endpoints, `PATH`), the Claude apps gateway `/login` signs in to
 (`forceLoginGatewayUrl` in global settings, which Claude Code 2.1.296 reads only there and only
-with `forceLoginMethod: "gateway"`; the entry says which, T107), a `permissions.defaultMode` that lets Claude act
-without asking (`bypassPermissions` and `auto` in global settings, where alone Claude Code
-takes them; `acceptEdits` from any settings file),
+with `forceLoginMethod: "gateway"`; the entry says which, T107), a `permissions.defaultMode`
+that lets Claude act without asking (`bypassPermissions` and `auto` in global settings, where
+alone Claude Code takes them; `acceptEdits` from any settings file),
 `permissions.allow` rules and `permissions.additionalDirectories` new on this PC, a new or
 changed `sandbox` block, `enableAllProjectMcpServers`, MCP servers (the whole definition is
 compared, so a new `env` or `headersHelper` shows), files that commands here or in the bundle
@@ -526,11 +526,12 @@ T107), seen on a real Claude Code for the plugin and mod sync tasks; the test fi
 - A plugin's data folder is `plugins/data/<id>` with every character other than letters,
   digits, `_` and `-` turned into `-` (`Odd.Name_v2@my-local.mkt` →
   `Odd-Name_v2-my-local-mkt`; T96 also kept `*`, which the 2.1.296 program turns, T107). A
-  mod's `$.store` is not there but in `plugins/store/<safe id>-<first 12 hex of
-sha256(id)>.json`, the safe id (`_` for any other character) cut to 64 characters, the
-  folder mode 700 and the file 600 (`probe-mod@skills-dir` →
-  `probe-mod_skills-dir-e89169932969.json`). The program names a `<package>@npm` plugin's data
-  folder another way, which agentnomad does not follow: it restores no npm plugin.
+  mod's `$.store` is not there but in
+  `plugins/store/<safe id>-<first 12 hex of sha256(id)>.json`, the safe id (`_` for any other
+  character) cut to 64 characters, the folder mode 700 and the file 600
+  (`probe-mod@skills-dir` → `probe-mod_skills-dir-e89169932969.json`). The program names a
+  `<package>@npm` plugin's data folder another way, which agentnomad does not follow: it
+  restores no npm plugin.
 - `skills/synced/<account>/manifest.json` entries have no `creatorType` any more; `source` is
   `anthropic`, `anthropic-example`, `plugin` (the user's uploads, with a `backingPluginId`),
   `custom` or `session-refs`. `plugins/synced/<account>/manifest.json` entries carry an

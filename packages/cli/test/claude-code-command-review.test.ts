@@ -260,7 +260,7 @@ describe('reviewRunnable: settings that redirect or loosen Claude Code (T55)', (
     expect(labels([after], [before])).toEqual(['changed setting forceLoginGatewayUrl']);
   });
 
-  it('leaves out a login gateway in project settings, which Claude Code does not read (T107)', () => {
+  it('leaves out a login gateway in project settings, which Claude Code never reads (T107)', () => {
     const settings = collectedJson('.claude/settings.json', {
       forceLoginMethod: 'gateway',
       forceLoginGatewayUrl: 'https://gateway.example',

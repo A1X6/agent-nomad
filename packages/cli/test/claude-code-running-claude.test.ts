@@ -51,8 +51,9 @@ describe('running Claude Code', () => {
   // Seen on Windows 11 (T67) through systemProcessLister, from a real
   // `npm install --prefix <dir> @anthropic-ai/claude-code` (2.1.285) started with `claude.cmd
   // mcp serve`. The npm package now ships the native claude.exe and the .cmd launcher starts it
-  // directly (2.1.296 too: `bin/claude.exe`, postinstall `node install.cjs`); node only runs when postinstall was skipped (cli-wrapper.cjs). The cmd.exe parent
-  // need not match: its claude.exe child does.
+  // directly (2.1.296 too: `bin/claude.exe`, postinstall `node install.cjs`); node only runs
+  // when postinstall was skipped (cli-wrapper.cjs). The cmd.exe parent need not match: its
+  // claude.exe child does.
   it.each([
     '"C:\\Users\\a\\AppData\\Roaming\\npm\\node_modules\\.bin\\\\..\\@anthropic-ai\\claude-code\\bin\\claude.exe"    mcp serve',
     'C:\\nvm4w\\nodejs\\node.exe C:\\Users\\a\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli-wrapper.cjs mcp serve',
