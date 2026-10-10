@@ -44,7 +44,7 @@ import { PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
  */
 
 /** The `env` name, as Claude Code 2.1.296 reads it. */
-export const PLUGIN_DIRS_VARIABLE = 'CLAUDE_CODE_PLUGIN_DIRS';
+const PLUGIN_DIRS_VARIABLE = 'CLAUDE_CODE_PLUGIN_DIRS';
 
 /** The user settings file, the only one that sets it: see `pluginDirFiles`. */
 const USER_SETTINGS = 'settings.json';
