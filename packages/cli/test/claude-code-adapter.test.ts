@@ -20,6 +20,7 @@ import {
   validatePassWithWarning,
   writeModFolder,
   SAVED_PLUGIN_DIR_ENTRY,
+  savedLocalMarketplace,
   savedPluginDir,
 } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
@@ -280,6 +281,16 @@ describe("Claude Code pull's version warning with mods (T103)", () => {
   it('keeps the unknown-version notice when the version here is unknown', () => {
     expect(versionNotice('2.1.296', null)).toBe(
       'This setup was saved from Claude Code 2.1.296; the version here is unknown.',
+    );
+  });
+
+  it('names the mods in saved local marketplaces and plugin folders too (T104)', () => {
+    const files = [savedLocalMarketplace('tools'), savedPluginDir(':')];
+    expect(claudeCodeAdapter(home).inspector?.versionNotice?.('2.1.287', '2.1.286', files)).toBe(
+      [
+        'This setup was saved from Claude Code 2.1.287, but this PC has 2.1.286. Update Claude Code so every setting works.',
+        'This setup has mods (probe-mod@tools, probe-mod@inline), which need Claude Code 2.1.287 or newer, but this PC has 2.1.286. Update Claude Code so they load.',
+      ].join('\n'),
     );
   });
 });

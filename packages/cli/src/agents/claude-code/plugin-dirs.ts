@@ -33,7 +33,7 @@ import {
 } from './plugin-review.ts';
 import type { ProgramCli } from './plugin-sync.ts';
 import { MarketplaceNameSchema } from './plugins.ts';
-import { PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
+import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
 
 /*
  * Plugin folders that `env.CLAUDE_CODE_PLUGIN_DIRS` in the user's settings loads every session
@@ -178,6 +178,24 @@ function inlineId(files: readonly CollectedFile[], name: string): string {
     ? valueOrNull(parseJsonWith(z.looseObject({ name: z.string() }), manifest.content))?.name
     : undefined;
   return `${printableLine(named ?? name)}@inline`;
+}
+
+/**
+ * The mods among the saved plugin folders in `files` (T104): those with `hooks/hooks.json`, by
+ * the id Claude Code gives them, e.g. `pd-mod@inline`. For pull's notice when this PC's Claude
+ * Code is too old to load mods (T103); a saved file it cannot read is left to `planPluginDirs`.
+ */
+export function savedPluginDirMods(files: readonly CollectedFile[]): string[] {
+  return files
+    .filter((file) => file.path.startsWith(PLUGIN_DIRS_PREFIX))
+    .flatMap((file) => {
+      const saved = valueOrNull(readSavedPluginDir(file.content));
+      if (saved === null) return [];
+      const inside = savedFolderFiles(saved);
+      return inside.some((entry) => entry.path === PLUGIN_HOOKS)
+        ? [inlineId(inside, saved.name)]
+        : [];
+    });
 }
 
 /** `settings` with the value rewritten by `replace`; as it is when nothing changes. */

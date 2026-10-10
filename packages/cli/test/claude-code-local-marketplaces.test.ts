@@ -9,6 +9,8 @@ import {
   MOD_MODULE,
   MOD_NAME,
   modFiles,
+  savedFiles,
+  savedLocalMarketplace,
   scriptedGit,
   validateCli,
   validatePassWithWarning,
@@ -33,6 +35,7 @@ import {
   localMarketplaceFiles,
   planLocalMarketplaces,
   readSavedLocalMarketplace,
+  savedMarketplaceMods,
   type CollectedFile,
   type ConflictChoice,
   type LocalMarketplaceRestoreDeps,
@@ -169,19 +172,30 @@ describe('push saves a local marketplace (T98)', () => {
 });
 
 /** The saved entry of `tools`, as push writes it, with `overrides`. */
-const savedTools = (overrides: object = {}) =>
-  collectedJson(SAVED_PATH, {
-    name: TOOLS,
-    path: 'markets/tools',
-    git: null,
-    plugins: [{ id: localModId(TOOLS), scope: 'user', commandSource: false }],
-    files: toolsFiles().map((file) => ({
-      path: file.path,
-      content: Buffer.from(file.content).toString('base64'),
-      executable: false,
-    })),
-    ...overrides,
+const savedTools = (overrides: object = {}) => savedLocalMarketplace(TOOLS, overrides);
+
+describe('the mods in saved local marketplaces, for the version warning (T104)', () => {
+  it('names an installed plugin whose folder has hooks/hooks.json', () => {
+    expect(savedMarketplaceMods([savedTools()])).toEqual(['probe-mod@tools']);
   });
+
+  it('leaves out a plugin without hooks/hooks.json', () => {
+    const noHooks = toolsFiles().filter((file) => file.path !== `${MOD_NAME}/hooks/hooks.json`);
+    expect(savedMarketplaceMods([savedTools({ files: savedFiles(noHooks) })])).toEqual([]);
+  });
+
+  it('leaves out a mod in the folder that is not installed', () => {
+    expect(savedMarketplaceMods([savedTools({ plugins: [] })])).toEqual([]);
+  });
+
+  it('leaves out a saved marketplace it cannot read', () => {
+    expect(savedMarketplaceMods([collected(SAVED_PATH, 'not json')])).toEqual([]);
+  });
+
+  it('leaves out files that are not saved marketplaces', () => {
+    expect(savedMarketplaceMods(modFiles())).toEqual([]);
+  });
+});
 
 /**
  * Pull's plan for `files`, then its restore: `git` re-clones, `answers` answer the review's

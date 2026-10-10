@@ -21,14 +21,14 @@ import { devModsNotice, readDevMods } from './dev-mods.ts';
 import { CLAUDE_ENV_REFERENCES } from './env-files.ts';
 import { createClaudeCodeGlobalCollector } from './global-collector.ts';
 import { CLAUDE_JSON_BUNDLE_PATH } from './global-paths.ts';
-import { findGit, planLocalMarketplaces } from './local-marketplaces.ts';
+import { findGit, planLocalMarketplaces, savedMarketplaceMods } from './local-marketplaces.ts';
 import {
   detectManagedSettings,
   managedSettingsNotice,
   nodeManagedSettingsSystem,
   type ManagedSettingsSystem,
 } from './managed-settings.ts';
-import { planPluginDirs } from './plugin-dirs.ts';
+import { planPluginDirs, savedPluginDirMods } from './plugin-dirs.ts';
 import {
   askPluginFolders,
   findPluginValidator,
@@ -256,7 +256,11 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       versionNotice(savedWith, here, files) {
         const notes = [
           agentVersionNotice('Claude Code', savedWith, here),
-          modsVersionNotice(files, here),
+          // Mods in saved local marketplaces and plugin folders count too (T104).
+          modsVersionNotice(files, here, [
+            ...savedMarketplaceMods(files),
+            ...savedPluginDirMods(files),
+          ]),
         ].filter((note) => note !== null);
         return notes.length === 0 ? null : notes.join('\n');
       },

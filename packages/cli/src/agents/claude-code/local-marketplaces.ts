@@ -32,6 +32,7 @@ import {
   type PluginManifestInput,
 } from './plugins.ts';
 import { sameForRestore, type ClaudeCodeRestorer } from './restorer.ts';
+import { PLUGIN_HOOKS } from './skills-dir-plugins.ts';
 
 /*
  * Marketplaces added from a folder on this PC (T98). Plugins are reinstalled with Claude
@@ -356,6 +357,28 @@ export const savedFolderFiles = (saved: SavedFolder): CollectedFile[] =>
     content: new Uint8Array(Buffer.from(file.content, 'base64')),
     executable: file.executable,
   }));
+
+/**
+ * The mods among the installed plugins of the saved local marketplaces in `files` (T104): those
+ * whose folder has `hooks/hooks.json`, by their ids, e.g. `lm-mod@my-market`. For pull's notice
+ * when this PC's Claude Code is too old to load mods (T103); a saved file it cannot read is
+ * left to `planLocalMarketplaces` to report.
+ */
+export function savedMarketplaceMods(files: readonly CollectedFile[]): string[] {
+  return files
+    .filter((file) => file.path.startsWith(LOCAL_MARKETPLACES_PREFIX))
+    .flatMap((file) => {
+      const saved = valueOrNull(readSavedLocalMarketplace(file.content));
+      if (saved === null) return [];
+      const inside = savedFolderFiles(saved);
+      return saved.plugins
+        .filter((plugin) => {
+          const at = pluginFolderOf(inside, plugin.id);
+          return at !== null && filesUnder(inside, at).some((entry) => entry.path === PLUGIN_HOOKS);
+        })
+        .map((plugin) => plugin.id);
+    });
+}
 
 /**
  * Re-clones `source` into `dir`, which is not there: git's history and the saved commit, with
