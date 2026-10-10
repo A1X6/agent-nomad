@@ -33,7 +33,7 @@ import {
 } from './plugin-review.ts';
 import type { ProgramCli } from './plugin-sync.ts';
 import { MarketplaceNameSchema } from './plugins.ts';
-import { PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
+import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
 
 /*
  * Plugin folders that `env.CLAUDE_CODE_PLUGIN_DIRS` in the user's settings loads every session
@@ -171,6 +171,21 @@ export interface PluginDirPlan {
   restore(onConflict: ConflictResolver): Promise<RestoreReport>;
 }
 
+/**
+ * `entries` split on `:` with a Windows drive letter joined back to its path (T104): a value
+ * saved on macOS or Linux reaches a Windows PC with its home paths already written as
+ * `C:/Users/…`, so `C` and `/Users/…` are one folder. A one-letter entry is never a full path,
+ * so Claude Code would skip it anyway.
+ */
+const keepDriveLetters = (entries: readonly string[]): string[] =>
+  entries.reduce<string[]>((joined, entry) => {
+    const last = joined.at(-1);
+    if (last !== undefined && /^[A-Za-z]$/.test(last) && /^[\\/]/.test(entry)) {
+      joined[joined.length - 1] = `${last}:${entry}`;
+    } else joined.push(entry);
+    return joined;
+  }, []);
+
 /** How Claude Code names a folder it loads this way: its manifest's name, `@inline`. */
 function inlineId(files: readonly CollectedFile[], name: string): string {
   const manifest = files.find((file) => file.path === PLUGIN_MANIFEST);
@@ -178,6 +193,24 @@ function inlineId(files: readonly CollectedFile[], name: string): string {
     ? valueOrNull(parseJsonWith(z.looseObject({ name: z.string() }), manifest.content))?.name
     : undefined;
   return `${printableLine(named ?? name)}@inline`;
+}
+
+/**
+ * The mods among the saved plugin folders in `files` (T104): those with `hooks/hooks.json`, by
+ * the id Claude Code gives them, e.g. `pd-mod@inline`. For pull's notice when this PC's Claude
+ * Code is too old to load mods (T103); a saved file it cannot read is left to `planPluginDirs`.
+ */
+export function savedPluginDirMods(files: readonly CollectedFile[]): string[] {
+  return files
+    .filter((file) => file.path.startsWith(PLUGIN_DIRS_PREFIX))
+    .flatMap((file) => {
+      const saved = valueOrNull(readSavedPluginDir(file.content));
+      if (saved === null) return [];
+      const inside = savedFolderFiles(saved);
+      return inside.some((entry) => entry.path === PLUGIN_HOOKS)
+        ? [inlineId(inside, saved.name)]
+        : [];
+    });
 }
 
 /** `settings` with the value rewritten by `replace`; as it is when nothing changes. */
@@ -276,7 +309,7 @@ export async function planPluginDirs(
         return deps.platform === 'linux' ? full : full.toLowerCase();
       };
       const replace = (value: string) => {
-        const entries = splitPluginDirs(value, from);
+        const entries = keepDriveLetters(splitPluginDirs(value, from));
         const writeOf = (entry: string) =>
           toWrite.find((each) => folderOf(each.saved.entry) === folderOf(entry));
         // Already naming the folders pull writes (pulled onto the same places): as it is.

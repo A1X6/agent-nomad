@@ -1,5 +1,5 @@
 import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -60,6 +60,33 @@ const ACCOUNT_SKILL =
   '---\nname: my-account-skill\ndescription: From claude.ai\n---\nWrite release notes.\n';
 /** The manifest of a plugin the user uploaded to claude.ai, as Claude Code syncs it (T101). */
 const ACCOUNT_PLUGIN = '{"name":"my-account-plugin","version":"1.0.0"}';
+/**
+ * A marketplace added from a folder in home (T98), outside git, with the mod `lm-mod`
+ * installed from it; and plugin folders `env.CLAUDE_CODE_PLUGIN_DIRS` names (T99), one in home
+ * and one outside it. Pushed on one OS and pulled on another (T104): the folders land in the
+ * same place from home (the one outside home in `~/.agentnomad/plugin-dirs/`), and the value
+ * names them with the pulling OS's separator.
+ */
+const LOCAL_MARKET = 'e2e-local';
+const LOCAL_MOD_ID = `lm-mod@${LOCAL_MARKET}`;
+const localMarket = (pc: Pc) => join(pc.home, 'markets', LOCAL_MARKET);
+const PLUGIN_DIRS = 'CLAUDE_CODE_PLUGIN_DIRS';
+/** Where the plugin folders are on the first PC, and where pull writes them. */
+const pluginDirsFirst = (pc: Pc) => [
+  join(pc.home, 'dev', 'pd-home'),
+  join(dirname(pc.home), 'pd-outside'),
+];
+const pluginDirsPulled = (pc: Pc) => [
+  join(pc.home, 'dev', 'pd-home'),
+  join(pc.home, '.agentnomad', 'plugin-dirs', 'pd-outside'),
+];
+
+/** The mod `name` as a plugin folder `dir` of its own, its module {@link MOD_MODULE}. */
+async function writeMod(dir: string, name: string): Promise<void> {
+  await write(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name }));
+  await write(join(dir, 'hooks', 'hooks.json'), MOD_HOOKS);
+  await write(join(dir, 'hooks', 'register.ts'), MOD_MODULE);
+}
 
 interface StepContext {
   readonly server: LocalServer;
@@ -124,6 +151,8 @@ function expectNothingReadable(server: LocalServer, known: Known): void {
     ENV_VALUE,
     PLUGIN_ID,
     PLUGIN_VERSION,
+    LOCAL_MOD_ID,
+    'pd-outside',
   ];
   expect(plaintextLeaks(server.requests, secrets)).toEqual([]);
   // A session token goes only in the Authorization header.
@@ -218,6 +247,39 @@ async function expectRestored(pc: Pc, edited: boolean): Promise<void> {
   }
 }
 
+/**
+ * T104: the local marketplace and the plugin folders, pushed from another OS, are on `pc`:
+ * reviewed before they were written (`said`, what pull printed), each mod's module there,
+ * Claude Code told to add the marketplace from the folder pull wrote and to install its mod,
+ * and the value in the settings naming the folders pull wrote, joined with this OS's separator.
+ */
+async function expectPluginFoldersRestored(pc: Pc, said: string): Promise<void> {
+  expect(said).toContain(`+ ${LOCAL_MOD_ID} (${join(localMarket(pc), 'lm-mod')})`);
+  expect(said).toContain(`+ pd-home@inline (${join(pc.home, 'dev', 'pd-home')})`);
+  expect(said).toContain('+ pd-outside@inline');
+  expect(await read(join(localMarket(pc), 'lm-mod', 'hooks', 'register.ts'))).toBe(MOD_MODULE);
+  for (const dir of pluginDirsPulled(pc)) {
+    expect(await read(join(dir, 'hooks', 'register.ts'))).toBe(MOD_MODULE);
+  }
+  const known = JSON.parse(await read(claude(pc, 'plugins', 'known_marketplaces.json'))) as Record<
+    string,
+    { source: { path?: string } }
+  >;
+  expect(known[LOCAL_MARKET]?.source.path).toBe(localMarket(pc));
+  const installed = JSON.parse(await read(claude(pc, 'plugins', 'installed_plugins.json'))) as {
+    plugins: Record<string, unknown>;
+  };
+  expect(Object.keys(installed.plugins)).toContain(LOCAL_MOD_ID);
+  const settings = JSON.parse(await read(claude(pc, 'settings.json'))) as {
+    env?: Record<string, string>;
+  };
+  // A value saved on this OS keeps its slashes as the home path is restored (`C:/…` on
+  // Windows, which Claude Code reads too); the separator is always this OS's.
+  expect(forward(settings.env?.[PLUGIN_DIRS] ?? '')).toBe(
+    forward(pluginDirsPulled(pc).join(delimiter)),
+  );
+}
+
 /** Every file and folder of the PC (home and project), to see that nothing was added. */
 async function filesOf(pc: Pc): Promise<string[]> {
   const list = async (dir: string) =>
@@ -276,8 +338,20 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
       JSON.stringify({
         theme: 'dark',
         hooks: { Stop: [{ hooks: [{ type: 'command', command: hookCommand(pc) }] }] },
+        env: { [PLUGIN_DIRS]: pluginDirsFirst(pc).join(delimiter) },
       }),
     );
+    // T104: the plugin folders that value names, and the local marketplace with its mod.
+    for (const dir of pluginDirsFirst(pc)) await writeMod(dir, basename(dir));
+    await write(
+      join(localMarket(pc), '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: LOCAL_MARKET,
+        owner: { name: 'e2e' },
+        plugins: [{ name: 'lm-mod', source: './lm-mod' }],
+      }),
+    );
+    await writeMod(join(localMarket(pc), 'lm-mod'), 'lm-mod');
     await write(claude(pc, 'hooks', 'check.sh'), HOOK_SCRIPT, true);
     await write(claude(pc, 'skills', 'deploy', 'SKILL.md'), SKILL);
     await write(mod(pc, '.claude-plugin', 'plugin.json'), MOD_MANIFEST);
@@ -343,18 +417,23 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     await write(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nTeam.\n');
     await write(syncedPlugins('my-account-plugin/.claude-plugin/plugin.json'), ACCOUNT_PLUGIN);
     await write(syncedPlugins('team-plugin/.claude-plugin/plugin.json'), '{"name":"team-plugin"}');
-    // A plugin from a GitHub marketplace (T29), with its version (T100).
+    // A plugin from a GitHub marketplace (T29), with its version (T100), and the mod from the
+    // local marketplace (T98), whose version Claude Code does not know.
     await write(
       claude(pc, 'plugins', 'installed_plugins.json'),
       JSON.stringify({
         version: 2,
-        plugins: { [PLUGIN_ID]: [{ scope: 'user', installPath: 'x', version: PLUGIN_VERSION }] },
+        plugins: {
+          [PLUGIN_ID]: [{ scope: 'user', installPath: 'x', version: PLUGIN_VERSION }],
+          [LOCAL_MOD_ID]: [{ scope: 'user', installPath: 'x', version: 'unknown' }],
+        },
       }),
     );
     await write(
       claude(pc, 'plugins', 'known_marketplaces.json'),
       JSON.stringify({
         'e2e-market': { source: { source: 'github', repo: 'e2e-owner/e2e-market' } },
+        [LOCAL_MARKET]: { source: { source: 'directory', path: localMarket(pc) } },
       }),
     );
 
@@ -465,8 +544,9 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
     expect(pulled.stdout).toContain('+ probe-mod@skills-dir (skills/probe-mod)');
     expect(`${pulled.stdout}${pulled.stderr}`).not.toContain('types/register.d.ts');
     await expectRestored(pc, false);
+    await expectPluginFoldersRestored(pc, `${pulled.stdout}\n${pulled.stderr}`);
     // T100: Claude Code installs only the latest plugin version, so pull names the change.
-    expect(pulled.stdout).toContain(`Reinstalled ${PLUGIN_ID}.`);
+    expect(pulled.stdout).toContain(`Reinstalled ${PLUGIN_ID}, ${LOCAL_MOD_ID}.`);
     expect(pulled.stdout).toContain(`  ${PLUGIN_ID}  was ${PLUGIN_VERSION}, now 9.9.0`);
     // T42: the user's own claude.ai skill is a local skill here; Anthropic's and the
     // organization's never came along.
@@ -549,8 +629,9 @@ async function thirdPc({ server, keychain }: StepContext): Promise<void> {
     );
     expect(pulled.stdout).toContain('backed up first');
     await expectRestored(pc, true);
+    await expectPluginFoldersRestored(pc, `${pulled.stdout}\n${pulled.stderr}`);
     // The second PC saved the plugin at 9.9.0, the version installed here: no change named.
-    expect(pulled.stdout).toContain(`Reinstalled ${PLUGIN_ID}.`);
+    expect(pulled.stdout).toContain(`Reinstalled ${PLUGIN_ID}, ${LOCAL_MOD_ID}.`);
     expect(pulled.stdout).not.toContain(' was ');
     const backups = (await readdir(claude(pc))).filter((name) =>
       name.startsWith('CLAUDE.md.agentnomad-backup-'),
@@ -596,4 +677,89 @@ async function thirdPc({ server, keychain }: StepContext): Promise<void> {
   }
 }
 
-export const STEPS = { '1': firstPc, '2': secondPc, '3': thirdPc } as const;
+/**
+ * T104: pull's review of plugins (T97) through the `claude plugin validate` of the PC, on a
+ * setup of its own account, so its skipped plugins never reach the main account's revisions.
+ * A plugin without hooks, a mod and a mod whose manifest does not parse, in `skills/`.
+ */
+const GATE_LOGIN = ['--username', 'e2e-gate', '--password-stdin'];
+type GatePlugin = 'gate-broken' | 'gate-mod' | 'gate-plain';
+const gatePlugin = (pc: Pc, name: GatePlugin, ...parts: string[]) =>
+  claude(pc, 'skills', name, ...parts);
+
+/** Step 1, after the first PC: the gate's setup is pushed from this OS. */
+async function gateFirstPc({ server }: StepContext): Promise<void> {
+  const pc = await newPc('gate-first', { apiUrl: server.url, keychain: false });
+  try {
+    await write(
+      gatePlugin(pc, 'gate-plain', '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'gate-plain', author: { name: 'e2e' } }),
+    );
+    await write(gatePlugin(pc, 'gate-plain', 'skills', 'notes', 'SKILL.md'), REVIEW_SKILL);
+    await writeMod(claude(pc, 'skills', 'gate-mod'), 'gate-mod');
+    await writeMod(claude(pc, 'skills', 'gate-broken'), 'gate-broken');
+    await write(gatePlugin(pc, 'gate-broken', '.claude-plugin', 'plugin.json'), '{"name": "gate');
+    ok(await pc.run(['register', ...GATE_LOGIN, '--yes'], stdin));
+    const pushed = ok(await pc.run(['push', '--global', '--yes']));
+    expect(pushed.stdout).toContain(
+      'Plugins in skills/: gate-broken@skills-dir (runs code), gate-mod@skills-dir (runs code), gate-plain@skills-dir',
+    );
+  } finally {
+    await pc.remove();
+  }
+}
+
+/**
+ * Step 2, after the second PC: the gate's three ways on another OS. `--yes` writes the plugin
+ * without code and skips the mod (it needs a yes) and the broken one; `--allow-commands` then
+ * writes the mod, never the broken one. The gate's account is deleted after.
+ */
+async function gateSecondPc({ server }: StepContext): Promise<void> {
+  const pc = await newPc('gate-second', {
+    apiUrl: server.url,
+    keychain: false,
+    claude: FAKE_CLAUDE,
+  });
+  try {
+    ok(await pc.run(['login', ...GATE_LOGIN], stdin));
+    const yes = ok(await pc.run(['pull', '--global', '--yes']));
+    const said = `${yes.stdout}\n${yes.stderr}`;
+    expect(said).toContain('+ gate-plain@skills-dir (skills/gate-plain)');
+    expect(said).toContain(
+      'Skipped skills/gate-mod: gate-mod@skills-dir runs code inside Claude Code. --yes never accepts a plugin with code; add --allow-commands to accept it.',
+    );
+    expect(said).toContain('claude plugin validate: failed, the plugin is broken');
+    expect(said).toContain('✘ json: Invalid JSON syntax:');
+    expect(said).toContain(
+      'Skipped skills/gate-broken: gate-broken@skills-dir is broken, and only a yes from you writes it. Run pull without --yes to choose.',
+    );
+    expect(await read(gatePlugin(pc, 'gate-plain', 'skills', 'notes', 'SKILL.md'))).toBe(
+      REVIEW_SKILL,
+    );
+    for (const name of ['gate-mod', 'gate-broken'] as const) {
+      await expect(read(gatePlugin(pc, name, 'hooks', 'register.ts'))).rejects.toThrow();
+    }
+
+    const allowed = ok(await pc.run(['pull', '--global', '--yes', '--allow-commands']));
+    expect(allowed.stdout).toContain('./register.ts calls: $.store.get');
+    expect(`${allowed.stdout}\n${allowed.stderr}`).toContain('Skipped skills/gate-broken');
+    expect(await read(gatePlugin(pc, 'gate-mod', 'hooks', 'register.ts'))).toBe(MOD_MODULE);
+    await expect(read(gatePlugin(pc, 'gate-broken', 'hooks', 'register.ts'))).rejects.toThrow();
+
+    ok(await pc.run(['account', 'delete', ...GATE_LOGIN, '--yes'], stdin));
+  } finally {
+    await pc.remove();
+  }
+}
+
+export const STEPS = {
+  '1': async (context: StepContext) => {
+    await firstPc(context);
+    await gateFirstPc(context);
+  },
+  '2': async (context: StepContext) => {
+    await secondPc(context);
+    await gateSecondPc(context);
+  },
+  '3': thirdPc,
+} as const;

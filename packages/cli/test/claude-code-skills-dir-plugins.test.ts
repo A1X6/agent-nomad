@@ -97,4 +97,16 @@ describe("pull's warning on mods and an older Claude Code (T103)", () => {
   it('says nothing when the version here is unknown', () => {
     expect(modsVersionNotice(modFiles(), null)).toBeNull();
   });
+
+  it('names the mods outside skills/ it is given after those in skills/ (T104)', () => {
+    expect(modsVersionNotice(modFiles(), BEFORE_MODS, ['probe-mod@tools', 'pd-mod@inline'])).toBe(
+      'This setup has mods (probe-mod@skills-dir, probe-mod@tools, pd-mod@inline), which need Claude Code 2.1.287 or newer, but this PC has 2.1.286. Update Claude Code so they load.',
+    );
+  });
+
+  it('names the mods outside skills/ when skills/ has none (T104)', () => {
+    expect(modsVersionNotice(plainPlugin, BEFORE_MODS, ['probe-mod@tools'])).toBe(
+      'This setup has mods (probe-mod@tools), which need Claude Code 2.1.287 or newer, but this PC has 2.1.286. Update Claude Code so they load.',
+    );
+  });
 });

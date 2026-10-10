@@ -103,14 +103,22 @@ export function skillsPluginsNote(files: readonly CollectedFile[]): string | nul
 /**
  * What pull says when the setup has mods and this PC's Claude Code is older than the first
  * version that loads them (T103); `null` when the version here is unknown or new enough.
+ * `elsewhere`: the ids of the setup's mods outside `skills/`, e.g. in a saved local marketplace
+ * or plugin folder (T104).
  */
 export function modsVersionNotice(
   files: readonly CollectedFile[],
   here: string | null,
+  elsewhere: readonly string[] = [],
 ): string | null {
   if (here === null || compareVersions(here, MODS_SINCE) >= 0) return null;
-  const mods = skillsPluginFolders(files).filter((folder) => folder.mod);
+  const mods = [
+    ...skillsPluginFolders(files)
+      .filter((folder) => folder.mod)
+      .map((folder) => folder.id),
+    ...elsewhere,
+  ];
   if (mods.length === 0) return null;
-  const names = mods.map((folder) => folder.id).join(', ');
+  const names = mods.join(', ');
   return `This setup has mods (${names}), which need Claude Code ${MODS_SINCE} or newer, but this PC has ${here}. Update Claude Code so they load.`;
 }

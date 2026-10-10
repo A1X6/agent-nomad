@@ -641,6 +641,35 @@ export async function writeModFolder(dir: string): Promise<void> {
   }
 }
 
+/** `files` as a saved folder lists them (T98, T99): base64 content, none executable. */
+export const savedFiles = (files: readonly CollectedFile[]) =>
+  files.map((file) => ({
+    path: file.path,
+    content: Buffer.from(file.content).toString('base64'),
+    executable: false,
+  }));
+
+/**
+ * The saved entry of the marketplace `name` of {@link writeLocalMarketplace}, as push writes it
+ * from `~/markets/<name>` outside git with its mod installed (T98), with `overrides`.
+ */
+export const savedLocalMarketplace = (name: string, overrides: object = {}) =>
+  collectedJson(`.agentnomad/local-marketplaces/${name}.json`, {
+    name,
+    path: `markets/${name}`,
+    git: null,
+    plugins: [{ id: localModId(name), scope: 'user', commandSource: false }],
+    files: savedFiles([
+      collectedJson('.claude-plugin/marketplace.json', {
+        name,
+        owner: { name: 'me' },
+        plugins: [{ name: MOD_NAME, source: `./${MOD_NAME}` }],
+      }),
+      ...modFiles(`${MOD_NAME}/`),
+    ]),
+    ...overrides,
+  });
+
 /** Where the saving PC had the mod folder in {@link savedPluginDir}: another PC's path. */
 export const SAVED_PLUGIN_DIR_ENTRY = `/other/pc/dev/${MOD_NAME}`;
 
@@ -655,11 +684,7 @@ export const savedPluginDir = (separator: string, overrides: object = {}, n = 0)
     separator,
     path: `dev/${MOD_NAME}`,
     git: null,
-    files: modFiles('').map((file) => ({
-      path: file.path,
-      content: Buffer.from(file.content).toString('base64'),
-      executable: false,
-    })),
+    files: savedFiles(modFiles('')),
     ...overrides,
   });
 

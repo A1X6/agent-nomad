@@ -8,6 +8,7 @@ import {
   MOD_NAME,
   modFiles,
   SAVED_PLUGIN_DIR_ENTRY,
+  savedFiles,
   savedPluginDir,
   scriptedGit,
   validateCli,
@@ -33,6 +34,7 @@ import {
   pluginDirFiles,
   pluginDirsSeparator,
   readSavedPluginDir,
+  savedPluginDirMods,
   splitPluginDirs,
   type CollectedFile,
   type ConflictChoice,
@@ -88,6 +90,23 @@ describe('the value of CLAUDE_CODE_PLUGIN_DIRS (T99)', () => {
 
   it('names its folders trimmed, without empty ones', () => {
     expect(splitPluginDirs(' /a ::/b:', ':')).toEqual(['/a', '/b']);
+  });
+});
+
+describe('the mods in saved plugin folders, for the version warning (T104)', () => {
+  it('names a folder with hooks/hooks.json as Claude Code does, by its manifest', () => {
+    expect(savedPluginDirMods([savedPluginDir(OTHER_SEPARATOR)])).toEqual(['probe-mod@inline']);
+  });
+
+  it('leaves out a folder without hooks/hooks.json', () => {
+    const noHooks = modFiles('').filter((file) => file.path !== 'hooks/hooks.json');
+    expect(
+      savedPluginDirMods([savedPluginDir(OTHER_SEPARATOR, { files: savedFiles(noHooks) })]),
+    ).toEqual([]);
+  });
+
+  it('leaves out a saved plugin folder it cannot read', () => {
+    expect(savedPluginDirMods([collected(SAVED_PATH, 'not json')])).toEqual([]);
   });
 });
 
@@ -288,6 +307,15 @@ describe('pull writes a saved plugin folder (T99)', () => {
   it('points the value at the folder it wrote, with this PC’s separator', async () => {
     const { plan } = await pull([savedMod()]);
     const value = `${SAVED_PLUGIN_DIR_ENTRY}${OTHER_SEPARATOR}/not/saved`;
+    expect(valueIn(plan.withPluginDirs([settingsWith(value)]))).toBe(
+      `${modFolder()}${delimiter}/not/saved`,
+    );
+  });
+
+  it('keeps a drive letter the home path brought into a value saved with : (T104)', async () => {
+    const entry = `C:/pc/home/dev/${MOD_NAME}`;
+    const { plan } = await pull([savedMod({ entry, separator: ':' })]);
+    const value = `${entry}:/not/saved`;
     expect(valueIn(plan.withPluginDirs([settingsWith(value)]))).toBe(
       `${modFolder()}${delimiter}/not/saved`,
     );
