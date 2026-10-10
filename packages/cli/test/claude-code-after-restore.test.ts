@@ -196,7 +196,10 @@ describe('after a Claude Code restore', () => {
       cli: blocked,
       managed: blockedByPolicy,
     })(t.ctx);
-    expect(t.lines.join('\n')).toContain("blocked by your organization's Claude Code policy");
+    // The injected source is named: with no managed settings, no policy is named at all.
+    expect(t.lines).toContain(
+      "Could not install brag@brag: blocked by your organization's Claude Code policy (/etc/claude-code/managed-settings.json). Ask your admin to allow it. Details: /usr/bin/claude install: blocked by policy",
+    );
   });
 
   it('says so when Claude Code is not installed, instead of failing', async () => {
