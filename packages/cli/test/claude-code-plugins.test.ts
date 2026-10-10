@@ -9,13 +9,21 @@ import {
   PluginManifestSchema,
   projectDestination,
   readCurrentPlugins,
+  readLocalMarketplaces,
   readPluginManifest,
   readPluginVersions,
   readSavedPluginVersions,
   type PluginManifestInput,
 } from '../src/index.ts';
 
-import { installedPluginsFile, putJson, realisticPlugins } from './claude-code-plugin-fixtures.ts';
+import {
+  addedFromFolders,
+  installedPluginsFile,
+  localModId,
+  MOD_NAME,
+  putJson,
+  realisticPlugins,
+} from './claude-code-plugin-fixtures.ts';
 import { paths, text } from './fakes.ts';
 import {
   base,
@@ -195,6 +203,45 @@ describe('one reader of installed_plugins.json (BUG-03)', () => {
     });
     const current = await readCurrentPlugins(base, 'win32', project);
     expect(current.installed.has('lint@company|project')).toBe(true);
+  });
+});
+
+describe('marketplaces added from a local folder (T98)', () => {
+  /** The local marketplaces a push of `scope` saves from the test's `~/.claude`. */
+  const localFor = (scope: PluginManifestInput['scope'] = { kind: 'global' }) =>
+    readLocalMarketplaces({ baseDir: base, platform: process.platform, scope });
+
+  it('lists each one with its folder and its plugins installed in scope', async () => {
+    await realisticPlugins(home, project);
+    expect(await localFor()).toEqual([
+      {
+        name: 'local-tools',
+        folder: 'C:/tools/market',
+        plugins: [{ id: 'mine@local-tools', scope: 'user', commandSource: false }],
+      },
+    ]);
+  });
+
+  it('a project push lists none when its plugins are installed for the user only', async () => {
+    await realisticPlugins(home, project);
+    expect(await localFor({ kind: 'project', projectDir: project })).toEqual([]);
+  });
+
+  it('none without installed plugins', async () => {
+    expect(await localFor()).toEqual([]);
+  });
+
+  it('flags a plugin its catalog builds by running a command', async () => {
+    const folder = join(home, 'markets', 'tools');
+    await addedFromFolders(base, { tools: folder });
+    await putJson(join(folder, '.claude-plugin', 'marketplace.json'), {
+      name: 'tools',
+      owner: { name: 'me' },
+      plugins: [{ name: MOD_NAME, source: { source: 'command', command: 'make' } }],
+    });
+    expect((await localFor())[0]?.plugins).toEqual([
+      { id: localModId('tools'), scope: 'user', commandSource: true },
+    ]);
   });
 });
 

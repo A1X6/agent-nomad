@@ -9,6 +9,8 @@ import {
   CLAUDE_JSON_BUNDLE_PATH,
   globalDestination,
   hookScripts,
+  isPullMetadata,
+  LOCAL_MARKETPLACES_PREFIX,
   PLUGIN_VERSIONS_BUNDLE_PATH,
   projectDestination,
 } from '../src/index.ts';
@@ -53,6 +55,8 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['.agentnomad/home/Library/LaunchAgents/x.sh', 'a folder whose files run by themselves'],
     ['.agentnomad/home/.SSH/id_ed25519', 'a folder for keys and logins'],
     ['.agentnomad/other.json', 'unknown agentnomad entry'],
+    // A saved local marketplace is one file (T98): never a folder of loose files.
+    [`${LOCAL_MARKETPLACES_PREFIX}tools/run.sh`, 'unknown agentnomad entry'],
     // Windows and macOS ignore case: another spelling of a refused folder is refused too (T43).
     ['Plugins/cache/m/p/1.0.0/hooks/run.sh', 'never synced'],
     ['Skills/Synced/x/run.sh', 'never synced'],
@@ -102,6 +106,7 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['.env', 'not part of a Claude Code setup'],
     ['.GIT/hooks/pre-commit.sh', 'never synced'],
     ['.agentnomad/x.sh', 'unknown agentnomad entry'],
+    [`${LOCAL_MARKETPLACES_PREFIX}tools/run.sh`, 'unknown agentnomad entry'],
     ['.agentnomad/auto-memory/run.sh', 'auto memory holds only Markdown files'],
     ['.agentnomad/auto-memory/.bashrc', 'auto memory holds only Markdown files'],
     ['../outside.md', 'not a safe path'],
@@ -158,6 +163,8 @@ describe('restore rules: places what a collector produces', () => {
       { kind: 'target', path: 'agent-memory/reviewer/MEMORY.md' },
     ],
     [PLUGIN_VERSIONS_BUNDLE_PATH, { kind: 'metadata' }],
+    // Written by pull to a folder of its own choosing (T98), never as it is.
+    [`${LOCAL_MARKETPLACES_PREFIX}tools.json`, { kind: 'metadata' }],
   ])('global: %s', (path, destination) => {
     expect(globalDestination(path, new Set())).toEqual(destination);
   });
@@ -170,8 +177,21 @@ describe('restore rules: places what a collector produces', () => {
     ['.agentnomad/auto-memory/MEMORY.md', { kind: 'auto-memory', path: 'MEMORY.md' }],
     // Read by pull to name changed plugin versions (T100), never written.
     [PLUGIN_VERSIONS_BUNDLE_PATH, { kind: 'metadata' }],
+    [`${LOCAL_MARKETPLACES_PREFIX}tools.json`, { kind: 'metadata' }],
   ])('project: %s', (path, destination) => {
     expect(projectDestination(path)).toEqual(destination);
+  });
+});
+
+describe('isPullMetadata', () => {
+  it.each([
+    ['.agentnomad/plugins.json', true],
+    ['.agentnomad/programs.json', true],
+    [`${LOCAL_MARKETPLACES_PREFIX}tools.json`, true],
+    ['CLAUDE.md', false],
+    [`${LOCAL_MARKETPLACES_PREFIX}tools/run.sh`, false],
+  ])('%s: %s', (path, metadata) => {
+    expect(isPullMetadata(path)).toBe(metadata);
   });
 });
 

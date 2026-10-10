@@ -153,7 +153,9 @@ open, such as a chat or an option letter from a discussion.
     `SyncedPluginEntry`); and a mod in `skills/` (T97: `MOD_NAME`, `MOD_MODULE`, `modFiles`),
     a validate report with other `$` calls (`validatePassCalling`) or for a plugin without
     hooks (`validatePassNoHooks`, T101) and a `claude` that answers validate with a report
-    (`validateCli`, for `findPluginValidator` with `executableLookup`).
+    (`validateCli`, for `findPluginValidator` with `executableLookup`); a marketplace added
+    from a local folder (T98: `writeLocalMarketplace`, `addedFromFolders`, `localModId`) and
+    a scripted `git` (`scriptedGit` with `GitAnswer`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).
   - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`

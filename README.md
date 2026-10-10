@@ -179,7 +179,7 @@ The other setups are still done first, and one message lists what was not.
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, scripts your hooks and status line run                                                                                                                                      | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
 | **`~/.claude.json`**     | Your MCP servers and documented preferences, merged in                                                                                                                                                                                                                                                                | Your login, project list, usage and onboarding state                                                                                 |
-| **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed)                                                                                                                                   | Plugin files and caches                                                                                                              |
+| **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed); a marketplace added from a local folder, with its files                                                                          | Plugin caches; a local marketplace's `.git` and the files git ignores                                                                |
 | **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings and folders, scripts the project's hooks run                                                                                                                                                                        | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
 | **Opt-in**               | Memory (subagent and auto memory), environment variable values, a copy of your own claude.ai skills (`--account-skills`; never Anthropic's, nor your organization's when it can be told apart) and of the plugins you uploaded to claude.ai (`--account-plugins`; never claude.ai's directory or your organization's) |                                                                                                                                      |
 
@@ -202,6 +202,19 @@ Pull warns when the setup has mods and this PC's Claude Code is older than 2.1.2
 that loads them. Push never saves `~/.claude/dev-mods/` (mods a session is still developing,
 which Claude Code deletes after a while) and names each one so you can move it to `skills/`
 or a marketplace.
+
+### Marketplaces added from a local folder
+
+A marketplace you added with `claude plugin marketplace add <folder>` exists only on the PC
+that has the folder, so push saves its files when one of its plugins is installed: in a git
+repository only what git lists (tracked files with your current edits, and new files that
+are not ignored), elsewhere the whole folder, never `.git/`, `node_modules` or the other
+folders push always skips. When the folder's commit is on its remote, push also saves the
+remote and the commit. Pull writes the folder back at the same place in your home folder (one
+that was outside it goes to `~/.agentnomad/marketplaces/<name>`), re-cloning it first when it
+can and writing the saved files whatever happens, reviews each mod in it as above, then adds
+the marketplace and installs its plugins. A marketplace over 5 MB is left out, and push says
+why.
 
 ## Security
 

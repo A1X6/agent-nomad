@@ -18,6 +18,7 @@ import {
   GLOBAL_MEMORY_FOLDERS,
   GLOBAL_REFUSED,
   HOME_SCRIPTS_PREFIX,
+  LOCAL_MARKETPLACES_PREFIX,
   PLUGIN_VERSIONS_BUNDLE_PATH,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
@@ -65,6 +66,11 @@ const PROJECT_METADATA: ReadonlySet<string> = new Set([
 /** The same for a global bundle, which also saves the programs its hooks need. */
 const GLOBAL_METADATA: ReadonlySet<string> = new Set([...PROJECT_METADATA, PROGRAMS_BUNDLE_PATH]);
 
+/** A saved local marketplace (T98): pull writes its files to a folder of its own choosing. */
+const isLocalMarketplace = (path: string) =>
+  path.startsWith(LOCAL_MARKETPLACES_PREFIX) &&
+  !path.slice(LOCAL_MARKETPLACES_PREFIX.length).includes('/');
+
 /** What a global entry may be written under, built once: the synced folders. */
 const GLOBAL_FOLDER_PREFIXES: readonly string[] = [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].map(
   (folder) => `${folder}/`,
@@ -111,7 +117,7 @@ export function globalDestination(
 ): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
   if (path === CLAUDE_JSON_BUNDLE_PATH) return { kind: 'claude-json' };
-  if (GLOBAL_METADATA.has(path)) return { kind: 'metadata' };
+  if (GLOBAL_METADATA.has(path) || isLocalMarketplace(path)) return { kind: 'metadata' };
   // Saved claude.ai skills (T42): written only by pull's follow-up, after asking.
   if (path.startsWith(ACCOUNT_SKILLS_PREFIX)) return { kind: 'metadata' };
   // Saved claude.ai plugins (T101): pull's plan step offers them as `skills/<name>/`.
@@ -145,7 +151,7 @@ export function projectDestination(
   allowedScripts: ReadonlySet<string> = new Set(),
 ): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
-  if (PROJECT_METADATA.has(path)) return { kind: 'metadata' };
+  if (PROJECT_METADATA.has(path) || isLocalMarketplace(path)) return { kind: 'metadata' };
   if (path.startsWith(`${AUTO_MEMORY_BUNDLE_PREFIX}/`)) {
     // Auto memory is Markdown notes (T43): nothing else, so no script or startup file.
     if (extensionOf(path) !== '.md') return refused('auto memory holds only Markdown files');
@@ -163,3 +169,11 @@ export function projectDestination(
     (isScript(path) && (path.startsWith('.claude/') || allowedScripts.has(path)));
   return allowed ? { kind: 'target', path } : refused('not part of a Claude Code setup');
 }
+
+/**
+ * Whether pull reads `path` and never writes it as a file, in a global or a project setup:
+ * `plugins.json`, `programs.json`, a saved local marketplace (T98) and the like.
+ */
+export const isPullMetadata = (path: string): boolean =>
+  globalDestination(path, new Set()).kind === 'metadata' ||
+  projectDestination(path).kind === 'metadata';

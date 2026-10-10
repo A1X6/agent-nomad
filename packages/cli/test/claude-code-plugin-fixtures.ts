@@ -1,4 +1,4 @@
-import { readdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, rm } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import { collected, collectedJson, writeTestFile } from './fakes.ts';
@@ -521,6 +521,79 @@ export async function syncedAccount(
       `---\nname: ${skill.name}\n---\n${skill.description}\n`,
     );
   }
+}
+
+/** The mod's plugin id in a local marketplace named `name` (T98). */
+export const localModId = (name: string) => `${MOD_NAME}@${name}`;
+
+/**
+ * A marketplace named `name` in the folder `dir`, as a user makes one for a mod (T98): its
+ * catalog naming the mod `MOD_NAME` in `./probe-mod`, and the mod's files there.
+ */
+export async function writeLocalMarketplace(dir: string, name: string): Promise<void> {
+  await putJson(join(dir, '.claude-plugin', 'marketplace.json'), {
+    name,
+    owner: { name: 'me' },
+    plugins: [{ name: MOD_NAME, source: `./${MOD_NAME}` }],
+  });
+  for (const file of modFiles(`${MOD_NAME}/`)) {
+    await writeTestFile(join(dir, ...file.path.split('/')), file.content);
+  }
+}
+
+/**
+ * Claude Code's lists in the base folder `base`: each marketplace of `folders` (name → folder)
+ * added from its folder, and its mod installed for the user (T98).
+ */
+export async function addedFromFolders(
+  base: string,
+  folders: Readonly<Record<string, string>>,
+): Promise<void> {
+  const names = Object.keys(folders);
+  await putJson(
+    join(base, 'plugins', 'known_marketplaces.json'),
+    Object.fromEntries(
+      names.map((name) => [name, { source: { source: 'directory', path: folders[name] } }]),
+    ),
+  );
+  await putJson(installedPluginsFile(base), {
+    version: 2,
+    plugins: Object.fromEntries(
+      names.map((name) => [
+        localModId(name),
+        [{ scope: 'user', installPath: 'x', version: 'unknown' }],
+      ]),
+    ),
+  });
+}
+
+/** What a scripted `git` answers to one command. */
+export interface GitAnswer {
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+}
+
+/**
+ * A `git` that answers each command (its arguments joined by spaces) from `answers`, exit 1
+ * for any other, and records each call with its folder (T98). A clone that succeeds makes
+ * the folder with an empty `.git`, as `git clone --no-checkout` leaves it.
+ */
+export function scriptedGit(answers: Readonly<Record<string, GitAnswer>>) {
+  const calls: { args: string; cwd: string }[] = [];
+  const git: ProgramCli = {
+    async run(args, cwd) {
+      calls.push({ args: args.join(' '), cwd });
+      const answer = answers[args.join(' ')];
+      if (answer === undefined) return { exitCode: 1, stdout: '', stderr: 'not scripted' };
+      const exitCode = answer.exitCode ?? 0;
+      if (args[0] === 'clone' && exitCode === 0) {
+        await mkdir(join(args.at(-1) ?? '', '.git'), { recursive: true });
+      }
+      return { exitCode, stdout: answer.stdout ?? '', stderr: answer.stderr ?? '' };
+    },
+  };
+  return { git, calls };
 }
 
 /** An entry of `plugins/synced/<account>/manifest.json`: a plugin id, a name and any fields. */

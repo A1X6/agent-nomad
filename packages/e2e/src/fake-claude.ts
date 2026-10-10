@@ -3,7 +3,8 @@
  * and the real Claude Code is never run (it would clone marketplaces from the network). It
  * answers as Claude Code 2.1.296 does: `--json` result lines, and an install that records the
  * plugin in `~/.claude/plugins` at the latest version, 9.9.0, as Claude Code cannot install
- * an older one.
+ * an older one. A marketplace added from a folder (T98) is known by the name in its catalog,
+ * and `plugin validate --json` passes a mod with one warning, as T97's review expects.
  *
  * Usage (built, through the launcher pc.ts writes): node dist/src/fake-claude.js <arguments>
  */
@@ -36,11 +37,55 @@ const scope = args.includes('--scope') ? args[args.indexOf('--scope') + 1] : 'us
 if (first === '--version') {
   process.stdout.write('2.1.296 (Claude Code)\n');
 } else if (first === 'plugin' && second === 'marketplace' && third === 'add' && fourth) {
-  // `plugin marketplace add owner/repo`: known by its repository name.
+  // A folder (T98): known by the name in its catalog, from where it is. Else `owner/repo`:
+  // known by its repository name.
+  const catalog = await readFile(join(fourth, '.claude-plugin', 'marketplace.json'), 'utf8').catch(
+    () => null,
+  );
   await record('known_marketplaces.json', (json) => {
-    json[fourth.split('/').pop() ?? fourth] = { source: { source: 'github', repo: fourth } };
+    if (catalog === null) {
+      json[fourth.split('/').pop() ?? fourth] = { source: { source: 'github', repo: fourth } };
+    } else {
+      const { name } = JSON.parse(catalog) as { name: string };
+      json[name] = { source: { source: 'directory', path: fourth }, installLocation: fourth };
+    }
   });
   ok('marketplace-add');
+} else if (first === 'plugin' && second === 'validate' && third === '--json' && fourth) {
+  // A mod with one module, as Claude Code 2.1.296 reports it without an author (T96's
+  // `validatePassWithWarning`): passed with a warning, exit 0.
+  const file = (path: string) => `${fourth}/${path}`.replace(/\\/g, '/');
+  const entry = (path: string, type: string, extra: object) => ({
+    file: file(path),
+    type,
+    errors: [],
+    warnings: [],
+    notes: [],
+    gatingHooks: [],
+    ...extra,
+  });
+  const report = {
+    success: true,
+    strict: false,
+    target: file('.claude-plugin/plugin.json'),
+    manifest: entry('.claude-plugin/plugin.json', 'plugin', {
+      warnings: [
+        {
+          path: 'author',
+          message:
+            'No author information provided. Consider adding author details for plugin attribution',
+          code: null,
+        },
+      ],
+    }),
+    contents: [
+      entry('hooks/hooks.json', 'hooks', {
+        notes: ['./register.ts hooks: session.start', './register.ts calls: $.store.get'],
+      }),
+    ],
+    advice: [],
+  };
+  process.stdout.write(`${JSON.stringify(report)}\n`);
 } else if (first === 'plugin' && second === 'install' && third !== undefined) {
   await record('installed_plugins.json', (json) => {
     const installed = (json['plugins'] ?? {}) as Record<string, unknown>;

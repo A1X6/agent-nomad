@@ -372,7 +372,7 @@ export function createPullPlanner(deps: PullDeps) {
    */
   async function planAgent(
     restore: Omit<PlannedRestore, 'agentPlan'>,
-    conflictAnswer: ConflictChoice | undefined,
+    conflicts: ReturnType<typeof conflictAsker>,
     options: PullOptions,
   ): Promise<AgentRestorePlan> {
     const { adapter, target, files } = restore;
@@ -387,7 +387,8 @@ export function createPullPlanner(deps: PullDeps) {
       target,
       files,
       conflicts: restore.conflicts,
-      conflictAnswer,
+      conflictAnswer: conflicts.fixed(),
+      askConflict: conflicts.ask,
       prompter,
       reporter,
       assumeYes: options.yes,
@@ -474,7 +475,7 @@ export function createPullPlanner(deps: PullDeps) {
       for (const restore of answered) {
         restores.push({
           ...restore,
-          agentPlan: await planAgent(restore, conflicts.fixed(), options),
+          agentPlan: await planAgent(restore, conflicts, options),
         });
       }
       return { restores, outcomes, conflictAnswer: conflicts.fixed() };

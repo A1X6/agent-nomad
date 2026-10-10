@@ -92,6 +92,13 @@ export const PLUGINS_BUNDLE_PATH = `${RESERVED_DIR}/plugins.json`;
 /** The installed version of each of those plugins (T100), read by pull, never written. */
 export const PLUGIN_VERSIONS_BUNDLE_PATH = `${RESERVED_DIR}/plugin-versions.json`;
 
+/**
+ * The files of marketplaces added from a local folder (T98), one `<name>.json` each, read by
+ * pull, never written as they are. One file per marketplace, so an older CLI, which refuses
+ * an unknown reserved entry with a warning, warns once per marketplace, not once per file.
+ */
+export const LOCAL_MARKETPLACES_PREFIX = `${RESERVED_DIR}/local-marketplaces/`;
+
 /** Programs a hook or the status line needs, with install details (`.agentnomad/programs.json`). */
 export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
 
