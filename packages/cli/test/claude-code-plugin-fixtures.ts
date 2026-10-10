@@ -2,11 +2,12 @@ import { mkdir, readdir, rm } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import { collected, collectedJson, writeTestFile } from './fakes.ts';
-import type {
-  CollectedFile,
-  ManagedSettings,
-  ManagedSettingsSystem,
-  ProgramCli,
+import {
+  syncedPluginFolder,
+  type CollectedFile,
+  type ManagedSettings,
+  type ManagedSettingsSystem,
+  type ProgramCli,
 } from '../src/index.ts';
 
 /** Plugin files shared by the plugin and plugin sync tests (review 7 READ-01). */
@@ -310,7 +311,7 @@ export function validateCli(run: ValidateRun) {
   return { cli, calls };
 }
 
-/** The claude.ai account of the synced files below. */
+/** The claude.ai account of the synced files below: `<org-uuid>_<account-uuid>` (2.1.296). */
 export const SYNCED_ACCOUNT =
   '22222222-2222-4222-8222-222222222222_33333333-3333-4333-8333-333333333333';
 
@@ -377,9 +378,9 @@ export const olderSyncedSkillsManifest = {
 };
 
 /**
- * `plugins/synced/<account>/manifest.json` (Claude Code 2.1.295, fields from the T101 notes;
- * the `plugins` list around the entries is assumed, like the skills manifest's), one entry for
- * each `installationPreference`.
+ * `plugins/synced/<account>/manifest.json` in the shape the Claude Code 2.1.296 program reads
+ * (schema `smt` for an entry), one entry for each `installationPreference`. The user's upload
+ * is on its `generation` 2, so its folder is `my-upload~g2`, and has a `presentsAs`.
  */
 export const syncedPluginsManifest = {
   lastUpdated: 1760000000000,
@@ -392,6 +393,8 @@ export const syncedPluginsManifest = {
       updatedAt: '2026-10-09T00:00:00Z',
       marketplaceName: 'my-uploads',
       installationPreference: 'available',
+      presentsAs: 'skill',
+      generation: 2,
     },
     {
       pluginId: 'plugin_02required',
@@ -416,15 +419,15 @@ export const syncedPluginsManifest = {
       pluginId: 'plugin_04blocked',
       name: 'directory-off',
       description: 'A plugin not offered to this account.',
-      version: '0.9.0',
-      updatedAt: '2026-10-09T00:00:00Z',
+      version: null,
+      updatedAt: null,
       marketplaceName: 'anthropic-directory',
       installationPreference: 'not_available',
     },
   ],
 };
 
-/** The `<name>.meta.json` next to a synced plugin, repeating three manifest fields. */
+/** The `<folder>.meta.json` next to a synced plugin's folder, repeating three manifest fields. */
 export const syncedPluginMeta = {
   server_plugin_id: 'plugin_01upload',
   marketplace_name: 'my-uploads',
@@ -432,36 +435,44 @@ export const syncedPluginMeta = {
 };
 
 /**
- * `plugins/synced/<account>/.marketplaces.json`, from Claude Code's code (no account had one):
- * one row for each `scope`; `account` is My Uploads. A list is assumed around the rows.
+ * `plugins/synced/<account>/.marketplaces.json` in the shape the Claude Code 2.1.296 program
+ * writes: an object with its `rows` (schema `vqn`), one row for each `scope`; `account` is My
+ * Uploads.
  */
-export const syncedMarketplaces = [
-  {
-    name: 'team-org',
-    display_name: 'Team',
-    scope: 'org',
-    source: { source: 'claudeai' },
-    id: 'mkt_01org',
-  },
-  {
-    name: 'anthropic-directory',
-    display_name: 'Anthropic Directory',
-    scope: 'default',
-    source: { source: 'claudeai' },
-    id: 'mkt_02default',
-  },
-  {
-    name: 'my-uploads',
-    display_name: 'My Uploads',
-    scope: 'account',
-    source: { source: 'claudeai' },
-    id: 'mkt_03account',
-  },
-];
+export const syncedMarketplaces = {
+  etag: '"e2026-10-09"',
+  parserVersion: 1,
+  rows: [
+    {
+      name: 'team-org',
+      display_name: 'Team',
+      scope: 'org',
+      source: { source: 'claudeai' },
+      id: 'mkt_01org',
+      updated_at: '2026-10-09T00:00:00Z',
+    },
+    {
+      name: 'anthropic-directory',
+      display_name: 'Anthropic Directory',
+      scope: 'default',
+      source: { source: 'claudeai' },
+      id: 'mkt_02default',
+      updated_at: '2026-10-09T00:00:00Z',
+    },
+    {
+      name: 'my-uploads',
+      display_name: 'My Uploads',
+      scope: 'account',
+      source: { source: 'claudeai' },
+      id: 'mkt_03account',
+      updated_at: '2026-10-09T00:00:00Z',
+    },
+  ],
+};
 
 /**
- * The claude.ai synced files of Claude Code 2.1.295 in the base folder `base`: the skills and
- * plugins manifests, the marketplaces and one plugin's `.meta.json`.
+ * The claude.ai synced files of Claude Code 2.1.296 in the base folder `base`: the skills and
+ * plugins manifests, the marketplaces and the upload's `.meta.json` (its folder is on `~g2`).
  */
 export async function syncedSources(base: string): Promise<void> {
   const skills = join(base, 'skills', 'synced', SYNCED_ACCOUNT);
@@ -469,7 +480,7 @@ export async function syncedSources(base: string): Promise<void> {
   await putJson(join(skills, 'manifest.json'), syncedSkillsManifest);
   await putJson(join(plugins, 'manifest.json'), syncedPluginsManifest);
   await putJson(join(plugins, '.marketplaces.json'), syncedMarketplaces);
-  await putJson(join(plugins, 'my-upload.meta.json'), syncedPluginMeta);
+  await putJson(join(plugins, 'my-upload~g2.meta.json'), syncedPluginMeta);
 }
 
 /** An entry of `skills/synced/<account>/manifest.json`: a name, a description and any fields. */
@@ -598,11 +609,12 @@ export function scriptedGit(answers: Readonly<Record<string, GitAnswer>>) {
 export interface SyncedPluginEntry {
   readonly pluginId: string;
   readonly name: string;
+  readonly generation?: number | undefined;
   readonly [field: string]: unknown;
 }
 
 /**
- * The files of each synced plugin's folder, `plugins/synced/<account>/<name>/` (T101, assumed
+ * The files of each synced plugin's folder, `plugins/synced/<account>/<folder>/` (T101, assumed
  * like a plugin anywhere): its manifest and one skill, plus what push leaves out, a folder
  * Claude Code generates (`.claude-plugin/types/`) and OS clutter (`.DS_Store`).
  */
@@ -616,7 +628,8 @@ export const syncedPluginFiles = (name: string): Record<string, string> => ({
 /**
  * {@link syncedSources} in the base folder `base` with `plugins` (by default those of
  * {@link syncedPluginsManifest}) in the plugins manifest, a folder for each
- * ({@link syncedPluginFiles}), and, with `marketplaces: false`, no `.marketplaces.json` (T101).
+ * ({@link syncedPluginFiles}, named by `syncedPluginFolder`), and, with `marketplaces: false`,
+ * no `.marketplaces.json` (T101).
  */
 export async function syncedAccountPlugins(
   base: string,
@@ -629,7 +642,7 @@ export async function syncedAccountPlugins(
   if (options.marketplaces === false) await rm(join(dir, '.marketplaces.json'));
   for (const plugin of plugins) {
     for (const [file, content] of Object.entries(syncedPluginFiles(plugin.name))) {
-      await writeTestFile(join(dir, plugin.name, ...file.split('/')), content);
+      await writeTestFile(join(dir, syncedPluginFolder(plugin), ...file.split('/')), content);
     }
   }
 }

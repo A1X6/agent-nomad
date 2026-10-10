@@ -14,19 +14,21 @@ import {
   NOT_OWN_SCOPES,
   readSyncedPluginsOf,
   SYNCED_PLUGINS_DIR,
+  syncedPluginFolder,
   type SyncedPlugin,
 } from './synced-plugins.ts';
 
 /**
  * Plugins from the user's claude.ai account (T101), the same rules as its skills (T42).
- * Claude Code downloads them into `~/.claude/plugins/synced/<account>/<name>/` and manages
+ * Claude Code downloads them into `~/.claude/plugins/synced/<account>/<folder>/` and manages
  * that folder itself; agentnomad never writes there. On request, push saves the plugin folders
  * of the user's **own** uploads (marketplace scope `account`, My Uploads) under a reserved
  * bundle folder; never claude.ai's directory, an organization's, nor one claude.ai installs by
  * itself. Pull can add them back as plugins in `~/.claude/skills/<name>/`, which Claude Code
  * loads as `<name>@skills-dir`, on a PC that does not get them from its own claude.ai sync.
- * "The plugin's files" are the folder named after the plugin next to the manifest, taken
- * whole minus the skipped names and what Claude Code generates in it (`.claude-plugin/types/`).
+ * "The plugin's files" are its folder next to the manifest (`<name>`, or `<name>~g<N>` from its
+ * generation 2, {@link syncedPluginFolder}), taken whole minus the skipped names and what
+ * Claude Code generates in it (`.claude-plugin/types/`). The bundle keeps the plain `<name>`.
  */
 
 /** The id of the optional part for saved claude.ai plugins (T101); also the flag name. */
@@ -114,7 +116,10 @@ export async function readSyncedPlugins(
         continue;
       }
       if (own.has(name)) continue;
-      const dir = path.join(accountDir, name);
+      const dir = path.join(
+        accountDir,
+        syncedPluginFolder({ name, generation: plugin.generation }),
+      );
       if (!(await isFile(path.join(dir, ...PLUGIN_MANIFEST.split('/'))))) {
         leftOut.push(`${name} (its folder here has no ${PLUGIN_MANIFEST})`);
         continue;

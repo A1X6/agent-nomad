@@ -44,14 +44,14 @@ import {
 
 useProjectFolders('agentnomad-account-plugins-');
 
-/** One entry of the 2.1.295 plugins manifest, by name, with `fields` changed. */
+/** One entry of the 2.1.296 plugins manifest, by name, with `fields` changed. */
 function syncedPlugin(name: string, fields: Partial<SyncedPluginEntry> = {}): SyncedPluginEntry {
   const plugin = syncedPluginsManifest.plugins.find((entry) => entry.name === name);
   if (plugin === undefined) throw new Error(`no synced plugin ${name} in the fixture`);
   return { ...plugin, ...fields };
 }
 
-/** What push finds after Claude Code 2.1.295 synced `plugins` (see `syncedAccountPlugins`). */
+/** What push finds after Claude Code 2.1.296 synced `plugins` (see `syncedAccountPlugins`). */
 async function syncedWith(plugins: readonly SyncedPluginEntry[], marketplaces = true) {
   await syncedAccountPlugins(base, { plugins, marketplaces });
   const found = await readSyncedPlugins(pathsOf(process.platform), base);
@@ -68,6 +68,20 @@ describe('claude.ai plugins (T101): what push saves', () => {
     expect(found.ownNames).toEqual(['my-upload']);
     expect(found.notice).toBeNull();
     expect(found.problem).toBeNull();
+  });
+
+  it('takes a plugin on generation 2 from its <name>~g2 folder (T106)', async () => {
+    const found = await syncedWith([syncedPlugin('my-upload')]);
+    expect(found.own).toEqual([
+      { name: 'my-upload', dir: join(base, 'plugins', 'synced', SYNCED_ACCOUNT, 'my-upload~g2') },
+    ]);
+  });
+
+  it('takes a plugin without a generation from its plain folder (T106)', async () => {
+    const found = await syncedWith([syncedPlugin('my-upload', { generation: undefined })]);
+    expect(found.own).toEqual([
+      { name: 'my-upload', dir: join(base, 'plugins', 'synced', SYNCED_ACCOUNT, 'my-upload') },
+    ]);
   });
 
   it("never saves an organization's plugin, and names it", async () => {
@@ -157,7 +171,7 @@ describe('claude.ai plugins (T101): what push saves', () => {
 
   it('leaves out a folder with no plugin manifest, and names it', async () => {
     await syncedAccountPlugins(base, { plugins: [syncedPlugin('my-upload')] });
-    const folder = join(base, 'plugins', 'synced', SYNCED_ACCOUNT, 'my-upload');
+    const folder = join(base, 'plugins', 'synced', SYNCED_ACCOUNT, 'my-upload~g2');
     await rm(join(folder, '.claude-plugin', 'plugin.json'));
     const found = await readSyncedPlugins(pathsOf(process.platform), base);
     expect(found.own).toEqual([]);

@@ -60,6 +60,8 @@ const ACCOUNT_SKILL =
   '---\nname: my-account-skill\ndescription: From claude.ai\n---\nWrite release notes.\n';
 /** The manifest of a plugin the user uploaded to claude.ai, as Claude Code syncs it (T101). */
 const ACCOUNT_PLUGIN = '{"name":"my-account-plugin","version":"1.0.0"}';
+/** A claude.ai account folder as Claude Code 2.1.296 names it: `<org-uuid>_<account-uuid>`. */
+const ACCOUNT_DIR = '44444444-4444-4444-8444-444444444444_55555555-5555-4555-8555-555555555555';
 /**
  * A marketplace added from a folder in home (T98), outside git, with the mod `lm-mod`
  * installed from it; and plugin folders `env.CLAUDE_CODE_PLUGIN_DIRS` names (T99), one in home
@@ -370,9 +372,9 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     await write(memoryFile(pc), MEMORY);
     // Skills Claude Code 2.1.295 synced from claude.ai (T42, T105): no creatorType; the
     // user's own upload, one of Anthropic's and one of an organization's plugins.
-    const synced = (...parts: string[]) => claude(pc, 'skills', 'synced', 'account-1', ...parts);
+    const synced = (...parts: string[]) => claude(pc, 'skills', 'synced', ACCOUNT_DIR, ...parts);
     const syncedPlugins = (file: string) =>
-      claude(pc, 'plugins', 'synced', 'account-1', ...file.split('/'));
+      claude(pc, 'plugins', 'synced', ACCOUNT_DIR, ...file.split('/'));
     await write(
       synced('manifest.json'),
       JSON.stringify({
@@ -383,9 +385,11 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
         ],
       }),
     );
+    // The plugins in the shapes of the Claude Code 2.1.296 program (T106).
     await write(
       syncedPlugins('manifest.json'),
       JSON.stringify({
+        lastUpdated: 1760000000000,
         plugins: [
           { pluginId: 'plugin_mine', marketplaceName: 'my-uploads' },
           { pluginId: 'plugin_team', marketplaceName: 'team-org' },
@@ -395,6 +399,7 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
             name: 'my-account-plugin',
             marketplaceName: 'my-uploads',
             installationPreference: 'available',
+            generation: 2,
           },
           {
             pluginId: 'plugin_org',
@@ -407,15 +412,32 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     );
     await write(
       syncedPlugins('.marketplaces.json'),
-      JSON.stringify([
-        { name: 'my-uploads', scope: 'account' },
-        { name: 'team-org', scope: 'org' },
-      ]),
+      JSON.stringify({
+        parserVersion: 1,
+        rows: [
+          {
+            name: 'my-uploads',
+            display_name: 'My Uploads',
+            scope: 'account',
+            source: { source: 'claudeai' },
+            id: 'mkt_mine',
+            updated_at: '2026-10-09T00:00:00Z',
+          },
+          {
+            name: 'team-org',
+            display_name: 'Team',
+            scope: 'org',
+            source: { source: 'claudeai' },
+            id: 'mkt_team',
+            updated_at: '2026-10-09T00:00:00Z',
+          },
+        ],
+      }),
     );
     await write(synced('my-account-skill', 'SKILL.md'), ACCOUNT_SKILL);
     await write(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic.\n');
     await write(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nTeam.\n');
-    await write(syncedPlugins('my-account-plugin/.claude-plugin/plugin.json'), ACCOUNT_PLUGIN);
+    await write(syncedPlugins('my-account-plugin~g2/.claude-plugin/plugin.json'), ACCOUNT_PLUGIN);
     await write(syncedPlugins('team-plugin/.claude-plugin/plugin.json'), '{"name":"team-plugin"}');
     // A plugin from a GitHub marketplace (T29), with its version (T100), and the mod from the
     // local marketplace (T98), whose version Claude Code does not know.
@@ -466,11 +488,11 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     expect(pushed.stderr).not.toContain('left out, because agentnomad does not know');
     // T105: the organization's skill is named as left out.
     expect(pushed.stderr).toContain(
-      'Not saved from claude.ai account account-1: team-skill (it comes from your organization or claude.ai, not from you).',
+      `Not saved from claude.ai account ${ACCOUNT_DIR}: team-skill (it comes from your organization or claude.ai, not from you).`,
     );
     // T101: so is the organization's plugin; only the uploaded one is saved.
     expect(pushed.stderr).toContain(
-      'Plugins not saved from claude.ai account account-1: team-plugin (it comes from your organization or claude.ai, not from you).',
+      `Plugins not saved from claude.ai account ${ACCOUNT_DIR}: team-plugin (it comes from your organization or claude.ai, not from you).`,
     );
 
     const status = ok(await pc.run(['status']));
@@ -554,7 +576,7 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
     await expect(read(claude(pc, 'skills', 'pdf', 'SKILL.md'))).rejects.toThrow();
     await expect(read(claude(pc, 'skills', 'team-skill', 'SKILL.md'))).rejects.toThrow();
     await expect(
-      read(claude(pc, 'skills', 'synced', 'account-1', 'manifest.json')),
+      read(claude(pc, 'skills', 'synced', ACCOUNT_DIR, 'manifest.json')),
     ).rejects.toThrow();
     // T101: the uploaded claude.ai plugin is a local plugin here, reviewed first; the
     // organization's never left the first PC.
