@@ -4,7 +4,8 @@
  * answers as Claude Code 2.1.296 does: `--json` result lines, and an install that records the
  * plugin in `~/.claude/plugins` at the latest version, 9.9.0, as Claude Code cannot install
  * an older one. A marketplace added from a folder (T98) is known by the name in its catalog,
- * and `plugin validate --json` passes a mod with one warning, as T97's review expects.
+ * and `plugin validate --json` reports on the folder it is given (T104), so pull's review of a
+ * plugin or mod (T97) takes each of its three ways in the e2e: written, needs a yes, broken.
  *
  * Usage (built, through the launcher pc.ts writes): node dist/src/fake-claude.js <arguments>
  */
@@ -24,6 +25,69 @@ async function record(file: string, entries: (json: Record<string, unknown>) => 
   entries(json);
   await mkdir(plugins, { recursive: true });
   await writeFile(path, JSON.stringify(json, null, 2));
+}
+
+/**
+ * `plugin validate --json <folder>` as Claude Code 2.1.296 reports it (T96, T97 probes), from
+ * the folder's own files (T104): a manifest that does not parse is an error (exit 1); without
+ * an author it is a warning; each module `hooks/hooks.json` names gets a `hooks:` line (the
+ * events it passes to `on`) and a `calls:` line (the `$` methods it calls, sorted).
+ */
+async function validate(folder: string) {
+  const file = (path: string) => `${folder}/${path}`.replace(/\\/g, '/');
+  const text = (path: string) =>
+    readFile(join(folder, ...path.split('/')), 'utf8').catch(() => null);
+  const entry = (path: string, type: string, extra: object) => ({
+    file: file(path),
+    type,
+    errors: [],
+    warnings: [],
+    notes: [],
+    gatingHooks: [],
+    ...extra,
+  });
+  /** A JSON file of the folder, or why it does not parse (also when it is missing). */
+  const json = async <T>(path: string): Promise<{ value: T } | { problem: string }> => {
+    try {
+      return { value: JSON.parse((await text(path)) ?? '') as T };
+    } catch (error) {
+      return { problem: `Invalid JSON syntax: ${error instanceof Error ? error.message : ''}` };
+    }
+  };
+  const read = await json<{ author?: unknown }>('.claude-plugin/plugin.json');
+  const manifest = 'value' in read ? read.value : null;
+  const problem = 'problem' in read ? read.problem : '';
+  const hooksRead = await json<{ modules?: string[] }>('hooks/hooks.json');
+  const hooks = 'value' in hooksRead ? hooksRead.value : null;
+  const notes: string[] = [];
+  for (const module of hooks?.modules ?? []) {
+    const source = (await text(`hooks/${module.replace(/^\.\//, '')}`)) ?? '';
+    const events = [...source.matchAll(/\bon\(\s*["']([^"']+)["']/g)].map((match) => match[1]);
+    const calls = [...new Set(source.match(/\$(?:\.[A-Za-z_]\w*)+/g) ?? [])].sort();
+    notes.push(`${module} hooks: ${events.join(', ')}`);
+    notes.push(`${module} calls: ${calls.length === 0 ? 'nothing on $' : calls.join(', ')}`);
+  }
+  return {
+    success: manifest !== null,
+    strict: false,
+    target: file('.claude-plugin/plugin.json'),
+    manifest: entry('.claude-plugin/plugin.json', 'plugin', {
+      ...(manifest === null && { errors: [{ path: 'json', message: problem, code: null }] }),
+      ...(manifest !== null &&
+        manifest.author === undefined && {
+          warnings: [
+            {
+              path: 'author',
+              message:
+                'No author information provided. Consider adding author details for plugin attribution',
+              code: null,
+            },
+          ],
+        }),
+    }),
+    contents: hooks === null ? [] : [entry('hooks/hooks.json', 'hooks', { notes })],
+    advice: [],
+  };
 }
 
 const ok = (command: string) => {
@@ -52,40 +116,9 @@ if (first === '--version') {
   });
   ok('marketplace-add');
 } else if (first === 'plugin' && second === 'validate' && third === '--json' && fourth) {
-  // A mod with one module, as Claude Code 2.1.296 reports it without an author (T96's
-  // `validatePassWithWarning`): passed with a warning, exit 0.
-  const file = (path: string) => `${fourth}/${path}`.replace(/\\/g, '/');
-  const entry = (path: string, type: string, extra: object) => ({
-    file: file(path),
-    type,
-    errors: [],
-    warnings: [],
-    notes: [],
-    gatingHooks: [],
-    ...extra,
-  });
-  const report = {
-    success: true,
-    strict: false,
-    target: file('.claude-plugin/plugin.json'),
-    manifest: entry('.claude-plugin/plugin.json', 'plugin', {
-      warnings: [
-        {
-          path: 'author',
-          message:
-            'No author information provided. Consider adding author details for plugin attribution',
-          code: null,
-        },
-      ],
-    }),
-    contents: [
-      entry('hooks/hooks.json', 'hooks', {
-        notes: ['./register.ts hooks: session.start', './register.ts calls: $.store.get'],
-      }),
-    ],
-    advice: [],
-  };
+  const report = await validate(fourth);
   process.stdout.write(`${JSON.stringify(report)}\n`);
+  if (!report.success) process.exitCode = 1;
 } else if (first === 'plugin' && second === 'install' && third !== undefined) {
   await record('installed_plugins.json', (json) => {
     const installed = (json['plugins'] ?? {}) as Record<string, unknown>;
