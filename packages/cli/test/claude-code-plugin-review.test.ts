@@ -109,6 +109,14 @@ describe('claude plugin validate on a plugin folder (T97)', () => {
     ]);
   });
 
+  it('a file it cannot copy leaves the folder unreviewed, never stops pull', async () => {
+    const { validator, calls } = await validatorFor(validatePassWithWarning);
+    // A folder and a file of one name: the second cannot be written.
+    const clash = [collected('hooks', 'x'), ...modFiles('')];
+    expect((await validator.validate(mod(clash))).kind).toBe('unavailable');
+    expect(calls).toEqual([]);
+  });
+
   it('shows its errors with the folder pull writes, not the copy', async () => {
     const { validator } = await validatorFor(validateBrokenManifest);
     expect(await validator.validate(mod())).toEqual({

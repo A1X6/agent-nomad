@@ -12,13 +12,13 @@ import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
 export const SKILLS_DIR_MARKETPLACE = 'skills-dir';
 
 /** A plugin's manifest, from the plugin's folder. */
-export const PLUGIN_MANIFEST = '.claude-plugin/plugin.json';
+const PLUGIN_MANIFEST = '.claude-plugin/plugin.json';
 
 /** The hooks file of a plugin: classic command hooks, or a mod's modules. */
 export const PLUGIN_HOOKS = 'hooks/hooks.json';
 
 /** Folders inside a plugin that Claude Code writes itself, e.g. `.claude-plugin/types`. */
-export const GENERATED_IN_PLUGIN: readonly string[] = DATA.plugins.generatedInPlugin;
+const GENERATED_IN_PLUGIN: readonly string[] = DATA.plugins.generatedInPlugin;
 
 /** `skills/<name>/<rest>` → `[name, rest]`, `null` for any other path. */
 function splitSkillsPath(path: string): readonly [string, string] | null {

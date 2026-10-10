@@ -74,7 +74,7 @@ export const WATCHED_SETTINGS: readonly string[] = [
  * the pull review flags (T97): what each group does on this PC. `calls` names only the method,
  * never the program, path or prompt, so the review offers the module's source.
  */
-export const RISKY_MOD_CALLS: readonly { readonly prefix: string; readonly does: string }[] = [
+const RISKY_MOD_CALLS: readonly { readonly prefix: string; readonly does: string }[] = [
   { prefix: '$.process', does: 'runs programs' },
   { prefix: '$.model', does: 'calls the model' },
   { prefix: '$.net', does: 'uses the network' },
@@ -85,7 +85,7 @@ export const RISKY_MOD_CALLS: readonly { readonly prefix: string; readonly does:
 ];
 
 /** `$.fs` methods that only read; every other `$.fs` method counts as a file write. */
-export const READING_FS_CALLS: readonly string[] = [
+const READING_FS_CALLS: readonly string[] = [
   '$.fs.read',
   '$.fs.readFile',
   '$.fs.readText',

@@ -34,7 +34,7 @@ export interface PluginFolderToReview {
 }
 
 /** What `claude plugin validate` said about a folder, or why it could not be asked. */
-export type PluginValidation =
+type PluginValidation =
   | {
       readonly kind: 'checked';
       /** Exit 0: passed (also with warnings). */
@@ -71,7 +71,7 @@ const staysInside = (path: string) =>
  * review's own: Claude Code rewrites settings when it starts (2.1.296 turned `"model": "opus"`
  * into `"opus[1m]"`), and pull's review must leave this PC's setup as it is (T97).
  */
-export type ValidateCli = (configDir: string) => ProgramCli;
+type ValidateCli = (configDir: string) => ProgramCli;
 
 /**
  * A validator running `claude plugin validate --json` (`claude`: how to run the found program,
@@ -79,7 +79,7 @@ export type ValidateCli = (configDir: string) => ProgramCli;
  * a new temporary folder of its own, never on a path read from the bundle. Paths of that copy
  * are shown as the folder's own (`skills/probe-mod`).
  */
-export function createPluginValidator(claude: ValidateCli | null): PluginValidator {
+function createPluginValidator(claude: ValidateCli | null): PluginValidator {
   return {
     async validate(folder) {
       if (claude === null) {
@@ -90,11 +90,20 @@ export function createPluginValidator(claude: ValidateCli | null): PluginValidat
         const copy = join(temp, 'plugin');
         const configDir = join(temp, 'config');
         await mkdir(configDir);
-        for (const file of folder.files) {
-          if (!staysInside(file.path)) continue;
-          const path = join(copy, ...file.path.split('/'));
-          await mkdir(dirname(path), { recursive: true });
-          await writeFile(path, file.content);
+        try {
+          for (const file of folder.files) {
+            if (!staysInside(file.path)) continue;
+            const path = join(copy, ...file.path.split('/'));
+            await mkdir(dirname(path), { recursive: true });
+            await writeFile(path, file.content);
+          }
+        } catch (error) {
+          // E.g. a name this OS cannot hold: the folder is then unreviewed, never a crash.
+          const reason = error instanceof Error ? error.message : String(error);
+          return {
+            kind: 'unavailable',
+            reason: `its files could not be copied to check them (${reason})`,
+          };
         }
         const run = await claude(configDir).run(['plugin', 'validate', '--json', copy], temp);
         const report =
@@ -153,7 +162,7 @@ export async function findPluginValidator(
 }
 
 /** One module of a mod: what it hooks into and the `$` methods it calls. */
-export interface ModuleReview {
+interface ModuleReview {
   /** As validate names it, e.g. `./register.ts`. */
   readonly module: string;
   readonly hooks: readonly string[];
@@ -269,7 +278,7 @@ export async function reviewPluginFolder(
 }
 
 /** The review as pull shows it: one block for the folder, each line printable. */
-export function pluginReviewLines(review: PluginReview, change: 'new' | 'changed'): string[] {
+function pluginReviewLines(review: PluginReview, change: 'new' | 'changed'): string[] {
   const { validation } = review;
   const status =
     validation.kind === 'unavailable'
