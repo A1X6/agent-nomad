@@ -55,10 +55,14 @@ export const pluginDataFolder = (id: string): string => safeId(id, DATA_RULE);
 /** `plugins/store/<file>` of plugin `id`: `probe-mod@skills-dir` → `probe-mod_skills-dir-<hash>.json`. */
 export function pluginStoreFile(id: string): string {
   const hash = createHash('sha256').update(id).digest('hex').slice(0, STORE_RULE.hashDigits);
-  return `${safeId(id, STORE_RULE)}-${hash}${STORE_RULE.extension}`;
+  const name = safeId(id, STORE_RULE).slice(0, STORE_RULE.maxNameLength);
+  return `${name}-${hash}${STORE_RULE.extension}`;
 }
 
-/** A name as the rules above make one, so a saved name can never leave its folder. */
+/**
+ * A name as the rules above make one, or with a `*` as agentnomad made them before T107, so a
+ * saved name can never leave its folder.
+ */
 const SAFE_NAME = /^[A-Za-z0-9_*-]+$/;
 const isStoreFileName = (name: string) =>
   name.endsWith(STORE_RULE.extension) &&

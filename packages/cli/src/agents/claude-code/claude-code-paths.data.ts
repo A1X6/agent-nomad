@@ -17,7 +17,7 @@ const RAW = {
    * The newest Claude Code these lists were checked against (T41). The weekly drift check
    * reports changelog entries of newer versions; bump this after reviewing them.
    */
-  reviewedVersion: '2.1.292',
+  reviewedVersion: '2.1.296',
 
   global: {
     /** Single files in the base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -64,8 +64,11 @@ const RAW = {
       'feedback',
       'feedback-bundles',
       'policy-limits.json',
-      // When the limits above were last fetched (Claude Code 2.1.295, T96).
+      // When the limits above were last fetched (Claude Code 2.1.295, T96; checked on 2.1.296).
       'policy-limits.json.stamp.json',
+      // Scratch copies of a repository an /ultrareview upload makes (its changelog for
+      // 2.1.295; the 2.1.296 program makes the folder with mode 700, T107).
+      'seed-admin',
     ],
     /**
      * Other things Claude Code keeps in the base folder that are known and deliberately
@@ -110,8 +113,8 @@ const RAW = {
   plugins: {
     /**
      * Folders inside a plugin or mod in `skills/<name>/` (T97) that Claude Code writes itself:
-     * `.claude-plugin/types/` when it hot-reloads a mod (Claude Code 2.1.295, T96). Never
-     * pushed, never written by pull.
+     * `.claude-plugin/types/` when it hot-reloads a mod (Claude Code 2.1.295, T96; checked on
+     * 2.1.296). Never pushed, never written by pull.
      */
     generatedInPlugin: ['.claude-plugin/types'],
     /**
@@ -124,20 +127,23 @@ const RAW = {
     /**
      * A plugin's own folder, `plugins/data/<folder>` (`CLAUDE_PLUGIN_DATA`), named from its id
      * `<name>@<source>` with every character `unsafe` matches turned into `replaceWith`
-     * (Claude Code 2.1.295, T96): `lm-plugin@my-local.mkt` → `lm-plugin-my-local-mkt`. Pushed
-     * on request, only for a plugin the setup restores (T102).
+     * (Claude Code 2.1.295, T96; read from the 2.1.296 program, T107, which turns `*` too):
+     * `lm-plugin@my-local.mkt` → `lm-plugin-my-local-mkt`. Pushed on request, only for a
+     * plugin the setup restores (T102).
      */
-    data: { folder: 'plugins/data', unsafe: '[^A-Za-z0-9_*-]', replaceWith: '-' },
+    data: { folder: 'plugins/data', unsafe: '[^A-Za-z0-9_-]', replaceWith: '-' },
     /**
      * A mod's `$.store`, one file per plugin in `plugins/store/` (folder 700, file 600): the id
-     * with every character `unsafe` matches turned into `replaceWith`, `-`, the first
-     * `hashDigits` hex digits of the id's SHA-256 and `.json` (2.1.295, T96):
+     * with every character `unsafe` matches turned into `replaceWith`, cut to `maxNameLength`,
+     * then `-`, the first `hashDigits` hex digits of the id's SHA-256 and `.json` (2.1.295, T96;
+     * read from the 2.1.296 program, T107, which turns `*` too and cuts the name):
      * `probe-mod@skills-dir` → `probe-mod_skills-dir-e89169932969.json`. Pushed as `data` (T102).
      */
     store: {
       folder: 'plugins/store',
-      unsafe: '[^A-Za-z0-9_*-]',
+      unsafe: '[^A-Za-z0-9_-]',
       replaceWith: '_',
+      maxNameLength: 64,
       hashDigits: 12,
       extension: '.json',
     },
@@ -287,6 +293,7 @@ const PathsDataSchema = z.strictObject({
       folder: z.string().min(1),
       unsafe: Pattern,
       replaceWith: z.string(),
+      maxNameLength: z.number().int().min(1),
       hashDigits: z.number().int().min(1).max(64),
       extension: z.string().regex(/^\.[a-z]+$/),
     }),
