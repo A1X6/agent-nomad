@@ -3,7 +3,8 @@
  * and the real Claude Code is never run (it would clone marketplaces from the network). It
  * answers as Claude Code 2.1.296 does: `--json` result lines, and an install that records the
  * plugin in `~/.claude/plugins` at the latest version, 9.9.0, as Claude Code cannot install
- * an older one.
+ * an older one. A marketplace added from a folder (T98) is known by the name in its catalog,
+ * and `plugin validate --json` passes a mod with one warning, as T97's review expects.
  *
  * Usage (built, through the launcher pc.ts writes): node dist/src/fake-claude.js <arguments>
  */
