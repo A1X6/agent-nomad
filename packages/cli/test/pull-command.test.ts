@@ -765,6 +765,28 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     expect(t.lines.some((line) => line.includes('was saved from'))).toBe(false);
   });
 
+  it('warns when the setup has mods and this PC runs a Claude Code without mods (T103)', async () => {
+    const server = fakeBundleServer();
+    const a = pc('laptop');
+    for (const file of modFiles()) {
+      await writeTestFile(join(a.base, ...file.path.split('/')), file.content);
+    }
+    await pushFrom(a, server, [], { adapter: claudeAdapterAt(a.home, '2.1.287') })({
+      global: true,
+      yes: true,
+      memory: false,
+    });
+    const b = pc('desktop');
+    const t = pullOn(b, server, [], { adapter: claudeAdapterAt(b.home, '2.1.286') });
+    await t.pull({ global: true, yes: true });
+    expect(t.lines).toContain(
+      [
+        'warn: This setup was saved from Claude Code 2.1.287, but this PC has 2.1.286. Update Claude Code so every setting works.',
+        'This setup has mods (probe-mod@skills-dir), which need Claude Code 2.1.287 or newer, but this PC has 2.1.286. Update Claude Code so they load.',
+      ].join('\n'),
+    );
+  });
+
   it('runs the agent’s follow-up and adds saved environment variables', async () => {
     const { server } = await pushedEnvSetup();
 

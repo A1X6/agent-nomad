@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { modFiles } from './claude-code-plugin-fixtures.ts';
 import { collected, collectedJson, paths } from './fakes.ts';
-import { isGeneratedInSkillsPlugin, skillsPluginFolders, skillsPluginsNote } from '../src/index.ts';
+import {
+  isGeneratedInSkillsPlugin,
+  modsVersionNotice,
+  skillsPluginFolders,
+  skillsPluginsNote,
+} from '../src/index.ts';
 
 /** Plugins and mods in `~/.claude/skills/` (T97): which folders they are, and what is generated. */
 
@@ -64,5 +69,32 @@ describe("push's note on plugins in skills/ (T97)", () => {
 
   it('says nothing without plugins', () => {
     expect(skillsPluginsNote([collected('skills/plain/SKILL.md', '# Plain')])).toBeNull();
+  });
+});
+
+describe("pull's warning on mods and an older Claude Code (T103)", () => {
+  /** The last Claude Code before mods (2.1.287 added them). */
+  const BEFORE_MODS = '2.1.286';
+
+  it('names the mods when this PC is older than the first version with mods', () => {
+    expect(modsVersionNotice([...modFiles(), ...plainPlugin], BEFORE_MODS)).toBe(
+      'This setup has mods (probe-mod@skills-dir), which need Claude Code 2.1.287 or newer, but this PC has 2.1.286. Update Claude Code so they load.',
+    );
+  });
+
+  it('says nothing on the first version with mods', () => {
+    expect(modsVersionNotice(modFiles(), '2.1.287')).toBeNull();
+  });
+
+  it('says nothing on a newer version', () => {
+    expect(modsVersionNotice(modFiles(), '2.2.0')).toBeNull();
+  });
+
+  it('says nothing without mods, even when older', () => {
+    expect(modsVersionNotice(plainPlugin, BEFORE_MODS)).toBeNull();
+  });
+
+  it('says nothing when the version here is unknown', () => {
+    expect(modsVersionNotice(modFiles(), null)).toBeNull();
   });
 });

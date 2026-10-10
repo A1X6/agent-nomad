@@ -198,6 +198,11 @@ code is written only after your yes or with `--allow-commands`; `--yes` alone ne
 it, and one that validate finds broken needs your yes. Without Claude Code on the PC, the
 plugin counts as unreviewed code.
 
+Pull warns when the setup has mods and this PC's Claude Code is older than 2.1.287, the first
+that loads them. Push never saves `~/.claude/dev-mods/` (mods a session is still developing,
+which Claude Code deletes after a while) and names each one so you can move it to `skills/`
+or a marketplace.
+
 ## Security
 
 - Your password never leaves your PC. A key derived from it (Argon2id) unlocks a random data

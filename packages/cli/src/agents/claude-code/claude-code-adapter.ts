@@ -17,6 +17,7 @@ import {
 import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
 import { claudeConfigDir, createClaudeCodeDetector } from './detector.ts';
+import { devModsNotice, readDevMods } from './dev-mods.ts';
 import { CLAUDE_ENV_REFERENCES } from './env-files.ts';
 import { createClaudeCodeGlobalCollector } from './global-collector.ts';
 import { CLAUDE_JSON_BUNDLE_PATH } from './global-paths.ts';
@@ -41,7 +42,7 @@ import {
   systemProcessLister,
   type ClaudeRunningCheck,
 } from './running-claude.ts';
-import { skillsPluginFolders, skillsPluginsNote } from './skills-dir-plugins.ts';
+import { modsVersionNotice, skillsPluginFolders, skillsPluginsNote } from './skills-dir-plugins.ts';
 import { findUnknownEntries } from './unknown-files.ts';
 
 export interface ClaudeCodeAdapterOptions {
@@ -206,10 +207,20 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
           homedir: options.homedir,
         }),
       async notices(command) {
-        const notice = managedSettingsNotice(await managedSettings(), command);
-        return notice === null ? [] : [notice];
+        const notices = [managedSettingsNotice(await managedSettings(), command)];
+        // Mods in development are never pushed (T103): push names them so they can be kept.
+        if (command === 'push') {
+          notices.push(devModsNotice(await readDevMods(pathsOf(options.platform), baseDir)));
+        }
+        return notices.filter((notice) => notice !== null);
       },
-      versionNotice: (savedWith, here) => agentVersionNotice('Claude Code', savedWith, here),
+      versionNotice(savedWith, here, files) {
+        const notes = [
+          agentVersionNotice('Claude Code', savedWith, here),
+          modsVersionNotice(files, here),
+        ].filter((note) => note !== null);
+        return notes.length === 0 ? null : notes.join('\n');
+      },
       pushNotes(files) {
         const note = skillsPluginsNote(files);
         return note === null ? [] : [note];
