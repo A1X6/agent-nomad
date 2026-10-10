@@ -8,6 +8,7 @@ export * from './agents/claude-code/claude-code-paths.data.ts';
 export * from './agents/claude-code/claude-json-merge.ts';
 export * from './agents/claude-code/command-review.ts';
 export * from './agents/claude-code/detector.ts';
+export * from './agents/claude-code/dev-mods.ts';
 export * from './agents/claude-code/env-files.ts';
 export * from './agents/claude-code/global-collector.ts';
 export * from './agents/claude-code/global-paths.ts';

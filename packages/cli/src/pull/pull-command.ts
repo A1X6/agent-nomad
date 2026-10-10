@@ -312,14 +312,14 @@ export function createPullPlanner(deps: PullDeps) {
       }
     }
 
-    const versionNote = adapter.inspector?.versionNotice?.(bundle.agentVersion, version) ?? null;
-    if (versionNote !== null) reporter.warn(versionNote);
-
     const scope: BundleScope = bundle.scope;
     const target: ScopeTarget =
       scope.kind === 'global' ? { kind: 'global' } : { kind: 'project', projectDir: deps.cwd };
     const resolver = localPathResolver(deps.platform, deps.homedir);
     let files = fromBundleFiles(bundle.files, resolver);
+    const versionNote =
+      adapter.inspector?.versionNotice?.(bundle.agentVersion, version, files) ?? null;
+    if (versionNote !== null) reporter.warn(versionNote);
 
     // What this PC has now: files that only differ in the home path's slashes stay as they
     // are, and anything that runs programs and is new here is confirmed before writing.

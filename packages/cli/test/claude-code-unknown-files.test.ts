@@ -85,6 +85,11 @@ describe('unknown-file check (T32 done-when)', () => {
     expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([]);
   });
 
+  it('does not report dev-mods/, the mods Claude Code keeps per session (T103)', async () => {
+    await writeTestFile(join(base, 'dev-mods', 'session-a', 'probe-mod', 'hooks', 'hooks.json'));
+    expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([]);
+  });
+
   it('checks a project’s .claude folder', async () => {
     await writeTestFile(join(project, '.claude', 'settings.json'));
     await writeTestFile(join(project, '.claude', 'worktrees', 'wt', 'x'));
