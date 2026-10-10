@@ -3,14 +3,18 @@
  * the paths data file (T32); this module only gives them names and fast lookups.
  */
 import { RESERVED_DIR } from '../adapter.ts';
-import { inHomeFolder, isSensitiveHomePath } from '../shared/file-gathering.ts';
+import { inHomeFolder, isSensitiveHomePath } from '../shared/bundle-paths.ts';
 import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 
 /** Single files in the base folder. */
 export const GLOBAL_FILES: readonly string[] = DATA.global.files;
 
-/** The settings files among the single files (DUP-01): hooks and the status line live there. */
-export const GLOBAL_SETTINGS_FILES: readonly string[] = settingsFilesIn(GLOBAL_FILES);
+/** The settings files among `files` (DUP-01): hooks and the status line live there. */
+export const globalSettingsFiles = (files: readonly string[]): readonly string[] =>
+  settingsFilesIn(files);
+
+/** The settings files among the single files. */
+export const GLOBAL_SETTINGS_FILES: readonly string[] = globalSettingsFiles(GLOBAL_FILES);
 
 /** Folders in the base folder, taken whole (minus the skips below). */
 export const GLOBAL_FOLDERS: readonly string[] = DATA.global.folders;
@@ -50,6 +54,8 @@ export const CLAUDE_JSON_MCP_KEY = 'mcpServers';
 
 /** The selected `~/.claude.json` keys. */
 export const CLAUDE_JSON_BUNDLE_PATH = `${RESERVED_DIR}/claude.json`;
+/** The user's own claude.ai skills, saved on request (T42). */
+export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
 /** Hook and status line scripts elsewhere in the home folder, by path from home. */
 export const HOME_SCRIPTS_PREFIX = `${RESERVED_DIR}/home/`;
 
@@ -89,6 +95,13 @@ export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
  * command runs the tool, directly or through `npx` / `bunx`.
  */
 export const TOOL_CONFIG_FILES: Readonly<Record<string, readonly string[]>> = DATA.toolConfigFiles;
+
+/** The bundle paths of those tool settings files (`.agentnomad/home/...`). */
+export const TOOL_SETTINGS_BUNDLE_PATHS: ReadonlySet<string> = new Set(
+  Object.values(TOOL_CONFIG_FILES)
+    .flat()
+    .map((relative) => HOME_SCRIPTS_PREFIX + relative),
+);
 
 /** Shells and runtimes: present wherever agentnomad runs, so not recorded as programs. */
 export const RUNTIME_COMMANDS: ReadonlySet<string> = new Set(DATA.runtimeCommands);

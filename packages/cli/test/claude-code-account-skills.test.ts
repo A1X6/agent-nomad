@@ -11,6 +11,7 @@ import {
 } from './claude-code-project-fixtures.ts';
 import {
   collected,
+  executableLookup,
   paths,
   readText,
   recordingReporter,
@@ -29,7 +30,6 @@ import {
   readSyncedSkills,
   SKIPPED_NAMES,
   type CollectedFile,
-  type ExecutableLookupSystem,
 } from '../src/index.ts';
 
 useProjectFolders('agentnomad-account-skills-');
@@ -75,6 +75,14 @@ describe('claude.ai skills (T42): reading and saving', () => {
     expect(found.own).toEqual([]);
     expect(found.problem).toContain('in a format agentnomad does not know');
   });
+
+  it('names every account whose manifest cannot be read, not only the last', async () => {
+    await writeTestFile(synced('manifest.json'), '{"version": 2, "entries": []}');
+    await writeTestFile(join(base, 'skills', 'synced', 'other-account', 'manifest.json'), 'x');
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
+    expect(found.problem?.match(/Claude Code's list of synced skills/g)).toHaveLength(2);
+    expect(found.problem).toContain('(skills/synced/other-account/manifest.json)');
+  });
 });
 
 /** A claude.ai skill as push saves it, holding `content` as it is. */
@@ -117,12 +125,11 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
   ) {
     const script = scriptedPrompter(answers);
     const { reporter, lines } = recordingReporter({ levels: false });
-    const system: ExecutableLookupSystem = {
+    const system = executableLookup({
       platform: process.platform,
       homedir: home,
       env: { PATH: '' },
-      isExecutable: () => Promise.resolve(false),
-    };
+    });
     const restorer = createClaudeCodeRestorer({
       baseDir: base,
       homedir: home,
@@ -165,10 +172,13 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     expect(t.lines.at(-1)).toContain('Added mine as local skills.');
   });
 
-  it('no by default; --yes alone never adds them and never asks', async () => {
+  it('a no adds none', async () => {
     const no = run([saved('mine', 'Plain.')], {}, [false]);
     await no.done;
     await expect(skillFile('mine')).rejects.toThrow();
+  });
+
+  it('--yes alone never adds them and never asks', async () => {
     const yes = run([saved('mine', 'Plain.')], { assumeYes: true });
     await yes.done;
     expect(yes.asked).toEqual([]);
@@ -202,18 +212,21 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     expect(t.lines.at(-1)).toContain('Added mine as local skills.');
   });
 
-  it('skips a skill this PC already gets from claude.ai, and never touches a local one', async () => {
+  it('skips a skill this PC already gets from claude.ai', async () => {
     await syncedSetup();
-    await writeTestFile(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
-    const t = run([saved('my-skill', 'From the other PC.'), saved('local-one', 'Theirs.')], {
-      accountSkills: true,
-    });
+    const t = run([saved('my-skill', 'From the other PC.')], { accountSkills: true });
     await t.done;
-    expect(await skillFile('local-one')).toBe('My own local version.');
     await expect(skillFile('my-skill')).rejects.toThrow();
     expect(t.lines.join('\n')).toContain(
       'my-skill: skipped, this PC already gets it from claude.ai',
     );
+  });
+
+  it('never touches a local skill of the same name', async () => {
+    await writeTestFile(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
+    const t = run([saved('local-one', 'Theirs.')], { accountSkills: true });
+    await t.done;
+    expect(await skillFile('local-one')).toBe('My own local version.');
   });
 });
 

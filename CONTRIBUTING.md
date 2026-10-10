@@ -30,7 +30,7 @@ node packages/cli/dist/src/bin.js --help
 | `pnpm test`                 | All unit and integration tests (Vitest).                                                 |
 | `pnpm test:coverage`        | The tests with a coverage report (in `coverage/`).                                       |
 | `pnpm knip`                 | Lists unused files, dependencies and exports (mark a kept export `@public`).             |
-| `pnpm test:e2e`             | Builds, then runs the built CLI end to end against a local API (three simulated PCs).    |
+| `pnpm test:e2e`             | Builds, then runs the built CLI end to end against a local API (four simulated PCs).     |
 | `pnpm check`                | Typecheck, lint, format check and tests: what CI runs. Run it before every pull request. |
 | `pnpm lint` / `pnpm format` | ESLint / Prettier on their own.                                                          |
 | `pnpm release:build`        | Builds the npm package into `packages/cli/release/` (bundled with esbuild).              |
@@ -124,12 +124,14 @@ open, such as a chat or an option letter from a discussion.
     and `dataKey`) and the real password checker (`useZxcvbnChecker`, then `zxcvbn`);
     collected files (`collected`, `collectedJson`, `paths`, `text`); files on disk
     (`writeTestFile`, `linkFolder`, `readText`, `readJson`, `exists`); a secret store
-    (`memorySecretStore`, `memorySecrets`), a scripted prompter (`scriptedPrompter`), a
-    recording reporter (`recordingReporter`), an env writer (`fakeEnvWriter`), a typed
-    partial API client (`fakeApi`), a bundle server (`fakeBundleServer`, read with
-    `storedOn` and `revisionOn`), a local state in a temporary folder (`localStateIn`), an
-    adapter that only detects (`fakeAdapter`, with `installedAgent` and `missingAgent`),
-    a password the policy accepts (`STRONG`) and a project folder nobody looks in (`CWD`).
+    (`memorySecretStore`, `memorySecrets`, and `loggedInStore` for one already logged in), a
+    PC that finds only the programs it is given (`executableLookup`), a scripted prompter
+    (`scriptedPrompter`), a recording reporter (`recordingReporter`), an env writer
+    (`fakeEnvWriter`), a typed partial API client (`fakeApi`), a bundle server
+    (`fakeBundleServer`, read with `storedOn` and `revisionOn`), a local state in a
+    temporary folder (`localStateIn`), an adapter that only detects (`fakeAdapter`, with
+    `installedAgent` and `missingAgent`), a password the policy accepts (`STRONG`) and a
+    project folder nobody looks in (`CWD`).
   - `packages/cli/test/claude-code-project-fixtures.ts`: the Claude Code tests' temporary
     home and project (`useProjectFolders`, then `root`, `home`, `base` and `project`), the
     collectors (`options`, `globalCollector`, `collect`, `collectSkipped`), the real adapter
@@ -159,8 +161,9 @@ open, such as a chat or an option letter from a discussion.
   `CLAUDE_JSON_BUNDLE_PATH`, `BLOCK_START` and `BLOCK_END` (the CLI). A value an assertion
   compares against stays written out, and so do the header names, sizes and settings that
   pin the API format in the contracts tests and the server's `support/fixtures.ts`.
-- A module's tests go in the test file named after it (see the file reference in
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), so they are found by name.
+- A module's tests go in the test file named after it, so they are found by name. The file
+  reference in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) lists the other test files and
+  the small modules tested through the code that uses them.
 - Anything that touches paths runs on macOS, Linux and Windows in CI; write it so it passes
   on all three (use `path.join`, never assume `/`).
 - A change to push, pull or the bundle belongs in the end-to-end steps too

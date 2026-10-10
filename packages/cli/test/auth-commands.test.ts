@@ -16,8 +16,8 @@ import {
   dataKey,
   fakeApi,
   localStateIn,
+  loggedInStore,
   memorySecrets,
-  memorySecretStore,
   recordingReporter,
   scriptedPrompter,
   STRONG,
@@ -800,7 +800,7 @@ describe('agentnomad account delete, logged in with a local state', () => {
   ) {
     const script = scriptedPrompter(answers);
     const { reporter, lines } = recordingReporter();
-    const secrets = memorySecretStore({ loggedIn: dataKey, saved });
+    const secrets = loggedInStore(dataKey, saved);
     const sent: string[] = [];
     const api = fakeApi({
       auth: {

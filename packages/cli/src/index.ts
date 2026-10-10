@@ -1,6 +1,6 @@
 export * from './agents/adapter.ts';
-export * from './agents/claude-code/account-skills.ts';
 export * from './agents/agents-command.ts';
+export * from './agents/claude-code/account-skills.ts';
 export * from './agents/claude-code/after-restore.ts';
 export * from './agents/claude-code/auto-memory.ts';
 export * from './agents/claude-code/claude-code-adapter.ts';
@@ -27,6 +27,7 @@ export * from './agents/claude-code/settings-commands.ts';
 export * from './agents/claude-code/unknown-files.ts';
 export * from './agents/notices.ts';
 export * from './agents/registry.ts';
+export * from './agents/shared/bundle-paths.ts';
 export * from './agents/shared/detector-system.ts';
 export * from './agents/shared/file-gathering.ts';
 export * from './api/api-client.ts';

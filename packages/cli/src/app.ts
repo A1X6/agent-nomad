@@ -14,9 +14,9 @@ import type { ApiClient } from './api/api-client.ts';
 import { resolveApiUrl } from './api/api-url.ts';
 import { createHttpApiClient } from './api/http-api-client.ts';
 import { createAuthCommands } from './auth/auth-commands.ts';
-import { createSetupCommands } from './commands/setup-commands.ts';
 import { loadZxcvbnChecker } from './auth/password-policy.ts';
 import type { CommandHandlers } from './cli/commands.ts';
+import { createSetupCommands } from './commands/setup-commands.ts';
 import { configDir } from './config/config-dir.ts';
 import { createEnvCommand } from './env/env-command.ts';
 import {

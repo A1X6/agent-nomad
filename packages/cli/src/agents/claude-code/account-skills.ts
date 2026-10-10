@@ -4,8 +4,9 @@ import type { PlatformPath } from 'node:path';
 import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
-import { RESERVED_DIR, type CollectedFile } from '../adapter.ts';
+import type { CollectedFile } from '../adapter.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
+import { ACCOUNT_SKILLS_PREFIX } from './global-paths.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 
 /**
@@ -18,7 +19,6 @@ import { runnableInMarkdown } from './runnable-markdown.ts';
 const SYNCED_SKILLS_DIR = 'skills/synced';
 /** The id of the optional part for saved claude.ai skills (T42, T61); also the flag name. */
 export const ACCOUNT_SKILLS_PART = 'account-skills';
-export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
 
 /**
  * Claude Code's `manifest.json` for one account's synced skills (an internal file, so only
@@ -33,16 +33,17 @@ const EntrySchema = z.looseObject({ name: z.string(), creatorType: z.string().op
 const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const RESERVED_NAMES = new Set(['synced', 'anthropic-skills']);
 const isUsableSkillName = (name: string) =>
-  SKILL_NAME.test(name) &&
-  !RESERVED_NAMES.has(name.toLowerCase()) &&
-  !name.toLowerCase().startsWith('anthropic-skills:');
+  SKILL_NAME.test(name) && !RESERVED_NAMES.has(name.toLowerCase());
 
 export interface SyncedSkills {
   /** The user's own skills, with their folder on this PC. */
   readonly own: readonly { readonly name: string; readonly dir: string }[];
   /** Every synced skill name on this PC (any creator), to avoid adding a duplicate. */
   readonly allNames: ReadonlySet<string>;
-  /** Why nothing could be read, e.g. a manifest in an unknown format; `null` when fine. */
+  /**
+   * Why an account's skills could not be read, e.g. a manifest in an unknown format, one
+   * sentence per account; `null` when fine.
+   */
   readonly problem: string | null;
 }
 
@@ -54,7 +55,7 @@ export async function readSyncedSkills(path: PlatformPath, baseDir: string): Pro
   const root = path.join(baseDir, ...SYNCED_SKILLS_DIR.split('/'));
   const own = new Map<string, string>();
   const allNames = new Set<string>();
-  let problem: string | null = null;
+  const problems: string[] = [];
   const accounts = await readdir(root, { withFileTypes: true }).catch(() => []);
   for (const account of accounts) {
     if (!account.isDirectory() || account.name.startsWith('.')) continue;
@@ -62,7 +63,9 @@ export async function readSyncedSkills(path: PlatformPath, baseDir: string): Pro
     const text = await readFile(path.join(accountDir, 'manifest.json'), 'utf8').catch(() => null);
     const manifest = text === null ? null : valueOrNull(parseJsonWith(ManifestSchema, text));
     if (manifest === null) {
-      problem = `Claude Code's list of synced skills (${SYNCED_SKILLS_DIR}/${account.name}/manifest.json) is missing or in a format agentnomad does not know.`;
+      problems.push(
+        `Claude Code's list of synced skills (${SYNCED_SKILLS_DIR}/${account.name}/manifest.json) is missing or in a format agentnomad does not know.`,
+      );
       continue;
     }
     for (const entry of manifest.skills) {
@@ -86,7 +89,7 @@ export async function readSyncedSkills(path: PlatformPath, baseDir: string): Pro
       .map(([name, dir]) => ({ name, dir }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     allNames,
-    problem,
+    problem: problems.length === 0 ? null : problems.join(' '),
   };
 }
 
@@ -127,7 +130,9 @@ export function planAccountSkills(
     const rest = file.path.slice(ACCOUNT_SKILLS_PREFIX.length);
     const name = rest.split('/')[0] ?? '';
     if (!isUsableSkillName(name) || rest === name) continue;
-    byName.set(name, [...(byName.get(name) ?? []), file]);
+    const skillFiles = byName.get(name);
+    if (skillFiles === undefined) byName.set(name, [file]);
+    else skillFiles.push(file);
   }
   const toAdd: { name: string; runsCommands: boolean }[] = [];
   const skipped: { name: string; reason: string }[] = [];

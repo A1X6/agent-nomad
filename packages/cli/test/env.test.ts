@@ -89,6 +89,12 @@ describe('finding ${VAR} references', () => {
     expect([...scan.setBySettings]).toEqual(['COMPANY_PROXY']);
   });
 
+  it('finds nothing for an agent that names no files to scan', () => {
+    const scan = scanEnvReferences([mcpJson], undefined);
+    expect(scan.variables).toEqual([]);
+    expect([...scan.setBySettings]).toEqual([]);
+  });
+
   it('ignores files that are not JSON', () => {
     const broken = collected('.mcp.json', '{ nope');
     expect(scanEnvReferences([broken], CLAUDE_ENV_REFERENCES).variables).toEqual([]);
@@ -486,55 +492,63 @@ describe('restoring values on pull', () => {
     expect(written).toEqual([section.variables]);
   });
 
-  it('--yes alone never adds a variable that sends traffic elsewhere (T56)', async () => {
-    const { reporter, lines } = recordingReporter({ levels: false });
+  describe('variables that send traffic elsewhere (T56)', () => {
     const redirects = {
       variables: { API_KEY: 'key-1', HTTPS_PROXY: 'http://p', ANTHROPIC_BASE_URL: 'https://x' },
     };
-    const first = recordingWriter();
-    const result = await restoreEnvValues({
-      isRedirectVariable,
-      section: redirects,
-      env: {},
-      writer: first.writer,
-      prompter: neverAsks,
-      reporter,
-      assumeYes: true,
-    });
-    expect(first.written).toEqual([{ API_KEY: 'key-1' }]);
-    expect(result.declined).toBe(true);
-    expect(lines.join('\n')).toContain('Not added: ANTHROPIC_BASE_URL, HTTPS_PROXY.');
-    expect(lines.join('\n')).toContain('--allow-commands');
-    expect(lines.join('\n')).not.toContain('http://p');
+    const quiet = () => recordingReporter({ levels: false });
 
-    const { asked, prompter } = defaultAnswers();
-    const second = recordingWriter();
-    await restoreEnvValues({
-      isRedirectVariable,
-      section: redirects,
-      env: {},
-      writer: second.writer,
-      prompter,
-      reporter,
+    it('--yes alone adds the others but never these, and says how to accept them', async () => {
+      const { writer, written } = recordingWriter();
+      const { lines, reporter } = quiet();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section: redirects,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.declined).toBe(true);
+      expect(lines.join('\n')).toContain('Not added: ANTHROPIC_BASE_URL, HTTPS_PROXY.');
+      expect(lines.join('\n')).toContain('--allow-commands');
+      expect(lines.join('\n')).not.toContain('http://p');
     });
-    expect(asked[1]).toEqual([
-      'ANTHROPIC_BASE_URL, HTTPS_PROXY send programs’ requests elsewhere. Add them too?',
-      false,
-    ]);
-    expect(second.written).toEqual([{ API_KEY: 'key-1' }]);
 
-    const third = recordingWriter();
-    await restoreEnvValues({
-      isRedirectVariable,
-      section: redirects,
-      env: {},
-      writer: third.writer,
-      prompter: neverAsks,
-      reporter,
-      assumeYes: true,
-      allowCommands: true,
+    it('asks about them separately, defaulting to no', async () => {
+      const { writer, written } = recordingWriter();
+      const { asked, prompter } = defaultAnswers();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section: redirects,
+        env: {},
+        writer,
+        prompter,
+        reporter: quiet().reporter,
+      });
+      expect(asked[1]).toEqual([
+        'ANTHROPIC_BASE_URL, HTTPS_PROXY send programs’ requests elsewhere. Add them too?',
+        false,
+      ]);
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
     });
-    expect(third.written).toEqual([redirects.variables]);
+
+    it('--allow-commands adds them too', async () => {
+      const { writer, written } = recordingWriter();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section: redirects,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        assumeYes: true,
+        allowCommands: true,
+      });
+      expect(written).toEqual([redirects.variables]);
+    });
   });
 
   describe('variables that make programs run code (T44)', () => {
@@ -599,15 +613,11 @@ describe('restoring values on pull', () => {
 });
 
 describe('agentnomad env', () => {
-  const adapter = (
-    global: CollectedFile[],
-    project: CollectedFile[],
-    installed = true,
-  ): AgentAdapter => ({
+  const adapter = (global: CollectedFile[], project: CollectedFile[]): AgentAdapter => ({
     id: 'claude-code',
     displayName: 'Claude Code',
     detector: {
-      detect: () => Promise.resolve({ installed, baseDir: '/h/.claude', version: null }),
+      detect: () => Promise.resolve({ installed: true, baseDir: '/h/.claude', version: null }),
     },
     collector: {
       collect: (target) => Promise.resolve(target.kind === 'global' ? global : project),

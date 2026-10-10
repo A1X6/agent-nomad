@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fakeManagedSystem as fakeSystem,
   fileManagedSettings,
+  noManagedSettings,
 } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
 import { recordingReporter } from './fakes.ts';
@@ -22,12 +23,13 @@ const policy = JSON.stringify({
 });
 
 describe('finding managed settings', () => {
-  it('uses the system folder Claude Code reads on each OS', () => {
-    expect(managedSettingsDir('linux', {})).toBe('/etc/claude-code');
-    expect(managedSettingsDir('darwin', {})).toBe('/Library/Application Support/ClaudeCode');
-    expect(managedSettingsDir('win32', { ProgramFiles: 'D:\\Programs' })).toBe(
-      'D:\\Programs\\ClaudeCode',
-    );
+  it.each([
+    ['linux', {}, '/etc/claude-code'],
+    ['darwin', {}, '/Library/Application Support/ClaudeCode'],
+    ['win32', { ProgramFiles: 'D:\\Programs' }, 'D:\\Programs\\ClaudeCode'],
+    ['win32', {}, 'C:\\Program Files\\ClaudeCode'],
+  ] as const)('uses the system folder Claude Code reads: %s %j', (platform, env, folder) => {
+    expect(managedSettingsDir(platform, env)).toBe(folder);
   });
 
   it('Linux: the managed file, drop-ins and managed MCP servers', async () => {
@@ -125,13 +127,16 @@ describe('the Settings value in reg query output (QA-07)', () => {
 });
 
 describe('server-managed settings (claude.ai admin console)', () => {
+  /** Claude Code's cached copy, in the fake PC's base folder. */
+  const remoteCache = '/home/a/.claude/remote-settings.json';
+
   /** Settings from the admin console that block a marketplace, in Claude Code's cached copy. */
   const blockingMarketplace = () =>
     detectManagedSettings(
       fakeSystem({
         platform: 'linux',
         files: {
-          '/home/a/.claude/remote-settings.json': JSON.stringify({
+          [remoteCache]: JSON.stringify({
             blockedMarketplaces: [{ source: 'github', repo: 'x/y' }],
           }),
         },
@@ -156,7 +161,7 @@ describe('server-managed settings (claude.ai admin console)', () => {
 
   it('an empty cache means none are set', async () => {
     const found = await detectManagedSettings(
-      fakeSystem({ platform: 'linux', files: { '/home/a/.claude/remote-settings.json': '{}' } }),
+      fakeSystem({ platform: 'linux', files: { [remoteCache]: '{}' } }),
     );
     expect(found.sources).toEqual([]);
   });
@@ -168,6 +173,13 @@ describe('warnings (T31 done-when)', () => {
   it('push says they stay with this PC', () => {
     expect(managedSettingsNotice(found, 'push')).toBe(
       'Your organization manages some Claude Code settings on this PC (/etc/claude-code/managed-settings.json). They stay with this PC and are not saved with your setup. They limit which plugins can be installed and which MCP servers can run, so some items may be blocked here.',
+    );
+  });
+
+  it('names the one limit they set', () => {
+    const pluginsOnly = { ...found, restrictsMcpServers: false };
+    expect(managedSettingsNotice(pluginsOnly, 'pull')).toContain(
+      'They limit which plugins can be installed, so some items may be blocked here.',
     );
   });
 
@@ -197,5 +209,15 @@ describe('warnings (T31 done-when)', () => {
 
   it('other failures keep their own reason', () => {
     expect(explainPluginFailure('Repository not found', found)).toBe('Repository not found');
+  });
+
+  it('a policy word keeps its own reason when nothing was looked for', () => {
+    expect(explainPluginFailure('Marketplace y is blocked', null)).toBe('Marketplace y is blocked');
+  });
+
+  it('a policy word keeps its own reason when this PC has no managed settings', () => {
+    expect(explainPluginFailure('Plugin x is not allowed', noManagedSettings)).toBe(
+      'Plugin x is not allowed',
+    );
   });
 });

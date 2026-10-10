@@ -1,10 +1,18 @@
 import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
-import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
+import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
+import {
+  GLOBAL_SETTINGS_FILES,
+  HOME_SCRIPTS_PREFIX,
+  isScript,
+  TOOL_SETTINGS_BUNDLE_PATHS,
+} from './global-paths.ts';
+import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
+import { runnableInMarkdown } from './runnable-markdown.ts';
 import {
   commandsInSettings,
   commandText,
@@ -12,14 +20,6 @@ import {
   hookItems,
   pathWords,
 } from './settings-commands.ts';
-import {
-  GLOBAL_SETTINGS_FILES,
-  HOME_SCRIPTS_PREFIX,
-  isScript,
-  TOOL_CONFIG_FILES,
-} from './global-paths.ts';
-import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
-import { runnableInMarkdown } from './runnable-markdown.ts';
 
 /*
  * Things in a Claude Code setup that run programs on this PC (T34, T44), as Claude Code's
@@ -54,11 +54,9 @@ const LIST_LABELS = /^(hook |setting permissions\.(allow|additionalDirectories)$
 /** Folders whose Markdown files are skills, custom commands or subagents. */
 const MARKDOWN_FOLDERS = /^(\.claude\/)?(skills|commands|agents)\//;
 
-const Json = z.record(z.string(), z.unknown());
 const Command = z.looseObject({ command: z.string().optional() });
-const Env = z.record(z.string(), z.unknown());
 
-const parse = (file: CollectedFile) => valueOrNull(parseJsonWith(Json, file.content));
+const parse = (file: CollectedFile) => valueOrNull(parseJsonWith(JsonObjectSchema, file.content));
 
 /** JSON with sorted keys, so two copies of the same object compare equal. */
 function stable(value: unknown): string {
@@ -144,7 +142,7 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
       typeof value === 'string' ? value : nested.success ? nested.data.command : undefined;
     if (command !== undefined) entries.push(entry(file.path, `setting ${key}`, command));
   }
-  const env = Env.safeParse(json['env']);
+  const env = JsonObjectSchema.safeParse(json['env']);
   for (const [name, value] of Object.entries(env.success ? env.data : {})) {
     // In a settings `env` block they reach Claude Code and every hook it starts. Redirect
     // variables send its requests elsewhere or choose what it runs commands with (T55).
@@ -153,7 +151,7 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
     }
   }
   // A starting mode that lets Claude act without asking, from the files it takes effect in.
-  const permissions = Json.safeParse(json['permissions']);
+  const permissions = JsonObjectSchema.safeParse(json['permissions']);
   const mode = permissions.success ? permissions.data['defaultMode'] : undefined;
   const loosening = typeof mode === 'string' ? LOOSENING_MODES[mode] : undefined;
   if (
@@ -174,7 +172,7 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
     }
   }
   // The sandbox block as a whole: a change anywhere in it may open commands or the network.
-  const sandbox = Json.safeParse(json['sandbox']);
+  const sandbox = JsonObjectSchema.safeParse(json['sandbox']);
   if (sandbox.success) {
     const shown = stable(sandbox.data);
     entries.push(entry(file.path, 'setting sandbox', shown, shown));
@@ -197,10 +195,10 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
  */
 function serverEntries(file: CollectedFile, servers: unknown): RunnableEntry[] {
   if (servers === undefined) return [];
-  const all = Json.safeParse(servers);
+  const all = JsonObjectSchema.safeParse(servers);
   if (!all.success) return [unreadable(file.path, 'MCP servers', servers)];
   return Object.entries(all.data).flatMap(([name, value]) => {
-    const server = Json.safeParse(value);
+    const server = JsonObjectSchema.safeParse(value);
     if (!server.success) return [unreadable(file.path, `MCP server ${name}`, value)];
     const shown = describeServer(server.data);
     return shown === ''
@@ -330,13 +328,8 @@ export function reviewRunnable(
 
   // Settings of status line tools can hold commands of their own (ccstatusline's Custom
   // Command widget), so a new or changed copy is shown too.
-  const toolSettings = new Set(
-    Object.values(TOOL_CONFIG_FILES)
-      .flat()
-      .map((path) => HOME_SCRIPTS_PREFIX + path),
-  );
   const tools: ReviewedEntry[] = incoming
-    .filter((file) => toolSettings.has(file.path))
+    .filter((file) => TOOL_SETTINGS_BUNDLE_PATHS.has(file.path))
     .flatMap((file) => {
       const change = newOrChanged(file);
       if (change === null) return [];

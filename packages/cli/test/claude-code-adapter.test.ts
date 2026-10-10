@@ -93,11 +93,14 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
   });
 
-  it('is not asked when the file would not change or its merge was declined', async () => {
+  it('is not asked when the file would not change', async () => {
     await writeTestFile(join(home, '.claude.json'), '{"diffTool":"terminal"}');
     const t = planStep([true], []);
     await t.plan();
     expect(t.asked).toEqual([]);
+  });
+
+  it('is not asked when its merge was declined', async () => {
     await writeTestFile(join(home, '.claude.json'), '{}');
     const declined = planStep([true], []);
     await declined.plan({ conflicts: new Map([[CLAUDE_JSON_BUNDLE_PATH, 'skip']]) });
@@ -119,29 +122,48 @@ describe('Claude Code adapter', () => {
     expect(adapter()).toMatchObject({ id: 'claude-code', displayName: 'Claude Code' });
   });
 
-  it('detects, collects global and project setups, and restores them', async () => {
+  /** A global setup and a project, each with its CLAUDE.md; returns the project folder. */
+  async function globalAndProject() {
     await writeTestFile(join(home, '.claude', 'CLAUDE.md'), 'global rules');
     const project = join(home, 'app');
     await writeTestFile(join(project, 'CLAUDE.md'), 'project rules');
+    return project;
+  }
 
-    const claude = adapter();
-    expect(await claude.detector.detect()).toEqual({
+  it('detects Claude Code by its base folder', async () => {
+    await globalAndProject();
+    expect(await adapter().detector.detect()).toEqual({
       installed: true,
       baseDir: join(home, '.claude'),
       version: null,
     });
-    const global = await claude.collector.collect({ kind: 'global' }, { includeMemory: false });
+  });
+
+  it('collects the global setup', async () => {
+    await globalAndProject();
+    const global = await adapter().collector.collect({ kind: 'global' }, { includeMemory: false });
+    expect(paths(global)).toEqual(['CLAUDE.md']);
+  });
+
+  it('collects a project setup', async () => {
+    const project = await globalAndProject();
+    const local = await adapter().collector.collect(
+      { kind: 'project', projectDir: project },
+      { includeMemory: false },
+    );
+    expect(paths(local)).toEqual(['CLAUDE.md']);
+    expect(new TextDecoder().decode(local[0]?.content)).toBe('project rules');
+  });
+
+  it('restores a project setup into another folder', async () => {
+    const project = await globalAndProject();
+    const claude = adapter();
     const local = await claude.collector.collect(
       { kind: 'project', projectDir: project },
       { includeMemory: false },
     );
-    expect(paths(global)).toEqual(['CLAUDE.md']);
-    expect(paths(local)).toEqual(['CLAUDE.md']);
-    expect(new TextDecoder().decode(local[0]?.content)).toBe('project rules');
-
-    const other = join(home, 'other-app');
     const report = await claude.restorer.restore(
-      { kind: 'project', projectDir: other },
+      { kind: 'project', projectDir: join(home, 'other-app') },
       local,
       () => Promise.resolve('skip'),
     );

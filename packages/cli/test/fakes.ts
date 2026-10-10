@@ -12,6 +12,7 @@ import { afterEach, beforeAll, beforeEach } from 'vitest';
 // Module paths, not the package index: the agent boundary test uses these fakes and must
 // not load any agent's adapter.
 import type { AgentAdapter, CollectedFile, DetectedAgent } from '../src/agents/adapter.ts';
+import type { ExecutableLookupSystem } from '../src/agents/shared/detector-system.ts';
 import type { ApiClient, BundleUpload } from '../src/api/api-client.ts';
 import { ApiError } from '../src/api/api-errors.ts';
 import { loadZxcvbnChecker, type PasswordChecker } from '../src/auth/password-policy.ts';
@@ -212,11 +213,31 @@ export function memorySecretStore(
   };
 }
 
+/**
+ * A SecretStore logged in with `key` (by default the data key from {@link useDataKey}), with
+ * `saved` as the map behind it when a test looks at what is stored.
+ */
+export const loggedInStore = (key: Uint8Array = dataKey, saved?: Map<SecretName, string>) =>
+  memorySecretStore({ loggedIn: key, ...(saved && { saved }) });
+
 /** A memory SecretStore and the map behind it. */
 export function memorySecrets(backend: SecretStore['backend'] = 'keychain') {
   const saved = new Map<SecretName, string>();
   return { store: memorySecretStore({ backend, saved }), saved };
 }
+
+/** A PC for code that searches PATH: only the `executables` (full paths) can run. */
+export const executableLookup = (pc: {
+  readonly platform: NodeJS.Platform;
+  readonly homedir: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly executables?: readonly string[];
+}): ExecutableLookupSystem => ({
+  platform: pc.platform,
+  homedir: pc.homedir,
+  env: pc.env,
+  isExecutable: (path) => Promise.resolve((pc.executables ?? []).includes(path)),
+});
 
 /** A password the real password policy accepts. */
 export const STRONG = 'plum-garage-violin-47';

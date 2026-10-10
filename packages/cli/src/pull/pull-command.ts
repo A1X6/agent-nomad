@@ -1,10 +1,5 @@
 import { type Bundle, type BundleScope, type SourceOs } from '@agentnomad/contracts';
-import {
-  createPathResolver,
-  sourceOsOf,
-  type BundleCodec,
-  type CryptoService,
-} from '@agentnomad/core';
+import type { BundleCodec, CryptoService } from '@agentnomad/core';
 
 import {
   chosenAgent,
@@ -22,12 +17,16 @@ import { showNotices } from '../agents/notices.ts';
 import type { ApiClient } from '../api/api-client.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
-import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
+import { checkProjectFolder, ProjectFolderError } from '../cli/project-folder.ts';
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { planEnvRestore, writeEnvValues } from '../env/env-restore.ts';
 import { ENV_BUNDLE_PATH, parseEnvSection, type EnvSection } from '../env/env-section.ts';
 import type { EnvWriter } from '../env/shell-profile.ts';
-import { fromBundleFiles, preferLocalEquivalents } from '../push/bundle-files.ts';
+import {
+  fromBundleFiles,
+  localPathResolver,
+  preferLocalEquivalents,
+} from '../push/bundle-files.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
 import { printableLine } from '../ui/printable.ts';
@@ -113,8 +112,8 @@ const describe = (adapter: AgentAdapter, setup: SavedSetup) =>
 /**
  * Pull's plan step (T59): chooses saved setups, downloads and checks them, and asks every
  * question before anything is written: an older copy, what would run programs, each file
- * here that differs, saved environment values, and each agent's own questions (T61). Without a terminal, a question the flags
- * leave open stops pull here (T46).
+ * here that differs, saved environment values, and each agent's own questions (T61). Without
+ * a terminal, a question the flags leave open stops pull here (T46).
  */
 export function createPullPlanner(deps: PullDeps) {
   const { prompter, reporter } = deps;
@@ -132,7 +131,11 @@ export function createPullPlanner(deps: PullDeps) {
     if (options.agents) {
       return options.agents.map((id) => {
         const match = withSetups.find((entry) => entry.adapter.id === id);
-        if (!match) throw new Error(`No saved setup for agent "${id}".`);
+        if (!match) {
+          throw new Error(
+            `No saved setup for agent "${id}". Run \`agentnomad list\` to see your saved setups.`,
+          );
+        }
         return chosenAgent(match);
       });
     }
@@ -160,15 +163,7 @@ export function createPullPlanner(deps: PullDeps) {
     const { adapter } = agent;
     // A project is never restored into the home folder or the agent's own folder: its
     // `.claude/` there is the global setup (BUG-05).
-    const refusal = projectFolderRefusal(deps.cwd, {
-      homedir: deps.homedir,
-      baseDir: agent.baseDir,
-      agentName: adapter.displayName,
-      platform: deps.platform,
-    });
-    if (options.project !== undefined && refusal !== null) {
-      throw new ProjectFolderError(deps.cwd, refusal);
-    }
+    const refusal = checkProjectFolder(deps.cwd, agent, deps, options.project !== undefined);
     const mine = saved.filter((setup) => setup.agent === adapter.id);
     const global = mine.find((setup) => setup.projectName === null);
     const projects = mine.filter((setup) => setup.projectName !== null);
@@ -323,7 +318,7 @@ export function createPullPlanner(deps: PullDeps) {
     const scope: BundleScope = bundle.scope;
     const target: ScopeTarget =
       scope.kind === 'global' ? { kind: 'global' } : { kind: 'project', projectDir: deps.cwd };
-    const resolver = createPathResolver({ os: sourceOsOf(deps.platform), homeDir: deps.homedir });
+    const resolver = localPathResolver(deps.platform, deps.homedir);
     let files = fromBundleFiles(bundle.files, resolver);
 
     // What this PC has now: files that only differ in the home path's slashes stay as they
@@ -489,9 +484,9 @@ export function createPullPlanner(deps: PullDeps) {
 
 /**
  * Pull's apply step (T59): writes each planned setup with the answers from the plan, adds the
- * chosen environment values, remembers the revision, then runs each agent's follow-up. It has no prompter, so it never
- * asks: a file that differs but was not asked about (only the restorer saw it) is left as it
- * is, and the setup is not done.
+ * chosen environment values, remembers the revision, then runs each agent's follow-up. It has
+ * no prompter, so it never asks: a file that differs but was not asked about (only the
+ * restorer saw it) is left as it is, and the setup is not done.
  */
 export function createPullApplier(deps: PullApplyDeps) {
   const { reporter } = deps;

@@ -9,6 +9,7 @@ import {
   fakeAdapter,
   fakeApi,
   localStateIn,
+  loggedInStore,
   memorySecretStore,
   recordingReporter,
   scriptedPrompter,
@@ -88,7 +89,7 @@ function fakeServer() {
 function commands(
   server: ReturnType<typeof fakeServer>,
   answers: unknown[] = [],
-  secrets = memorySecretStore({ loggedIn: dataKey }),
+  secrets = loggedInStore(),
 ) {
   const script = scriptedPrompter(answers);
   const { reporter, lines } = recordingReporter();

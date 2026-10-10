@@ -4,6 +4,7 @@ import { BACKUP_MARKER, INCOMING_MARKER } from '@agentnomad/core';
 
 import { TEMP_MARKER } from '../../system/files.ts';
 import { RESERVED_DIR, type ScopeTarget } from '../adapter.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 import {
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
@@ -13,7 +14,6 @@ import {
   IGNORED_COPY_PATTERNS,
   NEVER_SYNCED,
 } from './global-paths.ts';
-import { pathsOf } from '../shared/detector-system.ts';
 import { hookScripts } from './hook-scripts.ts';
 import {
   PROJECT_CLAUDE_FILES,

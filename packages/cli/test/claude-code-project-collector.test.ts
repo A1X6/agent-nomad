@@ -12,6 +12,7 @@ import {
   options,
   project,
   root,
+  stopHook,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
 import { linkFolder, paths, text, writeTestFile } from './fakes.ts';
@@ -122,6 +123,15 @@ describe('project collector: what is taken', () => {
       'scripts/check.py',
     ]);
     expect(text(files, '.claude/hooks/lint.sh')).toBe('npm run lint');
+  });
+
+  it('takes scripts the hooks in settings.local.json run too', async () => {
+    await writeTestFile(join(project, 'scripts', 'mine.py'), 'print(2)');
+    await writeTestFile(
+      join(project, '.claude', 'settings.local.json'),
+      JSON.stringify(stopHook('python scripts/mine.py')),
+    );
+    expect(paths(await collect())).toEqual(['.claude/settings.local.json', 'scripts/mine.py']);
   });
 
   it('returns nothing for a folder without a Claude Code setup', async () => {

@@ -11,8 +11,8 @@ import {
 import { expect } from 'vitest';
 
 import type { LocalServer } from './local-server.ts';
-import { looksCompressedOnly, plaintextLeaks } from './plaintext.ts';
 import { forward, isExecutable, newPc, read, write, type Pc, type RunResult } from './pc.ts';
+import { looksCompressedOnly, plaintextLeaks } from './plaintext.ts';
 
 /** A throwaway account on the throwaway local server; strong enough for the T23 policy. */
 const USERNAME = 'e2e-user';

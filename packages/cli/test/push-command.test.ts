@@ -16,10 +16,15 @@ import {
   collected,
   crypto,
   dataKey,
+  fakeAdapter,
   fakeBundleServer,
+  installedAgent,
   localStateIn,
+  loggedInStore,
   memorySecretStore,
+  missingAgent,
   recordingReporter,
+  revisionOn,
   scriptedPrompter,
   storedOn,
   useDataKey,
@@ -52,7 +57,6 @@ const HOME = posix ? '/home/ahmed' : 'C:\\Users\\ahmed';
 const PROJECT = posix ? '/home/ahmed/work/my-app' : 'C:\\Users\\ahmed\\work\\my-app';
 
 useDataKey();
-const loggedIn = () => memorySecretStore({ loggedIn: dataKey });
 
 let dir: string;
 useTempDir('agentnomad-push-', (temp) => (dir = temp));
@@ -118,7 +122,7 @@ function setup(
   const applyDeps: PushApplyDeps = {
     reporter,
     registry: () => createAgentRegistry([options.adapter ?? collectingAdapter()]),
-    secrets: () => Promise.resolve(options.secrets ?? loggedIn()),
+    secrets: () => Promise.resolve(options.secrets ?? loggedInStore()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
     codec: options.codec ?? createGzipBundleCodec(),
@@ -295,7 +299,7 @@ describe('agentnomad push', () => {
       expect(t.lines).toContain('info: No claude.ai skills of your own were found on this PC.');
     });
 
-    it('asks about them only when there are some; no by default', async () => {
+    it('asks about them when there are some; no by default', async () => {
       const some = withAccountSkills(['my-skill']);
       const t = setup([false], { adapter: some.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
@@ -303,7 +307,9 @@ describe('agentnomad push', () => {
         'Also save a copy of your 1 claude.ai skill (my-skill)? Your claude.ai account already syncs them; the copy is for PCs without that account.',
       ]);
       expect(some.seen).toEqual([false]);
+    });
 
+    it('does not ask about them when there are none', async () => {
       const none = withAccountSkills([]);
       const quiet = setup([], { adapter: none.adapter, pc: 'no-account-skills' });
       await quiet.command.push({ global: true, yes: false, memory: false });
@@ -543,7 +549,7 @@ describe('agentnomad push', () => {
   it('the plan step asks every question and uploads nothing; apply uploads and asks nothing (T59)', async () => {
     const server = await savedFromLaptop();
     const desktop = setup(['global', false, true], { server, pc: 'desktop' });
-    const keys = { secrets: loggedIn(), crypto, dataKey };
+    const keys = { secrets: loggedInStore(), crypto, dataKey };
 
     const plan = await createPushPlanner(desktop.deps).plan(noFlags, keys);
     expect(desktop.script.asked).toEqual([
@@ -567,7 +573,7 @@ describe('agentnomad push', () => {
   it('apply never asks: a copy saved from another PC after the plan is not done (T59)', async () => {
     const server = fakeBundleServer();
     const t = setup(['global', false], { server });
-    const keys = { secrets: loggedIn(), crypto, dataKey };
+    const keys = { secrets: loggedInStore(), crypto, dataKey };
     const plan = await createPushPlanner(t.deps).plan(noFlags, keys);
     // Another PC saves while this push is between its plan and its upload.
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
@@ -660,6 +666,79 @@ describe('agentnomad push', () => {
     // Push keeps its own wording with the shared error (T62).
     await expect(setup([], { secrets: empty }).command.push(noFlags)).rejects.toThrow(
       /^You are not logged in on this PC\. Run `agentnomad login` first\.$/,
+    );
+  });
+});
+
+describe('push: which agents, the project name and what is left out (T95)', () => {
+  /** `t`'s push with these agents registered instead of its one adapter. */
+  const pushWith = (t: ReturnType<typeof setup>, adapters: AgentAdapter[]) =>
+    createPushCommand({ ...t.deps, registry: () => createAgentRegistry(adapters) }).push;
+
+  it('asks which agents when several are installed, and saves only the chosen', async () => {
+    const t = setup([['claude-code'], false]);
+    const other = fakeAdapter('other', 'Other CLI', installedAgent);
+    await pushWith(t, [collectingAdapter(), other])({ global: true, yes: false });
+    expect(t.script.asked).toEqual([
+      'Which agents?',
+      'Include memory (what Claude learned: subagent and auto memory)?',
+    ]);
+    expect(revisionOn(t.server, GLOBAL_SCOPE_KEY)).toBe(1);
+    expect(t.server.stored.size).toBe(1);
+  });
+
+  it('--agent with an unknown id names the next step', async () => {
+    const t = setup([]);
+    await expect(t.command.push({ global: true, yes: true, agents: ['nope'] })).rejects.toThrow(
+      'Unknown agent "nope". Run `agentnomad agents` to see the supported ones.',
+    );
+  });
+
+  it('--agent with an agent that is not installed here says so', async () => {
+    const t = setup([]);
+    const other = fakeAdapter('other', 'Other CLI', missingAgent);
+    await expect(
+      pushWith(t, [collectingAdapter(), other])({ global: true, yes: true, agents: ['other'] }),
+    ).rejects.toThrow('Other CLI is not installed on this PC.');
+  });
+
+  it('says so when no supported agent is installed', async () => {
+    const t = setup([], { adapter: fakeAdapter('claude-code', 'Claude Code', missingAgent) });
+    await t.command.push(noFlags);
+    expect(t.lines).toEqual([
+      'info: No supported agent is installed on this PC, so there is nothing to push.',
+    ]);
+  });
+
+  it('asks again for a project name the server would refuse', async () => {
+    const t = setup(['project', 'my\u0007app', 'my-app', false]);
+    await t.command.push(noFlags);
+    expect(t.script.rejected).toEqual(['Project name must not contain control characters']);
+    expect(await t.state.projectNameFor(PROJECT)).toBe('my-app');
+  });
+
+  it('says when a setup has nothing to save, and uploads nothing', async () => {
+    const t = setup([], { adapter: collectingAdapter({ global: [] }) });
+    await t.command.push({ global: true, yes: true });
+    expect(t.lines).toContain('info: Nothing to save for the Claude Code global setup.');
+    expect(t.server.stored.size).toBe(0);
+  });
+
+  it('names each file the collector left out, with why', async () => {
+    const base = collectingAdapter();
+    const adapter: AgentAdapter = {
+      ...base,
+      collector: {
+        collect: (target, options) => {
+          options.onSkipped?.('big.bin', 'it is larger than 10 MB');
+          return base.collector.collect(target, options);
+        },
+      },
+    };
+    const t = setup([], { adapter });
+    await t.command.push({ global: true, yes: true });
+    expect(t.lines).toContain(
+      'warn: Claude Code global setup: left out\n  - big.bin: it is larger than 10 MB',
     );
   });
 });
