@@ -11,6 +11,7 @@ import { ACCOUNT_SKILLS_PART, planAccountSkills, readSyncedSkills } from './acco
 import { claudeConfigDir, findClaudeExecutable } from './detector.ts';
 import {
   ACCOUNT_SKILLS_PREFIX,
+  PLUGIN_VERSIONS_BUNDLE_PATH,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
 } from './global-paths.ts';
@@ -22,7 +23,12 @@ import {
   readCurrentPlugins,
   type ProgramCli,
 } from './plugin-sync.ts';
-import { readSavedPlugins } from './plugins.ts';
+import {
+  readPluginVersions,
+  readSavedPlugins,
+  readSavedPluginVersions,
+  type PluginVersions,
+} from './plugins.ts';
 import { readSavedPrograms } from './programs.ts';
 
 export interface AfterRestoreDeps {
@@ -80,6 +86,7 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
     }
     const baseDir = claudeConfigDir(deps.system);
     const projectDir = context.target.kind === 'project' ? context.target.projectDir : undefined;
+    const versions = savedVersions(context);
     const choice = await askPluginSync({
       manifest,
       current: await readCurrentPlugins(baseDir, deps.system.platform, projectDir),
@@ -96,8 +103,38 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
         reporter,
         cwd: projectDir ?? deps.system.homedir,
         explainFailure: (reason) => explainPluginFailure(reason, managed),
+        ...(versions !== null && {
+          versions: {
+            saved: versions,
+            installed: (installed) =>
+              readPluginVersions(
+                {
+                  baseDir,
+                  platform: deps.system.platform,
+                  scope:
+                    projectDir === undefined ? { kind: 'global' } : { kind: 'project', projectDir },
+                },
+                installed,
+              ),
+          },
+        }),
       });
     };
+  }
+
+  /**
+   * The saved `plugin-versions.json` (T100); `null` for a bundle without one (pushed before
+   * T100, or with no known version) and for one that cannot be read, which is said.
+   */
+  function savedVersions(context: FollowUpPlanContext): PluginVersions | null {
+    const file = context.files.find((entry) => entry.path === PLUGIN_VERSIONS_BUNDLE_PATH);
+    if (!file) return null;
+    const saved = readSavedPluginVersions(file.content);
+    if ('value' in saved) return saved.value;
+    context.reporter.warn(
+      `Saved plugin versions could not be read, so changed versions are not named: ${saved.problem}`,
+    );
+    return null;
   }
 
   async function programs(context: FollowUpPlanContext): Promise<FollowUp> {
