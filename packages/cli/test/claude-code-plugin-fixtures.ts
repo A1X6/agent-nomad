@@ -242,14 +242,27 @@ export const validateBrokenManifest: ValidateRun = {
 export const MOD_NAME = 'probe-mod';
 
 /**
+ * A mod's module as Claude Code 2.1.296 takes it (T97 probe): a `register` export, and `$` as
+ * the first parameter of each hook (else validate lists `calls: nothing on $`).
+ */
+export const MOD_MODULE = [
+  'export function register(on, options) {',
+  '  on("session.start", async ($, e) => {',
+  '    await $.store.get("seen");',
+  '  });',
+  '}',
+  '',
+].join('\n');
+
+/**
  * A mod's files under `prefix` (`skills/probe-mod/` by default; `''` for paths from the mod's
- * folder): its manifest, `hooks/hooks.json` naming `./register.ts` (the key around the module
- * is assumed: T96 did not record it) and the module.
+ * folder): its manifest, `hooks/hooks.json` with `{"modules": ["./register.ts"]}` and the
+ * module, which validate finds from the `hooks/` folder (2.1.296, T97 probe).
  */
 export const modFiles = (prefix = `skills/${MOD_NAME}/`): CollectedFile[] => [
   collectedJson(`${prefix}.claude-plugin/plugin.json`, { name: MOD_NAME }),
   collectedJson(`${prefix}hooks/hooks.json`, { modules: ['./register.ts'] }),
-  collected(`${prefix}register.ts`, 'export default ($) => $.store.get("seen");\n'),
+  collected(`${prefix}hooks/register.ts`, MOD_MODULE),
 ];
 
 /** `validatePassWithWarning` with these `$` calls on the module's `calls:` line (T97). */

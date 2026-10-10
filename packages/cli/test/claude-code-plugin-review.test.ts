@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  MOD_MODULE,
   MOD_NAME,
   modFiles,
   validateBrokenManifest,
@@ -78,7 +79,11 @@ describe('claude plugin validate on a plugin folder (T97)', () => {
     const [call] = calls;
     expect(call?.args.slice(0, 3)).toEqual(['plugin', 'validate', '--json']);
     expect(call?.args[3]?.startsWith(join(tmpdir(), 'agentnomad-plugin-review-'))).toBe(true);
-    expect(call?.files).toEqual(['.claude-plugin/plugin.json', 'hooks/hooks.json', 'register.ts']);
+    expect(call?.files).toEqual([
+      '.claude-plugin/plugin.json',
+      'hooks/hooks.json',
+      'hooks/register.ts',
+    ]);
   });
 
   it('removes the copy afterwards', async () => {
@@ -93,7 +98,7 @@ describe('claude plugin validate on a plugin folder (T97)', () => {
     expect(calls[0]?.files).toEqual([
       '.claude-plugin/plugin.json',
       'hooks/hooks.json',
-      'register.ts',
+      'hooks/register.ts',
     ]);
   });
 
@@ -150,6 +155,26 @@ describe('the review of a plugin folder (T97)', () => {
         calls: ['$.store.get', '$.store.set', '$.ui.status'],
         risky: [],
       },
+    ]);
+  });
+
+  it('a module that calls nothing on $ has no calls', async () => {
+    const { validator } = await validatorFor(validatePassCalling(['nothing on $']));
+    expect((await reviewPluginFolder(mod(), validator)).modules[0]?.calls).toEqual([]);
+  });
+
+  it('keeps a hook filter with commas as one hook', async () => {
+    const run = validatePassCalling(['$.store.get']);
+    const json = structuredClone(run.json) as { contents: { notes: string[] }[] };
+    json.contents[0]?.notes.splice(
+      0,
+      1,
+      './register.ts hooks: tool.call{tool=Bash,Edit}, session.start',
+    );
+    const { validator } = await validatorFor({ ...run, json });
+    expect((await reviewPluginFolder(mod(), validator)).modules[0]?.hooks).toEqual([
+      'tool.call{tool=Bash,Edit}',
+      'session.start',
     ]);
   });
 
@@ -218,7 +243,7 @@ describe('asking before writing a plugin folder with code (T97)', () => {
   it('offers the source of a module with risky calls', async () => {
     const t = await gate(validatePassCalling(['$.process.spawn']), {}, [true, false]);
     expect(t.asked[0]).toBe('Show the source of ./register.ts in probe-mod@skills-dir?');
-    expect(t.lines).toContain('export default ($) => $.store.get("seen");\n');
+    expect(t.lines).toContain(MOD_MODULE);
   });
 
   it('--yes never accepts it', async () => {
@@ -275,7 +300,7 @@ describe('whether a plugin folder is new or changed here (T97)', () => {
   });
 
   it('changed when a file differs', async () => {
-    await writeTestFile(join(dir, 'register.ts'), 'old');
+    await writeTestFile(join(dir, 'hooks', 'register.ts'), 'old');
     expect(await pluginFolderChange(dir, mod())).toBe('changed');
   });
 

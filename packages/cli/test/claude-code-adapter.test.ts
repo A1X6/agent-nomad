@@ -223,7 +223,7 @@ describe('Claude Code plan step: plugin folders in skills/ (T97)', () => {
   it('writes a mod after a yes', async () => {
     const t = await planStep([true]);
     const report = await t.planned.restore(answer('skip'), {});
-    expect(report.written).toContain('skills/probe-mod/register.ts');
+    expect(report.written).toContain('skills/probe-mod/hooks/register.ts');
     expect(t.planned.declined).toBe(false);
   });
 

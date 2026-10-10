@@ -159,11 +159,40 @@ export interface PluginReview {
 
 const NOTE = /^(.+?) (hooks|calls): (.*)$/;
 
-const listed = (text: string) =>
-  text
-    .split(',')
-    .map((part) => part.trim())
-    .filter((part) => part !== '');
+/** What validate writes on a `calls:` line when a module calls no `$` method. */
+const NO_CALLS = 'nothing on $';
+
+/** A note's list, split on commas outside `{…}` (`tool.call{tool=Bash}`). */
+function listed(text: string): string[] {
+  if (text.trim() === NO_CALLS) return [];
+  const parts: string[] = [];
+  let depth = 0;
+  let part = '';
+  for (const char of text) {
+    if (char === '{') depth += 1;
+    if (char === '}') depth = Math.max(0, depth - 1);
+    if (char === ',' && depth === 0) {
+      parts.push(part);
+      part = '';
+    } else part += char;
+  }
+  parts.push(part);
+  return parts.map((item) => item.trim()).filter((item) => item !== '');
+}
+
+/**
+ * A module's file in the folder: validate names modules as `hooks/hooks.json` does, from the
+ * `hooks/` folder (`./register.ts` is `hooks/register.ts`); `null` when it leaves the folder.
+ */
+function moduleFile(module: string): string | null {
+  const parts: string[] = [];
+  for (const part of ['hooks', ...module.split('/')]) {
+    if (part === '' || part === '.') continue;
+    if (part !== '..') parts.push(part);
+    else if (parts.pop() === undefined) return null;
+  }
+  return parts.join('/');
+}
 
 /** The modules in validate's notes, in the order it lists them. */
 function modulesOf(notes: readonly string[]): ModuleReview[] {
@@ -259,7 +288,7 @@ const riskyModuleFiles = (review: PluginReview, folder: PluginFolderToReview) =>
   review.modules
     .filter((module) => module.risky.length > 0)
     .flatMap((module) => {
-      const path = module.module.replace(/^\.\//, '');
+      const path = moduleFile(module.module);
       const file = folder.files.find((entry) => entry.path === path);
       return file ? [{ module: module.module, file }] : [];
     });

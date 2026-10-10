@@ -691,7 +691,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const t = pullOn(b, server, []);
     // No claude on this PC's PATH: the mod is unreviewed code, which --yes never writes.
     await t.pull({ global: true, yes: true });
-    expect(await exists(join(b.base, 'skills', 'probe-mod', 'register.ts'))).toBe(false);
+    expect(await exists(join(b.base, 'skills', 'probe-mod', 'hooks', 'register.ts'))).toBe(false);
     expect(await t.state.isPartial('claude-code', GLOBAL_SCOPE_KEY)).toBe(true);
   });
 
