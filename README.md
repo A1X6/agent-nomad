@@ -190,6 +190,28 @@ The other setups are still done first, and one message lists what was not.
 Settings your organization manages on a PC are never synced; agentnomad tells you when they
 exist.
 
+### Where plugins come from, and what happens to each
+
+| Plugin source                                                                                           | Push                                                                                                                | Pull                                                                                                                | Reviewed before it is written                                              |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| A marketplace from GitHub, git or a URL                                                                 | Saves which plugins you installed and their versions, never their files                                             | Reinstalls them with `claude plugin`; Claude Code installs the latest version, and pull names each one that changed | Installing needs a yes or `--allow-commands`; `--yes` alone never installs |
+| [A marketplace added from a local folder](#marketplaces-added-from-a-local-folder)                      | Saves its files, and its remote and commit when the commit is pushed                                                | Writes the folder back, re-cloned first when it can, then adds it and installs its plugins                          | Each plugin in it, as for `skills/`                                        |
+| [A plugin or mod in `~/.claude/skills/`](#plugins-and-mods-in-skills)                                   | Saved with `skills/`                                                                                                | Written back to `skills/`                                                                                           | Yes: `claude plugin validate` and what each module hooks into and calls    |
+| [A folder in `CLAUDE_CODE_PLUGIN_DIRS`](#plugin-folders-in-claude_code_plugin_dirs)                     | Saves its files, as for a local marketplace                                                                         | Writes the folder back and points the value at it, with this PC's separator                                         | Yes, as for `skills/`                                                      |
+| A plugin you uploaded to claude.ai (opt-in, `--account-plugins`)                                        | Saves a copy of its folder                                                                                          | Adds it to `skills/` on a PC without that claude.ai account                                                         | Yes, as for `skills/`                                                      |
+| [Plugin data](#plugin-data) (opt-in, `--plugin-data`)                                                   | Saves it for the plugins the setup puts back                                                                        | Puts it back after they are installed, only for a plugin installed here                                             | No (it is data, not code); a file here that differs is asked about         |
+| claude.ai's directory (Anthropic's plugins), your organization's, and ones claude.ai installs by itself | Never: claude.ai or your organization gives them to each PC; push names the ones it leaves out                      |                                                                                                                     |                                                                            |
+| Mods in development (`~/.claude/dev-mods/`)                                                             | Never: Claude Code deletes them after a while; push names each one so you can move it to `skills/` or a marketplace |                                                                                                                     |                                                                            |
+| `--plugin-dir` and plugins an SDK passes                                                                | Never: they are given to one run and written nowhere agentnomad can see                                             |                                                                                                                     |                                                                            |
+
+Plugin caches, a folder's `.git/` and the files git ignores, and what Claude Code generates in a
+plugin (`.claude-plugin/types/`) are never saved. A plugin with code is written only after your
+yes or with `--allow-commands`; one that `claude plugin validate` finds broken only after your
+yes. Pull warns when the setup has mods (in `skills/`, a saved local marketplace or a plugin
+folder) and this PC's Claude Code is older than 2.1.287, the first that loads them. Saved
+folders and plugin data are encrypted like the rest of the setup and saved as they are, so a
+key written in them travels too: keep keys in environment variables, which push asks about.
+
 ### Plugins and mods in `skills/`
 
 A folder in `~/.claude/skills/` with `.claude-plugin/plugin.json` is a plugin Claude Code
@@ -213,11 +235,6 @@ outside home goes to `~/.agentnomad/plugin-dirs/<name>`), reviews it like a plug
 own `~/.claude/settings.json` is read: Claude Code takes this variable from no project
 settings file. Plugins given to one run with `--plugin-dir`, or passed by an SDK, are never
 written anywhere agentnomad can see, so they are not synced.
-
-Pull warns when the setup has mods and this PC's Claude Code is older than 2.1.287, the first
-that loads them. Push never saves `~/.claude/dev-mods/` (mods a session is still developing,
-which Claude Code deletes after a while) and names each one so you can move it to `skills/`
-or a marketplace.
 
 ### Marketplaces added from a local folder
 
