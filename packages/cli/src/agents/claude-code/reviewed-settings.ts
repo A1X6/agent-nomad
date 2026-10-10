@@ -15,7 +15,17 @@ export const COMMAND_SETTINGS = [
   'gcpAuthRefresh',
   'otelHeadersHelper',
   'fileSuggestion',
+  // `{ type: "command", command }`, run for each subagent's status line (named by the
+  // changelog for 2.1.293; read from any settings file by the 2.1.296 program, T107).
+  'subagentStatusLine',
 ];
+
+/**
+ * The Claude apps gateway that `/login` signs in to, so every request goes there (changelog
+ * for 2.1.295). The 2.1.296 program reads it from user settings only, with `forceLoginMethod`
+ * set to `gateway` (T107).
+ */
+export const LOGIN_GATEWAY_SETTING = 'forceLoginGatewayUrl';
 
 /**
  * `env` names in a settings file that send Claude Code's requests, prompts or telemetry
@@ -67,6 +77,7 @@ export const WATCHED_SETTINGS: readonly string[] = [
   ...COMMAND_SETTINGS,
   ...LOOSENING_SETTINGS,
   ...REDIRECT_VARIABLES,
+  LOGIN_GATEWAY_SETTING,
 ];
 
 /**

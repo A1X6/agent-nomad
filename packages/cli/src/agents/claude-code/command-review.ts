@@ -11,7 +11,11 @@ import {
   isScript,
   TOOL_SETTINGS_BUNDLE_PATHS,
 } from './global-paths.ts';
-import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
+import {
+  COMMAND_SETTINGS,
+  isRedirectVariable,
+  LOGIN_GATEWAY_SETTING,
+} from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 import {
   commandsInSettings,
@@ -149,6 +153,16 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
     if (LOADER_VARIABLE.test(name) || isRedirectVariable(name)) {
       entries.push(entry(file.path, `setting env ${name}`, `${name}=${String(value)}`));
     }
+  }
+  // The gateway `/login` signs in to, from the user settings it is read from (T107). The note
+  // says whether `forceLoginMethod` turns it on, so turning it on later shows as a change.
+  const gateway = json[LOGIN_GATEWAY_SETTING];
+  if (typeof gateway === 'string' && GLOBAL_SETTINGS_FILES.includes(file.path)) {
+    const note =
+      json['forceLoginMethod'] === 'gateway'
+        ? 'sign-in and requests go to this Claude apps gateway'
+        : 'used once forceLoginMethod is gateway';
+    entries.push(entry(file.path, `setting ${LOGIN_GATEWAY_SETTING}`, `${gateway} (${note})`));
   }
   // A starting mode that lets Claude act without asking, from the files it takes effect in.
   const permissions = JsonObjectSchema.safeParse(json['permissions']);

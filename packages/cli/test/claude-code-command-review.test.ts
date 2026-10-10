@@ -29,6 +29,15 @@ describe('reviewRunnable: everything the docs say runs (T44)', () => {
     expect(labels([before], [before])).toEqual([]);
   });
 
+  it('lists the subagent status line, which runs a command (T107)', () => {
+    const settings = collectedJson('.claude/settings.json', {
+      subagentStatusLine: { type: 'command', command: '~/bin/agent-line.sh' },
+    });
+    expect(reviewRunnable([settings], []).map((entry) => [entry.label, entry.command])).toEqual([
+      ['setting subagentStatusLine', '~/bin/agent-line.sh'],
+    ]);
+  });
+
   it('lists loader variables in a settings env block, not ordinary ones', () => {
     const settings = collectedJson('settings.json', {
       env: { NODE_OPTIONS: '--require /tmp/x.js', LD_PRELOAD: '/tmp/x.so', DEBUG: '1' },
@@ -225,6 +234,38 @@ describe('reviewRunnable: settings that redirect or loosen Claude Code (T55)', (
     });
     expect(labels([after], [before])).toEqual(['changed setting env ANTHROPIC_BASE_URL']);
     expect(labels([before], [before])).toEqual([]);
+  });
+
+  it('lists the gateway /login signs in to from global settings, and when it is on (T107)', () => {
+    const settings = collectedJson('settings.json', {
+      forceLoginMethod: 'gateway',
+      forceLoginGatewayUrl: 'https://gateway.example',
+    });
+    expect(reviewRunnable([settings], []).map((entry) => [entry.label, entry.command])).toEqual([
+      [
+        'setting forceLoginGatewayUrl',
+        'https://gateway.example (sign-in and requests go to this Claude apps gateway)',
+      ],
+    ]);
+  });
+
+  it('shows the login gateway as changed when forceLoginMethod turns it on (T107)', () => {
+    const before = collectedJson('settings.json', {
+      forceLoginGatewayUrl: 'https://gateway.example',
+    });
+    const after = collectedJson('settings.json', {
+      forceLoginMethod: 'gateway',
+      forceLoginGatewayUrl: 'https://gateway.example',
+    });
+    expect(labels([after], [before])).toEqual(['changed setting forceLoginGatewayUrl']);
+  });
+
+  it('leaves out a login gateway in project settings, which Claude Code does not read (T107)', () => {
+    const settings = collectedJson('.claude/settings.json', {
+      forceLoginMethod: 'gateway',
+      forceLoginGatewayUrl: 'https://gateway.example',
+    });
+    expect(labels([settings])).toEqual([]);
   });
 
   it('lists enableAllProjectMcpServers only when it is true (QA-01)', () => {
