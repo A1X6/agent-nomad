@@ -14,6 +14,7 @@ const HookSchema = z.looseObject({
   url: z.string().optional(),
 });
 const HookCommandSchema = z.looseObject({ command: z.string().optional() });
+const HookGroupSchema = z.looseObject({ hooks: z.array(z.unknown()).optional() });
 
 /**
  * One item of a settings `hooks` block: a hook, or a part of the block that could not be
@@ -39,7 +40,7 @@ export function hookItems(hooks: unknown): HookItem[] {
       continue;
     }
     for (const group of groups) {
-      const parsed = z.looseObject({ hooks: z.array(z.unknown()).optional() }).safeParse(group);
+      const parsed = HookGroupSchema.safeParse(group);
       if (!parsed.success) {
         items.push({ event, unreadable: group });
         continue;
