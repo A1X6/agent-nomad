@@ -228,6 +228,8 @@ loop) into a shared `agents/shared/` module rather than copying them.
   organization-managed settings (see `claude-code/managed-settings.ts`).
 - **`inspector.versionNotice(savedWith, here)`:** what pull says about the version a setup
   was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text).
+- **`inspector.pushNotes(files)`:** lines push's summary adds about the collected files, such
+  as the plugins among them (see `skillsPluginsNote` in `claude-code/skills-dir-plugins.ts`).
 - **`optionalParts`:** what push saves only after a yes, as data (an id, its scope, what
   there is, the question, and `flagHelp`, the help for `--<id>` / `--no-<id>` in push and
   pull); the collector gets the chosen ids in `options.include`. The command line builds
@@ -242,7 +244,8 @@ loop) into a shared `agents/shared/` module rather than copying them.
   is written, such as reinstalling extensions with the agent's own commands. It returns how
   to write the setup (usually the restorer's `restore`) and a follow-up that runs after
   writing and gets no prompter. Respect `context.assumeYes` and `context.allowCommands`:
-  without `allowCommands`, never install or run anything unasked.
+  without `allowCommands`, never install or run anything unasked. When its questions leave
+  part of the setup out, it returns `declined: true`, so a later push asks first.
 
 ## Step 7 · Put the adapter together
 

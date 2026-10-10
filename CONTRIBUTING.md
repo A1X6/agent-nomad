@@ -146,7 +146,10 @@ open, such as a chat or an option letter from a discussion.
     `ValidateRun` (`validatePassWithWarning`, `validateBrokenManifest`, the mod folder shown
     as `VALIDATED_MOD`); and the claude.ai synced files of `SYNCED_ACCOUNT`
     (`syncedSkillsManifest`, `olderSyncedSkillsManifest`, `syncedPluginsManifest`,
-    `syncedPluginMeta`, `syncedMarketplaces`, all written by `syncedSources`).
+    `syncedPluginMeta`, `syncedMarketplaces`, all written by `syncedSources`); a mod in
+    `skills/` (T97: `MOD_NAME`, `MOD_MODULE`, `modFiles`), a validate report with other
+    `$` calls (`validatePassCalling`) and a `claude` that answers validate with a report
+    (`validateCli`, for `findPluginValidator` with `executableLookup`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).
   - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`

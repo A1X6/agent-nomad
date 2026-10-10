@@ -178,6 +178,18 @@ The other setups are still done first, and one message lists what was not.
 Settings your organization manages on a PC are never synced; agentnomad tells you when they
 exist.
 
+### Plugins and mods in `skills/`
+
+A folder in `~/.claude/skills/` with `.claude-plugin/plugin.json` is a plugin Claude Code
+loads as `<name>@skills-dir`; with `hooks/hooks.json` it is a mod that runs code inside Claude
+Code. Push saves it with the rest of `skills/` (never `.claude-plugin/types/`, which Claude
+Code generates) and names it in its summary. Before pull writes a new or changed one, it runs
+`claude plugin validate` on a copy and shows what each module hooks into and calls, flagging
+programs, file writes, model and network calls; you can read the module first. A plugin with
+code is written only after your yes or with `--allow-commands`; `--yes` alone never writes
+it, and one that validate finds broken needs your yes. Without Claude Code on the PC, the
+plugin counts as unreviewed code.
+
 ## Security
 
 - Your password never leaves your PC. A key derived from it (Argon2id) unlocks a random data
