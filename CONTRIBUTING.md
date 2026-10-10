@@ -155,7 +155,8 @@ open, such as a chat or an option letter from a discussion.
     hooks (`validatePassNoHooks`, T101) and a `claude` that answers validate with a report
     (`validateCli`, for `findPluginValidator` with `executableLookup`); a marketplace added
     from a local folder (T98: `writeLocalMarketplace`, `addedFromFolders`, `localModId`) and
-    a scripted `git` (`scriptedGit` with `GitAnswer`).
+    a scripted `git` (`scriptedGit` with `GitAnswer`); a plugin's data folder and store file
+    (T102: `writePluginData`, `writePluginStore`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).
   - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`
