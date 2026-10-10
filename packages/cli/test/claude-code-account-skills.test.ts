@@ -75,6 +75,14 @@ describe('claude.ai skills (T42): reading and saving', () => {
     expect(found.own).toEqual([]);
     expect(found.problem).toContain('in a format agentnomad does not know');
   });
+
+  it('names every account whose manifest cannot be read, not only the last', async () => {
+    await writeTestFile(synced('manifest.json'), '{"version": 2, "entries": []}');
+    await writeTestFile(join(base, 'skills', 'synced', 'other-account', 'manifest.json'), 'x');
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
+    expect(found.problem?.match(/Claude Code's list of synced skills/g)).toHaveLength(2);
+    expect(found.problem).toContain('(skills/synced/other-account/manifest.json)');
+  });
 });
 
 /** A claude.ai skill as push saves it, holding `content` as it is. */
