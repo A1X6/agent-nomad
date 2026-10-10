@@ -439,11 +439,12 @@ marketplace of scope `account` in `.marketplaces.json`; `org` and `default` (an
 organization's, claude.ai's directory) are left out and named. Without `.marketplaces.json`
 an organization's skill cannot be told apart, and push says so; with it, a skill whose
 marketplace cannot be found, or with a `source` agentnomad does not know, is left out and
-named. Anthropic's (`anthropic`, `anthropic-example`) and `session-refs` are never saved. On pull they are listed and, after a yes (or
-`--account-skills`), written as normal local skills in `~/.claude/skills/<name>/`, skipping
-any this PC already gets from claude.ai and never replacing a local skill. A local skill
-runs its `!`command`` lines where a synced one does not, so such skills are marked, and a
-flag alone adds them only with `--allow-commands`.
+named. Anthropic's (`anthropic`, `anthropic-example`) and `session-refs` are never saved.
+On pull they are listed and, after a yes (or `--account-skills`), written as normal local
+skills in `~/.claude/skills/<name>/`, skipping any this PC already gets from claude.ai and
+never replacing a local skill. A local skill runs its `!`command`` lines where a synced one
+does not, so such skills are marked, and a flag alone adds them only with
+`--allow-commands`.
 
 **After restore:** plugins are reinstalled with Claude Code's own `claude plugin
 marketplace add` and `claude plugin install` (on Windows a `.cmd` launcher runs through
