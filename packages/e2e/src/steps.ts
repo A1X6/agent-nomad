@@ -262,19 +262,39 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     await write(join(pc.project, 'CLAUDE.md'), 'Project rules.\n');
     await write(join(pc.project, '.mcp.json'), JSON.stringify(MCP_JSON));
     await write(memoryFile(pc), MEMORY);
-    // Skills Claude Code synced from claude.ai (T42): the user's own and one of Anthropic's.
+    // Skills Claude Code 2.1.295 synced from claude.ai (T42, T105): no creatorType; the
+    // user's own upload, one of Anthropic's and one of an organization's plugins.
     const synced = (...parts: string[]) => claude(pc, 'skills', 'synced', 'account-1', ...parts);
+    const syncedPlugins = (file: string) => claude(pc, 'plugins', 'synced', 'account-1', file);
     await write(
       synced('manifest.json'),
       JSON.stringify({
         skills: [
-          { name: 'my-account-skill', creatorType: 'user' },
-          { name: 'pdf', creatorType: 'anthropic' },
+          { name: 'my-account-skill', source: 'plugin', backingPluginId: 'plugin_mine' },
+          { name: 'pdf', source: 'anthropic' },
+          { name: 'team-skill', source: 'plugin', backingPluginId: 'plugin_team' },
         ],
       }),
     );
+    await write(
+      syncedPlugins('manifest.json'),
+      JSON.stringify({
+        plugins: [
+          { pluginId: 'plugin_mine', marketplaceName: 'my-uploads' },
+          { pluginId: 'plugin_team', marketplaceName: 'team-org' },
+        ],
+      }),
+    );
+    await write(
+      syncedPlugins('.marketplaces.json'),
+      JSON.stringify([
+        { name: 'my-uploads', scope: 'account' },
+        { name: 'team-org', scope: 'org' },
+      ]),
+    );
     await write(synced('my-account-skill', 'SKILL.md'), ACCOUNT_SKILL);
     await write(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic.\n');
+    await write(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nTeam.\n');
 
     ok(await pc.run(['register', ...LOGIN, '--yes'], stdin));
     const secretsHere = await known(pc);
@@ -301,6 +321,10 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     expect(pushed.stdout).toContain('Saved the Claude Code project "demo"');
     // T49: a normal setup gets no false "not saved" warning (its hook script is saved).
     expect(pushed.stderr).not.toContain('left out, because agentnomad does not know');
+    // T105: the organization's skill is named as left out.
+    expect(pushed.stderr).toContain(
+      'Not saved from claude.ai account account-1: team-skill (it comes from your organization or claude.ai, not from you).',
+    );
 
     const status = ok(await pc.run(['status']));
     expect(status.stdout).toContain('Claude Code global setup: up to date (revision 1)');
@@ -364,9 +388,11 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
     expect(pulled.stdout).toContain('Restored the Claude Code global setup');
     expect(pulled.stdout).toContain('Restored the Claude Code project "demo"');
     await expectRestored(pc, false);
-    // T42: the user's own claude.ai skill is a local skill here; Anthropic's never came along.
+    // T42: the user's own claude.ai skill is a local skill here; Anthropic's and the
+    // organization's never came along.
     expect(await read(claude(pc, 'skills', 'my-account-skill', 'SKILL.md'))).toBe(ACCOUNT_SKILL);
     await expect(read(claude(pc, 'skills', 'pdf', 'SKILL.md'))).rejects.toThrow();
+    await expect(read(claude(pc, 'skills', 'team-skill', 'SKILL.md'))).rejects.toThrow();
     await expect(
       read(claude(pc, 'skills', 'synced', 'account-1', 'manifest.json')),
     ).rejects.toThrow();

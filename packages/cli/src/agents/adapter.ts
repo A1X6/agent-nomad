@@ -58,8 +58,15 @@ export interface OptionalPart {
   readonly id: string;
   /** The setup it belongs to. */
   readonly scope: ScopeTarget['kind'];
-  /** What there is to save on this PC, or why it cannot be read. */
-  available(): Promise<{ readonly names: readonly string[]; readonly problem: string | null }>;
+  /**
+   * What there is to save on this PC, or why it cannot be read, and what to say before asking
+   * (`notice`, e.g. what was left out and why).
+   */
+  available(): Promise<{
+    readonly names: readonly string[];
+    readonly problem: string | null;
+    readonly notice?: string | null;
+  }>;
   /** Push's question, e.g. `Also save a copy of your 2 claude.ai skills (a, b)? …`. */
   question(names: readonly string[]): string;
   /** Said when it cannot be read, given `available()`'s problem. */
