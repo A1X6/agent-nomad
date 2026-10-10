@@ -22,7 +22,7 @@ import {
   homePathProblem,
   extensionOf,
   isScript,
-  TOOL_CONFIG_FILES,
+  TOOL_SETTINGS_BUNDLE_PATHS,
 } from './global-paths.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
@@ -53,6 +53,20 @@ const underAnyCase = (path: string, folder: string) =>
 
 const refused = (reason: string): RestoreDestination => ({ kind: 'refused', reason });
 
+/** What a global entry may be written under, built once: the synced folders. */
+const GLOBAL_FOLDER_PREFIXES: readonly string[] = [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].map(
+  (folder) => `${folder}/`,
+);
+
+/** What a project entry may be written as or under in `.claude/`, built once. */
+const PROJECT_CLAUDE_PATHS: readonly string[] = PROJECT_CLAUDE_FILES.map(
+  (name) => `.claude/${name}`,
+);
+const PROJECT_FOLDER_PREFIXES: readonly string[] = [
+  ...PROJECT_CLAUDE_FOLDERS,
+  ...PROJECT_MEMORY_FOLDERS,
+].map((folder) => `.claude/${folder}/`);
+
 /**
  * Home files a bundle may restore: known tool settings, or scripts that the setup's own hooks
  * or status line run (`allowedScripts`, T38). Any other file could be one that runs by itself
@@ -65,9 +79,10 @@ function homeDestination(
 ): RestoreDestination {
   const problem = homePathProblem(relative);
   if (problem !== null) return refused(problem);
-  const toolSettings = Object.values(TOOL_CONFIG_FILES).flat();
-  if (toolSettings.includes(relative) || allowedScripts.has(HOME_SCRIPTS_PREFIX + relative))
+  const bundlePath = HOME_SCRIPTS_PREFIX + relative;
+  if (TOOL_SETTINGS_BUNDLE_PATHS.has(bundlePath) || allowedScripts.has(bundlePath)) {
     return { kind: 'home', path: relative };
+  }
   return refused('no hook or status line in this setup runs it');
 }
 
@@ -96,8 +111,7 @@ export function globalDestination(
   if (GLOBAL_REFUSED.some((entry) => underAnyCase(path, entry))) return refused('never synced');
 
   const allowed =
-    GLOBAL_FILES.includes(path) ||
-    [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS].some((folder) => path.startsWith(`${folder}/`));
+    GLOBAL_FILES.includes(path) || GLOBAL_FOLDER_PREFIXES.some((prefix) => path.startsWith(prefix));
   if (allowed) return { kind: 'target', path };
   if (isScript(path)) {
     return allowedScripts.has(path)
@@ -128,11 +142,10 @@ export function projectDestination(
     return refused('never synced');
   }
 
-  const claudeFolders = [...PROJECT_CLAUDE_FOLDERS, ...PROJECT_MEMORY_FOLDERS];
   const allowed =
     PROJECT_ROOT_FILES.includes(path) ||
-    PROJECT_CLAUDE_FILES.some((name) => path === `.claude/${name}`) ||
-    claudeFolders.some((folder) => path.startsWith(`.claude/${folder}/`)) ||
+    PROJECT_CLAUDE_PATHS.includes(path) ||
+    PROJECT_FOLDER_PREFIXES.some((prefix) => path.startsWith(prefix)) ||
     (isScript(path) && (path.startsWith('.claude/') || allowedScripts.has(path)));
   return allowed ? { kind: 'target', path } : refused('not part of a Claude Code setup');
 }
