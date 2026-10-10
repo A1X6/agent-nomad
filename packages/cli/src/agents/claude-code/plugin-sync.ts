@@ -13,6 +13,7 @@ import {
   type MarketplaceEntry,
   type PluginEntry,
   type PluginManifest,
+  type PluginVersions,
 } from './plugins.ts';
 
 /**
@@ -124,9 +125,20 @@ export interface PluginSyncChoice {
   readonly declined: readonly string[];
 }
 
+/**
+ * The versions push saved (T100) and a reader of the versions now installed. Claude Code
+ * 2.1.296 installs only the latest version of a plugin, so pull names each one that changed.
+ */
+export interface SavedVersionCheck {
+  readonly saved: PluginVersions;
+  readonly installed: (plugins: readonly PluginEntry[]) => Promise<PluginVersions | null>;
+}
+
 export interface InstallPluginsDeps {
   readonly claude: ProgramCli;
-  readonly reporter: Pick<Reporter, 'success' | 'warn'>;
+  readonly reporter: Pick<Reporter, 'info' | 'success' | 'warn'>;
+  /** Saved versions to compare with what was installed; left out for a bundle without them. */
+  readonly versions?: SavedVersionCheck;
   /** Where project-scope plugins are installed; the home folder for a global setup. */
   readonly cwd: string;
   /** Turns an install failure into a clearer reason, e.g. "blocked by your organization" (T31). */
@@ -187,6 +199,32 @@ export async function askPluginSync(deps: AskPluginSyncDeps): Promise<PluginSync
   return { marketplaces: plan.marketplaces, plugins, declined };
 }
 
+/** Names each just-installed plugin whose version is not the saved one, one line each (T100). */
+async function reportVersionChanges(
+  check: SavedVersionCheck,
+  installed: readonly PluginEntry[],
+  reporter: Pick<Reporter, 'info'>,
+): Promise<void> {
+  const versionOf = (versions: PluginVersions | null, plugin: PluginEntry) =>
+    versions?.plugins.find((entry) => entry.id === plugin.id && entry.scope === plugin.scope)
+      ?.version;
+  const now = await check.installed(installed);
+  const changed = installed.flatMap((plugin) => {
+    const was = versionOf(check.saved, plugin);
+    const is = versionOf(now, plugin);
+    return was !== undefined && is !== undefined && was !== is
+      ? [`  ${plugin.id}  was ${was}, now ${is}`]
+      : [];
+  });
+  if (changed.length === 0) return;
+  reporter.info(
+    [
+      'Claude Code installs only the latest version of a plugin, so these changed:',
+      ...changed,
+    ].join('\n'),
+  );
+}
+
 /**
  * Installs what the user agreed to (T29, T61): adds the marketplaces, then installs the
  * plugins with Claude Code's own commands. Asks nothing.
@@ -238,6 +276,10 @@ export async function installPlugins(
 
   if (result.installed.length > 0) {
     deps.reporter.success(`Reinstalled ${result.installed.join(', ')}.`);
+    if (deps.versions) {
+      const installed = choice.plugins.filter((plugin) => result.installed.includes(plugin.id));
+      await reportVersionChanges(deps.versions, installed, deps.reporter);
+    }
   }
   for (const failure of result.failed)
     deps.reporter.warn(`Could not install ${failure.what}: ${failure.reason}`);

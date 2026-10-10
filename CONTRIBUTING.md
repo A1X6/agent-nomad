@@ -179,7 +179,9 @@ open, such as a chat or an option letter from a discussion.
   on all three (use `path.join`, never assume `/`).
 - A change to push, pull or the bundle belongs in the end-to-end steps too
   (`packages/e2e/src/steps.ts`), including the check that nothing readable leaves the PC
-  (`packages/e2e/src/plaintext.ts`: as text, encoded or compressed).
+  (`packages/e2e/src/plaintext.ts`: as text, encoded or compressed). A PC that pulls plugins
+  gets the `claude` command of `packages/e2e/src/fake-claude.ts` (`newPc` option `claude`),
+  never the real Claude Code.
 
 ## Pull requests
 

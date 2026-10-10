@@ -274,6 +274,21 @@ describe('pull says when saved plugins or programs cannot be read (BUG-01)', () 
     expect(t.lines.some((line) => line.startsWith('Saved plugins could not be read: '))).toBe(true);
   });
 
+  it('warns when plugin-versions.json cannot be read, and still reinstalls (T100)', async () => {
+    const { cli, runs } = recordingCli();
+    const plugins = savedPlugins([], [brag]);
+    const t = context([plugins, collected('.agentnomad/plugin-versions.json', '{')]);
+    await afterRestore({ system: system(['/usr/bin/claude']), cli })(t.ctx);
+    expect(runs).toEqual(['/usr/bin/claude plugin install brag@brag --scope user --json']);
+    expect(
+      t.lines.some((line) =>
+        line.startsWith(
+          'Saved plugin versions could not be read, so changed versions are not named: ',
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it('offers the other programs and names one it refuses', async () => {
     const { cli, runs } = recordingCli();
     const saved = savedPrograms([

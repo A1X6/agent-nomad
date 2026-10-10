@@ -8,6 +8,7 @@ import {
   CLAUDE_JSON_BUNDLE_PATH,
   globalDestination,
   hookScripts,
+  PLUGIN_VERSIONS_BUNDLE_PATH,
   projectDestination,
 } from '../src/index.ts';
 
@@ -155,6 +156,7 @@ describe('restore rules: places what a collector produces', () => {
       'agent-memory/reviewer/MEMORY.md',
       { kind: 'target', path: 'agent-memory/reviewer/MEMORY.md' },
     ],
+    [PLUGIN_VERSIONS_BUNDLE_PATH, { kind: 'metadata' }],
   ])('global: %s', (path, destination) => {
     expect(globalDestination(path, new Set())).toEqual(destination);
   });
@@ -165,6 +167,8 @@ describe('restore rules: places what a collector produces', () => {
       { kind: 'target', path: '.claude/agent-memory/reviewer/MEMORY.md' },
     ],
     ['.agentnomad/auto-memory/MEMORY.md', { kind: 'auto-memory', path: 'MEMORY.md' }],
+    // Read by pull to name changed plugin versions (T100), never written.
+    [PLUGIN_VERSIONS_BUNDLE_PATH, { kind: 'metadata' }],
   ])('project: %s', (path, destination) => {
     expect(projectDestination(path)).toEqual(destination);
   });

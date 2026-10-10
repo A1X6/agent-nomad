@@ -50,6 +50,11 @@ const MOD_MODULE =
   'export function register(on, options) {\n  on("session.start", async ($, e) => {\n    await $.store.get("e2e-mod-seen");\n  });\n}\n';
 const MOD_TYPES = 'declare const generatedByClaudeCode: true;\n';
 const mod = (pc: Pc, ...parts: string[]) => claude(pc, 'skills', 'probe-mod', ...parts);
+/** The `claude` command of the PCs that pull (T100): installs plugins at version 9.9.0. */
+const FAKE_CLAUDE = fileURLToPath(new URL('../dist/src/fake-claude.js', import.meta.url));
+/** A marketplace plugin installed on the first PC, at an older version than pull gets. */
+const PLUGIN_ID = 'e2e-plugin@e2e-market';
+const PLUGIN_VERSION = '9.8.7-e2e';
 /** A skill from the user's claude.ai account, as Claude Code syncs it (T42). */
 const ACCOUNT_SKILL =
   '---\nname: my-account-skill\ndescription: From claude.ai\n---\nWrite release notes.\n';
@@ -115,6 +120,8 @@ function expectNothingReadable(server: LocalServer, known: Known): void {
     'second@example.com',
     'demo',
     ENV_VALUE,
+    PLUGIN_ID,
+    PLUGIN_VERSION,
   ];
   expect(plaintextLeaks(server.requests, secrets)).toEqual([]);
   // A session token goes only in the Authorization header.
@@ -317,6 +324,20 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     await write(synced('my-account-skill', 'SKILL.md'), ACCOUNT_SKILL);
     await write(synced('pdf', 'SKILL.md'), '---\nname: pdf\n---\nAnthropic.\n');
     await write(synced('team-skill', 'SKILL.md'), '---\nname: team-skill\n---\nTeam.\n');
+    // A plugin from a GitHub marketplace (T29), with its version (T100).
+    await write(
+      claude(pc, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        version: 2,
+        plugins: { [PLUGIN_ID]: [{ scope: 'user', installPath: 'x', version: PLUGIN_VERSION }] },
+      }),
+    );
+    await write(
+      claude(pc, 'plugins', 'known_marketplaces.json'),
+      JSON.stringify({
+        'e2e-market': { source: { source: 'github', repo: 'e2e-owner/e2e-market' } },
+      }),
+    );
 
     ok(await pc.run(['register', ...LOGIN, '--yes'], stdin));
     const secretsHere = await known(pc);
@@ -378,7 +399,12 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
  * rewrites every path for this PC; pulling again changes nothing; an edit is pushed back.
  */
 async function secondPc({ server, keychain }: StepContext): Promise<void> {
-  const pc = await newPc('second', { apiUrl: server.url, keychain, env: PRESET_ENV });
+  const pc = await newPc('second', {
+    apiUrl: server.url,
+    keychain,
+    env: PRESET_ENV,
+    claude: FAKE_CLAUDE,
+  });
   try {
     // This PC already has its own settings and Claude Code login state.
     await write(claude(pc, 'settings.json'), JSON.stringify({ theme: 'light', model: 'opus' }));
@@ -414,6 +440,9 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
     expect(pulled.stdout).toContain('+ probe-mod@skills-dir (skills/probe-mod)');
     expect(`${pulled.stdout}${pulled.stderr}`).not.toContain('types/register.d.ts');
     await expectRestored(pc, false);
+    // T100: Claude Code installs only the latest plugin version, so pull names the change.
+    expect(pulled.stdout).toContain(`Reinstalled ${PLUGIN_ID}.`);
+    expect(pulled.stdout).toContain(`  ${PLUGIN_ID}  was ${PLUGIN_VERSION}, now 9.9.0`);
     // T42: the user's own claude.ai skill is a local skill here; Anthropic's and the
     // organization's never came along.
     expect(await read(claude(pc, 'skills', 'my-account-skill', 'SKILL.md'))).toBe(ACCOUNT_SKILL);
@@ -458,7 +487,12 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
  * delete and account delete leave nothing on the server.
  */
 async function thirdPc({ server, keychain }: StepContext): Promise<void> {
-  const pc = await newPc('third', { apiUrl: server.url, keychain, env: PRESET_ENV });
+  const pc = await newPc('third', {
+    apiUrl: server.url,
+    keychain,
+    env: PRESET_ENV,
+    claude: FAKE_CLAUDE,
+  });
   // Never pulled: knows no revision. Its login is kept in its own folder (see pc.ts).
   const stale = await newPc('stale', { apiUrl: server.url, keychain: false });
   try {
@@ -481,6 +515,9 @@ async function thirdPc({ server, keychain }: StepContext): Promise<void> {
     );
     expect(pulled.stdout).toContain('backed up first');
     await expectRestored(pc, true);
+    // The second PC saved the plugin at 9.9.0, the version installed here: no change named.
+    expect(pulled.stdout).toContain(`Reinstalled ${PLUGIN_ID}.`);
+    expect(pulled.stdout).not.toContain(' was ');
     const backups = (await readdir(claude(pc))).filter((name) =>
       name.startsWith('CLAUDE.md.agentnomad-backup-'),
     );

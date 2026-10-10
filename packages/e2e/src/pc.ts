@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { configDir, createFileStore, createKeychainStore, SECRETS_FILE } from '@agentnomad/cli';
@@ -63,6 +63,8 @@ export async function newPc(
     keychain: boolean;
     /** Variables already set in this PC's environment. */
     env?: Readonly<Record<string, string>>;
+    /** A `claude` command first on the PATH that runs this built script (T100). */
+    claude?: string;
   },
 ): Promise<Pc> {
   const root = await realpath(await mkdtemp(join(tmpdir(), `agentnomad-e2e-${name}-`)));
@@ -86,6 +88,13 @@ export async function newPc(
     AGENTNOMAD_API_URL: options.apiUrl,
     ...options.env,
   });
+  if (options.claude !== undefined) {
+    const bin = join(root, 'bin');
+    await addClaudeLauncher(bin, options.claude);
+    // Windows keeps the name as `Path`; the CLI reads it whatever its case.
+    const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
+    env[key] = [bin, env[key]].filter(Boolean).join(delimiter);
+  }
 
   const start = (entry: string, args: readonly string[], input: string) =>
     new Promise<RunResult>((resolve, reject) => {
@@ -135,6 +144,19 @@ export async function newPc(
     },
     remove: () => rm(root, { recursive: true, force: true }),
   };
+}
+
+/** `claude` in `bin`: a `.cmd` launcher on Windows, a shell script elsewhere, as npm makes. */
+async function addClaudeLauncher(bin: string, script: string): Promise<void> {
+  if (process.platform === 'win32') {
+    await write(join(bin, 'claude.cmd'), `@"${process.execPath}" "${script}" %*\r\n`);
+  } else {
+    await write(
+      join(bin, 'claude'),
+      `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`,
+      true,
+    );
+  }
 }
 
 export async function write(path: string, content: string, executable = false): Promise<void> {
