@@ -4,7 +4,10 @@ import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull, type JsonResult } from '../../system/json.ts';
 import { samePath } from '../../system/paths.ts';
+import type { CollectedFile } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
+import { jsonFile } from '../shared/file-gathering.ts';
+import { PLUGIN_VERSIONS_BUNDLE_PATH, PLUGINS_BUNDLE_PATH } from './global-paths.ts';
 
 /**
  * Plugins are reinstalled, never copied (T29): push saves which marketplaces and plugins
@@ -63,6 +66,39 @@ export const PluginManifestSchema = z.strictObject({
   skipped: z.array(SkippedSchema),
 });
 
+/** The version of one saved plugin install, as `installed_plugins.json` gives it (T100). */
+interface PluginVersionEntry {
+  /** `plugin@marketplace`. */
+  readonly id: string;
+  readonly scope: PluginScope;
+  readonly version: string;
+}
+
+/**
+ * What `.agentnomad/plugin-versions.json` holds (T100). A file of its own, as `plugins.json`
+ * is read strictly by older CLIs; they refuse this unknown file with a warning and go on.
+ */
+export interface PluginVersions {
+  readonly plugins: readonly PluginVersionEntry[];
+}
+
+/** A version as Claude Code writes one: `1.2.0`, a 12-digit commit or `1.2.0-<hash>`. */
+const PluginVersionSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/);
+
+const PluginVersionsSchema = z.strictObject({
+  plugins: z.array(
+    z.strictObject({
+      id: PluginEntrySchema.shape.id,
+      scope: PluginEntrySchema.shape.scope,
+      version: PluginVersionSchema,
+    }),
+  ),
+});
+
+/** A saved `plugin-versions.json` as pull reads it; never throws (T100). */
+export const readSavedPluginVersions = (content: Uint8Array): JsonResult<PluginVersions> =>
+  parseJsonWith(PluginVersionsSchema, content);
+
 /** A saved `plugins.json` as pull reads it: the entries it accepts, and the ones it refused. */
 export interface SavedPlugins {
   readonly manifest: PluginManifest;
@@ -116,6 +152,8 @@ const KnownMarketplacesSchema = z.record(
 const PluginInstallSchema = z.looseObject({
   scope: z.enum(['user', 'project', 'local', 'managed']).or(z.string()),
   projectPath: z.string().optional(),
+  // Checked where it is used (T100): an odd version never makes the whole file unreadable.
+  version: z.unknown().optional(),
 });
 const InstalledPluginsSchema = z.looseObject({
   plugins: z.record(z.string(), z.array(PluginInstallSchema)),
@@ -185,6 +223,49 @@ export interface PluginManifestInput {
     { readonly kind: 'global' } | { readonly kind: 'project'; readonly projectDir: string };
 }
 
+/** Whether an install is one of `input`'s: user scope, or installed for that project. */
+const inScope = (install: PluginInstall, input: PluginManifestInput): boolean =>
+  input.scope.kind === 'global'
+    ? install.scope === 'user'
+    : (install.scope === 'project' || install.scope === 'local') &&
+      installedIn(install, input.scope.projectDir, input.platform);
+
+/**
+ * The installed version of each of `plugins` in `input`'s scope (T100): push saves them, and
+ * pull reads them again after installing. Left out: a version Claude Code could not tell
+ * (`unknown`, e.g. an npm source) or one in an unexpected form. `null` when none is known.
+ */
+export async function readPluginVersions(
+  input: PluginManifestInput,
+  plugins: readonly PluginEntry[],
+): Promise<PluginVersions | null> {
+  const installed = await readInstalledPlugins(input.baseDir, input.platform);
+  const versions = plugins.flatMap(({ id, scope }) => {
+    const version = PluginVersionSchema.safeParse(
+      installed?.[id]?.find((install) => install.scope === scope && inScope(install, input))
+        ?.version,
+    );
+    return version.success && version.data !== 'unknown'
+      ? [{ id, scope, version: version.data }]
+      : [];
+  });
+  return versions.length === 0 ? null : { plugins: versions };
+}
+
+/**
+ * What push saves about plugins, for both collectors: `plugins.json` and, when a version is
+ * known, `plugin-versions.json` (T100). Nothing when there are no plugins to save.
+ */
+export async function pluginFiles(input: PluginManifestInput): Promise<CollectedFile[]> {
+  const manifest = await readPluginManifest(input);
+  if (manifest === null) return [];
+  const versions = await readPluginVersions(input, manifest.plugins);
+  return [
+    jsonFile(PLUGINS_BUNDLE_PATH, manifest),
+    ...(versions === null ? [] : [jsonFile(PLUGIN_VERSIONS_BUNDLE_PATH, versions)]),
+  ];
+}
+
 /** Reads the installed plugins and their marketplaces; `null` when there are none to save. */
 export async function readPluginManifest(
   input: PluginManifestInput,
@@ -197,11 +278,7 @@ export async function readPluginManifest(
     (await readJson(path.join(pluginsDir, 'known_marketplaces.json'), KnownMarketplacesSchema)) ??
     {};
 
-  const wanted = (entry: PluginInstall) =>
-    input.scope.kind === 'global'
-      ? entry.scope === 'user'
-      : (entry.scope === 'project' || entry.scope === 'local') &&
-        installedIn(entry, input.scope.projectDir, input.platform);
+  const wanted = (entry: PluginInstall) => inScope(entry, input);
 
   const marketplaces = new Map<string, MarketplaceEntry>();
   const plugins: PluginEntry[] = [];

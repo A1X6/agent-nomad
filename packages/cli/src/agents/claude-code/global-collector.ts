@@ -22,13 +22,12 @@ import {
   globalSettingsFiles,
   HOME_SCRIPTS_PREFIX,
   NEVER_SYNCED,
-  PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
   SKIPPED_NAMES,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
 import { hookScripts } from './hook-scripts.ts';
-import { readPluginManifest } from './plugins.ts';
+import { pluginFiles } from './plugins.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
 import { commandsInSettings, programOf } from './settings-commands.ts';
 
@@ -176,12 +175,9 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       const selected = await claudeJson();
       if (selected) found.push(selected);
 
-      const plugins = await readPluginManifest({
-        baseDir,
-        platform: options.platform,
-        scope: { kind: 'global' },
-      });
-      if (plugins) found.push(jsonFile(PLUGINS_BUNDLE_PATH, plugins));
+      found.push(
+        ...(await pluginFiles({ baseDir, platform: options.platform, scope: { kind: 'global' } })),
+      );
 
       // Opt-in (T42): a copy of the user's own claude.ai skills, never skills/synced itself.
       if (collectOptions.include?.has(ACCOUNT_SKILLS_PART) === true) {

@@ -87,6 +87,9 @@ export function homePathProblem(relative: string): string | null {
 /** Marketplaces and plugins to reinstall on pull (T29). */
 export const PLUGINS_BUNDLE_PATH = `${RESERVED_DIR}/plugins.json`;
 
+/** The installed version of each of those plugins (T100), read by pull, never written. */
+export const PLUGIN_VERSIONS_BUNDLE_PATH = `${RESERVED_DIR}/plugin-versions.json`;
+
 /** Programs a hook or the status line needs, with install details (`.agentnomad/programs.json`). */
 export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
 

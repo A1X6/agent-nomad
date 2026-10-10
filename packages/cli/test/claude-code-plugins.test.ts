@@ -5,17 +5,21 @@ import { describe, expect, it } from 'vitest';
 import {
   globalDestination,
   marketplaceAddArgument,
+  PLUGIN_VERSIONS_BUNDLE_PATH,
   PluginManifestSchema,
   projectDestination,
   readCurrentPlugins,
   readPluginManifest,
+  readPluginVersions,
+  readSavedPluginVersions,
   type PluginManifestInput,
 } from '../src/index.ts';
 
 import { installedPluginsFile, putJson, realisticPlugins } from './claude-code-plugin-fixtures.ts';
-import { paths } from './fakes.ts';
+import { paths, text } from './fakes.ts';
 import {
   base,
+  collect,
   globalCollector,
   home,
   project,
@@ -71,7 +75,7 @@ describe('plugin list on push', () => {
   it('the global collector adds .agentnomad/plugins.json, which restore never writes', async () => {
     await realisticPlugins(home, project);
     const files = await globalCollector().collect({ kind: 'global' }, { includeMemory: false });
-    expect(paths(files)).toEqual(['.agentnomad/plugins.json']);
+    expect(paths(files)).toEqual(['.agentnomad/plugin-versions.json', '.agentnomad/plugins.json']);
     expect(globalDestination('.agentnomad/plugins.json', new Set())).toEqual({ kind: 'metadata' });
     expect(projectDestination('.agentnomad/plugins.json')).toEqual({ kind: 'metadata' });
   });
@@ -191,5 +195,98 @@ describe('one reader of installed_plugins.json (BUG-03)', () => {
     });
     const current = await readCurrentPlugins(base, 'win32', project);
     expect(current.installed.has('lint@company|project')).toBe(true);
+  });
+});
+
+describe('plugin versions on push (T100)', () => {
+  /** The saved `plugin-versions.json` of the collected `files`, as JSON. */
+  const savedVersions = (files: Awaited<ReturnType<typeof collect>>) =>
+    JSON.parse(text(files, PLUGIN_VERSIONS_BUNDLE_PATH)) as unknown;
+
+  it('a global push saves the installed version of each saved plugin', async () => {
+    await realisticPlugins(home, project);
+    const files = await globalCollector().collect({ kind: 'global' }, { includeMemory: false });
+    expect(savedVersions(files)).toEqual({
+      plugins: [
+        { id: 'brag@brag', scope: 'user', version: '1.0.0' },
+        { id: 'builder@company', scope: 'user', version: '1.0.0' },
+        { id: 'warp@claude-code-warp', scope: 'user', version: '1.0.0' },
+      ],
+    });
+  });
+
+  it('a project push saves the versions of that project’s plugins only', async () => {
+    await realisticPlugins(home, project);
+    expect(savedVersions(await collect())).toEqual({
+      plugins: [{ id: 'team-lint@company', scope: 'project', version: '1.0.0' }],
+    });
+  });
+
+  it('no versions file when no saved plugin has a known version', async () => {
+    await realisticPlugins(home, project);
+    await putJson(installedPluginsFile(base), {
+      plugins: { 'brag@brag': [{ scope: 'user', version: 'unknown' }] },
+    });
+    const files = await globalCollector().collect({ kind: 'global' }, { includeMemory: false });
+    expect(paths(files)).toEqual(['.agentnomad/plugins.json']);
+  });
+
+  /** The version push saves for `brag@brag` when Claude Code recorded `version`. */
+  const savedVersionOf = async (version: unknown) => {
+    await putJson(installedPluginsFile(base), {
+      plugins: { 'brag@brag': [{ scope: 'user', version }] },
+    });
+    return readPluginVersions(
+      { baseDir: base, platform: process.platform, scope: { kind: 'global' } },
+      [{ id: 'brag@brag', scope: 'user', commandSource: false }],
+    );
+  };
+
+  it('a version in the form Claude Code writes is saved (control for the next test)', async () => {
+    expect(await savedVersionOf('1.2.0-a1b2c3d4e5f6')).toEqual({
+      plugins: [{ id: 'brag@brag', scope: 'user', version: '1.2.0-a1b2c3d4e5f6' }],
+    });
+  });
+
+  it.each([['unknown'], [7], ['-x'], ['1.0 beta'], [null]])(
+    'a version Claude Code could not tell, or in an odd form, is left out: %j',
+    async (version) => {
+      expect(await savedVersionOf(version)).toBeNull();
+    },
+  );
+
+  it('the version of an install in another scope is not taken', async () => {
+    await putJson(installedPluginsFile(base), {
+      plugins: { 'brag@brag': [{ scope: 'project', projectPath: project, version: '1.0.0' }] },
+    });
+    expect(
+      await readPluginVersions(
+        { baseDir: base, platform: process.platform, scope: { kind: 'global' } },
+        [{ id: 'brag@brag', scope: 'user', commandSource: false }],
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('saved plugin versions on pull (T100)', () => {
+  const content = (value: string) => new TextEncoder().encode(value);
+
+  it('reads a saved plugin-versions.json', () => {
+    const saved = '{"plugins":[{"id":"brag@brag","scope":"user","version":"1.0.0"}]}';
+    expect(readSavedPluginVersions(content(saved))).toEqual({
+      value: { plugins: [{ id: 'brag@brag', scope: 'user', version: '1.0.0' }] },
+    });
+  });
+
+  it.each([
+    ['that is not JSON', '{'],
+    ['that is not the expected shape', '{"plugins": 1}'],
+    [
+      'holding a version that is not one',
+      '{"plugins":[{"id":"a@b","scope":"user","version":"--x"}]}',
+    ],
+    ['holding an unknown key', '{"plugins":[],"extra":true}'],
+  ])('a file %s is a problem, never a crash', (_, saved) => {
+    expect(readSavedPluginVersions(content(saved))).toHaveProperty('problem');
   });
 });

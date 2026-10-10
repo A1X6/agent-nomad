@@ -1,16 +1,11 @@
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { underAnyFolder } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
-import {
-  createFileGatherer,
-  type FileGatherer,
-  jsonFile,
-  uniqueByPath,
-} from '../shared/file-gathering.ts';
+import { createFileGatherer, type FileGatherer, uniqueByPath } from '../shared/file-gathering.ts';
 import { findAutoMemory } from './auto-memory.ts';
-import { PLUGINS_BUNDLE_PATH, SKIPPED_NAMES } from './global-paths.ts';
+import { SKIPPED_NAMES } from './global-paths.ts';
 import { projectHookScripts } from './hook-scripts.ts';
-import { readPluginManifest } from './plugins.ts';
+import { pluginFiles } from './plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
   PROJECT_CLAUDE_FILES,
@@ -123,12 +118,13 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
         found.push(...(await autoMemory(projectDir, collectOptions.onSkipped)));
       }
 
-      const plugins = await readPluginManifest({
-        baseDir: options.baseDir,
-        platform: options.platform,
-        scope: { kind: 'project', projectDir },
-      });
-      if (plugins) found.push(jsonFile(PLUGINS_BUNDLE_PATH, plugins));
+      found.push(
+        ...(await pluginFiles({
+          baseDir: options.baseDir,
+          platform: options.platform,
+          scope: { kind: 'project', projectDir },
+        })),
+      );
 
       return uniqueByPath(found);
     },
