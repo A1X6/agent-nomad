@@ -446,6 +446,28 @@ plugin built by running a command gets its own question; programs that hooks sta
 `npm install -g name@version` (the package is the one the launcher runs: its link on macOS
 and Linux, its `.cmd` on Windows, so `tsc` from `typescript` and scoped packages count).
 
+**Claude Code plugin facts (2.1.295)** (T96), seen on a real Claude Code for the plugin and
+mod sync tasks; the test fixtures in `claude-code-plugin-fixtures.ts` hold each one:
+
+- A mod (`hooks/hooks.json` naming modules) in `~/.claude/skills/<name>/` loads as
+  `<name>@skills-dir`, scope user.
+- A plugin's data folder is `plugins/data/<id>` with every character other than letters,
+  digits, `_`, `*` and `-` turned into `-` (`Odd.Name_v2@my-local.mkt` →
+  `Odd-Name_v2-my-local-mkt`). A mod's `$.store` is not there but in
+  `plugins/store/<safe id>-<first 12 hex of sha256(id)>.json`, the folder mode 700 and the file
+  600 (`probe-mod@skills-dir` → `probe-mod_skills-dir-e89169932969.json`).
+- `skills/synced/<account>/manifest.json` entries have no `creatorType` any more; `source` is
+  `anthropic`, `anthropic-example`, `plugin` (the user's uploads, with a `backingPluginId`),
+  `custom` or `session-refs`. `plugins/synced/<account>/manifest.json` entries carry an
+  `installationPreference` (`available`, `required`, `auto_install`, `not_available`) and
+  `.marketplaces.json` rows a `scope` (`org`, `default`, `account` for My Uploads).
+- `claude plugin validate` prints one `hooks:` and one `calls:` line per module (`calls:` names
+  only `$` methods; classic command hooks are not listed), exits 0 on a pass, also with
+  warnings, and 1 on an error (a syntax error, a missing module, a broken manifest);
+  `--strict` makes a warning fail. `--json` has the same lines in each entry's `notes`
+  (checked again on 2.1.296).
+- `policy-limits.json.stamp.json` is state and never synced.
+
 **Keeping up with Claude Code:** files Claude Code adds that the data file does not know
 are reported on push (a folder holding a script the hooks or status line run is not: push saves
 that script); the Claude Code version is stamped in every bundle; and a weekly
@@ -644,7 +666,8 @@ of these:
   (`claude-code-command-review.test.ts`, `claude-code-restorer.test.ts`).
 - **Shared set-up, not tests:** `fakes.ts` (tested by `fakes.test.ts`; it also holds the CLI
   tests' one temporary-folder hook and their crypto service and data key), `stub-restorer.ts`,
-  `claude-code-project-fixtures.ts`, `claude-code-plugin-fixtures.ts`, core's and contracts'
+  `claude-code-project-fixtures.ts`, `claude-code-plugin-fixtures.ts` (its plugin source
+  fixtures, T96, are tested by `claude-code-plugin-fixtures.test.ts`), core's and contracts'
   `fixtures.ts`, and the server's `support/` (`app.ts`, `database.ts`, `fixtures.ts`).
 
 ## `packages/contracts/src`

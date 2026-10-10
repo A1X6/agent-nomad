@@ -139,8 +139,14 @@ open, such as a chat or an option letter from a discussion.
     (`setMemoryDirectory`, `memoryDir`) and a claude.ai synced skills folder (`synced`,
     `syncedSetup`).
   - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
-    `putJson`, `realisticPlugins`) and managed settings (`fakeManagedSystem` with
-    `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`).
+    `putJson`, `realisticPlugins`), managed settings (`fakeManagedSystem` with
+    `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`) and the plugin sources Claude
+    Code 2.1.295 keeps (T96): the names `SKILLS_DIR_MARKETPLACE`, `PLUGIN_DATA_FOLDERS`,
+    `PLUGIN_STORE_FILES` and `PLUGIN_STORE_MODES`; `claude plugin validate` runs as
+    `ValidateRun` (`validatePassWithWarning`, `validateBrokenManifest`, the mod folder shown
+    as `VALIDATED_MOD`); and the claude.ai synced files of `SYNCED_ACCOUNT`
+    (`syncedSkillsManifest`, `olderSyncedSkillsManifest`, `syncedPluginsManifest`,
+    `syncedPluginMeta`, `syncedMarketplaces`, all written by `syncedSources`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).
   - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`
