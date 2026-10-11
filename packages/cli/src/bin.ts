@@ -14,7 +14,7 @@ import { createNoTerminalPrompter } from './ui/no-terminal-prompter.ts';
 const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 const reporter = createClackReporter({ diagnostics: process.stderr, interactive });
 
-const { handlers, optionalParts } = createApp({
+const { handlers, optionalParts, agents } = createApp({
   env: process.env,
   platform: process.platform,
   homedir: homedir(),
@@ -25,4 +25,9 @@ const { handlers, optionalParts } = createApp({
   readPasswordStdin: () => readFirstLine(process.stdin),
 });
 
-process.exitCode = await runCli(process.argv.slice(2), { handlers, optionalParts, reporter });
+process.exitCode = await runCli(process.argv.slice(2), {
+  handlers,
+  optionalParts,
+  agents,
+  reporter,
+});

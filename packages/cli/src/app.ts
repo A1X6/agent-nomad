@@ -16,6 +16,7 @@ import { createHttpApiClient } from './api/http-api-client.ts';
 import { createAuthCommands } from './auth/auth-commands.ts';
 import { loadZxcvbnChecker } from './auth/password-policy.ts';
 import type { CommandHandlers } from './cli/commands.ts';
+import type { AgentHelp } from './cli/help-text.ts';
 import { createSetupCommands } from './commands/setup-commands.ts';
 import { configDir } from './config/config-dir.ts';
 import { createEnvCommand } from './env/env-command.ts';
@@ -82,23 +83,28 @@ export function createAppRegistry(
 
 /**
  * The command handlers, and the registered agents' optional parts for the command line's
- * flags (ARCH-02). When the agents cannot be built here, there are no part flags; the
- * commands that need the agents say why, and the others (`--help`, login) still work.
+ * flags (ARCH-02) with what their setups hold for `--help` (T115). When the agents cannot be
+ * built here, there are no part flags; the commands that need the agents say why, and the
+ * others (`--help`, login) still work.
  */
 export function createApp(app: AppEnvironment): {
   readonly handlers: CommandHandlers;
   readonly optionalParts: readonly OptionalPart[];
+  readonly agents: readonly AgentHelp[];
 } {
   const registry = lazy(() => createAppRegistry(app));
   let optionalParts: readonly OptionalPart[] = [];
+  let agents: readonly AgentHelp[] = [];
   try {
-    optionalParts = registry()
-      .list()
-      .flatMap((adapter) => adapter.optionalParts ?? []);
+    const adapters = registry().list();
+    optionalParts = adapters.flatMap((adapter) => adapter.optionalParts ?? []);
+    agents = adapters.flatMap(({ displayName, contents }) =>
+      contents ? [{ displayName, contents }] : [],
+    );
   } catch {
     // Left empty: building the registry again in the command reports the error.
   }
-  return { handlers: createAppHandlers(app, registry), optionalParts };
+  return { handlers: createAppHandlers(app, registry), optionalParts, agents };
 }
 
 /**
@@ -106,7 +112,7 @@ export function createApp(app: AppEnvironment): {
  * Nothing (keychain, crypto, network) is touched until a command needs it, so `--help`
  * stays instant and never fails.
  */
-export function createAppHandlers(
+function createAppHandlers(
   app: AppEnvironment,
   registry: () => AgentRegistry = lazy(() => createAppRegistry(app)),
 ): CommandHandlers {

@@ -6,6 +6,10 @@ import {
 } from '@agentnomad/contracts';
 import { InvalidArgumentError } from '@commander-js/extra-typings';
 
+import { ENV_NAME } from '../env/env-section.ts';
+import type { EnvValuesChoice } from './commands.ts';
+import { ENV_VALUES_ALL, ENV_VALUES_NONE } from './help-text.ts';
+
 /** `--agent claude-code,codex`: validated agent ids, in order, without repeats. */
 export function parseAgentList(value: string): AgentId[] {
   const ids = value
@@ -22,6 +26,32 @@ export function parseAgentList(value: string): AgentId[] {
     }
   }
   return [...new Set(ids)];
+}
+
+/**
+ * `--env-values GITHUB_TOKEN,NPM_TOKEN`, `all` or `none` (T115): validated variable names, in
+ * order, without repeats.
+ */
+export function parseEnvValues(value: string): EnvValuesChoice {
+  const trimmed = value.trim();
+  if (trimmed === ENV_VALUES_ALL || trimmed === ENV_VALUES_NONE) return trimmed;
+  const names = trimmed
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (names.length === 0) {
+    throw new InvalidArgumentError(
+      `Give variable names, comma-separated, or ${ENV_VALUES_ALL} or ${ENV_VALUES_NONE}.`,
+    );
+  }
+  for (const name of names) {
+    if (!ENV_NAME.test(name)) {
+      throw new InvalidArgumentError(
+        `"${name}" is not a variable name (letters, digits and _, not starting with a digit).`,
+      );
+    }
+  }
+  return [...new Set(names)];
 }
 
 /** `--project <name>`: the same rules the bundle format uses for project names. */

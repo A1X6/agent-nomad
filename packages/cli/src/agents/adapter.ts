@@ -258,6 +258,27 @@ export interface AgentRestorePlan {
 }
 
 /**
+ * What a setup holds, in the plain words `push --help`, `pull --help` and the README "What is
+ * synced" table use (T115). The four lists are the README table's cells, item for item.
+ */
+export interface AgentContents {
+  /** How help names the global setup, e.g. `global setup (~/.claude)`. */
+  readonly globalLabel: string;
+  /** Always saved with the global setup. */
+  readonly global: readonly string[];
+  /** Also always saved with it, from outside its folder (other README rows). */
+  readonly globalAlso: readonly string[];
+  /** Always saved with a project. */
+  readonly project: readonly string[];
+  /** Never saved from the global setup. */
+  readonly globalNever: readonly string[];
+  /** Never saved from outside its folder either (other README rows). */
+  readonly globalNeverAlso: readonly string[];
+  /** Never saved from a project. */
+  readonly projectNever: readonly string[];
+}
+
+/**
  * Everything agentnomad knows about one agent. Adding an agent means writing one of these
  * and registering it; nothing else changes.
  */
@@ -275,6 +296,8 @@ export interface AgentAdapter {
   readonly envReferences?: EnvReferenceFiles;
   /** What push saves only after a yes (T61). */
   readonly optionalParts?: readonly OptionalPart[];
+  /** What a setup always holds and never holds, for `--help` (T115). */
+  readonly contents?: AgentContents;
   /**
    * The agent's own questions for one pulled setup, asked in pull's plan step before
    * anything is written (T61): e.g. an open app that rewrites a file, plugins to reinstall.

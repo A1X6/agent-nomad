@@ -82,7 +82,8 @@ function pushFrom(
   options: { reporter?: Reporter; env?: Record<string, string>; adapter?: AgentAdapter } = {},
 ) {
   return createPushCommand({
-    prompter: scriptedPrompter(answers).prompter,
+    // Then yes to "Upload … now?" after the summary, when push asks it (T115).
+    prompter: scriptedPrompter([...answers, true]).prompter,
     reporter: options.reporter ?? recordingReporter().reporter,
     registry: () => createAgentRegistry([options.adapter ?? claudeAdapter(machine.home)]),
     secrets: () => Promise.resolve(loggedInStore()),
@@ -108,9 +109,11 @@ function pullOn(
     prompter?: Prompter;
     /** The folder pull runs in; the project folder by default. */
     cwd?: string;
+    /** The answer to "Restore … now?" after the summary, when pull asks it (T115); yes. */
+    restore?: boolean;
   } = {},
 ) {
-  const script = scriptedPrompter(answers);
+  const script = scriptedPrompter([...answers, options.restore ?? true]);
   const { reporter, lines } = recordingReporter();
   const state = localStateIn(machine.home);
   // What apply gets: everything but the prompter.
@@ -132,6 +135,9 @@ function pullOn(
   const pull = createPullCommand(deps).pull;
   return { pull, deps, applyDeps, asked: script.asked, lines, state };
 }
+
+/** Pull's question after its summary, when it asked anything before (T115). */
+const RESTORE_IT = 'Restore it now? Nothing is written until you say yes.';
 
 /** The session and data key the plan step gets from the handler. */
 const keysOf = () => ({ secrets: loggedInStore(), crypto, dataKey });
@@ -266,7 +272,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     const b = pc('desktop');
     const t = pullOn(b, server, [true], { cwd: b.home });
     await t.pull(none);
-    expect(t.asked).toEqual(['Allow them?']);
+    expect(t.asked).toEqual(['Allow them?', RESTORE_IT]);
     expect(await readText(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
     await expect(readFile(join(b.home, 'CLAUDE.md'))).rejects.toThrow();
   });
@@ -291,7 +297,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     await pullOn(b, server, []).pull({ global: true, yes: true, allowCommands: true });
     // This PC's copy differs from the saved one; the hook command is unchanged.
     await writeTestFile(join(b.base, 'hooks', 'check.sh'), 'echo local\n');
-    const t = pullOn(b, server, [false, 'skip']);
+    const t = pullOn(b, server, [false]);
     await t.pull({ global: true, yes: false });
     const review = reviewShown(t.lines);
     expect(review).toContain('~ script: hooks/check.sh  (changed)');
@@ -401,7 +407,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     await writeTestFile(join(b.base, 'CLAUDE.md'), 'mine');
     const t = pullOn(b, server, [true]);
     await t.pull({ global: true, yes: false, conflict: 'merge' });
-    expect(t.asked).toEqual(['Allow them?']);
+    expect(t.asked).toEqual(['Allow them?', RESTORE_IT]);
     expect(await readText(join(b.base, 'CLAUDE.md'))).toBe('mine');
     expect((await readdir(b.base)).some((name) => name.includes('agentnomad-incoming'))).toBe(true);
   });
@@ -475,7 +481,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('an older copy than this PC had is restored after a yes (T38)', async () => {
     const { server } = await pushedSetup();
     const b = pc('desktop');
-    const asked = pullOn(b, server, [true, true, 'merge-all']);
+    const asked = pullOn(b, server, [true, true]);
     await asked.state.setRevision('claude-code', GLOBAL_SCOPE_KEY, 3);
     await asked.pull({ global: true, yes: false });
     expect(asked.asked[0]).toBe('Restore this older copy anyway?');
@@ -591,6 +597,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
     );
     expect(t.asked).toEqual([
       'asked.md\\u{000a}  ~ hook: fake already exists here and is different.',
+      RESTORE_IT,
     ]);
     expect(t.lines.join('\n')).toContain(
       'Left as they are in the Claude Code global setup: left.md\\u{000a}fake advice.',
@@ -878,7 +885,11 @@ describe('pull: which agents and setups, and when there is none to pull (T95)', 
       ...t.deps,
       registry: () => createAgentRegistry([claudeAdapter(b.home), other]),
     }).pull({ global: true, yes: false });
-    expect(t.asked).toEqual(['Which agents?', 'Allow them?']);
+    expect(t.asked).toEqual([
+      "Which agents? Each agent's setup is saved and restored on its own.",
+      'Allow them?',
+      RESTORE_IT,
+    ]);
     expect(await readText(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
   });
 
@@ -918,7 +929,7 @@ describe('pull: which agents and setups, and when there is none to pull (T95)', 
     await writeTestFile(join(site.project, 'CLAUDE.md'), 'Site rules.');
     await pushFrom(site, server, ['project', 'site', false])(none);
     const offered: { label: string; hint?: string }[] = [];
-    const script = scriptedPrompter(['project']);
+    const script = scriptedPrompter(['project', true]);
     const prompter: Prompter = {
       ...script.prompter,
       select: (message, choices) => {
@@ -938,5 +949,98 @@ describe('pull: which agents and setups, and when there is none to pull (T95)', 
       { label: 'site' },
     ]);
     expect(await readText(join(a.project, 'CLAUDE.md'))).toBe('Project rules.');
+  });
+});
+
+describe('pull: the summary before writing, --skip-existing and --env-values (T115)', () => {
+  it('after asking anything, shows what it will write and asks once more', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, [true]);
+    await t.pull({ global: true, yes: false });
+    expect(t.asked).toEqual(['Allow them?', RESTORE_IT]);
+    expect(t.lines).toContain(
+      [
+        'info: Ready to restore:',
+        '  The Claude Code global setup: 4 files',
+        '    Always restored (a file here that differs is asked about first)',
+        '    Restored only when you choose (a question, or the flag): --env-values none',
+      ].join('\n'),
+    );
+  });
+
+  it('a no to that question writes nothing and is not a failure', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, [true], { restore: false });
+    await t.pull({ global: true, yes: false });
+    expect(t.lines).toContain('info: Nothing was written.');
+    await expect(readFile(join(b.base, 'CLAUDE.md'))).rejects.toThrow();
+    expect(await t.state.revisionOf('claude-code', GLOBAL_SCOPE_KEY)).toBeNull();
+  });
+
+  it('flags that answer everything ask nothing more, so a script keeps working', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const t = pullOn(b, server, [], { prompter: createNoTerminalPrompter() });
+    await t.pull({ global: true, yes: false, allowCommands: true });
+    expect(await readText(join(b.base, 'CLAUDE.md'))).toContain('Notes live in');
+  });
+
+  it('--skip-existing leaves every file here that differs as it is, asking nothing', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    await writeTestFile(join(b.base, 'CLAUDE.md'), 'mine');
+    const t = pullOn(b, server, []);
+    await t.pull({ global: true, yes: false, conflict: 'skip', allowCommands: true });
+    expect(t.asked).toEqual([]);
+    expect(await readText(join(b.base, 'CLAUDE.md'))).toBe('mine');
+    expect((await readdir(b.base)).some((name) => name.includes('agentnomad-incoming'))).toBe(
+      false,
+    );
+  });
+
+  it('"Skip all remaining files" answers the rest without asking', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    await writeTestFile(join(b.base, 'CLAUDE.md'), 'mine');
+    await writeTestFile(join(b.base, 'skills', 'deploy', 'SKILL.md'), 'mine too');
+    const t = pullOn(b, server, [true, 'skip-all']);
+    await t.pull({ global: true, yes: false });
+    expect(t.asked.filter((question) => question.includes('already exists'))).toHaveLength(1);
+    expect(await readText(join(b.base, 'CLAUDE.md'))).toBe('mine');
+    expect(await readText(join(b.base, 'skills', 'deploy', 'SKILL.md'))).toBe('mine too');
+  });
+
+  it('--env-values none adds no saved value, asking nothing about them', async () => {
+    const { server } = await pushedEnvSetup();
+    const b = pc('desktop');
+    const { writer, written } = fakeEnvWriter();
+    const t = pullOn(b, server, [], { writer });
+    await t.pull({
+      global: true,
+      yes: false,
+      allowCommands: true,
+      conflict: 'merge',
+      envValues: 'none',
+    });
+    expect(t.asked).toEqual([]);
+    expect(written).toEqual([]);
+  });
+
+  it('--env-values with a name adds that saved value, asking nothing about it', async () => {
+    const { server } = await pushedEnvSetup();
+    const b = pc('desktop');
+    const { writer, written } = fakeEnvWriter();
+    const t = pullOn(b, server, [], { writer });
+    await t.pull({
+      global: true,
+      yes: false,
+      allowCommands: true,
+      conflict: 'merge',
+      envValues: ['GITHUB_TOKEN'],
+    });
+    expect(t.asked).toEqual([]);
+    expect(written).toEqual([{ GITHUB_TOKEN: 'ghp_secret' }]);
   });
 });
