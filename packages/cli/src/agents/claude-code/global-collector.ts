@@ -39,7 +39,7 @@ import {
   SKIPPED_NAMES,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
-import { hookScripts } from './hook-scripts.ts';
+import { hookScripts, onceEachScript, type SkippedScript } from './hook-scripts.ts';
 import { localMarketplaceFiles } from './local-marketplaces.ts';
 import { pluginDirFiles } from './plugin-dirs.ts';
 import type { ProgramCli } from './plugin-sync.ts';
@@ -82,13 +82,17 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
   // The settings files among them, as `GLOBAL_SETTINGS_FILES` is made.
   const settingsFiles = globalSettingsFiles(globalFiles);
 
-  /** Script files that hooks and the status line run, if they are in the home folder. */
+  /**
+   * Script files that hooks and the status line run, if they are in the home folder; the
+   * others are told to `onSkipped` (T112).
+   */
   async function hookScriptFiles(
     files: FileGatherer,
     settingsJson: string,
+    onSkipped: SkippedScript | undefined,
   ): Promise<CollectedFile[]> {
     const found: CollectedFile[] = [];
-    for (const script of hookScripts(settingsJson, options)) {
+    for (const script of hookScripts(settingsJson, options, onSkipped)) {
       const file = await files.readIfFile(script.nativePath, script.bundlePath);
       if (file) found.push(file);
     }
@@ -233,7 +237,10 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       const settingsJsons = found
         .filter((file) => settingsFiles.includes(file.path))
         .map((file) => new TextDecoder().decode(file.content));
-      for (const text of settingsJsons) found.push(...(await hookScriptFiles(files, text)));
+      const skippedScript = onceEachScript(collectOptions.onSkipped);
+      for (const text of settingsJsons) {
+        found.push(...(await hookScriptFiles(files, text, skippedScript)));
+      }
       found.push(...(await programs(files, settingsJsons, collectOptions.onSkipped)));
       found.push(...(await importedFiles(files, found, collectOptions.onSkipped)));
 

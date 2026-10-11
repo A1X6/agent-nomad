@@ -34,8 +34,8 @@ export interface UnknownFilesInput {
 
 /**
  * Top-level names in the base folder that hold a script the global hooks or status line
- * run (T49): push saves those scripts by that route (T25), so such a folder, e.g. `hooks/`,
- * is not unknown. A folder with no such script is still reported.
+ * run (T49): push saves those scripts by that route (T25), so such a folder, e.g. `bin/`,
+ * is not unknown (`hooks/` is synced whole, T112). A folder with no such script is still reported.
  */
 async function hookScriptNames(input: UnknownFilesInput): Promise<string[]> {
   if (input.homedir === undefined) return [];

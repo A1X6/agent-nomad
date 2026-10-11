@@ -323,6 +323,25 @@ describe('global collector: hook and status line scripts', () => {
     expect(paths(files)).toEqual(['settings.json']);
   });
 
+  it('takes hooks/ whole, also the scripts no setting runs (T112)', async () => {
+    await writeTestFile(join(base, 'hooks', 'check.sh'), 'echo check');
+    await writeTestFile(join(base, 'hooks', 'lib', 'common.ps1'), 'shared');
+    expect(paths(await collect())).toEqual(['hooks/check.sh', 'hooks/lib/common.ps1']);
+  });
+
+  it('tells push about each script it cannot take, once (T112)', async () => {
+    await withTempDir('agentnomad-outside-', async (outside) => {
+      const script = join(outside, 'tool.sh');
+      await writeTestFile(script);
+      await writeSettings({
+        statusLine: { type: 'command', command: `bash ${script}` },
+        ...stopHook(script),
+      });
+      const { skipped } = await collectSkipped(collector(), { kind: 'global' });
+      expect(skipped).toEqual([`script ${script}: it is outside the home folder`]);
+    });
+  });
+
   it('ignores programs on PATH, missing files and files outside home', async () => {
     await withTempDir('agentnomad-outside-', async (outside) => {
       await writeTestFile(join(outside, 'tool.sh'));

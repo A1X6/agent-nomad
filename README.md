@@ -181,7 +181,7 @@ The other setups are still done first, and one message lists what was not.
 
 |                          | Synced                                                                                                                                                                                                                                                                                                                                                  | Never synced                                                                                                                         |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, scripts your hooks and status line run                                                                                                                                                                        | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
+| **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, `hooks/`, scripts your hooks and status line run                                                                                                                                                              | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
 | **`~/.claude.json`**     | Your MCP servers and documented preferences, merged in                                                                                                                                                                                                                                                                                                  | Your login, project list, usage and onboarding state                                                                                 |
 | **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed); a marketplace added from a local folder, with its files; plugin folders `CLAUDE_CODE_PLUGIN_DIRS` loads, with their files; their data on request (`--plugin-data`) | Plugin caches; a local marketplace's `.git` and the files git ignores; `--plugin-dir` and SDK plugins                                |
 | **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings and folders, scripts the project's hooks run                                                                                                                                                                                                          | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
@@ -189,6 +189,13 @@ The other setups are still done first, and one message lists what was not.
 
 Settings your organization manages on a PC are never synced; agentnomad tells you when they
 exist.
+
+`hooks/` (in `~/.claude` and in a project's `.claude/`) is synced whole, also scripts no
+setting runs yet: a script there runs only when a settings file names it, and pull shows each
+new or changed hook first. A script your hooks or status line run elsewhere is saved when it is
+in your home folder (or, for a project, inside the project). One push cannot take (outside your
+home folder, in a folder agentnomad never syncs, a folder for keys and logins or one whose
+files run by themselves) is named where push lists what it left out, with why.
 
 ### Files your `CLAUDE.md` imports
 
