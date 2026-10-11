@@ -7,6 +7,7 @@ import {
   ACCOUNT_PLUGINS_PREFIX,
   ACCOUNT_SKILLS_PREFIX,
   CLAUDE_JSON_BUNDLE_PATH,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   globalDestination,
   hookScripts,
   isPullMetadata,
@@ -64,6 +65,8 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['.agentnomad/home/Library/LaunchAgents/x.sh', 'a folder whose files run by themselves'],
     ['.agentnomad/home/.SSH/id_ed25519', 'a folder for keys and logins'],
     ['.agentnomad/other.json', 'unknown agentnomad entry'],
+    // A project's part of ~/.claude.json (T109) only belongs to a project setup.
+    [CLAUDE_JSON_PROJECT_BUNDLE_PATH, 'unknown agentnomad entry'],
     // A saved local marketplace is one file (T98): never a folder of loose files.
     [`${LOCAL_MARKETPLACES_PREFIX}tools/run.sh`, 'unknown agentnomad entry'],
     // A saved plugin folder is one file too (T99).
@@ -72,6 +75,9 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['Plugins/cache/m/p/1.0.0/hooks/run.sh', 'never synced'],
     ['Skills/Synced/x/run.sh', 'never synced'],
     ['.AgentNomad/home/x.sh', 'unknown agentnomad entry'],
+    // Every project's auto memory (T110): Markdown notes, each under its project's folder name.
+    ['.agentnomad/auto-memory/C--work-app/run.sh', 'auto memory holds only Markdown files'],
+    ['.agentnomad/auto-memory/MEMORY.md', 'auto memory of the global setup belongs to a project'],
     ['../outside.md', 'not a safe path'],
   ])('global: %s', (path, reason) => {
     expect(globalDestination(path, new Set())).toEqual({ kind: 'refused', reason });
@@ -187,6 +193,15 @@ describe('restore rules: places what a collector produces', () => {
     [`${PLUGIN_STORE_PREFIX}probe-mod_skills-dir-e89169932969.json`, { kind: 'metadata' }],
     // Synced whole (T112): a script there runs only when a setting names it, and pull shows it.
     ['hooks/lib/common.sh', { kind: 'target', path: 'hooks/lib/common.sh' }],
+    // Every project's auto memory (T110), and the shared folder's under its reserved name.
+    [
+      '.agentnomad/auto-memory/C--work-app/topics/testing.md',
+      { kind: 'global-auto-memory', folder: 'C--work-app', path: 'topics/testing.md' },
+    ],
+    [
+      '.agentnomad/auto-memory/_shared/MEMORY.md',
+      { kind: 'global-auto-memory', folder: '_shared', path: 'MEMORY.md' },
+    ],
   ])('global: %s', (path, destination) => {
     expect(globalDestination(path, new Set())).toEqual(destination);
   });
@@ -199,6 +214,8 @@ describe('restore rules: places what a collector produces', () => {
     ['.agentnomad/auto-memory/MEMORY.md', { kind: 'auto-memory', path: 'MEMORY.md' }],
     // The project's prompt for a bare /loop, read before the global one (T113).
     ['.claude/loop.md', { kind: 'target', path: '.claude/loop.md' }],
+    // Merged into the folder's entry in ~/.claude.json (T109).
+    [CLAUDE_JSON_PROJECT_BUNDLE_PATH, { kind: 'claude-json' }],
     // Read by pull to name changed plugin versions (T100), never written.
     [PLUGIN_VERSIONS_BUNDLE_PATH, { kind: 'metadata' }],
     [`${LOCAL_MARKETPLACES_PREFIX}tools.json`, { kind: 'metadata' }],
@@ -244,5 +261,29 @@ describe('claude.ai plugins (T101)', () => {
     expect(
       globalDestination(`${ACCOUNT_PLUGINS_PREFIX}my-upload/.claude-plugin/plugin.json`, new Set()),
     ).toEqual({ kind: 'metadata' });
+  });
+});
+
+describe('restore rules: files the memory files import (T111)', () => {
+  it('global: a file outside the synced folders only when the setup imports it', () => {
+    expect(globalDestination('shared/team.md', new Set(['shared/team.md']))).toEqual({
+      kind: 'target',
+      path: 'shared/team.md',
+    });
+    expect(globalDestination('shared/team.md', new Set())).toEqual({
+      kind: 'refused',
+      reason: 'not part of a Claude Code setup',
+    });
+  });
+
+  it('project: a file outside .claude/ only when the setup imports it', () => {
+    expect(projectDestination('docs/guide.md', new Set(['docs/guide.md']))).toEqual({
+      kind: 'target',
+      path: 'docs/guide.md',
+    });
+    expect(projectDestination('docs/guide.md')).toEqual({
+      kind: 'refused',
+      reason: 'not part of a Claude Code setup',
+    });
   });
 });

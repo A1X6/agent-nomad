@@ -17,9 +17,10 @@ import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import * as z from 'zod';
 
 import { CLAUDE_CODE_PATHS } from '../../src/agents/claude-code/claude-code-paths.data.ts';
-import { docsTopLevelNames, driftReport, reportMarkdown } from './drift.ts';
+import { docsGlobalConfigKeys, docsTopLevelNames, driftReport, reportMarkdown } from './drift.ts';
 
 const DOCS_URL = 'https://code.claude.com/docs/en/claude-directory.md';
+const SETTINGS_URL = 'https://code.claude.com/docs/en/settings-reference.md';
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md';
 const REGISTRY_URL = 'https://registry.npmjs.org/@anthropic-ai/claude-code/latest';
 
@@ -48,8 +49,9 @@ async function freshEntries(): Promise<string[] | null> {
     .filter((line) => line.length > 0);
 }
 
-const [directoryDocs, changelog, latest, fresh] = await Promise.all([
+const [directoryDocs, settingsReference, changelog, latest, fresh] = await Promise.all([
   fetchText(DOCS_URL),
+  fetchText(SETTINGS_URL),
   fetchText(CHANGELOG_URL),
   latestVersion(),
   freshEntries(),
@@ -59,6 +61,10 @@ const [directoryDocs, changelog, latest, fresh] = await Promise.all([
 if (docsTopLevelNames(directoryDocs).length < 10) {
   throw new Error(`${DOCS_URL} no longer lists the .claude directory as expected`);
 }
+// The index table gives about a dozen keys the scope "Global config" today (T109).
+if ((docsGlobalConfigKeys(settingsReference) ?? []).length === 0) {
+  throw new Error(`${SETTINGS_URL} no longer has the settings index with "Global config" keys`);
+}
 if (!/^## \d+\.\d+\.\d+/m.test(changelog)) {
   throw new Error(`${CHANGELOG_URL} no longer has "## <version>" sections`);
 }
@@ -66,6 +72,7 @@ if (!/^## \d+\.\d+\.\d+/m.test(changelog)) {
 const report = driftReport({
   paths: CLAUDE_CODE_PATHS,
   directoryDocs,
+  settingsReference,
   changelog,
   latestVersion: latest,
   freshEntries: fresh,

@@ -178,7 +178,12 @@ export function createProgram({ handlers, optionalParts, output }: ProgramDeps) 
     .addOption(pushAgent)
     .addOption(pushGlobal)
     .addOption(pushProject)
-    .addOption(new Option('--memory', "include the agent's memory"))
+    .addOption(
+      new Option(
+        '--memory',
+        "save the agent's memory, what it learned about you and your projects, from its folder (the global setup takes every project's, a project only its own)",
+      ),
+    )
     .addOption(new Option('--no-memory', 'leave memory out'));
   addPartOptions(push, parts, 'push');
   push.addOption(yesOption()).action((options, command) =>

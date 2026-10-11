@@ -152,7 +152,7 @@ Run `agentnomad <command> --help` for every option.
 | `--agent <ids>`                              | push, pull, status, delete                          | Agents to use, comma-separated (e.g. `claude-code`).                                                                                             |
 | `--global`                                   | push, pull, status, delete                          | The global setup (`~/.claude`).                                                                                                                  |
 | `--project <name>`                           | push, pull, status, delete                          | A project setup, by the name it was saved under.                                                                                                 |
-| `--memory` / `--no-memory`                   | push                                                | Include Claude's memory, or not.                                                                                                                 |
+| `--memory` / `--no-memory`                   | push                                                | Save Claude's memory, what it learned about you and your projects (the global setup takes every project's, a project only its own).              |
 | `--account-skills` / `--no-account-skills`   | push, pull                                          | Push: save a copy of your own claude.ai skills. Pull: add them as local skills (for a PC without that claude.ai account).                        |
 | `--account-plugins` / `--no-account-plugins` | push, pull                                          | Push: save a copy of the plugins you uploaded to claude.ai. Pull: add them as local plugins (for a PC without that claude.ai account).           |
 | `--plugin-data` / `--no-plugin-data`         | push, pull                                          | Push: save the data of the plugins the setup puts back (e.g. a mod's saved choices). Pull: put it back, for plugins installed here.              |
@@ -179,13 +179,13 @@ The other setups are still done first, and one message lists what was not.
 
 ## What is synced
 
-|                          | Synced                                                                                                                                                                                                                                                                                                                                                  | Never synced                                                                                                                         |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `loop.md` (your `/loop` prompt), `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, `hooks/`, scripts your hooks and status line run                                                                                                                             | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
-| **`~/.claude.json`**     | Your MCP servers and documented preferences, merged in                                                                                                                                                                                                                                                                                                  | Your login, project list, usage and onboarding state                                                                                 |
-| **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed); a marketplace added from a local folder, with its files; plugin folders `CLAUDE_CODE_PLUGIN_DIRS` loads, with their files; their data on request (`--plugin-data`) | Plugin caches; a local marketplace's `.git` and the files git ignores; `--plugin-dir` and SDK plugins                                |
-| **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings, `loop.md` and folders, scripts the project's hooks run                                                                                                                                                                                               | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
-| **Opt-in**               | Memory (subagent and auto memory), environment variable values, a copy of your own claude.ai skills (`--account-skills`; never Anthropic's, nor your organization's when it can be told apart) and of the plugins you uploaded to claude.ai (`--account-plugins`; never claude.ai's directory or your organization's)                                   |                                                                                                                                      |
+|                          | Synced                                                                                                                                                                                                                                                                                                                                                        | Never synced                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `loop.md` (your `/loop` prompt), `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, `hooks/`, scripts your hooks and status line run                                                                                                                                   | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
+| **`~/.claude.json`**     | Your MCP servers and documented preferences (the settings reference's 12 "Global config" keys), merged in; for a project, its local MCP servers (`claude mcp add`'s default) and `.mcp.json` approvals, merged into that folder's entry                                                                                                                       | Your login, project trust, history and allowed tools, usage and onboarding state                                                     |
+| **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed); a marketplace added from a local folder, with its files; plugin folders `CLAUDE_CODE_PLUGIN_DIRS` loads, with their files; their data on request (`--plugin-data`)       | Plugin caches; a local marketplace's `.git` and the files git ignores; `--plugin-dir` and SDK plugins                                |
+| **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings, `loop.md` and folders, scripts the project's hooks run                                                                                                                                                                                                     | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
+| **Opt-in**               | Memory (subagent and auto memory; the global setup takes every project's), environment variable values, a copy of your own claude.ai skills (`--account-skills`; never Anthropic's, nor your organization's when it can be told apart) and of the plugins you uploaded to claude.ai (`--account-plugins`; never claude.ai's directory or your organization's) |                                                                                                                                      |
 
 Settings your organization manages on a PC are never synced; agentnomad tells you when they
 exist.
@@ -196,6 +196,28 @@ new or changed hook first. A script your hooks or status line run elsewhere is s
 in your home folder (or, for a project, inside the project). One push cannot take (outside your
 home folder, in a folder agentnomad never syncs, a folder for keys and logins or one whose
 files run by themselves) is named where push lists what it left out, with why.
+
+Claude Code keeps each project's auto memory in `~/.claude/projects/<name>/memory/`, the name
+made from the project's path. Pull puts it back under the same name, so Claude Code finds it
+when the project is at the same path on the new PC; when it is not, the notes still land under
+that name and are picked up once the project is at that path. When `autoMemoryDirectory` in
+your user settings names one folder for every project, the global setup saves that folder once
+and pull puts it back in the folder your user settings name. When one pull restores the global
+setup and a project that both hold the same note, the project's copy wins.
+
+### Files your `CLAUDE.md` imports
+
+A `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` or rule file can pull in other files with
+`@path` lines. Push follows them as Claude Code does (from the importing file, `~/` for your
+home folder, up to four hops deep, never inside code) and saves each imported text document
+that is not synced already: from your home folder in a global setup, from inside the project in
+a project setup. Pull puts each one back where the import points. Push names every imported
+file it cannot take, with the file and line that import it: one outside your home folder (or
+the project), one in a folder for keys and logins or never synced, and code, scripts or files
+without an extension. Pull writes imported files without asking, so only Markdown and plain
+text (`.md`, `.txt` and the like) come along; settings such as `.json` files never do. Claude
+Code reads imported files as instructions and never runs them. On Windows, write import paths
+with forward slashes: Claude Code ends a path at a backslash.
 
 ### Where plugins come from, and what happens to each
 

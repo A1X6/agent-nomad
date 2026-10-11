@@ -5,23 +5,30 @@ import { describe, expect, it } from 'vitest';
 
 import {
   base,
+  claudeJsonKey,
   collect,
   globalCollector,
   home,
+  LOCAL_MCP_SERVER,
   memoryDir,
   project,
+  projectMemory,
   root,
   setMemoryDirectory,
   stopHook,
   useProjectFolders,
+  writeClaudeJsonProject,
 } from './claude-code-project-fixtures.ts';
-import { collected, readJson, readText, writeTestFile } from './fakes.ts';
+import { collected, collectedJson, readJson, readText, writeTestFile } from './fakes.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
+  claudeJsonProjectQuestion,
   createClaudeCodeRestorer,
   LOCAL_MARKETPLACES_PREFIX,
   hooksForOtherOs,
   lineEndingsFor,
+  projectDirName,
   sameForRestore,
   type ClaudeCodeRestorer,
   type CollectedFile,
@@ -461,6 +468,98 @@ describe('restorer: ~/.claude.json', () => {
   });
 });
 
+describe("restorer: the project's part of ~/.claude.json (T109)", () => {
+  const incoming = collectedJson(CLAUDE_JSON_PROJECT_BUNDLE_PATH, {
+    mcpServers: { local: LOCAL_MCP_SERVER },
+    enabledMcpjsonServers: ['shared'],
+  });
+  const otherProject = { '/other': { mcpServers: { theirs: { command: 'theirs' } } } };
+
+  it("creates the folder's entry when it is missing, asking the project's question", async () => {
+    await writeTestFile(
+      join(home, '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: 'me@example.com' }, projects: otherProject }),
+    );
+    const { questions, resolve } = answer('merge');
+    const report = await restorer().restore(
+      { kind: 'project', projectDir: project },
+      [incoming],
+      resolve,
+    );
+    expect(questions).toEqual([
+      [
+        '.agentnomad/claude-json-project.json',
+        {
+          overwriteAllowed: false,
+          message:
+            "~/.claude.json: add this project's MCP servers local; .mcp.json servers approved: shared to its entry for this folder? Claude Code keeps them there next to your login and the folder's trust, which stay as they are. Merge (the default) adds them; Skip leaves the file as it is.",
+        },
+      ],
+    ]);
+    expect(await readJson(join(home, '.claude.json'))).toEqual({
+      oauthAccount: { emailAddress: 'me@example.com' },
+      projects: {
+        ...otherProject,
+        [claudeJsonKey()]: {
+          mcpServers: { local: LOCAL_MCP_SERVER },
+          enabledMcpjsonServers: ['shared'],
+        },
+      },
+    });
+    expect(report.written).toEqual([CLAUDE_JSON_PROJECT_BUNDLE_PATH]);
+  });
+
+  it("keeps the entry's other keys and merges servers and choices by name", async () => {
+    await writeClaudeJsonProject({
+      allowedTools: ['Bash(ls:*)'],
+      hasTrustDialogAccepted: true,
+      mcpServers: { mine: { command: 'mine' }, local: { command: 'old' } },
+      disabledMcpjsonServers: ['shared', 'noisy'],
+    });
+    await restoreProject([incoming], 'merge');
+    expect((await readJson(join(home, '.claude.json')))['projects']).toEqual({
+      [claudeJsonKey()]: {
+        allowedTools: ['Bash(ls:*)'],
+        hasTrustDialogAccepted: true,
+        mcpServers: { mine: { command: 'mine' }, local: LOCAL_MCP_SERVER },
+        // Approved there, so no longer rejected here.
+        disabledMcpjsonServers: ['noisy'],
+        enabledMcpjsonServers: ['shared'],
+      },
+    });
+  });
+
+  it('says it would change nothing when the entry already has it', async () => {
+    await writeClaudeJsonProject({
+      mcpServers: { local: LOCAL_MCP_SERVER },
+      enabledMcpjsonServers: ['shared'],
+    });
+    const r = restorer();
+    expect(await r.claudeJsonChange([incoming], { kind: 'project', projectDir: project })).toBe(
+      'none',
+    );
+    const { questions, resolve } = answer('merge');
+    await r.restore({ kind: 'project', projectDir: project }, [incoming], resolve);
+    expect(questions).toEqual([]);
+  });
+
+  it('restores only servers and choices, never trust or history of the entry', async () => {
+    await writeClaudeJsonProject({ hasTrustDialogAccepted: false });
+    const forged = collectedJson(CLAUDE_JSON_PROJECT_BUNDLE_PATH, {
+      hasTrustDialogAccepted: true,
+      allowedTools: ['Bash(*)'],
+      mcpServers: { local: LOCAL_MCP_SERVER },
+    });
+    const report = await restoreProject([forged], 'merge');
+    expect((await readJson(join(home, '.claude.json')))['projects']).toEqual({
+      [claudeJsonKey()]: { hasTrustDialogAccepted: false, mcpServers: { local: LOCAL_MCP_SERVER } },
+    });
+    expect(report.warnings).toEqual([
+      `Left out of ${join(home, '.claude.json')}: "hasTrustDialogAccepted", "allowedTools" (only this project's MCP servers and .mcp.json choices are restored there).`,
+    ]);
+  });
+});
+
 describe('restorer: home files', () => {
   it('puts tool settings and hook scripts back in the home folder', async () => {
     await restoreGlobal(
@@ -886,6 +985,16 @@ describe('restorer: what pull asks before writing (T61)', () => {
     expect(conflicts[1]?.question).toEqual({ overwriteAllowed: true });
   });
 
+  it("lists the project's part of ~/.claude.json whenever it is pulled, with its question (T109)", () => {
+    const part = collected(CLAUDE_JSON_PROJECT_BUNDLE_PATH, '{"enabledMcpjsonServers":["shared"]}');
+    expect(restorer().conflicts([part], [])).toEqual([
+      {
+        path: CLAUDE_JSON_PROJECT_BUNDLE_PATH,
+        question: claudeJsonProjectQuestion(['.mcp.json servers approved: shared']),
+      },
+    ]);
+  });
+
   it('never asks about a saved local marketplace, which pull writes elsewhere (T98)', () => {
     const saved = `${LOCAL_MARKETPLACES_PREFIX}tools.json`;
     expect(restorer().conflicts([collected(saved, 'theirs')], [collected(saved, 'mine')])).toEqual(
@@ -984,5 +1093,140 @@ describe('restorer: hooks for another OS, by what they run (review 6 UX-02)', ()
     expect(hooksForOtherOs(statusLine('node "C:/hooks/x.ps1"'), 'linux')).toEqual([
       'node "C:/hooks/x.ps1"',
     ]);
+  });
+});
+
+describe('restorer: auto memory of every project (T110)', () => {
+  const NOTE = '.agentnomad/auto-memory/C--work-app/MEMORY.md';
+  const SHARED_NOTE = '.agentnomad/auto-memory/_shared/MEMORY.md';
+  /** The test project's note as a global bundle holds it. */
+  const globalNote = () => `.agentnomad/auto-memory/${projectDirName(project)}/MEMORY.md`;
+
+  it("writes each project's notes to its folder in the base folder's projects/", async () => {
+    const report = await restoreGlobal([collected(NOTE, 'remember')], 'skip');
+    expect(await readText(projectMemory('C--work-app', 'MEMORY.md'))).toBe('remember');
+    expect(report.written).toEqual([NOTE]);
+  });
+
+  it('asks about a note that differs here, and backs it up before overwriting', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'), 'mine');
+    const report = await restoreGlobal([collected(NOTE, 'theirs')], 'overwrite');
+    expect(await readText(projectMemory('C--work-app', 'MEMORY.md'))).toBe('theirs');
+    expect(report.backups).toEqual([`${NOTE}.agentnomad-backup-${STAMP}`]);
+  });
+
+  it('lists a note that differs here among the conflicts', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'), 'mine');
+    const current = await globalCollector().collect({ kind: 'global' }, { includeMemory: true });
+    expect(restorer().conflicts([collected(NOTE, 'theirs')], current)).toEqual([
+      { path: NOTE, question: { overwriteAllowed: true } },
+    ]);
+  });
+
+  it('writes shared notes to the folder the pulled user settings name', async () => {
+    const settings = collected('settings.json', JSON.stringify({ autoMemoryDirectory: '~/all' }));
+    await restoreGlobal([settings, collected(SHARED_NOTE, 'shared')], 'skip');
+    expect(await readText(join(home, 'all', 'MEMORY.md'))).toBe('shared');
+  });
+
+  it('skips shared notes with a warning when no user settings name a folder', async () => {
+    const report = await restoreGlobal([collected(SHARED_NOTE, 'shared')], 'skip');
+    expect(report.skipped).toEqual([SHARED_NOTE]);
+    expect(report.warnings).toEqual([
+      'Shared auto memory was not restored: autoMemoryDirectory is not set in your user settings.',
+    ]);
+  });
+
+  it('refuses shared notes for a folder for keys (T43)', async () => {
+    await setMemoryDirectory(join(base, 'settings.json'), '~/.ssh');
+    const report = await restoreGlobal([collected(SHARED_NOTE, 'shared')], 'skip');
+    expect(report.warnings).toEqual([
+      `Shared auto memory was not restored to ${join(home, '.ssh')}, the folder autoMemoryDirectory names: it is a folder for keys and logins.`,
+    ]);
+    await expect(stat(join(home, '.ssh', 'MEMORY.md'))).rejects.toThrow();
+  });
+
+  it("the project's copy wins over the global one in one pull, without a question", async () => {
+    const both = restorer();
+    await both.restore(
+      { kind: 'global' },
+      [collected(globalNote(), 'global')],
+      answer('skip').resolve,
+    );
+    const asked = answer('skip');
+    const report = await both.restore(
+      { kind: 'project', projectDir: project },
+      [collected('.agentnomad/auto-memory/MEMORY.md', 'project')],
+      asked.resolve,
+    );
+    expect(await readText(join(memoryDir(), 'MEMORY.md'))).toBe('project');
+    expect(asked.questions).toEqual([]);
+    expect(report.written).toEqual(['.agentnomad/auto-memory/MEMORY.md']);
+  });
+
+  it('the project copy is still asked about when the global one left the note as it was', async () => {
+    await writeTestFile(join(memoryDir(), 'MEMORY.md'), 'mine');
+    const both = restorer();
+    await both.restore(
+      { kind: 'global' },
+      [collected(globalNote(), 'global')],
+      answer('skip').resolve,
+    );
+    const asked = answer('skip');
+    await both.restore(
+      { kind: 'project', projectDir: project },
+      [collected('.agentnomad/auto-memory/MEMORY.md', 'project')],
+      asked.resolve,
+    );
+    expect(asked.questions).toEqual([
+      ['.agentnomad/auto-memory/MEMORY.md', { overwriteAllowed: true }],
+    ]);
+    expect(await readText(join(memoryDir(), 'MEMORY.md'))).toBe('mine');
+  });
+});
+
+describe('restorer: files the memory files import (T111)', () => {
+  it('puts a global import back where the setup imports it from', async () => {
+    const report = await restoreGlobal(
+      [
+        collected('CLAUDE.md', '@~/notes/a.md\n@shared/team.md\n'),
+        collected('.agentnomad/home/notes/a.md', '@b.md\n'),
+        collected('.agentnomad/home/notes/b.md', 'B\n'),
+        collected('shared/team.md', 'Team\n'),
+        collected('.agentnomad/home/notes/other.md', 'not imported\n'),
+      ],
+      'skip',
+    );
+    expect(report.written).toEqual([
+      '.agentnomad/home/notes/a.md',
+      '.agentnomad/home/notes/b.md',
+      'CLAUDE.md',
+      'shared/team.md',
+    ]);
+    expect(report.skipped).toEqual(['.agentnomad/home/notes/other.md']);
+    expect(await readText(join(home, 'notes', 'b.md'))).toBe('B\n');
+    expect(await readText(join(base, 'shared', 'team.md'))).toBe('Team\n');
+  });
+
+  it('puts a project import back at its project path', async () => {
+    const report = await restoreProject(
+      [collected('CLAUDE.md', '@docs/guide.md\n'), collected('docs/guide.md', 'Guide\n')],
+      'skip',
+    );
+    expect(report.written).toEqual(['CLAUDE.md', 'docs/guide.md']);
+    expect(await readText(join(project, 'docs', 'guide.md'))).toBe('Guide\n');
+  });
+
+  it('never writes an imported script or a file without an extension', async () => {
+    const report = await restoreProject(
+      [
+        collected('CLAUDE.md', '@tools/run.sh @.husky/pre-commit\n'),
+        collected('tools/run.sh', 'echo pwned\n'),
+        collected('.husky/pre-commit', 'echo pwned\n'),
+      ],
+      'skip',
+    );
+    expect(report.written).toEqual(['CLAUDE.md']);
+    expect(report.skipped).toEqual(['.husky/pre-commit', 'tools/run.sh']);
   });
 });

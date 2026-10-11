@@ -24,16 +24,26 @@ import type {
   ScopeTarget,
 } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
-import { findAutoMemory } from './auto-memory.ts';
+import { findAutoMemory, findSharedAutoMemory } from './auto-memory.ts';
 import {
-  CLAUDE_JSON_QUESTION,
+  claudeJsonFileOf,
+  claudeJsonQuestion,
   createClaudeJsonMerge,
+  isClaudeJsonPath,
   type MutableReport,
 } from './claude-json-merge.ts';
+import {
+  followImports,
+  globalImportPlace,
+  isGlobalMemoryFile,
+  isProjectMemoryFile,
+  projectImportPlace,
+  type ImportPlace,
+} from './claude-md-imports.ts';
 import { reviewRunnable } from './command-review.ts';
-import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
+import { extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
 import { hookScripts, projectHookScripts } from './hook-scripts.ts';
-import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
+import { PROJECT_SETTINGS_FILES, SHARED_AUTO_MEMORY } from './project-paths.ts';
 import {
   globalDestination,
   isPullMetadata,
@@ -63,9 +73,13 @@ export interface ClaudeCodeRestorer extends Restorer {
   ): Promise<RestoreReport>;
   /**
    * What restoring `files` would do to `~/.claude.json` here as it is now: nothing, create
-   * it, or merge into it (only after the answer to its conflict question).
+   * it, or merge into it (only after the answer to its conflict question). A project's part
+   * goes into the entry of `target`'s folder (T109).
    */
-  claudeJsonChange(files: readonly CollectedFile[]): Promise<'none' | 'new' | 'merge'>;
+  claudeJsonChange(
+    files: readonly CollectedFile[],
+    target?: ScopeTarget,
+  ): Promise<'none' | 'new' | 'merge'>;
   /**
    * Writes `files` (paths from `dir`) into the folder `dir` as `restore` writes a setup's
    * files: the same conflict answers, backups, line endings and permissions (T98: a local
@@ -95,6 +109,14 @@ export interface RestorerOptions {
 /** Scripts that must use LF (a CR breaks the shell) and ones Windows runs with CRLF. */
 const LF_SCRIPTS = new Set(['.sh', '.bash', '.zsh', '.fish', '.py', '.rb', '.pl', '.lua']);
 const CRLF_SCRIPTS = new Set(['.bat', '.cmd']);
+
+/** Where auto memory goes, each looked up once and only when an entry needs it. */
+interface MemoryFolders {
+  /** The pulled project's own folder. */
+  readonly project: () => Promise<string | null>;
+  /** The folder `autoMemoryDirectory` in user settings names for every project (T110). */
+  readonly shared: () => Promise<string | null>;
+}
 
 /** Commands that only run on one side: their program, or a script they run. */
 const ONLY_ON = {
@@ -169,9 +191,15 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     fallback: strategies.textSideBySide,
     overwrite: strategies.overwrite,
   };
-  const claudeJsonFile = options.customConfigDir
-    ? path.join(options.baseDir, '.claude.json')
-    : path.join(options.homedir, '.claude.json');
+  // Windows and macOS ignore case and Unicode form: two names may be one file there (T43).
+  const foldsNames = options.platform === 'win32' || options.platform === 'darwin';
+  const sameFileKey = (name: string) => (foldsNames ? name.normalize('NFC').toLowerCase() : name);
+  /**
+   * Auto memory files written in this run, by OS path (T110). A global and a project setup
+   * pulled together can hold the same note; pull writes the global setup first, and the
+   * project's copy then replaces what it wrote without another question: the project wins.
+   */
+  const memoryWritten = new Map<string, Uint8Array>();
 
   /** The file at `nativePath` with its permissions, `'folder'` for anything else, or `null`. */
   async function readExistingFile(
@@ -202,7 +230,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   }
 
   const claudeJson = createClaudeJsonMerge({
-    claudeJsonFile,
+    claudeJsonFile: claudeJsonFileOf(options),
+    platform: options.platform,
     isClaudeRunning: options.isClaudeRunning,
     readExisting,
     writeAtomically,
@@ -223,7 +252,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   async function nativePathOf(
     target: ScopeTarget,
     destination: RestoreDestination,
-    memoryDir: () => Promise<string | null>,
+    memory: MemoryFolders,
   ): Promise<string | null> {
     switch (destination.kind) {
       case 'target':
@@ -234,7 +263,15 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       case 'home':
         return resolver.toNativePath(options.homedir, destination.path);
       case 'auto-memory': {
-        const dir = await memoryDir();
+        const dir = await memory.project();
+        return dir === null ? null : resolver.toNativePath(dir, destination.path);
+      }
+      case 'global-auto-memory': {
+        if (destination.folder !== SHARED_AUTO_MEMORY) {
+          const note = `projects/${destination.folder}/memory/${destination.path}`;
+          return resolver.toNativePath(options.baseDir, note);
+        }
+        const dir = await memory.shared();
         return dir === null ? null : resolver.toNativePath(dir, destination.path);
       }
       default:
@@ -242,8 +279,44 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     }
   }
 
-  /** Where each entry of `incoming` belongs, given the scripts its own hooks run. */
-  function destinations(target: ScopeTarget, incoming: readonly CollectedFile[]) {
+  /**
+   * The bundle paths of the files the bundle's own memory files import (T111), found in the
+   * bundle as push placed them for this PC: pull writes those and no other file there.
+   */
+  async function importedIn(
+    incoming: readonly CollectedFile[],
+    folder: string,
+    isMemoryFile: (bundlePath: string) => boolean,
+    place: (nativePath: string) => ImportPlace,
+  ): Promise<string[]> {
+    const byPath = new Map(incoming.map((entry) => [entry.path, entry]));
+    const memoryFiles = incoming
+      .filter((entry) => isMemoryFile(entry.path))
+      .map((entry) => ({
+        nativePath: path.join(folder, ...entry.path.split('/')),
+        bundlePath: entry.path,
+        text: new TextDecoder().decode(entry.content),
+      }));
+    const { files } = await followImports(
+      memoryFiles,
+      {
+        place,
+        isFile: () => Promise.resolve(false),
+        read(_nativePath, bundlePath) {
+          const entry = byPath.get(bundlePath);
+          return Promise.resolve(entry ? new TextDecoder().decode(entry.content) : null);
+        },
+      },
+      options,
+    );
+    return files.map((file) => file.bundlePath);
+  }
+
+  /**
+   * Where each entry of `incoming` belongs, given the scripts its own hooks run and the files
+   * its memory files import.
+   */
+  async function destinations(target: ScopeTarget, incoming: readonly CollectedFile[]) {
     const scriptsIn = (settingsFiles: readonly string[], scriptsOf: (json: string) => string[]) =>
       new Set(
         incoming
@@ -253,6 +326,12 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     const globalScripts = scriptsIn(GLOBAL_SETTINGS_FILES, (json) =>
       hookScripts(json, options).map((script) => script.bundlePath),
     );
+    if (target.kind === 'global') {
+      const imported = await importedIn(incoming, options.baseDir, isGlobalMemoryFile, (file) =>
+        globalImportPlace(file, options),
+      );
+      for (const bundlePath of imported) globalScripts.add(bundlePath);
+    }
     const projectScripts =
       target.kind === 'project'
         ? scriptsIn(PROJECT_SETTINGS_FILES, (json) =>
@@ -262,6 +341,13 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
             }).map((script) => script.bundlePath),
           )
         : new Set<string>();
+    if (target.kind === 'project') {
+      const { projectDir } = target;
+      const imported = await importedIn(incoming, projectDir, isProjectMemoryFile, (file) =>
+        projectImportPlace(file, { projectDir, platform: options.platform }),
+      );
+      for (const bundlePath of imported) projectScripts.add(bundlePath);
+    }
     return (bundlePath: string): RestoreDestination => {
       const windowsProblem = options.platform === 'win32' ? windowsNameProblem(bundlePath) : null;
       if (windowsProblem !== null) return { kind: 'refused', reason: windowsProblem };
@@ -285,6 +371,29 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
             : location.kind === 'refused'
               ? `Auto memory was not restored to ${printableLine(location.dir)}, the folder autoMemoryDirectory names: ${location.reason}.`
               : 'Auto memory was not restored: this project path is too long to find its memory folder.',
+        );
+        return null;
+      })());
+  }
+
+  /**
+   * The shared auto memory folder for a global bundle's `_shared` notes (T110), looked up once
+   * and only when an entry needs it: from user settings here, else from the pulled ones.
+   */
+  function sharedMemoryFolder(incoming: readonly CollectedFile[], report: MutableReport) {
+    let memory: Promise<string | null> | undefined;
+    return () =>
+      (memory ??= (async () => {
+        const settings = incoming.find((entry) => entry.path === 'settings.json');
+        const location = await findSharedAutoMemory(
+          options,
+          settings === undefined ? null : new TextDecoder().decode(settings.content),
+        );
+        if (location.kind === 'folder') return location.dir;
+        report.warnings.push(
+          location.kind === 'none'
+            ? 'Shared auto memory was not restored: autoMemoryDirectory is not set in your user settings.'
+            : `Shared auto memory was not restored to ${printableLine(location.dir)}, the folder autoMemoryDirectory names: ${location.reason}.`,
         );
         return null;
       })());
@@ -369,12 +478,16 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     return options.platform === 'win32' ? windowsNameProblem(path) : null;
   }
 
-  /** Writes `file` to `nativePath` with the user's answer if one is there and differs. */
+  /**
+   * Writes `file` to `nativePath` with the user's answer if one is there and differs. An auto
+   * memory note (`memory`) replaces one this run wrote there before without asking (T110).
+   */
   async function writeEntry(
     file: CollectedFile,
     nativePath: string,
     ask: ConflictResolver,
     report: MutableReport,
+    memory = false,
   ): Promise<void> {
     const existing = await readExistingFile(nativePath);
     if (existing === 'folder') {
@@ -385,12 +498,20 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       return;
     }
     const content = lineEndingsFor(options.platform, file.path, file.content);
-    const writes = await writesFor(file, content, existing?.content ?? null, ask);
+    const key = memory ? sameFileKey(path.resolve(nativePath)) : null;
+    const earlier = key === null ? undefined : memoryWritten.get(key);
+    const ours = earlier !== undefined && existing !== null && sameBytes(existing.content, earlier);
+    const writes = ours
+      ? [{ path: file.path, content }]
+      : await writesFor(file, content, existing?.content ?? null, ask);
     if (writes === null) {
       report.skipped.push(file.path);
       return;
     }
     await writeAll(file, nativePath, writes, existing?.mode ?? null, report);
+    if (key !== null && writes.some((write) => write.path === file.path)) {
+      memoryWritten.set(key, content);
+    }
   }
 
   /**
@@ -413,13 +534,12 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         throw error;
       }
     };
-    // Windows and macOS ignore case and Unicode form, so two entries a Linux PC keeps apart
-    // (`Notes.md`, `notes.md`) would land on one file here: only the first is written (T43).
-    const foldsNames = options.platform === 'win32' || options.platform === 'darwin';
+    // Two entries a Linux PC keeps apart (`Notes.md`, `notes.md`) would land on one file
+    // where names fold: only the first is written (T43).
     const seen = new Map<string, string>();
     for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
       if (foldsNames) {
-        const folded = file.path.normalize('NFC').toLowerCase();
+        const folded = sameFileKey(file.path);
         const first = seen.get(folded);
         if (first !== undefined) {
           report.skipped.push(file.path);
@@ -462,7 +582,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         // to ask about, even when this PC would save another one.
         if (isPullMetadata(file.path)) continue;
         const here = byPath.get(file.path);
-        const claudeJson = file.path === CLAUDE_JSON_BUNDLE_PATH;
+        const claudeJson = isClaudeJsonPath(file.path);
         if (here === undefined && !claudeJson) continue;
         if (
           here !== undefined &&
@@ -471,21 +591,24 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           continue;
         found.push({
           path: file.path,
-          question: claudeJson ? CLAUDE_JSON_QUESTION : { overwriteAllowed: true },
+          question: claudeJson ? claudeJsonQuestion(file) : { overwriteAllowed: true },
         });
       }
       return found;
     },
 
-    async claudeJsonChange(incoming) {
-      const file = incoming.find((entry) => entry.path === CLAUDE_JSON_BUNDLE_PATH);
-      return file === undefined ? 'none' : claudeJson.change(file);
+    async claudeJsonChange(incoming, target) {
+      const file = incoming.find((entry) => isClaudeJsonPath(entry.path));
+      return file === undefined ? 'none' : claudeJson.change(file, target);
     },
 
     async restore(target, incoming, onConflict, context: ClaudeRestoreContext = {}) {
       const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
-      const destinationOf = destinations(target, incoming);
-      const memoryDir = autoMemoryFolder(target, report);
+      const destinationOf = await destinations(target, incoming);
+      const memory: MemoryFolders = {
+        project: autoMemoryFolder(target, report),
+        shared: sharedMemoryFolder(incoming, report),
+      };
 
       /** Writes one entry; a problem with it is thrown and reported by `writeEach`. */
       async function restoreEntry(file: CollectedFile, ask: ConflictResolver): Promise<void> {
@@ -496,16 +619,18 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         }
         if (destination.kind === 'metadata') return;
         if (destination.kind === 'claude-json') {
-          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true);
+          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true, target);
           return;
         }
 
-        const nativePath = await nativePathOf(target, destination, memoryDir);
+        const nativePath = await nativePathOf(target, destination, memory);
         if (nativePath === null) {
           report.skipped.push(file.path);
           return;
         }
-        await writeEntry(file, nativePath, ask, report);
+        const note =
+          destination.kind === 'auto-memory' || destination.kind === 'global-auto-memory';
+        await writeEntry(file, nativePath, ask, report, note);
       }
 
       await writeEach(incoming, onConflict, report, restoreEntry);
