@@ -170,7 +170,9 @@ open, such as a chat or an option letter from a discussion.
   `GitAnswer`); the mod as a plugin folder of its own (`writeModFolder`) and its saved
   `CLAUDE_CODE_PLUGIN_DIRS` entry (T99: `savedPluginDir`, `SAVED_PLUGIN_DIR_ENTRY`); files
   as a saved folder lists them (`savedFiles`, T104); a plugin's data folder and store file
-  (T102: `writePluginData`, `writePluginStore`).
+  (T102: `writePluginData`, `writePluginStore`); the names of the mod API a module reaches as
+  `$.<name>`, read from the Claude Code in `MOD_CALLS_VERSION` (`MOD_CALLS`, SEC-04 of review
+  15), which a newer Claude Code's list replaces, with the new version.
 - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
   other parts (`stubRestorer`).
 - `packages/cli/test/readme.ts`: the repository README as the tests that keep it and the
