@@ -10,7 +10,6 @@ import {
   syncedAccountPlugins,
   syncedPluginFiles,
   syncedPluginsManifest,
-  validateCli,
   validatePassNoHooks,
   type SyncedPluginEntry,
 } from './claude-code-plugin-fixtures.ts';
@@ -19,23 +18,14 @@ import {
   claudeCodeAdapter,
   home,
   useProjectFolders,
+  planStepWith,
 } from './claude-code-project-fixtures.ts';
-import {
-  collected,
-  collectedJson,
-  executableLookup,
-  paths,
-  readText,
-  recordingReporter,
-  scriptedPrompter,
-  writeTestFile,
-} from './fakes.ts';
+import { collected, collectedJson, paths, readText, writeTestFile } from './fakes.ts';
 
 import {
   ACCOUNT_PLUGINS_PREFIX,
   collectAccountPlugins,
   createFileGatherer,
-  findPluginValidator,
   pathsOf,
   planAccountPlugins,
   readSyncedPlugins,
@@ -305,40 +295,9 @@ describe("claude.ai plugins (T101): pull's plan step", () => {
     answers: boolean[],
     overrides: Partial<RestorePlanContext> = {},
   ) {
-    const script = scriptedPrompter(answers);
-    const { reporter, lines } = recordingReporter({ levels: false });
-    const system = executableLookup({
-      platform: 'linux',
-      homedir: home,
-      env: { PATH: '/usr/bin' },
-      executables: ['/usr/bin/claude'],
-    });
-    const validate = validateCli(validatePassNoHooks);
-    const adapter = claudeCodeAdapter(home, {
-      pluginValidator: await findPluginValidator(system, validate.cli),
-    });
-    if (!adapter.planRestore) throw new Error('no plan step');
-    const planned = await adapter.planRestore({
-      target: { kind: 'global' },
-      files,
-      conflicts: new Map(),
-      conflictAnswer: undefined,
-      prompter: script.prompter,
-      reporter,
-      assumeYes: false,
-      allowCommands: false,
-      parts: new Map(),
-      ...overrides,
-    });
-    const report = await planned.restore(() => Promise.resolve('skip'), {});
-    return {
-      planned,
-      report,
-      asked: script.asked,
-      defaults: script.confirmDefaults,
-      lines,
-      validated: validate.calls,
-    };
+    const t = await planStepWith(validatePassNoHooks, answers, { files, ...overrides });
+    const report = await t.planned.restore(() => Promise.resolve('skip'), {});
+    return { ...t, report };
   }
 
   it('lists them and asks, yes by default (T114); a no writes nothing', async () => {

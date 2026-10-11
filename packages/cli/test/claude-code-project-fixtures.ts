@@ -3,15 +3,25 @@ import { join } from 'node:path';
 
 import { beforeEach } from 'vitest';
 
-import { useTempDir, writeTestFile } from './fakes.ts';
+import {
+  fakeManagedSystem,
+  validatorFor,
+  type ValidateRun,
+} from './claude-code-plugin-fixtures.ts';
+import { recordingReporter, scriptedPrompter, useTempDir, writeTestFile } from './fakes.ts';
 import type { Collector, ScopeTarget } from '../src/agents/adapter.ts';
 import type { GlobalCollectorOptions } from '../src/agents/claude-code/global-collector.ts';
 import {
   createClaudeCodeAdapter,
   createClaudeCodeGlobalCollector,
   createClaudeCodeProjectCollector,
+  createClaudeCodeRestorer,
   projectDirName,
   type ClaudeCodeAdapterOptions,
+  type Prompter,
+  type Reporter,
+  type RestorePlanContext,
+  type RestorerOptions,
 } from '../src/index.ts';
 
 /**
@@ -69,6 +79,73 @@ export const claudeCodeAdapter = (
     env: { PATH: '' },
     homedir,
     platform: process.platform,
+    isClaudeRunning: () => Promise.resolve(false),
+    ...overrides,
+  });
+
+/**
+ * The context of a global plan step asking `prompter` and telling `reporter`: no files, no
+ * conflicts, no flags and no parts named, unless `overrides` say otherwise.
+ */
+export const planContext = (
+  prompter: Prompter,
+  reporter: Reporter,
+  overrides: Partial<RestorePlanContext> = {},
+): RestorePlanContext => ({
+  target: { kind: 'global' },
+  files: [],
+  conflicts: new Map(),
+  conflictAnswer: undefined,
+  prompter,
+  reporter,
+  assumeYes: false,
+  allowCommands: false,
+  parts: new Map(),
+  ...overrides,
+});
+
+/**
+ * The real adapter's plan step in `homedir` (`home` unless said), with no managed settings, on a PC whose `claude`
+ * answers validate with `validate`, given `answers` and the context of {@link planContext}
+ * with `overrides`. Returns the plan, what was asked (and each yes/no default), the lines
+ * shown and the validate calls.
+ */
+export async function planStepWith(
+  validate: ValidateRun,
+  answers: unknown[],
+  overrides: Partial<RestorePlanContext> = {},
+  homedir = home,
+) {
+  const script = scriptedPrompter(answers);
+  const { reporter, lines } = recordingReporter({ levels: false });
+  const { validator, calls } = await validatorFor(validate);
+  const adapter = claudeCodeAdapter(homedir, {
+    managedSystem: fakeManagedSystem({ platform: 'linux' }),
+    pluginValidator: validator,
+  });
+  if (!adapter.planRestore) throw new Error('no plan step');
+  const planned = await adapter.planRestore(planContext(script.prompter, reporter, overrides));
+  return {
+    planned,
+    reporter,
+    lines,
+    asked: script.asked,
+    defaults: script.confirmDefaults,
+    validated: calls,
+  };
+}
+
+/**
+ * The Claude Code restorer for `base` in `home`, on this OS with no env, the default config
+ * folder and Claude Code not running, unless `overrides` say otherwise.
+ */
+export const testRestorer = (overrides: Partial<RestorerOptions> = {}) =>
+  createClaudeCodeRestorer({
+    baseDir: base,
+    homedir: home,
+    platform: process.platform,
+    env: {},
+    customConfigDir: false,
     isClaudeRunning: () => Promise.resolve(false),
     ...overrides,
   });
