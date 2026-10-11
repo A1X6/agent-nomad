@@ -473,7 +473,7 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
 // SEC-02 (review 16): Windows and macOS write `Evil/` and `evil/` into one folder.
 describe('claude.ai skills whose names differ only in case (SEC-02 of review 16)', () => {
-  it('adds only the first by name, so two saved skills never make one plugin with hooks', async () => {
+  it('adds only the first by name, so two saved skills never make one plugin with hooks', () => {
     const files = [
       ...modFiles(`${ACCOUNT_SKILLS_PREFIX}Evil/`).filter((file) => !file.path.includes('/hooks/')),
       collected(`${ACCOUNT_SKILLS_PREFIX}evil/hooks/hooks.json`, '{"hooks":{}}'),
