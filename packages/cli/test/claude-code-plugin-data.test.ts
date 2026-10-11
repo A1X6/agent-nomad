@@ -152,7 +152,7 @@ describe('plugin data (T102): what push takes', () => {
     const { found, skipped } = await collectFor([MOD_ID]);
     expect(paths(found)).toEqual([`${PLUGIN_DATA_PREFIX}${MOD_DATA}/notes.md`]);
     expect(skipped).toEqual([
-      `${PLUGIN_DATA_PREFIX}${MOD_DATA}: 2 files of ${MOD_ID} can run, and pull never puts back plugin data that can`,
+      `${PLUGIN_DATA_PREFIX}${MOD_DATA}: 2 files of ${MOD_ID} can run (a script or program), which plugin data never carries`,
     ]);
   });
 

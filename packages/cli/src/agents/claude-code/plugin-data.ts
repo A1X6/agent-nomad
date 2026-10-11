@@ -180,7 +180,7 @@ export async function collectPluginData(
     if (runnable > 0) {
       onSkipped?.(
         `${PLUGIN_DATA_PREFIX}${folder}`,
-        `${String(runnable)} file${runnable === 1 ? '' : 's'} of ${id} can run, and pull never puts back plugin data that can`,
+        `${String(runnable)} file${runnable === 1 ? '' : 's'} of ${id} can run (a script or program), which plugin data never carries`,
       );
     }
     own = own.filter((file) => !canRun(file));
