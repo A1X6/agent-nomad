@@ -23,10 +23,11 @@ import { PROJECT_NEVER_SYNCED } from './project-paths.ts';
 export const MAX_IMPORT_HOPS = 4;
 
 /**
- * Imported files push saves and pull writes: text documents. The program loads any text file
- * (code and scripts too, and files without an extension), but pull writes an imported file
- * without a review, so a script, code or an extension-less file (`.bashrc`, a git hook) is
- * never taken this way: push names it instead.
+ * Imported files push saves and pull writes: prose and plain text, from the program's text
+ * list. The program loads any text file, but pull writes an imported file without a review, so
+ * code, scripts, settings that programs read (`~/.claude.json`, a `.vscode` or tool config,
+ * which can name commands) and extension-less files (`.bashrc`, a git hook) are never taken
+ * this way: push names them instead.
  */
 const IMPORT_DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set([
   '.md',
@@ -38,22 +39,7 @@ const IMPORT_DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set([
   '.org',
   '.tex',
   '.latex',
-  '.json',
-  '.yaml',
-  '.yml',
-  '.toml',
-  '.xml',
   '.csv',
-  '.html',
-  '.htm',
-  '.ini',
-  '.cfg',
-  '.conf',
-  '.properties',
-  '.graphql',
-  '.gql',
-  '.proto',
-  '.sql',
   '.log',
   '.diff',
   '.patch',
@@ -222,7 +208,7 @@ export type ImportPlace =
 const refused = (reason: string): ImportPlace => ({ kind: 'refused', reason });
 
 const NOT_A_DOCUMENT =
-  'agentnomad saves an imported file only when it is a text document, never code, a script or a file without an extension';
+  'agentnomad saves an imported file only when it is Markdown or plain text, never code, settings, a script or a file without an extension';
 const NEVER_SYNCED_FOLDER = 'it is in a folder agentnomad never syncs';
 
 /** Compared without case, as pull refuses them (Windows and macOS ignore it). */

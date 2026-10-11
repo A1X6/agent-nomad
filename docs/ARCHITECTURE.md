@@ -386,12 +386,14 @@ when it starts with `./`, `~/`, `/` (not `/` alone) or a letter, digit, `.`, `_`
 a network path. A path resolves from the importing file's folder, `~/` from the home folder,
 `/c/x` as `C:\x` on Windows. Imports of imported files are followed depth first, each file
 once, four hops deep (`$nr=5` counts the memory file itself). The program loads any text
-extension (its `DZn` list); agentnomad takes only documents (`IMPORT_DOCUMENT_EXTENSIONS`),
-because pull writes them without a review: never code, scripts or names without an extension
-(`.bashrc`, `.husky/pre-commit`). Global placement follows the hook-script rule: in the base
-folder at its own path (never `.agentnomad/` nor a refused name), elsewhere in the home under
-`.agentnomad/home/` (never a folder for keys and logins nor an autostart folder); project
-placement keeps the project path, never in a never-synced entry (`.git`, `.agentnomad`, ...).
+extension (its `DZn` list); agentnomad takes only Markdown and plain text
+(`IMPORT_DOCUMENT_EXTENSIONS`), because pull writes them without a review: never code, scripts,
+settings programs read (`~/.claude.json`, which pull only ever merges, or a tool config naming a
+command) nor names without an extension (`.bashrc`, `.husky/pre-commit`). Global placement
+follows the hook-script rule: in the base folder at its own path (never `.agentnomad/` nor a
+refused name), elsewhere in the home under `.agentnomad/home/` (never a folder for keys and
+logins nor an autostart folder); project placement keeps the project path, never in a
+never-synced entry (`.git`, `.agentnomad`, ...).
 Files are read through the gatherer, so its link rules and 10 MB limit apply. Push passes each
 existing file it cannot take to `onSkipped` with the importing file, the line and the `@` text;
 a missing one is skipped without a word, as the program skips it. Pull follows the same imports

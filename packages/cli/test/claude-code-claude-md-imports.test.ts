@@ -175,7 +175,7 @@ describe('claude-md imports: where push saves a global import', () => {
     });
   });
 
-  it.each([['projects/x/memory/MEMORY.md'], ['plugins/cache/a.md'], ['.agentnomad/claude.json']])(
+  it.each([['projects/x/memory/MEMORY.md'], ['plugins/cache/a.md'], ['.agentnomad/notes.md']])(
     'refuses %s in the base folder',
     (relative) => {
       expect(globalImportPlace(join(base, ...relative.split('/')), globalContext)).toEqual({
@@ -206,16 +206,20 @@ describe('claude-md imports: where push saves a global import', () => {
     });
   });
 
-  it.each([['notes/run.sh'], ['notes/tool.ts'], ['.bashrc'], ['notes/Makefile']])(
-    'refuses %s, which is not a text document',
-    (relative) => {
-      expect(globalImportPlace(join(home, ...relative.split('/')), globalContext)).toEqual({
-        kind: 'refused',
-        reason:
-          'agentnomad saves an imported file only when it is a text document, never code, a script or a file without an extension',
-      });
-    },
-  );
+  it.each([
+    ['notes/run.sh'],
+    ['notes/tool.ts'],
+    ['.bashrc'],
+    ['notes/Makefile'],
+    ['.claude.json'],
+    ['.config/tool/settings.yaml'],
+  ])('refuses %s, which is not Markdown or plain text', (relative) => {
+    expect(globalImportPlace(join(home, ...relative.split('/')), globalContext)).toEqual({
+      kind: 'refused',
+      reason:
+        'agentnomad saves an imported file only when it is Markdown or plain text, never code, settings, a script or a file without an extension',
+    });
+  });
 });
 
 describe('claude-md imports: where push saves a project import', () => {

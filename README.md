@@ -199,10 +199,10 @@ that is not synced already: from your home folder in a global setup, from inside
 a project setup. Pull puts each one back where the import points. Push names every imported
 file it cannot take, with the file and line that import it: one outside your home folder (or
 the project), one in a folder for keys and logins or never synced, and code, scripts or files
-without an extension. Pull writes imported files without asking, so only documents such as
-`.md`, `.txt`, `.json` or `.yaml` come along. Claude Code reads imported files as
-instructions and never runs them. On Windows, write import paths with forward slashes: Claude
-Code ends a path at a backslash.
+without an extension. Pull writes imported files without asking, so only Markdown and plain
+text (`.md`, `.txt` and the like) come along; settings such as `.json` files never do. Claude
+Code reads imported files as instructions and never runs them. On Windows, write import paths
+with forward slashes: Claude Code ends a path at a backslash.
 
 ### Where plugins come from, and what happens to each
 
