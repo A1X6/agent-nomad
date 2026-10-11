@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
+import { isFile } from '../../system/files.ts';
 import { JsonObjectSchema } from '../../system/json.ts';
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { underAnyFolder } from '../shared/bundle-paths.ts';
@@ -17,6 +18,13 @@ import {
 } from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { ClaudeJsonError } from './claude-json-merge.ts';
+import {
+  followImports,
+  globalImportPlace,
+  isGlobalMemoryFile,
+  shownImportPath,
+  skippedImportReason,
+} from './claude-md-imports.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
@@ -89,6 +97,43 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
       if (file) found.push(file);
     }
     return found;
+  }
+
+  /**
+   * The files `CLAUDE.md` and the rules import (T111) that are not synced already: in the base
+   * folder or elsewhere in the home. Each one push cannot take is named, never left out silently.
+   */
+  async function importedFiles(
+    files: FileGatherer,
+    found: readonly CollectedFile[],
+    onSkipped: CollectOptions['onSkipped'],
+  ): Promise<CollectedFile[]> {
+    const memoryFiles = found
+      .filter((file) => isGlobalMemoryFile(file.path))
+      .map((file) => ({
+        nativePath: path.join(baseDir, ...file.path.split('/')),
+        bundlePath: file.path,
+        text: new TextDecoder().decode(file.content),
+      }));
+    const imported: CollectedFile[] = [];
+    const { skipped } = await followImports(
+      memoryFiles,
+      {
+        place: (nativePath) => globalImportPlace(nativePath, options),
+        isFile,
+        async read(nativePath, bundlePath) {
+          const file = await files.readIfFile(nativePath, bundlePath);
+          if (file === null) return null;
+          imported.push(file);
+          return new TextDecoder().decode(file.content);
+        },
+      },
+      options,
+    );
+    for (const entry of skipped) {
+      onSkipped?.(shownImportPath(entry.nativePath, options), skippedImportReason(entry, options));
+    }
+    return imported;
   }
 
   /**
@@ -197,6 +242,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         found.push(...(await hookScriptFiles(files, text, skippedScript)));
       }
       found.push(...(await programs(files, settingsJsons, collectOptions.onSkipped)));
+      found.push(...(await importedFiles(files, found, collectOptions.onSkipped)));
 
       const selected = await claudeJson();
       if (selected) found.push(selected);

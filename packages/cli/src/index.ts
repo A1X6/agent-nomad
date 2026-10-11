@@ -7,6 +7,7 @@ export * from './agents/claude-code/auto-memory.ts';
 export * from './agents/claude-code/claude-code-adapter.ts';
 export * from './agents/claude-code/claude-code-paths.data.ts';
 export * from './agents/claude-code/claude-json-merge.ts';
+export * from './agents/claude-code/claude-md-imports.ts';
 export * from './agents/claude-code/command-review.ts';
 export * from './agents/claude-code/detector.ts';
 export * from './agents/claude-code/dev-mods.ts';
