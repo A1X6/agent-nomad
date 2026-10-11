@@ -362,7 +362,7 @@ describe('Claude Code plan step: plugin folders in CLAUDE_CODE_PLUGIN_DIRS (T99)
 describe('Claude Code auto memory of every project (T110)', () => {
   it("names auto memory of every project in push's memory question", () => {
     expect(claudeCodeAdapter(home).memoryDescription).toBe(
-      'what Claude learned: subagent memory and auto memory, of every project for the global setup',
+      "what Claude learned: subagent memory, and auto memory: every project's with the global setup, this project's with a project",
     );
   });
 

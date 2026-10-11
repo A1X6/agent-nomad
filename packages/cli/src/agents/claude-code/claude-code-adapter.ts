@@ -234,7 +234,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     id: 'claude-code',
     displayName: 'Claude Code',
     memoryDescription:
-      'what Claude learned: subagent memory and auto memory, of every project for the global setup',
+      "what Claude learned: subagent memory, and auto memory: every project's with the global setup, this project's with a project",
     detector: createClaudeCodeDetector(system),
     collector,
     restorer,
