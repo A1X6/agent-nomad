@@ -239,7 +239,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
       yes: false,
     });
     expect(script.asked).toEqual([
-      'Include memory (what Example CLI remembers)?',
+      'Include memory (what Example CLI remembers)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
       'Also save your prompts library (review)?',
     ]);
     expect(seen.collected[0]?.include).toEqual(new Set(['prompts']));
@@ -302,7 +302,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
       env: { EXAMPLE_TOKEN: 'token-1', EXAMPLE_HOME: '/opt/example' },
     }).push({ global: true, yes: false });
     expect(script.asked).toEqual([
-      'Include memory (what Example CLI remembers)?',
+      'Include memory (what Example CLI remembers)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
       'Also save your prompts library (review)?',
       'Save these values with your setup (encrypted; only you can read them)? Leave all unticked to save none.',
     ]);

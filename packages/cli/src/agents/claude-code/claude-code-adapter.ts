@@ -16,6 +16,7 @@ import {
 } from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
+import { sharedMemoryNote } from './auto-memory.ts';
 import { claudeJsonProjectNote, isClaudeJsonPath } from './claude-json-merge.ts';
 import { claudeConfigDir, createClaudeCodeDetector } from './detector.ts';
 import { devModsNotice, readDevMods } from './dev-mods.ts';
@@ -233,7 +234,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
   return {
     id: 'claude-code',
     displayName: 'Claude Code',
-    memoryDescription: 'what Claude learned: subagent and auto memory',
+    memoryDescription:
+      "what Claude learned: subagent memory, and auto memory: every project's with the global setup, this project's with a project",
     detector: createClaudeCodeDetector(system),
     collector,
     restorer,
@@ -266,10 +268,13 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
         return notes.length === 0 ? null : notes.join('\n');
       },
       pushNotes(files) {
-        // Plugins in skills/ (T97) and the project's part of ~/.claude.json (T109).
-        return [skillsPluginsNote(files), claudeJsonProjectNote(files)].filter(
-          (note) => note !== null,
-        );
+        // Plugins in skills/ (T97), the project's part of ~/.claude.json (T109) and shared auto
+        // memory (T110).
+        return [
+          skillsPluginsNote(files),
+          claudeJsonProjectNote(files),
+          sharedMemoryNote(files),
+        ].filter((note) => note !== null);
       },
     },
 

@@ -76,6 +76,9 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['Plugins/cache/m/p/1.0.0/hooks/run.sh', 'never synced'],
     ['Skills/Synced/x/run.sh', 'never synced'],
     ['.AgentNomad/home/x.sh', 'unknown agentnomad entry'],
+    // Every project's auto memory (T110): Markdown notes, each under its project's folder name.
+    ['.agentnomad/auto-memory/C--work-app/run.sh', 'auto memory holds only Markdown files'],
+    ['.agentnomad/auto-memory/MEMORY.md', 'auto memory of the global setup belongs to a project'],
     ['../outside.md', 'not a safe path'],
   ])('global: %s', (path, reason) => {
     expect(globalDestination(path, new Set())).toEqual({ kind: 'refused', reason });
@@ -189,6 +192,15 @@ describe('restore rules: places what a collector produces', () => {
     [`${PLUGIN_STORE_PREFIX}probe-mod_skills-dir-e89169932969.json`, { kind: 'metadata' }],
     // Synced whole (T112): a script there runs only when a setting names it, and pull shows it.
     ['hooks/lib/common.sh', { kind: 'target', path: 'hooks/lib/common.sh' }],
+    // Every project's auto memory (T110), and the shared folder's under its reserved name.
+    [
+      '.agentnomad/auto-memory/C--work-app/topics/testing.md',
+      { kind: 'global-auto-memory', folder: 'C--work-app', path: 'topics/testing.md' },
+    ],
+    [
+      '.agentnomad/auto-memory/_shared/MEMORY.md',
+      { kind: 'global-auto-memory', folder: '_shared', path: 'MEMORY.md' },
+    ],
   ])('global: %s', (path, destination) => {
     expect(globalDestination(path, new Set())).toEqual(destination);
   });

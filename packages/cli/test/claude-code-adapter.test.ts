@@ -410,3 +410,18 @@ describe('Claude Code plan step: plugin folders in CLAUDE_CODE_PLUGIN_DIRS (T99)
     expect(t.asked).toEqual([]);
   });
 });
+
+describe('Claude Code auto memory of every project (T110)', () => {
+  it("names auto memory of every project in push's memory question", () => {
+    expect(claudeCodeAdapter(home).memoryDescription).toBe(
+      "what Claude learned: subagent memory, and auto memory: every project's with the global setup, this project's with a project",
+    );
+  });
+
+  it("says in push's summary that a shared memory folder is saved once", () => {
+    const files = [collected('.agentnomad/auto-memory/_shared/MEMORY.md', 'shared')];
+    expect(claudeCodeAdapter(home).inspector?.pushNotes?.(files)).toEqual([
+      'Auto memory: autoMemoryDirectory in your user settings is one folder for every project, so it is saved once',
+    ]);
+  });
+});
