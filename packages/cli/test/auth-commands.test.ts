@@ -616,14 +616,17 @@ describe('logout', () => {
 
 /**
  * Fast crypto that keeps every secret array it hands out: both derived keys, a new data key
- * (the only 32-byte random value) and an unlocked one.
+ * (the only 32-byte random value) and an unlocked one; and the key settings each derive was
+ * asked for (`derivedWith`).
  */
 function secretTrackingCrypto(failDerive = false) {
   const base = fastCrypto();
   const handedOut: Uint8Array[] = [];
+  const derivedWith: KdfParams[] = [];
   const crypto: CryptoService = {
     ...base,
     deriveKeys: async (password, salt, params) => {
+      derivedWith.push(params);
       if (failDerive) throw new Error('out of memory');
       const keys = await base.deriveKeys(password, salt, params);
       handedOut.push(keys.authKey, keys.passwordKey);
@@ -641,8 +644,27 @@ function secretTrackingCrypto(failDerive = false) {
     },
   };
   const allWiped = () => handedOut.every((bytes) => bytes.every((byte) => byte === 0));
-  return { crypto, handedOut, allWiped };
+  return { crypto, handedOut, derivedWith, allWiped };
 }
+
+// QA-01 (review 16): the settings are saved per account so they can be raised later.
+describe('the key settings the server saved for the account', () => {
+  it('login and account delete derive the keys with the settings prelogin answers', async () => {
+    const { server, secrets } = await registeredAhmed();
+    const user = server.users.get('ahmed');
+    if (!user) throw new Error('ahmed is not registered');
+    const saved: KdfParams = { ...FAST_KDF_PARAMS, passes: 3 };
+    server.users.set('ahmed', { ...user, kdfParams: saved });
+    const keys = secretTrackingCrypto();
+
+    await setup(['ahmed', STRONG], { server, crypto: keys.crypto }).commands.login(ASK);
+    await setup(['ahmed', STRONG], { server, secrets, crypto: keys.crypto }).commands.accountDelete(
+      ASK,
+    );
+    expect(keys.derivedWith).toEqual([saved, saved]);
+    expect(server.users.has('ahmed')).toBe(false);
+  });
+});
 
 const failingSave = () => {
   const secrets = memorySecrets();
