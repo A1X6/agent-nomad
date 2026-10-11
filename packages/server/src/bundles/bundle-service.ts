@@ -99,6 +99,9 @@ export interface BundleServiceDeps {
 /** Files left unused for this long are swept: far longer than any upload takes. */
 const ORPHAN_AGE_SECONDS = 60 * 60;
 
+/** Reads of a setup per download while saves keep replacing its file under it. */
+const DOWNLOAD_TRIES = 3;
+
 export function createBundleService(deps: BundleServiceDeps): BundleService {
   const { bundles, blobs, logError } = deps;
   const shouldSweep = deps.shouldSweep ?? (() => Math.random() < 0.02);
@@ -137,12 +140,20 @@ export function createBundleService(deps: BundleServiceDeps): BundleService {
     list: (userId, page) => bundles.list(userId, page),
 
     async download(key) {
-      const meta = await bundles.get(key);
-      if (!meta) throw new BundleNotFoundError();
-      const ciphertext = await blobs.get({ userId: key.userId, blobId: meta.blobId });
-      // The foreign key keeps the current file alive, so this means the database is broken.
-      if (!ciphertext) throw new Error(`Current file ${meta.blobId} of a saved setup is missing`);
-      return { meta, ciphertext };
+      let missing: string | undefined;
+      // A save or delete can land between the two reads and remove the file just read from
+      // the setup (BUG-03): read the setup again and follow it, a few times at most.
+      for (let tries = 0; tries < DOWNLOAD_TRIES; tries++) {
+        const meta = await bundles.get(key);
+        if (!meta) throw new BundleNotFoundError();
+        // The foreign key keeps the current file alive, so the same file missing twice
+        // means the database is broken.
+        if (meta.blobId === missing) break;
+        const ciphertext = await blobs.get({ userId: key.userId, blobId: meta.blobId });
+        if (ciphertext) return { meta, ciphertext };
+        missing = meta.blobId;
+      }
+      throw new Error(`Current file ${String(missing)} of a saved setup is missing`);
     },
 
     async upload(input) {
