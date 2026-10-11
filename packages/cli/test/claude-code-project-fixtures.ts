@@ -90,18 +90,26 @@ export function collect(includeMemory = false, env: Record<string, string> = {},
   );
 }
 
-/** Collects `target` (the test's project by default), recording each "path: reason" left out. */
+/**
+ * Collects `target` (the test's project by default), with memory when `includeMemory` says so,
+ * recording each "path: reason" left out.
+ */
 export async function collectSkipped(
   collector: Collector,
   target: ScopeTarget = { kind: 'project', projectDir: project },
+  includeMemory = false,
 ) {
   const skipped: string[] = [];
   const found = await collector.collect(target, {
-    includeMemory: false,
+    includeMemory,
     onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`),
   });
   return { found, skipped };
 }
+
+/** A path in the auto memory folder `<base>/projects/<name>/memory/` (T110: any project's). */
+export const projectMemory = (name: string, ...parts: string[]) =>
+  join(base, 'projects', name, 'memory', ...parts);
 
 /**
  * `dir` as Claude Code 2.1.296 writes it as a key of `projects` in `~/.claude.json` (T109):
@@ -126,7 +134,7 @@ export const writeClaudeJsonProject = (entry: unknown, top: Record<string, unkno
   );
 
 /** The folder Claude Code keeps this project's auto memory in. */
-export const memoryDir = (repo = project) => join(base, 'projects', projectDirName(repo), 'memory');
+export const memoryDir = (repo = project) => projectMemory(projectDirName(repo));
 
 const ACCOUNT = '00000000-0000-4000-8000-000000000000_11111111-1111-4111-8111-111111111111';
 

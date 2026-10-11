@@ -14,6 +14,7 @@ import {
   readSyncedPlugins,
 } from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
+import { allAutoMemoryFolders } from './auto-memory.ts';
 import { claudeJsonFileOf, readClaudeJsonFile } from './claude-json-merge.ts';
 import {
   followImports,
@@ -42,6 +43,7 @@ import { pluginDirFiles } from './plugin-dirs.ts';
 import type { ProgramCli } from './plugin-sync.ts';
 import { collectPluginData, PLUGIN_DATA_PART, restoredPluginIds } from './plugin-data.ts';
 import { pluginFiles } from './plugins.ts';
+import { collectMemoryFolder } from './project-collector.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
 import { commandsInSettings, programOf } from './settings-commands.ts';
 import { isGeneratedInSkillsPlugin } from './skills-dir-plugins.ts';
@@ -214,6 +216,16 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         : GLOBAL_FOLDERS;
       for (const name of folders) {
         found.push(...(await files.walk(path.join(baseDir, name), name, isLeftOut, seen)));
+      }
+      // With memory, the auto memory of every project too, not only of pushed projects (T110).
+      if (collectOptions.includeMemory) {
+        const { onSkipped } = collectOptions;
+        const machine = { baseDir, homedir, platform: options.platform };
+        const memory = await allAutoMemoryFolders(machine);
+        for (const left of memory.skipped) onSkipped?.(left.bundlePrefix, left.reason);
+        for (const { dir, bundlePrefix } of memory.folders) {
+          found.push(...(await collectMemoryFolder(dir, bundlePrefix, { ...machine, onSkipped })));
+        }
       }
 
       const settingsJsons = found

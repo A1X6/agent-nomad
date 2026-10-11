@@ -1,8 +1,13 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 
+import type { CollectedFile } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import { homePathProblem } from './global-paths.ts';
-import { MAX_PROJECT_DIR_NAME } from './project-paths.ts';
+import {
+  AUTO_MEMORY_BUNDLE_PREFIX,
+  MAX_PROJECT_DIR_NAME,
+  SHARED_AUTO_MEMORY,
+} from './project-paths.ts';
 import { parseSettings } from './settings-commands.ts';
 
 export interface AutoMemoryInput {
@@ -67,17 +72,25 @@ export async function repositoryRoot(
   }
 }
 
-/** `autoMemoryDirectory` from a settings file, with `~/` expanded; absolute paths only. */
-async function configuredDirectory(
-  settingsFile: string,
-  input: AutoMemoryInput,
-): Promise<string | null> {
+/** What finding a memory folder needs to know about this PC, whatever the project. */
+type MachineInput = Pick<AutoMemoryInput, 'baseDir' | 'homedir' | 'platform'>;
+
+/** `autoMemoryDirectory` from settings text, with `~/` expanded; absolute paths only. */
+function directoryIn(text: string, input: MachineInput): string | null {
   const path = pathsOf(input.platform);
-  const text = await readText(settingsFile);
-  const value = text === null ? undefined : parseSettings(text)?.['autoMemoryDirectory'];
+  const value = parseSettings(text)?.['autoMemoryDirectory'];
   if (typeof value !== 'string' || value.trim() === '') return null;
   const expanded = value.replace(/^~(?=[\\/])/, () => input.homedir);
   return path.isAbsolute(expanded) ? path.normalize(expanded) : null;
+}
+
+/** `autoMemoryDirectory` from a settings file, as `directoryIn` reads it. */
+async function configuredDirectory(
+  settingsFile: string,
+  input: MachineInput,
+): Promise<string | null> {
+  const text = await readText(settingsFile);
+  return text === null ? null : directoryIn(text, input);
 }
 
 /**
@@ -86,7 +99,7 @@ async function configuredDirectory(
  * settings, so the folder must be in the home folder, not a folder for keys or one whose files
  * run by themselves, and not elsewhere in Claude Code's own folder.
  */
-function chosenFolderProblem(dir: string, input: AutoMemoryInput): string | null {
+function chosenFolderProblem(dir: string, input: MachineInput): string | null {
   const path = pathsOf(input.platform);
   const inside = (folder: string) => {
     const relative = path.relative(folder, dir);
@@ -151,4 +164,83 @@ export async function findAutoMemory(input: AutoMemoryInput): Promise<AutoMemory
   return candidates.length === 1 && only !== undefined
     ? { kind: 'folder', dir: path.join(projects, only, 'memory') }
     : { kind: 'unknown' };
+}
+
+/** The one folder `autoMemoryDirectory` in user settings names for every project (T110). */
+export type SharedAutoMemory =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'folder'; readonly dir: string }
+  /** A folder agentnomad will not read or write, as for one project settings choose (T43). */
+  | { readonly kind: 'refused'; readonly dir: string; readonly reason: string };
+
+/**
+ * The shared auto memory folder: `autoMemoryDirectory` in user settings here, else in
+ * `incomingSettings` (the user settings a pull brings, written after the memory). Checked as
+ * a folder project settings choose (T43): a pulled bundle must not pick where notes go.
+ */
+export async function findSharedAutoMemory(
+  input: MachineInput,
+  incomingSettings: string | null = null,
+): Promise<SharedAutoMemory> {
+  const path = pathsOf(input.platform);
+  const dir =
+    (await configuredDirectory(path.join(input.baseDir, 'settings.json'), input)) ??
+    (incomingSettings === null ? null : directoryIn(incomingSettings, input));
+  if (dir === null) return { kind: 'none' };
+  const reason = chosenFolderProblem(dir, input);
+  return reason === null ? { kind: 'folder', dir } : { kind: 'refused', dir, reason };
+}
+
+/** A memory folder a global push takes, and the bundle folder its notes go under. */
+export interface MemoryFolder {
+  readonly dir: string;
+  readonly bundlePrefix: string;
+}
+
+/**
+ * The auto memory folders of every project, for a global push (T110): the shared folder once,
+ * as `<prefix>/_shared/`, when user settings name one; else each `<base>/projects/<name>/memory/`
+ * as `<prefix>/<name>/`. `skipped`: what is left out, with why.
+ */
+export async function allAutoMemoryFolders(input: MachineInput): Promise<{
+  readonly folders: readonly MemoryFolder[];
+  readonly skipped: readonly { readonly bundlePrefix: string; readonly reason: string }[];
+}> {
+  const path = pathsOf(input.platform);
+  const sharedPrefix = `${AUTO_MEMORY_BUNDLE_PREFIX}/${SHARED_AUTO_MEMORY}`;
+  const shared = await findSharedAutoMemory(input);
+  if (shared.kind === 'folder') {
+    return { folders: [{ dir: shared.dir, bundlePrefix: sharedPrefix }], skipped: [] };
+  }
+  if (shared.kind === 'refused') {
+    const reason = `autoMemoryDirectory in your user settings names ${shared.dir}: ${shared.reason}`;
+    return { folders: [], skipped: [{ bundlePrefix: sharedPrefix, reason }] };
+  }
+
+  const projects = path.join(input.baseDir, 'projects');
+  const entries = await readdir(projects, { withFileTypes: true }).catch(() => []);
+  const folders: MemoryFolder[] = [];
+  const skipped: { bundlePrefix: string; reason: string }[] = [];
+  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    if (!entry.isDirectory()) continue;
+    const bundlePrefix = `${AUTO_MEMORY_BUNDLE_PREFIX}/${entry.name}`;
+    // Only a name Claude Code was told to use can be this one; pull would read it as shared.
+    if (entry.name === SHARED_AUTO_MEMORY) {
+      skipped.push({
+        bundlePrefix,
+        reason: 'agentnomad keeps that name for a shared memory folder',
+      });
+    } else {
+      folders.push({ dir: path.join(projects, entry.name, 'memory'), bundlePrefix });
+    }
+  }
+  return { folders, skipped };
+}
+
+/** What push says when it saved the shared auto memory folder (T110), or `null`. */
+export function sharedMemoryNote(files: readonly CollectedFile[]): string | null {
+  const prefix = `${AUTO_MEMORY_BUNDLE_PREFIX}/${SHARED_AUTO_MEMORY}/`;
+  return files.some((file) => file.path.startsWith(prefix))
+    ? 'Auto memory: autoMemoryDirectory in your user settings is one folder for every project, so it is saved once'
+    : null;
 }

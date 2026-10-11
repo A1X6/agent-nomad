@@ -453,7 +453,7 @@ describe('agentnomad push', () => {
     const t = setup([false], { cwd: HOME });
     await t.command.push(noFlags);
     expect(t.script.asked).toEqual([
-      'Include memory (what Claude learned: subagent and auto memory)?',
+      'Include memory (what Claude learned: subagent and auto memory)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
     ]);
     expect(t.server.stored.size).toBe(1);
   });
@@ -475,7 +475,7 @@ describe('agentnomad push', () => {
     const t = setup([false], { cwd: join(HOME, '.claude') });
     await t.command.push(noFlags);
     expect(t.script.asked).toEqual([
-      'Include memory (what Claude learned: subagent and auto memory)?',
+      'Include memory (what Claude learned: subagent and auto memory)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
     ]);
     expect(t.server.stored.size).toBe(1);
   });
@@ -643,7 +643,7 @@ describe('agentnomad push', () => {
     const plan = await createPushPlanner(desktop.deps).plan(noFlags, keys);
     expect(desktop.script.asked).toEqual([
       'Claude Code: what to save?',
-      'Include memory (what Claude learned: subagent and auto memory)?',
+      'Include memory (what Claude learned: subagent and auto memory)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
       "A newer copy of the Claude Code global setup (revision 1) was saved from another PC. Replace it with this PC's setup?",
     ]);
     expect(plan.uploads.map((upload) => [upload.setup, upload.expectedRevision])).toEqual([
@@ -770,7 +770,7 @@ describe('push: which agents, the project name and what is left out (T95)', () =
     await pushWith(t, [collectingAdapter(), other])({ global: true, yes: false });
     expect(t.script.asked).toEqual([
       'Which agents?',
-      'Include memory (what Claude learned: subagent and auto memory)?',
+      'Include memory (what Claude learned: subagent and auto memory)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
     ]);
     expect(revisionOn(t.server, GLOBAL_SCOPE_KEY)).toBe(1);
     expect(t.server.stored.size).toBe(1);

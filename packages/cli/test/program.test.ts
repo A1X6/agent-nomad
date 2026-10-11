@@ -107,7 +107,7 @@ describe('help and version', () => {
 
   it("describes --memory without one agent's words (ARCH-02)", async () => {
     const { out } = await run(['push', '--help']);
-    expect(out).toMatch(/--memory +include the agent's memory/);
+    expect(out).toMatch(/--memory +save the agent's memory, what it learned/);
     expect(out).not.toContain('subagent');
   });
 

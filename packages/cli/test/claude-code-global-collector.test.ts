@@ -9,6 +9,8 @@ import {
   collectSkipped,
   globalCollector,
   home,
+  projectMemory,
+  setMemoryDirectory,
   stopHook,
   syncedSetup,
   useProjectFolders,
@@ -534,6 +536,72 @@ describe('global collector: plugin folders in CLAUDE_CODE_PLUGIN_DIRS (T99)', ()
     await writeSettings({ env: { CLAUDE_CODE_PLUGIN_DIRS: join(home, 'dev', 'probe-mod') } });
     const files = await collect();
     expect(files.map((file) => file.path)).toContain('.agentnomad/plugin-dirs/0.json');
+  });
+});
+
+describe('global collector: auto memory of every project (T110)', () => {
+  /** The auto memory entries among `files`. */
+  const memoryOf = (files: readonly CollectedFile[]) =>
+    paths(files).filter((path) => path.startsWith('.agentnomad/auto-memory/'));
+
+  it('takes the notes of every project, each under its folder name', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'), 'app notes');
+    await writeTestFile(projectMemory('C--work-app', 'topics', 'testing.md'));
+    await writeTestFile(projectMemory('-home-me-site', 'MEMORY.md'));
+    const files = await collect(true);
+    expect(memoryOf(files)).toEqual([
+      '.agentnomad/auto-memory/-home-me-site/MEMORY.md',
+      '.agentnomad/auto-memory/C--work-app/MEMORY.md',
+      '.agentnomad/auto-memory/C--work-app/topics/testing.md',
+    ]);
+    expect(text(files, '.agentnomad/auto-memory/C--work-app/MEMORY.md')).toBe('app notes');
+  });
+
+  it('takes none without memory', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'));
+    expect(memoryOf(await collect(false))).toEqual([]);
+  });
+
+  it('takes only Markdown files', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'));
+    await writeTestFile(projectMemory('C--work-app', 'run.sh'), 'echo hi');
+    expect(memoryOf(await collect(true))).toEqual([
+      '.agentnomad/auto-memory/C--work-app/MEMORY.md',
+    ]);
+  });
+
+  it('adds nothing for a project whose memory folder is empty or missing', async () => {
+    await mkdir(projectMemory('C--work-app'), { recursive: true });
+    await writeTestFile(join(base, 'projects', 'C--work-site', 'abc.jsonl'), 'SECRET transcript');
+    expect(memoryOf(await collect(true))).toEqual([]);
+  });
+
+  it('takes the folder autoMemoryDirectory in user settings names once, as _shared', async () => {
+    await setMemoryDirectory(join(base, 'settings.json'), '~/all-memory');
+    await writeTestFile(join(home, 'all-memory', 'MEMORY.md'), 'shared');
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'), 'no longer read');
+    const files = await collect(true);
+    expect(memoryOf(files)).toEqual(['.agentnomad/auto-memory/_shared/MEMORY.md']);
+    expect(text(files, '.agentnomad/auto-memory/_shared/MEMORY.md')).toBe('shared');
+  });
+
+  it('leaves out a shared folder for keys, and says why (T43)', async () => {
+    await setMemoryDirectory(join(base, 'settings.json'), '~/.ssh');
+    await writeTestFile(join(home, '.ssh', 'notes.md'), 'SECRET');
+    const { found, skipped } = await collectSkipped(collector(), { kind: 'global' }, true);
+    expect(memoryOf(found)).toEqual([]);
+    expect(skipped).toEqual([
+      `.agentnomad/auto-memory/_shared: autoMemoryDirectory in your user settings names ${join(home, '.ssh')}: it is a folder for keys and logins`,
+    ]);
+  });
+
+  it('leaves out a project folder named _shared, and says why', async () => {
+    await writeTestFile(projectMemory('_shared', 'MEMORY.md'));
+    const { found, skipped } = await collectSkipped(collector(), { kind: 'global' }, true);
+    expect(memoryOf(found)).toEqual([]);
+    expect(skipped).toEqual([
+      '.agentnomad/auto-memory/_shared: agentnomad keeps that name for a shared memory folder',
+    ]);
   });
 });
 

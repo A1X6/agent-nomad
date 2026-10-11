@@ -154,7 +154,7 @@ Run `agentnomad <command> --help` for every option.
 | `--agent <ids>`                              | push, pull, status, delete                          | Agents to use, comma-separated (e.g. `claude-code`).                                                                                                                                     |
 | `--global`                                   | push, pull, status, delete                          | The global setup (`~/.claude`).                                                                                                                                                          |
 | `--project <name>`                           | push, pull, status, delete                          | A project setup, by the name it was saved under.                                                                                                                                         |
-| `--memory` / `--no-memory`                   | push                                                | Include Claude's memory, or not.                                                                                                                                                         |
+| `--memory` / `--no-memory`                   | push                                                | Save Claude's memory, what it learned about you and your projects (the global setup takes every project's, a project only its own).                                                      |
 | `--account-skills` / `--no-account-skills`   | push, pull                                          | Push: save a copy of your own claude.ai skills. Pull: add them as local skills (for a PC without that claude.ai account). Yes unless you say no.                                         |
 | `--account-plugins` / `--no-account-plugins` | push, pull                                          | Push: save a copy of the plugins you uploaded to claude.ai. Pull: add them as local plugins (for a PC without that claude.ai account). Yes unless you say no.                            |
 | `--plugin-data` / `--no-plugin-data`         | push, pull                                          | Push: save the data of the plugins the setup puts back (e.g. a mod's saved choices). Pull: put it back, for plugins installed here. No unless you say yes (it can be large and private). |
@@ -188,7 +188,7 @@ The other setups are still done first, and one message lists what was not.
 | **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed); a marketplace added from a local folder, with its files; plugin folders `CLAUDE_CODE_PLUGIN_DIRS` loads, with their files; their data on request (`--plugin-data`) | Plugin caches; a local marketplace's `.git` and the files git ignores; `--plugin-dir` and SDK plugins                                   |
 | **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings and folders, scripts the project's hooks run                                                                                                                                                                                                          | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                          |
 | **claude.ai**            | A copy of your own claude.ai skills and of the plugins you uploaded to claude.ai, added on a PC without that claude.ai account, unless you say no (`--no-account-skills`, `--no-account-plugins`)                                                                                                                                                       | Anthropic's skills and claude.ai's directory, your organization's (when it can be told apart), and plugins claude.ai installs by itself |
-| **Opt-in**               | Memory (subagent and auto memory), environment variable values                                                                                                                                                                                                                                                                                          |                                                                                                                                         |
+| **Opt-in**               | Memory (subagent and auto memory; the global setup takes every project's), environment variable values                                                                                                                                                                                                                                                  |                                                                                                                                         |
 
 Settings your organization manages on a PC are never synced; agentnomad tells you when they
 exist.
@@ -199,6 +199,14 @@ new or changed hook first. A script your hooks or status line run elsewhere is s
 in your home folder (or, for a project, inside the project). One push cannot take (outside your
 home folder, in a folder agentnomad never syncs, a folder for keys and logins or one whose
 files run by themselves) is named where push lists what it left out, with why.
+
+Claude Code keeps each project's auto memory in `~/.claude/projects/<name>/memory/`, the name
+made from the project's path. Pull puts it back under the same name, so Claude Code finds it
+when the project is at the same path on the new PC; when it is not, the notes still land under
+that name and are picked up once the project is at that path. When `autoMemoryDirectory` in
+your user settings names one folder for every project, the global setup saves that folder once
+and pull puts it back in the folder your user settings name. When one pull restores the global
+setup and a project that both hold the same note, the project's copy wins.
 
 ### Files your `CLAUDE.md` imports
 

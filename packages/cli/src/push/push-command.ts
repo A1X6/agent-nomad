@@ -238,7 +238,7 @@ export function createPushPlanner(deps: PushDeps) {
       (options.yes
         ? false
         : await prompter.confirm(
-            `Include memory${described === '' ? '' : ` (${described})`}?`,
+            `Include memory${described === '' ? '' : ` (${described})`}? It is what the agent learned about you and your projects, so it is left out unless you say yes.`,
             false,
           ));
 
