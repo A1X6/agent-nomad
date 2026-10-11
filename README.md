@@ -263,9 +263,11 @@ Code. Push saves it with the rest of `skills/` (never `.claude-plugin/types/`, w
 Code generates) and names it in its summary. Before pull writes a new or changed one, it runs
 `claude plugin validate` on a copy and shows what each module hooks into, calls and writes, and the
 MCP servers, LSP servers and monitors Claude Code starts from the folder (`.mcp.json`, `.lsp.json`,
-`monitors/` or `plugin.json`). It flags calls that run programs, tools (Bash included), commands or
-subagents, start or call MCP servers, change settings or environment variables, send prompts, write
-files, call the model or use the network; you can read the module first. A plugin with code is
+`monitors/` or `plugin.json`). It flags hooks that decide tool permissions (they can allow every
+Bash command without a prompt) and calls that run programs, tools (Bash included), commands or
+subagents, start or call MCP servers, change settings or environment variables, send prompts, use
+your Claude login, write files, call the model or use the network; you can read the module first.
+A plugin with code is
 written only after your yes or with `--allow-commands`; `--yes` alone never writes it, and one that
 validate finds broken needs your yes. Without Claude Code on the PC, the plugin counts as unreviewed
 code.
@@ -277,7 +279,9 @@ code.
 Push saves each folder's files as it saves a local marketplace (in a git repository only
 what git lists, never `.git/`). Pull writes each folder to the same path from home (one
 outside home goes to `~/.agentnomad/plugin-dirs/<name>`), reviews it like a plugin in
-`skills/`, and points the value at the folders it wrote, with this PC's separator. Only your
+`skills/`, and points the value at the folders it wrote, with this PC's separator. A folder in
+the value that the setup did not save stays only when your own value here already names it;
+pull takes any other out and says so, and lists a new or changed value for review. Only your
 own `~/.claude/settings.json` is read: Claude Code takes this variable from no project
 settings file. Plugins given to one run with `--plugin-dir`, or passed by an SDK, are never
 written anywhere agentnomad can see, so they are not synced.

@@ -12,11 +12,7 @@ import {
   TOOL_SETTINGS_BUNDLE_PATHS,
 } from './global-paths.ts';
 import { CLAUDE_JSON_PROJECT_BUNDLE_PATH } from './project-paths.ts';
-import {
-  COMMAND_SETTINGS,
-  isWatchedVariable,
-  LOGIN_GATEWAY_SETTING,
-} from './reviewed-settings.ts';
+import { COMMAND_SETTINGS, isWatchedVariable, LOGIN_GATEWAY_SETTING } from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 import {
   commandsInSettings,
@@ -154,7 +150,8 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
   const env = JsonObjectSchema.safeParse(json['env']);
   for (const [name, value] of Object.entries(env.success ? env.data : {})) {
     // In a settings `env` block they reach Claude Code and every hook it starts. Redirect
-    // variables send its requests elsewhere or choose what it runs commands with (T55).
+    // variables send its requests elsewhere or choose what it runs commands with (T55), and
+    // `CLAUDE_CODE_PLUGIN_DIRS` names folders it loads as plugins (SEC-04 of review 16).
     if (isLoaderVariable(name) || isWatchedVariable(name)) {
       entries.push(entry(file.path, `setting env ${name}`, `${name}=${String(value)}`));
     }

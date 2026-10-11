@@ -331,7 +331,8 @@ export async function planPluginDirs(
         return entries
           .flatMap((entry) => {
             const write = writeOf(entry);
-            if (write !== undefined) return declined.has(printableLine(write.dir)) ? [] : [write.dir];
+            if (write !== undefined)
+              return declined.has(printableLine(write.dir)) ? [] : [write.dir];
             if (ownFolders.has(folderOf(entry))) return [entry];
             dropped.push(printableLine(entry));
             return [];

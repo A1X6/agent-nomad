@@ -18,5 +18,4 @@ const LOADER_VARIABLE =
  * Whether `name` is one of the variables above. Compared without case, as `isRedirectVariable`
  * does: Windows reads `node_options` as `NODE_OPTIONS` (SEC-05 of review 15).
  */
-export const isLoaderVariable = (name: string): boolean =>
-  LOADER_VARIABLE.test(name.toUpperCase());
+export const isLoaderVariable = (name: string): boolean => LOADER_VARIABLE.test(name.toUpperCase());

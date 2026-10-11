@@ -298,7 +298,10 @@ export function validatePassCalling(
   calls: readonly string[],
   hooks: readonly string[] = ['session.start'],
 ): ValidateRun {
-  const notes = [`./register.ts hooks: ${hooks.join(', ')}`, `./register.ts calls: ${calls.join(', ')}`];
+  const notes = [
+    `./register.ts hooks: ${hooks.join(', ')}`,
+    `./register.ts calls: ${calls.join(', ')}`,
+  ];
   const json = structuredClone(validatePassWithWarning.json);
   json['contents'] = [{ ...hooksContents[0], notes }];
   return { ...validatePassWithWarning, json };
