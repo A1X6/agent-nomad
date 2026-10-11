@@ -94,9 +94,10 @@ const PROJECT_FOLDER_PREFIXES: readonly string[] = [
 
 /**
  * Home files a bundle may restore: known tool settings, scripts that the setup's own hooks or
- * status line run (`allowedScripts`, T38) and documents its memory files import (T111). Any other file could be one that runs by itself
- * (a Startup folder, a shell or PowerShell profile) without ever being shown for review; those
- * places are refused even when a hook names them (T43).
+ * status line run (`allowedScripts`, T38) and documents its memory files import (T111). Any
+ * other file could be one that runs by itself (a Startup folder, a shell or PowerShell profile)
+ * without ever being shown for review; those places are refused even when a hook names them
+ * (T43).
  */
 function homeDestination(
   relative: string,
