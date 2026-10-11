@@ -126,12 +126,12 @@ open, such as a chat or an option letter from a discussion.
     (`writeTestFile`, `linkFolder`, `readText`, `readJson`, `exists`); a secret store
     (`memorySecretStore`, `memorySecrets`, and `loggedInStore` for one already logged in), a
     PC that finds only the programs it is given (`executableLookup`), a scripted prompter
-    (`scriptedPrompter`), a recording reporter (`recordingReporter`), an env writer
-    (`fakeEnvWriter`), a typed partial API client (`fakeApi`), a bundle server
-    (`fakeBundleServer`, read with `storedOn` and `revisionOn`), a local state in a
-    temporary folder (`localStateIn`), an adapter that only detects (`fakeAdapter`, with
-    `installedAgent` and `missingAgent`), a password the policy accepts (`STRONG`) and a
-    project folder nobody looks in (`CWD`).
+    (`scriptedPrompter`, with each yes/no question's default in `confirmDefaults`), a
+    recording reporter (`recordingReporter`), an env writer (`fakeEnvWriter`), a typed
+    partial API client (`fakeApi`), a bundle server (`fakeBundleServer`, read with `storedOn`
+    and `revisionOn`), a local state in a temporary folder (`localStateIn`), an adapter that
+    only detects (`fakeAdapter`, with `installedAgent` and `missingAgent`), a password the
+    policy accepts (`STRONG`) and a project folder nobody looks in (`CWD`).
   - `packages/cli/test/claude-code-project-fixtures.ts`: the Claude Code tests' temporary
     home and project (`useProjectFolders`, then `root`, `home`, `base` and `project`), the
     collectors (`options`, `globalCollector`, `collect`, `collectSkipped`, with or without

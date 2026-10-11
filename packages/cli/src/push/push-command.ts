@@ -263,7 +263,10 @@ export function createPushPlanner(deps: PushDeps) {
         if (found.notice) reporter.warn(found.notice);
         if (found.names.length > 0) {
           const yes =
-            flag ?? (!options.yes && (await prompter.confirm(part.question(found.names), false)));
+            flag ??
+            (options.yes
+              ? part.defaultYes
+              : await prompter.confirm(part.question(found.names), part.defaultYes));
           if (yes) chosen.add(part.id);
         } else if (flag === true) {
           reporter.info(part.noneFound);

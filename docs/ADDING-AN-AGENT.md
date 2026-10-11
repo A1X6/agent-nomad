@@ -230,10 +230,11 @@ loop) into a shared `agents/shared/` module rather than copying them.
   was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text).
 - **`inspector.pushNotes(files)`:** lines push's summary adds about the collected files, such
   as the plugins among them (see `skillsPluginsNote` in `claude-code/skills-dir-plugins.ts`).
-- **`optionalParts`:** what push saves only after a yes, as data (an id, its scope, what
-  there is, the question, and `flagHelp`, the help for `--<id>` / `--no-<id>` in push and
-  pull); the collector gets the chosen ids in `options.include`. The command line builds
-  the flags from the registered adapters: nothing to add in `cli/`.
+- **`optionalParts`:** what push asks about, as data (an id, its scope, `defaultYes`, the
+  question's default and what `--yes` does, what there is, the question, and `flagHelp`, the
+  help for `--<id>` / `--no-<id>` in push and pull); the collector gets the chosen ids in
+  `options.include`. The command line builds the flags from the registered adapters: nothing
+  to add in `cli/`.
 - **`memoryDescription`:** what push's memory question names.
 - **`envReferences`:** which bundle files hold MCP servers (`mcp`) and settings with an
   `env` block (`settings`) that can use `${VAR}`, the variables the agent sets itself

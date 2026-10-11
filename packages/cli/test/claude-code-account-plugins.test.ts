@@ -195,7 +195,7 @@ describe('claude.ai plugins (T101): what push saves', () => {
       (entry) => entry.id === 'account-plugins',
     );
     expect(part?.question(['my-upload'])).toBe(
-      'Also save a copy of your 1 claude.ai plugin (my-upload)? Your claude.ai account already syncs them; the copy is for PCs without that account.',
+      'Also save a copy of your 1 claude.ai plugin (my-upload)? Your claude.ai account already syncs them; the copy is for PCs without that account. Saved unless you say no.',
     );
   });
 });
@@ -252,7 +252,7 @@ describe('claude.ai plugins (T101): what pull may add', () => {
 
 describe("claude.ai plugins (T101): pull's plan step", () => {
   const QUESTION =
-    'Add them as local plugins in ~/.claude/skills/? Only needed if this PC uses another claude.ai account, or none.';
+    'Add them as local plugins in ~/.claude/skills/? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.';
   const pluginManifest = () =>
     readText(join(base, 'skills', 'my-upload', '.claude-plugin', 'plugin.json'));
 
@@ -288,12 +288,20 @@ describe("claude.ai plugins (T101): pull's plan step", () => {
       ...overrides,
     });
     const report = await planned.restore(() => Promise.resolve('skip'), {});
-    return { planned, report, asked: script.asked, lines, validated: validate.calls };
+    return {
+      planned,
+      report,
+      asked: script.asked,
+      defaults: script.confirmDefaults,
+      lines,
+      validated: validate.calls,
+    };
   }
 
-  it('lists them and asks; no by default writes nothing', async () => {
+  it('lists them and asks, yes by default (T114); a no writes nothing', async () => {
     const t = await planStep(savedPlugin('my-upload'), [false]);
     expect(t.asked).toEqual([QUESTION]);
+    expect(t.defaults).toEqual([true]);
     expect(t.lines).toContain(
       'Plugins from your claude.ai account on the other PC:\n  + my-upload@skills-dir (skills/my-upload)',
     );
@@ -313,10 +321,30 @@ describe("claude.ai plugins (T101): pull's plan step", () => {
     );
   });
 
-  it('--yes alone never adds them and never asks', async () => {
+  it('--yes adds them without asking (T114)', async () => {
     const t = await planStep(savedPlugin('my-upload'), [], { assumeYes: true });
     expect(t.asked).toEqual([]);
+    expect(await pluginManifest()).toContain('my-upload');
+  });
+
+  it('--yes alone still never accepts a plugin with code (T97 review)', async () => {
+    const t = await planStep(modFiles(`${ACCOUNT_PLUGINS_PREFIX}probe-mod/`), [], {
+      assumeYes: true,
+    });
+    expect(t.report.written).toEqual([]);
+    expect(t.planned.declined).toBe(true);
+  });
+
+  it('--no-account-plugins adds none without asking, even with --yes', async () => {
+    const t = await planStep(savedPlugin('my-upload'), [], {
+      assumeYes: true,
+      parts: new Map([['account-plugins', false]]),
+    });
+    expect(t.asked).toEqual([]);
     await expect(pluginManifest()).rejects.toThrow();
+    expect(t.lines).toContain(
+      'Not added. To add them later: agentnomad pull --global --account-plugins',
+    );
   });
 
   it('--account-plugins adds them without asking', async () => {

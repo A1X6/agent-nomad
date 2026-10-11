@@ -50,7 +50,7 @@ export interface Collector {
 }
 
 /**
- * Something an agent saves only when the user opts in (T61), e.g. Claude Code's copy of the
+ * Something an agent saves only when the user agrees (T61), e.g. Claude Code's copy of the
  * user's claude.ai skills (T42). Push asks about each one; `--<id>` / `--no-<id>` answer it.
  */
 export interface OptionalPart {
@@ -58,6 +58,11 @@ export interface OptionalPart {
   readonly id: string;
   /** The setup it belongs to. */
   readonly scope: ScopeTarget['kind'];
+  /**
+   * The question's default answer, and what `--yes` does (T114): saved unless the user says
+   * no (`true`), or left out unless the user says yes (`false`).
+   */
+  readonly defaultYes: boolean;
   /**
    * What there is to save on this PC, or why it cannot be read, and what to say before asking
    * (`notice`, e.g. what was left out and why).

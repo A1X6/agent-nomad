@@ -193,8 +193,8 @@ agent and the generic code):
 | `.agentnomad/plugin-dirs/<n>.json`           | A plugin folder `env.CLAUDE_CODE_PLUGIN_DIRS` names in the user's `settings.json` (T99), `n` its place in the value: the folder as named there, the separator, its path from home (`null` outside home), the remote and commit, and its files, as a local marketplace's                   | Written to the same path from home (outside home: `~/.agentnomad/plugin-dirs/<name>`), re-cloned first when it can be, after the plugin review; the value in the restored `settings.json` then names the folders pull wrote, with this PC's separator. One file per folder, so older CLIs refuse it with one warning and go on                       |
 | `.agentnomad/programs.json`                  | Programs hooks start, and how npm installed them                                                                                                                                                                                                                                          | Missing ones are offered for install                                                                                                                                                                                                                                                                                                                 |
 | `.agentnomad/env.json`                       | Environment variable values the user chose to save                                                                                                                                                                                                                                        | Offered for the shell profile; never written as a file                                                                                                                                                                                                                                                                                               |
-| `.agentnomad/account-skills/...`             | A copy of the user's own claude.ai skills (opt-in; never Anthropic's or an organization's)                                                                                                                                                                                                | Offered as local skills in `~/.claude/skills/<name>/`, only on a PC that does not already get them from claude.ai                                                                                                                                                                                                                                    |
-| `.agentnomad/account-plugins/...`            | A copy of the plugin folders of the user's own claude.ai uploads (opt-in, T101; never claude.ai's directory, an organization's, or one claude.ai installs by itself)                                                                                                                      | Offered as plugins in `~/.claude/skills/<name>/` (`<name>@skills-dir`) after the plugin review, only on a PC that does not already get them from claude.ai. Older CLIs refuse them with one warning and go on                                                                                                                                        |
+| `.agentnomad/account-skills/...`             | A copy of the user's own claude.ai skills (saved unless the user says no, T114; never Anthropic's or an organization's)                                                                                                                                                                   | Offered as local skills in `~/.claude/skills/<name>/`, only on a PC that does not already get them from claude.ai                                                                                                                                                                                                                                    |
+| `.agentnomad/account-plugins/...`            | A copy of the plugin folders of the user's own claude.ai uploads (T101, saved unless the user says no, T114; never claude.ai's directory, an organization's, or one claude.ai installs by itself)                                                                                         | Offered as plugins in `~/.claude/skills/<name>/` (`<name>@skills-dir`) after the plugin review, only on a PC that does not already get them from claude.ai. Older CLIs refuse them with one warning and go on                                                                                                                                        |
 | `.agentnomad/plugin-data/<folder>/...`       | A plugin's `plugins/data/<folder>/` for each plugin the setup restores (opt-in, T102), named from its id; never a removed plugin's                                                                                                                                                        | Written after the plugins are in, only for a plugin installed here with that name (the same id). Older CLIs refuse each file with a warning and go on                                                                                                                                                                                                |
 | `.agentnomad/plugin-store/<file>.json`       | A mod's `plugins/store/<file>.json` (its `$.store`), on the same terms                                                                                                                                                                                                                    | The same; the store folder gets mode 700 and its files 600                                                                                                                                                                                                                                                                                           |
 
@@ -340,7 +340,7 @@ Everything agent-specific sits behind one interface, `AgentAdapter`
 | `collector`                    | Which files make up the global setup, or a project's setup? (Never credentials or machine state.)                                                                                                                                                                                                                      |
 | `restorer`                     | Write a pulled setup back: where each file goes, what is refused, per-OS line endings and permissions, conflicts. Also what pull's plan must ask first: what runs programs (`reviewRunnable`), which files differ (`conflicts`), which saved variables redirect requests (`isRedirectVariable`). It never asks itself. |
 | `inspector` (optional)         | What should the user be told on push, pull or `agents` (managed settings, files this version does not know yet, a setup saved with a newer version)? What push's summary adds about the collected files (`pushNotes`, T97: the plugins in `skills/`)?                                                                  |
-| `optionalParts` (optional)     | What push saves only after a yes, e.g. Claude Code's claude.ai skills; `available()` may add a `notice` push shows before asking; `--<id>` / `--no-<id>` answer it in push and pull, built from the registered adapters with the part's `flagHelp`.                                                                    |
+| `optionalParts` (optional)     | What push asks about, e.g. Claude Code's claude.ai skills; `defaultYes` is the question's default and what `--yes` does (T114); `available()` may add a `notice` push shows before asking; `--<id>` / `--no-<id>` answer it in push and pull, built from the registered adapters with the part's `flagHelp`.           |
 | `envReferences` (optional)     | Which files can use `${VAR}` (MCP servers, settings) and which variables the agent sets itself; push offers the values, `agentnomad env` lists them.                                                                                                                                                                   |
 | `memoryDescription` (optional) | What push's memory question names.                                                                                                                                                                                                                                                                                     |
 | `planRestore` (optional)       | The agent's own questions in pull's plan step; returns how to write the setup and a follow-up (e.g. plugin reinstalls) that gets no prompter. The plan may say it left part of the setup out (`declined`, T97), so a later push asks first, as after declined commands.                                                |
@@ -510,28 +510,30 @@ validate`, pull says so and treats the folder as unreviewed code. A declined fol
 out whole and the setup is noted as partial, so a later push asks first. T98, T99 and T101
 use the same review.
 
-**claude.ai skills (T42, opt-in):** Claude Code downloads the skills of the user's claude.ai
-account into `skills/synced/<account>/` and manages that folder; agentnomad never writes
-there. `push --account-skills` saves a copy of the user's **own** ones under
-`.agentnomad/account-skills/`. The folder's `manifest.json` tells them apart: before
-Claude Code 2.1.295 by `creatorType: user`; from 2.1.295, which writes no `creatorType`, by
-`source` `custom` or `plugin`. A `plugin` skill is the user's only when its backing plugin
+**claude.ai skills (T42):** Claude Code downloads the skills of the user's claude.ai account
+into `skills/synced/<account>/` and manages that folder; agentnomad never writes there. Push
+saves a copy of the user's **own** ones under `.agentnomad/account-skills/` unless the user
+says no or `--no-account-skills` (T114: the question defaults to yes, and `--yes` saves
+them). The folder's `manifest.json` tells them apart: before Claude Code 2.1.295 by
+`creatorType: user`; from 2.1.295, which writes no `creatorType`, by `source` `custom` or
+`plugin`. A `plugin` skill is the user's only when its backing plugin
 (`backingPluginId`, found in `plugins/synced/<account>/manifest.json`) comes from a
 marketplace of scope `account` in `.marketplaces.json`; `org` and `default` (an
 organization's, claude.ai's directory) are left out and named. Without `.marketplaces.json`
 an organization's skill cannot be told apart, and push says so; with it, a skill whose
 marketplace cannot be found, or with a `source` agentnomad does not know, is left out and
 named. Anthropic's (`anthropic`, `anthropic-example`) and `session-refs` are never saved.
-On pull they are listed and, after a yes (or `--account-skills`), written as normal local
-skills in `~/.claude/skills/<name>/`, skipping any this PC already gets from claude.ai and
-never replacing a local skill. A local skill runs its `!`command`` lines where a synced one
-does not, so such skills are marked, and a flag alone adds them only with
-`--allow-commands`.
+On pull they are listed and, unless the user says no or `--no-account-skills` (`--yes` adds
+them, T114), written as normal local skills in `~/.claude/skills/<name>/`, skipping any this
+PC already gets from claude.ai and never replacing a local skill. A local skill runs its
+`!`command`` lines where a synced one does not, so such skills are marked, and a flag or
+`--yes` (no person answering) adds them only with `--allow-commands`.
 
-**claude.ai plugins (T101, opt-in):** the same rules for the plugins Claude Code syncs into
-`plugins/synced/<account>/`, which agentnomad never writes either. `push --account-plugins`
-saves a copy of the user's **own** ones under `.agentnomad/account-plugins/<name>/`: only a
-plugin whose marketplace has scope `account` in `.marketplaces.json` (My Uploads), never
+**claude.ai plugins (T101):** the same rules for the plugins Claude Code syncs into
+`plugins/synced/<account>/`, which agentnomad never writes either. Push, unless the user says
+no or `--no-account-plugins` (T114, as for skills), saves a copy of the user's **own** ones
+under `.agentnomad/account-plugins/<name>/`: only a plugin whose marketplace has scope
+`account` in `.marketplaces.json` (My Uploads), never
 `default` (claude.ai's directory, e.g. Anthropic's knowledge-work plugins) or `org`, and never
 one with `installationPreference` `required` or `auto_install` (claude.ai installs those by
 itself). A manifest or marketplaces list in an unknown shape saves nothing for that account,
@@ -542,9 +544,9 @@ out and named. "The plugin's files" are the plugin's folder next to the manifest
 `generation` N of 2 or more (`syncedPluginFolder`, T106), taken whole minus the skipped names
 and what Claude Code generates in a plugin (`.claude-plugin/types/`); the bundle keeps the
 plain `<name>`. The `<folder>.meta.json` beside it only repeats manifest fields and stays.
-On pull they are listed and, after a yes (or
-`--account-plugins`; `--yes` alone never), added to the setup as `skills/<name>/`, where
-Claude Code loads them as `<name>@skills-dir`, skipping one this PC already gets from
+On pull they are listed and, unless the user says no or `--no-account-plugins` (`--yes` adds
+them, T114), added to the setup as `skills/<name>/`, where Claude Code loads them as
+`<name>@skills-dir`, skipping one this PC already gets from
 claude.ai (a synced plugin or skill of that name) and any name a local skill or plugin uses.
 They then go through the plugin review above like any plugin folder. If the PC later signs in
 to the account they came from, Claude Code prefers the local copy.

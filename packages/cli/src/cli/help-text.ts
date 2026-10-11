@@ -52,7 +52,7 @@ export const FLAG_HELP = {
     'accept new or changed hooks, MCP servers and scripts, and install plugins and programs (--yes alone skips them)',
   yes: {
     push: "answer every question with its default instead of asking: the global setup, no memory, no environment values, each optional part's default",
-    pull: 'answer every question with its default instead of asking: the global setup, merge files that differ, add missing plain environment values; never new commands or installs',
+    pull: "answer every question with its default instead of asking: the global setup, merge files that differ, add missing plain environment values, each optional part's default; never new commands or installs",
     delete:
       'delete without the last confirmation (which setups is still asked unless --global or --project names them)',
   },
