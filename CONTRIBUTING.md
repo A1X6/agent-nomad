@@ -30,7 +30,7 @@ node packages/cli/dist/src/bin.js --help
 | `pnpm test`                 | All unit and integration tests (Vitest).                                                 |
 | `pnpm test:coverage`        | The tests with a coverage report (in `coverage/`).                                       |
 | `pnpm knip`                 | Lists unused files, dependencies and exports (mark a kept export `@public`).             |
-| `pnpm test:e2e`             | Builds, then runs the built CLI end to end against a local API (four simulated PCs).     |
+| `pnpm test:e2e`             | Builds, then runs the built CLI against a local API: cross-OS steps, one-OS scenarios.   |
 | `pnpm check`                | Typecheck, lint, format check and tests: what CI runs. Run it before every pull request. |
 | `pnpm lint` / `pnpm format` | ESLint / Prettier on their own.                                                          |
 | `pnpm release:build`        | Builds the npm package into `packages/cli/release/` (bundled with esbuild).              |
@@ -209,12 +209,13 @@ open, such as a chat or an option letter from a discussion.
   the small modules tested through the code that uses them.
 - Anything that touches paths runs on macOS, Linux and Windows in CI; write it so it passes
   on all three (use `path.join`, never assume `/`).
-- A change to push, pull or the bundle belongs in the end-to-end steps too
-  (`packages/e2e/src/steps.ts`), including the check that nothing readable leaves the PC
+- A change to push, pull or the bundle belongs in an end-to-end test too: in the cross-OS steps
+  (`packages/e2e/src/steps.ts`) when it must cross operating systems, else in a scenario test of its
+  own in `packages/e2e/test/`, including the check that nothing readable leaves the PC
   (`expectNoLeaks` in `packages/e2e/src/leaks.ts`, which searches with
-  `packages/e2e/src/plaintext.ts`: as text, encoded or compressed). A PC that pulls plugins
-  gets the `claude` command of `packages/e2e/src/fake-claude.ts` (`newPc` option `claude`),
-  never the real Claude Code.
+  `packages/e2e/src/plaintext.ts`: as text, encoded or compressed). A PC that pulls plugins gets the
+  `claude` command of `packages/e2e/src/fake-claude.ts` (`newPc` option `claude`), never the real
+  Claude Code.
 
 ## Pull requests
 

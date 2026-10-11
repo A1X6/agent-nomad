@@ -77,7 +77,8 @@ new PC, and shows you anything that would run programs before writing it.
   added as local skills on a PC that uses another claude.ai account, or none, unless you say
   no (`--no-account-skills`). Anthropic's are never saved, and neither are your
   organization's when Claude Code's files tell them apart; push names any skill it leaves
-  out, and says when it cannot tell.
+  out, and says when it cannot tell. Pull reviews a skill that is a plugin or mod like any
+  plugin before writing it.
 - **And your claude.ai plugins.** A copy of the plugins you uploaded to claude.ai is saved
   and added as local plugins in `~/.claude/skills/` on a PC that uses another claude.ai
   account, or none, unless you say no (`--no-account-plugins`). Plugins from claude.ai's
@@ -168,9 +169,12 @@ Run `agentnomad <command> --help` for every option.
 
 With no terminal, agentnomad never asks: a question the flags do not answer stops the
 command with exit code 1 and names the flags to add. Push and pull ask every question before
-they change anything, so a script never stops halfway. Every choice push and pull ask about has
-a flag, and `push --help` and `pull --help` list what is always saved, what only when you choose
-(with the flag that chooses it) and what never.
+they change anything, so a script never stops halfway. Every choice about what to save or
+restore has a flag. The safety questions have none, on purpose: replacing a newer copy, pushing
+after a pull that did not restore everything, restoring an older copy, writing a plugin that
+`claude plugin validate` finds broken and closing Claude Code. Only a person can answer them
+yes, and `--yes` answers them no. `push --help` and `pull --help` list what is always saved,
+what only when you choose (with the flag that chooses it) and what never.
 
 When push or pull asked you anything, they then show what they will save or write and ask once
 more (`Upload it now?`, `Restore it now?`); nothing changes until you say yes. A run whose every
@@ -257,11 +261,14 @@ A folder in `~/.claude/skills/` with `.claude-plugin/plugin.json` is a plugin Cl
 loads as `<name>@skills-dir`; with `hooks/hooks.json` it is a mod that runs code inside Claude
 Code. Push saves it with the rest of `skills/` (never `.claude-plugin/types/`, which Claude
 Code generates) and names it in its summary. Before pull writes a new or changed one, it runs
-`claude plugin validate` on a copy and shows what each module hooks into and calls, flagging
-programs, file writes, model and network calls; you can read the module first. A plugin with
-code is written only after your yes or with `--allow-commands`; `--yes` alone never writes
-it, and one that validate finds broken needs your yes. Without Claude Code on the PC, the
-plugin counts as unreviewed code.
+`claude plugin validate` on a copy and shows what each module hooks into, calls and writes, and the
+MCP servers, LSP servers and monitors Claude Code starts from the folder (`.mcp.json`, `.lsp.json`,
+`monitors/` or `plugin.json`). It flags calls that run programs, tools (Bash included), commands or
+subagents, start or call MCP servers, change settings or environment variables, send prompts, write
+files, call the model or use the network; you can read the module first. A plugin with code is
+written only after your yes or with `--allow-commands`; `--yes` alone never writes it, and one that
+validate finds broken needs your yes. Without Claude Code on the PC, the plugin counts as unreviewed
+code.
 
 ### Plugin folders in `CLAUDE_CODE_PLUGIN_DIRS`
 
@@ -328,6 +335,7 @@ Details: [SECURITY.md](SECURITY.md) and the [threat model](docs/security/threat-
 | **v1**   | Claude Code on macOS, Linux and Windows: global and project setups, plugins, memory, secrets, scripting, cross-OS tests, security review                                                      | Released as 1.0 |
 | **v1.x** | More agents: OpenAI Codex CLI, Google Gemini CLI, OpenCode, Cursor, Claude Desktop and others                                                                                                 | Next            |
 | **v1.x** | Data-only agents: support a simple agent with a data file, no code                                                                                                                            | Planned         |
+| **v1.x** | claude.ai account items: your own skills and the plugins you uploaded are saved; connectors next                                                                                              | Started         |
 | **v2**   | **One setup, every agent:** turn your Claude Code setup into a Codex, Gemini CLI, OpenCode or Cursor setup (instructions, skills, MCP servers, commands), with a preview of what carries over | Planned         |
 | Later    | Password change, version history, selective sync, team sharing, dashboard, background sync                                                                                                    | Ideas           |
 

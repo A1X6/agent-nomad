@@ -226,8 +226,9 @@ loop) into a shared `agents/shared/` module rather than copying them.
   does not know, so push can tell the user (see `claude-code/unknown-files.ts`).
 - **`inspector.notices('push' | 'pull' | 'agents')`:** anything to point out, such as
   organization-managed settings (see `claude-code/managed-settings.ts`).
-- **`inspector.versionNotice(savedWith, here)`:** what pull says about the version a setup
-  was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text).
+- **`inspector.versionNotice(savedWith, here, files)`:** what pull says about the version a
+  setup was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text), and
+  what in `files` this version cannot run (Claude Code: mods).
 - **`inspector.pushNotes(files)`:** lines push's summary adds about the collected files, such
   as the plugins among them (see `skillsPluginsNote` in `claude-code/skills-dir-plugins.ts`).
 - **`optionalParts`:** what push asks about, as data (an id, its scope, `defaultYes`, the
@@ -235,6 +236,9 @@ loop) into a shared `agents/shared/` module rather than copying them.
   help for `--<id>` / `--no-<id>` in push and pull); the collector gets the chosen ids in
   `options.include`. The command line builds the flags from the registered adapters: nothing
   to add in `cli/`.
+- **`contents`:** what a setup always, optionally and never holds, in the words of `--help`
+  (see `claude-code/claude-code-contents.data.ts`); `push --help` and `pull --help` show it
+  under "What is saved" and "What is restored". Without it, the agent has no such section.
 - **`memoryDescription`:** what push's memory question names.
 - **`envReferences`:** which bundle files hold MCP servers (`mcp`) and settings with an
   `env` block (`settings`) that can use `${VAR}`, the variables the agent sets itself
