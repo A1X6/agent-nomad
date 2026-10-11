@@ -5,12 +5,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   base,
-  claudeCodeAdapter,
   home,
   synced,
   syncedSetup,
   useProjectFolders,
-  planContext,
+  planStepWith,
 } from './claude-code-project-fixtures.ts';
 import {
   MOD_NAME,
@@ -23,14 +22,7 @@ import {
   syncedSkillsManifest,
   type SyncedSkillEntry,
 } from './claude-code-plugin-fixtures.ts';
-import {
-  collected,
-  paths,
-  readText,
-  recordingReporter,
-  scriptedPrompter,
-  writeTestFile,
-} from './fakes.ts';
+import { collected, paths, readText, writeTestFile } from './fakes.ts';
 
 import {
   ACCOUNT_PLUGINS_PREFIX,
@@ -275,43 +267,45 @@ describe('claude.ai skills (T42): what pull may add', () => {
 });
 
 describe('claude.ai skills (T42): pull adds them as local skills', () => {
-  function run(
+  /** The plan step for `files` with these flags and answers; no `claude` on this PC. */
+  const planStep = (
     files: CollectedFile[],
     options: { assumeYes?: boolean; allowCommands?: boolean; accountSkills?: boolean } = {},
     answers: boolean[] = [],
-  ) {
-    const script = scriptedPrompter(answers);
-    const { reporter, lines } = recordingReporter({ levels: false });
-    const adapter = claudeCodeAdapter(home);
-    if (!adapter.planRestore) throw new Error('no plan step');
-    // The plan step asks (SEC-03: with the saved plugins); writing asks nothing (T61). Pull
-    // shows the restore's warnings.
-    const planned = adapter.planRestore(
-      planContext(script.prompter, reporter, {
+  ) =>
+    planStepWith(null, {
+      answers,
+      overrides: {
         files,
         assumeYes: options.assumeYes ?? false,
         allowCommands: options.allowCommands ?? false,
         parts: new Map(
           options.accountSkills === undefined ? [] : [['account-skills', options.accountSkills]],
         ),
-      }),
-    );
-    const done = planned.then(async (plan) => {
-      const report = await plan.restore(() => Promise.resolve('skip'), {});
-      for (const warning of report.warnings) reporter.warn(warning);
-      await plan.afterRestore({ reporter });
-      return { plan, report };
+      },
     });
-    return { planned, done, asked: script.asked, defaults: script.confirmDefaults, lines };
+
+  /**
+   * The restore and its follow-up of what `step` planned, as pull runs them: the plan step asks
+   * (SEC-03: with the saved plugins), writing asks nothing (T61), and pull shows the restore's
+   * warnings.
+   */
+  async function restoreAll(step: Awaited<ReturnType<typeof planStep>>) {
+    const report = await step.planned.restore(() => Promise.resolve('skip'), {});
+    for (const warning of report.warnings) step.reporter.warn(warning);
+    await step.planned.afterRestore({ reporter: step.reporter });
+    return { ...step, plan: step.planned, report };
   }
+
+  /** {@link planStep}, then {@link restoreAll}. */
+  const run = async (...args: Parameters<typeof planStep>) => restoreAll(await planStep(...args));
   const skillFile = (name: string) => readText(join(base, 'skills', name, 'SKILL.md'));
 
   it('asks, and a yes writes them into ~/.claude/skills/<name>/', async () => {
-    const t = run([saved('mine', 'Plain.')], {}, [true]);
-    await t.planned;
+    const planned = await planStep([saved('mine', 'Plain.')], {}, [true]);
     // Asked in the plan step.
-    expect(t.asked).toHaveLength(1);
-    await t.done;
+    expect(planned.asked).toHaveLength(1);
+    const t = await restoreAll(planned);
     expect(t.asked).toEqual([
       'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
     ]);
@@ -321,40 +315,36 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   // UX-01 (review 15, T118): pull's summary names what the agent's questions chose.
   it("names a yes in pull's summary", async () => {
-    const t = run([saved('mine', 'Plain.')], {}, [true]);
-    const { plan } = await t.done;
+    const t = await run([saved('mine', 'Plain.')], {}, [true]);
+    const { plan } = t;
     expect(plan.summary?.chosen).toContain('--account-skills yes (mine)');
   });
 
   it("names a no in pull's summary", async () => {
-    const t = run([saved('mine', 'Plain.')], {}, [false]);
-    const { plan } = await t.done;
+    const t = await run([saved('mine', 'Plain.')], {}, [false]);
+    const { plan } = t;
     expect(plan.summary?.chosen).toContain('--account-skills no (mine)');
   });
 
   it('asks with yes as the default (T114)', async () => {
-    const t = run([saved('mine', 'Plain.')], {}, [true]);
-    await t.done;
+    const t = await run([saved('mine', 'Plain.')], {}, [true]);
     expect(t.defaults).toEqual([true]);
   });
 
   it('a no adds none', async () => {
-    const no = run([saved('mine', 'Plain.')], {}, [false]);
-    await no.done;
+    const no = await run([saved('mine', 'Plain.')], {}, [false]);
     await expect(skillFile('mine')).rejects.toThrow();
   });
 
   it('--yes adds them without asking (T114)', async () => {
-    const yes = run([saved('mine', 'Plain.')], { assumeYes: true });
-    await yes.done;
+    const yes = await run([saved('mine', 'Plain.')], { assumeYes: true });
     expect(yes.asked).toEqual([]);
     expect(await skillFile('mine')).toContain('Plain.');
   });
 
   it('--yes never adds one that runs commands without --allow-commands', async () => {
     const files = [saved('mine', 'Plain.'), saved('runner', 'Run !`git status`')];
-    const yes = run(files, { assumeYes: true });
-    await yes.done;
+    const yes = await run(files, { assumeYes: true });
     expect(await skillFile('mine')).toContain('Plain.');
     await expect(skillFile('runner')).rejects.toThrow();
     expect(yes.lines.join('\n')).toContain('Skipped runner: it runs commands as a local skill.');
@@ -362,14 +352,12 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('--yes with --allow-commands adds one that runs commands', async () => {
     const files = [saved('runner', 'Run !`git status`')];
-    const allowed = run(files, { assumeYes: true, allowCommands: true });
-    await allowed.done;
+    const allowed = await run(files, { assumeYes: true, allowCommands: true });
     expect(await skillFile('runner')).toContain('git status');
   });
 
   it('--no-account-skills adds none without asking, even with --yes', async () => {
-    const no = run([saved('mine', 'Plain.')], { assumeYes: true, accountSkills: false });
-    await no.done;
+    const no = await run([saved('mine', 'Plain.')], { assumeYes: true, accountSkills: false });
     expect(no.asked).toEqual([]);
     await expect(skillFile('mine')).rejects.toThrow();
     expect(no.lines).toContain(
@@ -379,24 +367,23 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('--account-skills adds them without asking, but not one that runs commands unless --allow-commands', async () => {
     const files = [saved('mine', 'Plain.'), saved('runner', 'Run !`git status`')];
-    const flag = run(files, { accountSkills: true });
-    await flag.done;
+    const flag = await run(files, { accountSkills: true });
     expect(flag.asked).toEqual([]);
     expect(await skillFile('mine')).toContain('Plain.');
     await expect(skillFile('runner')).rejects.toThrow();
     expect(flag.lines.join('\n')).toContain('runner  ⚠ runs commands');
     expect(flag.lines.join('\n')).toContain('Skipped runner: it runs commands as a local skill.');
 
-    const allowed = run(files, { accountSkills: true, allowCommands: true });
-    await allowed.done;
+    const allowed = await run(files, { accountSkills: true, allowCommands: true });
     expect(await skillFile('runner')).toContain('git status');
   });
 
   it('names only the skills it wrote as added (UX-01)', async () => {
     // A file where the skill's folder would go: none of its files can be written.
     await writeTestFile(join(base, 'skills', 'broken'), 'not a folder');
-    const t = run([saved('mine', 'Plain.'), saved('broken', 'Plain.')], { accountSkills: true });
-    await t.done;
+    const t = await run([saved('mine', 'Plain.'), saved('broken', 'Plain.')], {
+      accountSkills: true,
+    });
     expect(await skillFile('mine')).toContain('Plain.');
     const shown = t.lines.join('\n');
     expect(shown).toContain('Skipped "skills/broken/SKILL.md"');
@@ -406,8 +393,7 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('skips a skill this PC already gets from claude.ai', async () => {
     await syncedSetup();
-    const t = run([saved('my-skill', 'From the other PC.')], { accountSkills: true });
-    await t.done;
+    const t = await run([saved('my-skill', 'From the other PC.')], { accountSkills: true });
     await expect(skillFile('my-skill')).rejects.toThrow();
     expect(t.lines.join('\n')).toContain(
       'my-skill: skipped, this PC already gets it from claude.ai',
@@ -416,15 +402,14 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('never touches a local skill of the same name', async () => {
     await writeTestFile(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
-    const t = run([saved('local-one', 'Theirs.')], { accountSkills: true });
-    await t.done;
+    const t = await run([saved('local-one', 'Theirs.')], { accountSkills: true });
     expect(await skillFile('local-one')).toBe('My own local version.');
   });
 
   // SEC-03 (review 15): a saved skill folder that is a plugin gets the plugin review (T97).
   it('--yes never adds a saved skill that is a plugin with code', async () => {
-    const t = run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), { assumeYes: true });
-    const { plan, report } = await t.done;
+    const t = await run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), { assumeYes: true });
+    const { plan, report } = t;
     expect(report.written).toEqual([]);
     expect(plan.declined).toBe(true);
     expect(t.lines.join('\n')).toContain(
@@ -434,8 +419,8 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
   });
 
   it('asks before writing a saved skill that is a plugin with code', async () => {
-    const t = run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), {}, [true, false]);
-    const { report } = await t.done;
+    const t = await run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), {}, [true, false]);
+    const { report } = t;
     expect(t.asked).toEqual([
       'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
       `Write ${MOD_NAME}@skills-dir? It runs code inside Claude Code.`,
@@ -448,8 +433,10 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
       `${ACCOUNT_PLUGINS_PREFIX}shared/.claude-plugin/plugin.json`,
       JSON.stringify({ name: 'shared' }),
     );
-    const t = run([plugin, saved('shared', 'Plain.')], { assumeYes: true, allowCommands: true });
-    await t.done;
+    const t = await run([plugin, saved('shared', 'Plain.')], {
+      assumeYes: true,
+      allowCommands: true,
+    });
     expect(t.lines.join('\n')).toContain(
       'shared: skipped, you already have a local skill with this name',
     );

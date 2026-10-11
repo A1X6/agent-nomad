@@ -196,7 +196,10 @@ describe("plugin data (T102): pull's plan step", () => {
     answers: boolean[],
     overrides: Partial<RestorePlanContext> = {},
   ) {
-    const t = await planStepWith(validatePassWithWarning, answers, { files, ...overrides });
+    const t = await planStepWith(validatePassWithWarning, {
+      answers,
+      overrides: { files, ...overrides },
+    });
     await t.planned.restore(() => Promise.resolve('skip'), {});
     await t.planned.afterRestore({ reporter: t.reporter });
     return { asked: t.asked, lines: t.lines, summary: t.planned.summary };

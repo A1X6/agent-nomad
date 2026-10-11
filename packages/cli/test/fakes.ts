@@ -4,7 +4,7 @@ import {
   type BundleSummary,
 } from '@agentnomad/contracts';
 import { createSodiumCryptoService, DATA_KEY_BYTES, type CryptoService } from '@agentnomad/core';
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeAll, beforeEach } from 'vitest';
@@ -19,6 +19,7 @@ import { loadZxcvbnChecker, type PasswordChecker } from '../src/auth/password-po
 import type { EnvWriter } from '../src/env/shell-profile.ts';
 import { SECRET_NAMES, type SecretName, type SecretStore } from '../src/secrets/secret-store.ts';
 import { createLocalState, STATE_FILE, type LocalState } from '../src/state/local-state.ts';
+import { isJsonObject } from '../src/system/json.ts';
 import type { Choice, Prompter, Reporter } from '../src/ui/prompter.ts';
 
 import { stubRestorer } from './stub-restorer.ts';
@@ -124,9 +125,6 @@ export const linkFolder = (target: string, path: string): Promise<void> =>
 /** A file's text (UTF-8). */
 export const readText = (path: string): Promise<string> => readFile(path, 'utf8');
 
-const isJsonObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 /** A JSON file that must hold an object; anything else fails the test here. */
 export async function readJson(path: string): Promise<Record<string, unknown>> {
   const value: unknown = JSON.parse(await readText(path));
@@ -134,12 +132,8 @@ export async function readJson(path: string): Promise<Record<string, unknown>> {
   return value;
 }
 
-/** Whether anything (a file or a folder) is at `path`. */
-export const exists = (path: string): Promise<boolean> =>
-  stat(path).then(
-    () => true,
-    () => false,
-  );
+/** Whether anything (a file or a folder) is at `path`: the CLI's own check (DUP-05). */
+export { exists } from '../src/system/files.ts';
 
 /**
  * An EnvWriter that touches no profile: `written` records the variables of each write.

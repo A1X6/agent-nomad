@@ -113,7 +113,14 @@ describe('decompression bomb protection', () => {
   });
 
   it('rejects a bomb from its size label before decompressing', async () => {
-    await expect(codec.decode(bomb)).rejects.toThrow(/too large/);
+    // A small payload whose label claims one byte over the limit: only the label check sees it.
+    const labelled = gzipSync(strToU8('{}'));
+    new DataView(labelled.buffer).setUint32(
+      labelled.length - 4,
+      MAX_DECOMPRESSED_BUNDLE_BYTES + 1,
+      true,
+    );
+    await expect(codec.decode(labelled)).rejects.toThrow(/too large/);
   });
 
   it('still stops a bomb whose size label lies', async () => {
