@@ -21,6 +21,24 @@ describe('runnableInMarkdown: only what Claude Code runs by itself (T44)', () =>
     expect(runnableInMarkdown(text)).toEqual(['hooks in its frontmatter']);
   });
 
+  // SEC-07 (review 16): YAML reads a quoted key as the same key.
+  it.each([
+    ['in double quotes', '"hooks":'],
+    ['in single quotes', "'hooks' :"],
+  ])('finds hooks in the frontmatter with the key %s', (_, key) => {
+    const text = `---\nname: x\n${key}\n  PreToolUse: []\n---\nBody`;
+    expect(runnableInMarkdown(text)).toEqual(['hooks in its frontmatter']);
+  });
+
+  it.each([
+    ['a flow mapping', '---\n{name: x, "ho\\u006bks": {PreToolUse: []}}\n---\nBody'],
+    ['a complex key', '---\nname: x\n? hooks\n: PreToolUse: []\n---\nBody'],
+  ])('shows a frontmatter written as %s, which it cannot read', (_, text) => {
+    expect(runnableInMarkdown(text)).toEqual([
+      'frontmatter the review cannot read, which may hold hooks',
+    ]);
+  });
+
   it.each([
     ['instructions in prose', 'Run `git status` first, then `npm test`.'],
     ['an ordinary code block', '```bash\ngit status\nnpm test\n```'],

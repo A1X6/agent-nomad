@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import {
   MOD_CALLS,
   MOD_CALLS_VERSION,
+  MOD_HOOKS,
+  MOD_HOOKS_VERSION,
   MOD_MODULE,
   MOD_NAME,
   modFiles,
@@ -34,6 +36,7 @@ import {
   pluginFolderChange,
   reviewPluginFolder,
   riskOfCall,
+  riskOfHook,
   type CollectedFile,
   type PluginFolderToReview,
 } from '../src/index.ts';
@@ -261,6 +264,29 @@ describe('the review of a plugin folder (T97)', () => {
     ]);
   });
 
+  // SEC-08 (review 16): a hook can answer Claude Code's permission question.
+  it('flags hooks that decide tool permissions, by event or by a pattern that may select one', async () => {
+    const run = validatePassCalling(
+      ['$.store.get'],
+      ['session.start', 'tool.check', 'tool.call{tool=Bash}', 'classic.PreToolUse', 'tool.*'],
+    );
+    const { validator } = await validatorFor(run);
+    expect((await reviewPluginFolder(mod(), validator)).modules[0]?.risky).toEqual([
+      'tool.check hook (decides tool permissions, can allow Bash)',
+      'classic.PreToolUse hook (decides tool permissions, can allow Bash)',
+      'tool.* hook (decides tool permissions, can allow Bash)',
+    ]);
+  });
+
+  it('flags a call that uses the Claude login (SEC-08 of review 16)', async () => {
+    const run = validatePassCalling(['$.session.authorize', '$.http.fetch']);
+    const { validator } = await validatorFor(run);
+    expect((await reviewPluginFolder(mod(), validator)).modules[0]?.risky).toEqual([
+      '$.session.authorize (uses your Claude login)',
+      '$.http.fetch (uses the network)',
+    ]);
+  });
+
   it('flags a call made through a helper, as validate names it', async () => {
     const run = validatePassCalling(['$.store.get', '$.tool.call (via run, again)']);
     const { validator } = await validatorFor(run);
@@ -292,11 +318,28 @@ describe('the review of a plugin folder (T97)', () => {
       'model.fork: calls the model',
       'mcp.call: starts or calls MCP servers',
       'mcp.connect: starts or calls MCP servers',
+      'session.authorize: uses your Claude login',
       'fs.write: writes files',
       'http.fetch: uses the network',
       'process.run: runs programs',
       'process.spawn: runs programs',
       'env.set: sets environment variables',
+    ]);
+  });
+
+  it('pins the mod hooks of the Claude Code the paths data was reviewed against', () => {
+    expect(MOD_HOOKS_VERSION).toBe(CLAUDE_CODE_PATHS.reviewedVersion);
+  });
+
+  it("flags exactly these of the program's mod hooks (SEC-08 of review 16)", () => {
+    const flagged = MOD_HOOKS.flatMap((name) => {
+      const does = riskOfHook(name);
+      return does === null ? [] : [`${name}: ${does}`];
+    });
+    expect(flagged).toEqual([
+      'classic.PreToolUse: decides tool permissions, can allow Bash',
+      'classic.PermissionRequest: decides tool permissions, can allow Bash',
+      'tool.check: decides tool permissions, can allow Bash',
     ]);
   });
 
@@ -416,6 +459,16 @@ describe('asking before writing a plugin folder with code (T97)', () => {
     const t = await gate(validatePassCalling(['$.process.spawn']), {}, [true, false]);
     expect(t.asked[0]).toBe('Show the source of ./register.ts in probe-mod@skills-dir?');
     expect(t.lines).toContain(MOD_MODULE);
+  });
+
+  it('offers the source of a module with a risky hook, and warns of it (SEC-08 of review 16)', async () => {
+    const run = validatePassCalling(['nothing on $'], ['tool.check']);
+    const t = await gate(run, {}, [true, false]);
+    expect(t.asked[0]).toBe('Show the source of ./register.ts in probe-mod@skills-dir?');
+    expect(t.lines).toContain(MOD_MODULE);
+    expect(t.lines.join('\n')).toContain(
+      '⚠ ./register.ts: tool.check hook (decides tool permissions, can allow Bash)',
+    );
   });
 
   it('--yes never accepts it', async () => {
