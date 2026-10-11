@@ -105,10 +105,10 @@ export const planContext = (
 });
 
 /**
- * The real adapter's plan step in `homedir` (`home` unless said), with no managed settings, on a PC whose `claude`
- * answers validate with `validate`, given `answers` and the context of {@link planContext}
- * with `overrides`. Returns the plan, what was asked (and each yes/no default), the lines
- * shown and the validate calls.
+ * The real adapter's plan step in `homedir` (`home` unless said), with no managed settings,
+ * on a PC whose `claude` answers validate with `validate`, given `answers` and the context of
+ * {@link planContext} with `overrides`. Returns the plan, what was asked (and each yes/no
+ * default), the lines shown and the validate calls.
  */
 export async function planStepWith(
   validate: ValidateRun,
