@@ -569,6 +569,21 @@ describe('every flag the program declares is documented (T115)', () => {
     expect(missing).toEqual([]);
   });
 
+  it('and every flag the README Flags table lists, on each command its row names (QA-04)', () => {
+    const declared = new Set(flags.map(({ command, flag }) => `${command} ${flag}`));
+    const unknown = tableRows(readmeSection('### Flags')).flatMap(([cell, commands]) =>
+      words(cell)
+        .filter((word) => word.startsWith('--'))
+        .flatMap((flag) =>
+          (commands ?? '')
+            .split(', ')
+            .map((command) => `${command} ${flag}`)
+            .filter((used) => !declared.has(used)),
+        ),
+    );
+    expect(unknown).toEqual([]);
+  });
+
   it('in the hint a command without a terminal gives, for each command that asks', async () => {
     const asking = ['register', 'login', 'push', 'pull', 'delete', 'account delete'];
     for (const command of asking) {

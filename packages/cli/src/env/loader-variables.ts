@@ -7,7 +7,8 @@
  * (`JAVA_TOOL_OPTIONS` and kin), password and editor programs Git, SSH and other tools start
  * (`GIT_ASKPASS`, `SSH_ASKPASS`, `EDITOR`, `VISUAL`, `PAGER`, `LESSOPEN`), Git config files
  * and entries given through the environment (which can name programs too), and functions
- * Bash imports (`BASH_FUNC_*`).
+ * Bash imports (`BASH_FUNC_*`). Test the upper-cased name: Windows reads `node_options` as
+ * `NODE_OPTIONS` (SEC-05).
  */
 export const LOADER_VARIABLE =
   /^(PROMPT_COMMAND|BASH_ENV|ENV|ZDOTDIR|NODE_OPTIONS|NODE_PATH|PYTHONSTARTUP|PYTHONPATH|PYTHONHOME|PERL5OPT|PERL5LIB|RUBYOPT|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|GIT_SSH_COMMAND|GIT_EXTERNAL_DIFF|GIT_ASKPASS|SSH_ASKPASS|GIT_EDITOR|GIT_PAGER|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_.+|GIT_CONFIG_VALUE_.+|EDITOR|VISUAL|PAGER|LESSOPEN|LESSCLOSE|BASH_FUNC_.+|LD_.+|DYLD_.+)$/;

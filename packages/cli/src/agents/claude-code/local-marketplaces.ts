@@ -4,7 +4,7 @@ import { BundlePathSchema, MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
 import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull, type JsonResult } from '../../system/json.ts';
-import { formatSize } from '../../ui/format-size.ts';
+import { formatSize, formatSizeOver } from '../../ui/format-size.ts';
 import { printableLine } from '../../ui/printable.ts';
 import type {
   CollectedFile,
@@ -212,7 +212,7 @@ export async function saveFolder(
   if (size > MAX_BUNDLE_BYTES) {
     options.onSkipped?.(
       what,
-      `its files are ${formatSize(size)}, more than the ${formatSize(MAX_BUNDLE_BYTES)} a saved setup can hold. Ignore large files in git or move them out of the folder, then push again`,
+      `its files are ${formatSizeOver(size, MAX_BUNDLE_BYTES)}, more than the ${formatSize(MAX_BUNDLE_BYTES)} a saved setup can hold. Ignore large files in git or move them out of the folder, then push again`,
     );
     return null;
   }

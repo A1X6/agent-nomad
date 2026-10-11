@@ -8,6 +8,7 @@ const restore = (
     conflicts?: [string, ConflictChoice][];
     toAdd?: string[];
     declined?: boolean;
+    agentPlan?: { declined?: boolean; summary?: { files: number; chosen: string[] } };
   } = {},
 ) => ({
   name: 'Claude Code global setup',
@@ -15,6 +16,7 @@ const restore = (
   conflicts: new Map(options.conflicts ?? []),
   env: options.toAdd === undefined ? null : { toAdd: options.toAdd },
   declined: options.declined ?? false,
+  ...(options.agentPlan && { agentPlan: options.agentPlan }),
 });
 
 describe('pullSummary (T115)', () => {
@@ -51,6 +53,24 @@ describe('pullSummary (T115)', () => {
   it('says what runs programs is left out when the user declined it', () => {
     expect(pullSummary([restore({ declined: true })])).toContain(
       '--env-values none; --allow-commands no (what runs programs is left out)',
+    );
+  });
+
+  it("counts the files the agent's plan writes and adds its own choices (UX-01)", () => {
+    const summary = pullSummary([
+      restore({
+        agentPlan: {
+          declined: true,
+          summary: {
+            files: 5,
+            chosen: ['--account-plugins yes (notes)', 'plugin folders left out: skills/probe-mod'],
+          },
+        },
+      }),
+    ]);
+    expect(summary).toContain('  The Claude Code global setup: 5 files');
+    expect(summary).toContain(
+      ': --env-values none; --allow-commands no (what runs programs is left out); --account-plugins yes (notes); plugin folders left out: skills/probe-mod',
     );
   });
 });

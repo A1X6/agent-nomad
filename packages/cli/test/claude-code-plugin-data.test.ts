@@ -160,7 +160,7 @@ describe('plugin data (T102): what push takes', () => {
     const { found, skipped } = await collectFor([MOD_ID]);
     expect(found).toEqual([]);
     expect(skipped).toEqual([
-      `${PLUGIN_DATA_PREFIX}${MOD_DATA}: the data of ${MOD_ID} is 5.0 MB, over the 5.0 MB limit for one plugin`,
+      `${PLUGIN_DATA_PREFIX}${MOD_DATA}: the data of ${MOD_ID} is 5.0 MB and 1 B, over the 5.0 MB limit for one plugin`,
     ]);
   });
 
@@ -240,7 +240,7 @@ describe("plugin data (T102): pull's plan step", () => {
     });
     await planned.restore(() => Promise.resolve('skip'), {});
     await planned.afterRestore({ reporter });
-    return { asked: script.asked, lines };
+    return { asked: script.asked, lines, summary: planned.summary };
   }
 
   it('lists it and asks; no by default writes nothing', async () => {
@@ -254,6 +254,7 @@ describe("plugin data (T102): pull's plan step", () => {
       'Not put back. To put it back later: agentnomad pull --global --plugin-data',
     );
     expect(await exists(storePath())).toBe(false);
+    expect(t.summary?.chosen).toEqual([`--plugin-data no (${MOD_STORE})`]);
   });
 
   it('--yes alone never puts it back', async () => {

@@ -52,6 +52,16 @@ describe('reviewRunnable: everything the docs say runs (T44)', () => {
     ]);
   });
 
+  it('lists loader variables in lower case too, which Windows reads as upper case (SEC-05)', () => {
+    const settings = collectedJson('settings.json', {
+      env: { node_options: '--require /tmp/x.js', ld_preload: '/tmp/x.so', debug: '1' },
+    });
+    expect(labels([settings])).toEqual([
+      'new setting env node_options',
+      'new setting env ld_preload',
+    ]);
+  });
+
   it('lists http hooks and hooks with args', () => {
     const settings = collectedJson('settings.json', {
       hooks: {

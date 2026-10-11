@@ -27,7 +27,7 @@ import {
   useTempDir,
   writeTestFile,
 } from './fakes.ts';
-import { modFiles } from './claude-code-plugin-fixtures.ts';
+import { modFiles, syncedAccountPlugins } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter as claudeAdapter, stopHook } from './claude-code-project-fixtures.ts';
 import {
   createAgentRegistry,
@@ -82,8 +82,8 @@ function pushFrom(
   options: { reporter?: Reporter; env?: Record<string, string>; adapter?: AgentAdapter } = {},
 ) {
   return createPushCommand({
-    // Then yes to "Upload … now?" after the summary, when push asks it (T115).
-    prompter: scriptedPrompter([...answers, true]).prompter,
+    // Yes to "Upload … now?" after the summary, when push asks it (T115).
+    prompter: scriptedPrompter(answers, { question: UPLOAD_QUESTION, answer: true }).prompter,
     reporter: options.reporter ?? recordingReporter().reporter,
     registry: () => createAgentRegistry([options.adapter ?? claudeAdapter(machine.home)]),
     secrets: () => Promise.resolve(loggedInStore()),
@@ -113,7 +113,10 @@ function pullOn(
     restore?: boolean;
   } = {},
 ) {
-  const script = scriptedPrompter([...answers, options.restore ?? true]);
+  const script = scriptedPrompter(answers, {
+    question: RESTORE_QUESTION,
+    answer: options.restore ?? true,
+  });
   const { reporter, lines } = recordingReporter();
   const state = localStateIn(machine.home);
   // What apply gets: everything but the prompter.
@@ -138,6 +141,10 @@ function pullOn(
 
 /** Pull's question after its summary, when it asked anything before (T115). */
 const RESTORE_IT = 'Restore it now? Nothing is written until you say yes.';
+/** That question, for one setup or several. */
+const RESTORE_QUESTION = /^Restore .* now\? Nothing is written until you say yes\.$/;
+/** Push's question after its summary (T115), for one setup or several. */
+const UPLOAD_QUESTION = /^Upload .* now\? Nothing is saved until you say yes\.$/;
 
 /** The session and data key the plan step gets from the handler. */
 const keysOf = () => ({ secrets: loggedInStore(), crypto, dataKey });
@@ -1042,5 +1049,44 @@ describe('pull: the summary before writing, --skip-existing and --env-values (T1
     });
     expect(t.asked).toEqual([]);
     expect(written).toEqual([{ GITHUB_TOKEN: 'ghp_secret' }]);
+  });
+
+  it('--env-values with a name says it was not added when the setup saved no values (UX-05)', async () => {
+    const { server } = await pushedSetup();
+    const b = pc('desktop');
+    const { writer, written } = fakeEnvWriter();
+    const t = pullOn(b, server, [], { writer });
+    await t.pull({ global: true, yes: false, allowCommands: true, envValues: ['GITHUB_TOKEN'] });
+    expect(t.lines).toContain('warn: Not in the saved setup, so not added: GITHUB_TOKEN.');
+    expect(written).toEqual([]);
+  });
+});
+
+describe("pull: the summary names the agent's own choices (UX-01)", () => {
+  it('lists an added claude.ai plugin and a mod folder left out, and counts the files written', async () => {
+    const server = fakeBundleServer();
+    const a = pc('laptop');
+    await syncedAccountPlugins(a.base);
+    for (const file of modFiles()) {
+      await writeTestFile(join(a.base, ...file.path.split('/')), file.content);
+    }
+    await pushFrom(a, server, [])({ global: true, yes: true });
+    const b = pc('desktop');
+    // Yes to the claude.ai plugin and to writing it; no to the mod.
+    const t = pullOn(b, server, [true, true, false]);
+    await t.pull({ global: true, yes: false });
+    expect(t.asked.at(-1)).toBe(RESTORE_IT);
+    expect(t.lines).toContain(
+      [
+        'info: Ready to restore:',
+        // The claude.ai plugin's two files, not the mod's, nor the copy pull only reads.
+        '  The Claude Code global setup: 2 files',
+        '    Always restored (a file here that differs is asked about first)',
+        '    Restored only when you choose (a question, or the flag): --env-values none; --allow-commands no (what runs programs is left out); --account-plugins yes (my-upload); plugin folders left out: skills/probe-mod',
+      ].join('\n'),
+    );
+    expect(t.lines).toContain(
+      'success: Restored the Claude Code global setup: 2 written (revision 1).',
+    );
   });
 });

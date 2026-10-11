@@ -152,7 +152,7 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
   for (const [name, value] of Object.entries(env.success ? env.data : {})) {
     // In a settings `env` block they reach Claude Code and every hook it starts. Redirect
     // variables send its requests elsewhere or choose what it runs commands with (T55).
-    if (LOADER_VARIABLE.test(name) || isRedirectVariable(name)) {
+    if (LOADER_VARIABLE.test(name.toUpperCase()) || isRedirectVariable(name)) {
       entries.push(entry(file.path, `setting env ${name}`, `${name}=${String(value)}`));
     }
   }

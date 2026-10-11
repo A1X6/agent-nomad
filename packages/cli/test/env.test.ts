@@ -752,6 +752,25 @@ describe('restoring values on pull', () => {
       expect(lines.join('\n')).not.toContain('/tmp/x.js');
     });
 
+    it('--yes never adds a lower-case one either: Windows reads node_options as NODE_OPTIONS (SEC-05)', async () => {
+      const { writer, written } = recordingWriter();
+      const { lines, reporter } = quiet();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section: {
+          variables: { API_KEY: 'key-1', node_options: '--require /tmp/x.js', ld_preload: 'x.so' },
+        },
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.added).toEqual(['API_KEY']);
+      expect(lines.join('\n')).toContain('Not added: ld_preload, node_options.');
+    });
+
     it('--allow-commands adds them too', async () => {
       const { writer, written } = recordingWriter();
       await restoreEnvValues({
