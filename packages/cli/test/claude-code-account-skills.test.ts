@@ -10,6 +10,7 @@ import {
   synced,
   syncedSetup,
   useProjectFolders,
+  planContext,
 } from './claude-code-project-fixtures.ts';
 import {
   MOD_NAME,
@@ -285,19 +286,16 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     if (!adapter.planRestore) throw new Error('no plan step');
     // The plan step asks (SEC-03: with the saved plugins); writing asks nothing (T61). Pull
     // shows the restore's warnings.
-    const planned = adapter.planRestore({
-      target: { kind: 'global' },
-      files,
-      conflicts: new Map(),
-      conflictAnswer: undefined,
-      assumeYes: options.assumeYes ?? false,
-      allowCommands: options.allowCommands ?? false,
-      parts: new Map(
-        options.accountSkills === undefined ? [] : [['account-skills', options.accountSkills]],
-      ),
-      prompter: script.prompter,
-      reporter,
-    });
+    const planned = adapter.planRestore(
+      planContext(script.prompter, reporter, {
+        files,
+        assumeYes: options.assumeYes ?? false,
+        allowCommands: options.allowCommands ?? false,
+        parts: new Map(
+          options.accountSkills === undefined ? [] : [['account-skills', options.accountSkills]],
+        ),
+      }),
+    );
     const done = planned.then(async (plan) => {
       const report = await plan.restore(() => Promise.resolve('skip'), {});
       for (const warning of report.warnings) reporter.warn(warning);

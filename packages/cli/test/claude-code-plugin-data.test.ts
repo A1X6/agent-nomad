@@ -8,13 +8,13 @@ import {
   installedPluginsFile,
   MOD_NAME,
   modFiles,
+  writeModInSkills,
   PLUGIN_DATA_FOLDERS,
   PLUGIN_STORE_FILES,
   PLUGIN_STORE_MODES,
   putJson,
   realisticPlugins,
   syncedAccountPlugins,
-  validateCli,
   validatePassWithWarning,
   writePluginData,
   writePluginStore,
@@ -27,24 +27,13 @@ import {
   project,
   root,
   useProjectFolders,
+  planStepWith,
 } from './claude-code-project-fixtures.ts';
-import {
-  collected,
-  collectedJson,
-  executableLookup,
-  exists,
-  paths,
-  readJson,
-  readText,
-  recordingReporter,
-  scriptedPrompter,
-  writeTestFile,
-} from './fakes.ts';
+import { collected, collectedJson, exists, paths, readJson, readText } from './fakes.ts';
 
 import {
   collectPluginData,
   createFileGatherer,
-  findPluginValidator,
   PLUGIN_DATA_PREFIX,
   PLUGIN_STORE_PREFIX,
   pluginDataFolder,
@@ -65,13 +54,6 @@ const MOD_DATA = 'probe-mod-skills-dir';
 
 /** A mod's saved choice, as `$.store` keeps it. */
 const CHOICE = { theme: 'dark' };
-
-/** The mod in `~/.claude/skills/probe-mod/` on this PC (T97). */
-async function modInSkills(): Promise<void> {
-  for (const file of modFiles()) {
-    await writeTestFile(join(base, ...file.path.split('/')), file.content);
-  }
-}
 
 /** Plugin `id` installed for the user, from a GitHub marketplace. */
 async function installed(...ids: string[]): Promise<void> {
@@ -127,7 +109,7 @@ describe('plugin data (T102): which plugins push takes it for', () => {
   });
 
   it('a plugin folder in skills/ (T97)', async () => {
-    await modInSkills();
+    await writeModInSkills(base);
     expect(await ids()).toEqual([MOD_ID]);
   });
 
@@ -165,7 +147,7 @@ describe('plugin data (T102): what push takes', () => {
   });
 
   it('never takes the leftovers of a removed plugin', async () => {
-    await modInSkills();
+    await writeModInSkills(base);
     await writePluginData(base, MOD_DATA, { 'state.json': '{}' });
     await writePluginData(base, 'vercel-inline', { 'state.json': '{}' });
     await writePluginStore(base, 'gone_inline-0123456789ab.json', CHOICE);
@@ -181,14 +163,14 @@ describe('plugin data (T102): what push takes', () => {
   });
 
   it('takes nothing unless asked', async () => {
-    await modInSkills();
+    await writeModInSkills(base);
     await writePluginStore(base, MOD_STORE, CHOICE);
     const found = await globalCollector().collect({ kind: 'global' }, { includeMemory: false });
     expect(found.some((file) => file.path.startsWith(PLUGIN_STORE_PREFIX))).toBe(false);
   });
 
   it("push's question names the plugins with data", async () => {
-    await modInSkills();
+    await writeModInSkills(base);
     await writePluginStore(base, MOD_STORE, CHOICE);
     const part = claudeCodeAdapter(home).optionalParts?.find((entry) => entry.id === 'plugin-data');
     const found = await part?.available();
@@ -214,37 +196,14 @@ describe("plugin data (T102): pull's plan step", () => {
     answers: boolean[],
     overrides: Partial<RestorePlanContext> = {},
   ) {
-    const script = scriptedPrompter(answers);
-    const { reporter, lines } = recordingReporter({ levels: false });
-    const system = executableLookup({
-      platform: 'linux',
-      homedir: home,
-      env: { PATH: '/usr/bin' },
-      executables: ['/usr/bin/claude'],
-    });
-    const adapter = claudeCodeAdapter(home, {
-      pluginValidator: await findPluginValidator(system, validateCli(validatePassWithWarning).cli),
-    });
-    if (!adapter.planRestore) throw new Error('no plan step');
-    const planned = await adapter.planRestore({
-      target: { kind: 'global' },
-      files,
-      conflicts: new Map(),
-      conflictAnswer: undefined,
-      prompter: script.prompter,
-      reporter,
-      assumeYes: false,
-      allowCommands: false,
-      parts: new Map(),
-      ...overrides,
-    });
-    await planned.restore(() => Promise.resolve('skip'), {});
-    await planned.afterRestore({ reporter });
-    return { asked: script.asked, lines, summary: planned.summary };
+    const t = await planStepWith(validatePassWithWarning, answers, { files, ...overrides });
+    await t.planned.restore(() => Promise.resolve('skip'), {});
+    await t.planned.afterRestore({ reporter: t.reporter });
+    return { asked: t.asked, lines: t.lines, summary: t.planned.summary };
   }
 
   it('lists it and asks; no by default writes nothing', async () => {
-    await modInSkills();
+    await writeModInSkills(base);
     const t = await pull([savedStore()], [false]);
     expect(t.asked).toEqual([QUESTION]);
     expect(t.lines).toContain(
@@ -258,14 +217,14 @@ describe("plugin data (T102): pull's plan step", () => {
   });
 
   it('--yes alone never puts it back', async () => {
-    await modInSkills();
+    await writeModInSkills(base);
     const t = await pull([savedStore()], [], { assumeYes: true });
     expect(t.asked).toEqual([]);
     expect(await exists(storePath())).toBe(false);
   });
 
   it('the flag puts back the store of a plugin installed here, without asking', async () => {
-    await modInSkills();
+    await writeModInSkills(base);
     const t = await pull([savedStore()], [], { parts: new Map([['plugin-data', true]]) });
     expect(t.asked).toEqual([]);
     expect(await readJson(storePath())).toEqual(CHOICE);
@@ -301,7 +260,7 @@ describe("plugin data (T102): pull's plan step", () => {
   it.skipIf(process.platform === 'win32')(
     "keeps the store's permissions: folder 700, file 600",
     async () => {
-      await modInSkills();
+      await writeModInSkills(base);
       await pull([savedStore()], [true]);
       expect((await stat(join(base, 'plugins', 'store'))).mode & 0o777).toBe(
         PLUGIN_STORE_MODES.folder,
@@ -314,7 +273,7 @@ describe("plugin data (T102): pull's plan step", () => {
     ['overwrite', CHOICE],
     ['skip', { theme: 'light' }],
   ])('asks about a store file here that differs: %s', async (choice, after) => {
-    await modInSkills();
+    await writeModInSkills(base);
     await writePluginStore(base, MOD_STORE, { theme: 'light' });
     const asked: string[] = [];
     await pull([savedStore()], [true], {
@@ -328,7 +287,7 @@ describe("plugin data (T102): pull's plan step", () => {
   });
 
   it('ignores a saved name the naming rules could not make', async () => {
-    await modInSkills();
+    await writeModInSkills(base);
     const t = await pull([collected(`${PLUGIN_STORE_PREFIX}notes.txt`, 'x')], []);
     expect(t.asked).toEqual([]);
     expect(t.lines.some((line) => line.includes('notes.txt'))).toBe(false);

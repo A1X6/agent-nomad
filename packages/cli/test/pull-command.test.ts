@@ -27,7 +27,7 @@ import {
   useTempDir,
   writeTestFile,
 } from './fakes.ts';
-import { modFiles, syncedAccountPlugins } from './claude-code-plugin-fixtures.ts';
+import { syncedAccountPlugins, writeModInSkills } from './claude-code-plugin-fixtures.ts';
 import { claudeCodeAdapter as claudeAdapter, stopHook } from './claude-code-project-fixtures.ts';
 import {
   createAgentRegistry,
@@ -697,9 +697,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('a pull that left out a plugin folder is remembered (T97)', async () => {
     const server = fakeBundleServer();
     const a = pc('laptop');
-    for (const file of modFiles()) {
-      await writeTestFile(join(a.base, ...file.path.split('/')), file.content);
-    }
+    await writeModInSkills(a.base);
     await pushFrom(a, server, ['global', false])(none);
     const b = pc('desktop');
     const t = pullOn(b, server, []);
@@ -782,9 +780,7 @@ describe('agentnomad pull (T34 done-when: restores on a second machine)', () => 
   it('warns when the setup has mods and this PC runs a Claude Code without mods (T103)', async () => {
     const server = fakeBundleServer();
     const a = pc('laptop');
-    for (const file of modFiles()) {
-      await writeTestFile(join(a.base, ...file.path.split('/')), file.content);
-    }
+    await writeModInSkills(a.base);
     await pushFrom(a, server, [], { adapter: claudeAdapterAt(a.home, '2.1.287') })({
       global: true,
       yes: true,
@@ -1067,9 +1063,7 @@ describe("pull: the summary names the agent's own choices (UX-01)", () => {
     const server = fakeBundleServer();
     const a = pc('laptop');
     await syncedAccountPlugins(a.base);
-    for (const file of modFiles()) {
-      await writeTestFile(join(a.base, ...file.path.split('/')), file.content);
-    }
+    await writeModInSkills(a.base);
     await pushFrom(a, server, [])({ global: true, yes: true });
     const b = pc('desktop');
     // Yes to the claude.ai plugin and to writing it; no to the mod.

@@ -10,10 +10,11 @@ import {
   MOD_NAME,
   modFiles,
   validateBrokenManifest,
-  validateCli,
   validatePassCalling,
   validatePassNoHooks,
   validatePassWithWarning,
+  validatorFor,
+  writeModFolder,
   type ValidateRun,
 } from './claude-code-plugin-fixtures.ts';
 import {
@@ -47,18 +48,6 @@ const mod = (files = modFiles('')): PluginFolderToReview => ({
   folder: `skills/${MOD_NAME}`,
   files,
 });
-
-/** A PC where `claude` answers validate with `run`, or one without Claude Code. */
-async function validatorFor(run: ValidateRun | null) {
-  const fake = validateCli(run ?? validatePassWithWarning);
-  const system = executableLookup({
-    platform: 'linux',
-    homedir: '/home/a',
-    env: { PATH: '/usr/bin' },
-    executables: run === null ? [] : [CLAUDE],
-  });
-  return { validator: await findPluginValidator(system, fake.cli), calls: fake.calls };
-}
 
 /**
  * Asks about the mod (or `folder`) with `run` as validate's report and the given flags and
@@ -488,12 +477,7 @@ describe('whether a plugin folder is new or changed here (T97)', () => {
   });
 
   it('null when every file is here as it is', async () => {
-    for (const file of modFiles('')) {
-      await writeTestFile(
-        join(dir, ...file.path.split('/')),
-        new TextDecoder().decode(file.content),
-      );
-    }
+    await writeModFolder(dir);
     expect(await pluginFolderChange(dir, mod())).toBeNull();
   });
 });

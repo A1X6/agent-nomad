@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import {
   collected,
   collectedJson,
-  executableLookup,
   paths,
   readJson,
   readText,
@@ -17,9 +16,9 @@ import {
 import {
   fakeManagedSystem,
   modFiles,
-  validateCli,
   validatePassWithWarning,
   writeModFolder,
+  writeModInSkills,
   SAVED_PLUGIN_DIR_ENTRY,
   savedLocalMarketplace,
   savedPluginDir,
@@ -28,13 +27,14 @@ import {
   claudeCodeAdapter,
   claudeJsonKey,
   LOCAL_MCP_SERVER,
+  planContext,
+  planStepWith,
 } from './claude-code-project-fixtures.ts';
 import {
   AnswerNeededError,
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   createNoTerminalPrompter,
-  findPluginValidator,
   type ConflictChoice,
   type Prompter,
   type RestorePlanContext,
@@ -63,18 +63,13 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     });
     const plan = (overrides: Partial<RestorePlanContext> = {}) => {
       if (!adapter.planRestore) throw new Error('no plan step');
-      return adapter.planRestore({
-        target: { kind: 'global' },
-        files: [incoming],
-        conflicts: new Map([[CLAUDE_JSON_BUNDLE_PATH, 'merge']]),
-        conflictAnswer: undefined,
-        prompter: prompter ?? script.prompter,
-        reporter,
-        assumeYes: false,
-        allowCommands: false,
-        parts: new Map(),
-        ...overrides,
-      });
+      return adapter.planRestore(
+        planContext(prompter ?? script.prompter, reporter, {
+          files: [incoming],
+          conflicts: new Map([[CLAUDE_JSON_BUNDLE_PATH, 'merge']]),
+          ...overrides,
+        }),
+      );
     };
     return { plan, asked: script.asked };
   }
@@ -155,17 +150,13 @@ describe("Claude Code plan step: the project's part of ~/.claude.json (T109)", (
     });
     if (!adapter.planRestore) throw new Error('no plan step');
     const project = join(home, 'app');
-    const planned = await adapter.planRestore({
-      target: { kind: 'project', projectDir: project },
-      files: [incoming],
-      conflicts: new Map([[CLAUDE_JSON_PROJECT_BUNDLE_PATH, 'merge']]),
-      conflictAnswer: undefined,
-      prompter: script.prompter,
-      reporter,
-      assumeYes: false,
-      allowCommands: false,
-      parts: new Map(),
-    });
+    const planned = await adapter.planRestore(
+      planContext(script.prompter, reporter, {
+        target: { kind: 'project', projectDir: project },
+        files: [incoming],
+        conflicts: new Map([[CLAUDE_JSON_PROJECT_BUNDLE_PATH, 'merge']]),
+      }),
+    );
     expect(lines).toContain(NOTE);
     expect(script.asked).toEqual([
       'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.',
@@ -247,34 +238,8 @@ describe('Claude Code adapter', () => {
  * The global plan step for `modFiles()` (or `overrides.files`), with `claude` answering
  * validate with a passing report, and these answers.
  */
-async function planStep(answers: boolean[], overrides: Partial<RestorePlanContext> = {}) {
-  const script = scriptedPrompter(answers);
-  const { reporter } = recordingReporter({ levels: false });
-  const system = executableLookup({
-    platform: 'linux',
-    homedir: home,
-    env: { PATH: '/usr/bin' },
-    executables: ['/usr/bin/claude'],
-  });
-  const adapter = claudeCodeAdapter(home, {
-    managedSystem: fakeManagedSystem({ platform: 'linux' }),
-    pluginValidator: await findPluginValidator(system, validateCli(validatePassWithWarning).cli),
-  });
-  if (!adapter.planRestore) throw new Error('no plan step');
-  const planned = await adapter.planRestore({
-    target: { kind: 'global' },
-    files: modFiles(),
-    conflicts: new Map(),
-    conflictAnswer: undefined,
-    prompter: script.prompter,
-    reporter,
-    assumeYes: false,
-    allowCommands: false,
-    parts: new Map(),
-    ...overrides,
-  });
-  return { planned, asked: script.asked };
-}
+const planStep = (answers: boolean[], overrides: Partial<RestorePlanContext> = {}) =>
+  planStepWith(validatePassWithWarning, answers, { files: modFiles(), ...overrides }, home);
 
 describe('Claude Code plan step: plugin folders in skills/ (T97)', () => {
   const base = () => join(home, '.claude');
@@ -294,9 +259,7 @@ describe('Claude Code plan step: plugin folders in skills/ (T97)', () => {
   });
 
   it('does not ask about a plugin folder that is here as it is', async () => {
-    for (const file of modFiles()) {
-      await writeTestFile(join(base(), ...file.path.split('/')), file.content);
-    }
+    await writeModInSkills(base());
     const t = await planStep([]);
     expect(t.asked).toEqual([]);
   });

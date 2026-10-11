@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addedFromFolders,
+  localCatalog,
   localModId,
   MOD_MODULE,
   MOD_NAME,
@@ -12,16 +13,21 @@ import {
   savedFiles,
   savedLocalMarketplace,
   scriptedGit,
-  validateCli,
   validatePassWithWarning,
   writeLocalMarketplace,
+  validatorFor,
   type GitAnswer,
 } from './claude-code-plugin-fixtures.ts';
-import { base, home, root, useProjectFolders } from './claude-code-project-fixtures.ts';
+import {
+  base,
+  home,
+  root,
+  testRestorer,
+  useProjectFolders,
+} from './claude-code-project-fixtures.ts';
 import {
   collected,
   collectedJson,
-  executableLookup,
   exists,
   readJson,
   readText,
@@ -30,8 +36,6 @@ import {
   writeTestFile,
 } from './fakes.ts';
 import {
-  createClaudeCodeRestorer,
-  findPluginValidator,
   localMarketplaceFiles,
   planLocalMarketplaces,
   readSavedLocalMarketplace,
@@ -53,13 +57,8 @@ const toolsFolder = () => join(home, 'markets', TOOLS);
 const SAVED_PATH = `.agentnomad/local-marketplaces/${TOOLS}.json`;
 
 /** The files of the marketplace `tools` with the mod, paths from its folder. */
-const CATALOG = {
-  name: TOOLS,
-  owner: { name: 'me' },
-  plugins: [{ name: MOD_NAME, source: `./${MOD_NAME}` }],
-};
 const toolsFiles = (): CollectedFile[] => [
-  collectedJson('.claude-plugin/marketplace.json', CATALOG),
+  collectedJson('.claude-plugin/marketplace.json', localCatalog(TOOLS)),
   ...modFiles(`${MOD_NAME}/`),
 ];
 const LISTED = toolsFiles().map((file) => file.path);
@@ -213,25 +212,11 @@ async function pull(
     baseDir?: string;
   } = {},
 ) {
-  const fake = validateCli(validatePassWithWarning);
-  const lookup = executableLookup({
-    platform: 'linux',
-    homedir: '/home/a',
-    env: { PATH: '/usr/bin' },
-    executables: ['/usr/bin/claude'],
-  });
-  const validator = await findPluginValidator(lookup, fake.cli);
+  const { validator } = await validatorFor(validatePassWithWarning);
   const script = scriptedPrompter(options.answers ?? []);
   const { reporter, lines } = recordingReporter({ levels: false });
   const conflicts: string[] = [];
-  const restorer = createClaudeCodeRestorer({
-    baseDir: base,
-    homedir: home,
-    platform: process.platform,
-    env: {},
-    customConfigDir: false,
-    isClaudeRunning: () => Promise.resolve(false),
-  });
+  const restorer = testRestorer();
   const plan = await planLocalMarketplaces(
     {
       files,

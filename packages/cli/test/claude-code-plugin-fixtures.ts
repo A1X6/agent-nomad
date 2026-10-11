@@ -1,8 +1,9 @@
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
-import { collected, collectedJson, writeTestFile } from './fakes.ts';
+import { collected, collectedJson, executableLookup, writeTestFile } from './fakes.ts';
 import {
+  findPluginValidator,
   syncedPluginFolder,
   type CollectedFile,
   type ManagedSettings,
@@ -668,19 +669,37 @@ export async function syncedAccount(
   }
 }
 
+/**
+ * A plugin validator on a Linux PC where `claude` answers validate with `run`, or one without
+ * Claude Code, and the validate calls it made (T97).
+ */
+export async function validatorFor(run: ValidateRun | null) {
+  const fake = validateCli(run ?? validatePassWithWarning);
+  const system = executableLookup({
+    platform: 'linux',
+    homedir: '/home/a',
+    env: { PATH: '/usr/bin' },
+    executables: run === null ? [] : ['/usr/bin/claude'],
+  });
+  return { validator: await findPluginValidator(system, fake.cli), calls: fake.calls };
+}
+
 /** The mod's plugin id in a local marketplace named `name` (T98). */
 export const localModId = (name: string) => `${MOD_NAME}@${name}`;
+
+/** The catalog of the marketplace `name` of {@link writeLocalMarketplace}: the mod, by folder. */
+export const localCatalog = (name: string) => ({
+  name,
+  owner: { name: 'me' },
+  plugins: [{ name: MOD_NAME, source: `./${MOD_NAME}` }],
+});
 
 /**
  * A marketplace named `name` in the folder `dir`, as a user makes one for a mod (T98): its
  * catalog naming the mod `MOD_NAME` in `./probe-mod`, and the mod's files there.
  */
 export async function writeLocalMarketplace(dir: string, name: string): Promise<void> {
-  await putJson(join(dir, '.claude-plugin', 'marketplace.json'), {
-    name,
-    owner: { name: 'me' },
-    plugins: [{ name: MOD_NAME, source: `./${MOD_NAME}` }],
-  });
+  await putJson(join(dir, '.claude-plugin', 'marketplace.json'), localCatalog(name));
   await writeModFolder(join(dir, MOD_NAME));
 }
 
@@ -788,6 +807,9 @@ export async function writeModFolder(dir: string): Promise<void> {
   }
 }
 
+/** The mod in `skills/` of the base folder `base`, where Claude Code finds it (T97). */
+export const writeModInSkills = (base: string) => writeModFolder(join(base, 'skills', MOD_NAME));
+
 /** `files` as a saved folder lists them (T98, T99): base64 content, none executable. */
 export const savedFiles = (files: readonly CollectedFile[]) =>
   files.map((file) => ({
@@ -807,11 +829,7 @@ export const savedLocalMarketplace = (name: string, overrides: object = {}) =>
     git: null,
     plugins: [{ id: localModId(name), scope: 'user', commandSource: false }],
     files: savedFiles([
-      collectedJson('.claude-plugin/marketplace.json', {
-        name,
-        owner: { name: 'me' },
-        plugins: [{ name: MOD_NAME, source: `./${MOD_NAME}` }],
-      }),
+      collectedJson('.claude-plugin/marketplace.json', localCatalog(name)),
       ...modFiles(`${MOD_NAME}/`),
     ]),
     ...overrides,

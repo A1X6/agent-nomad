@@ -28,13 +28,13 @@ import {
   stopHook,
   useProjectFolders,
   writeClaudeJsonProject,
+  testRestorer,
 } from './claude-code-project-fixtures.ts';
 import { collected, collectedJson, readJson, readText, writeTestFile } from './fakes.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   claudeJsonProjectQuestion,
-  createClaudeCodeRestorer,
   LOCAL_MARKETPLACES_PREFIX,
   hooksForOtherOs,
   lineEndingsFor,
@@ -61,11 +61,7 @@ interface Setup {
 
 function restorer(setup: Setup = {}): ClaudeCodeRestorer {
   const running = [...(setup.running ?? [false])];
-  return createClaudeCodeRestorer({
-    baseDir: base,
-    homedir: home,
-    platform: process.platform,
-    env: {},
+  return testRestorer({
     customConfigDir: setup.customConfigDir ?? false,
     now: () => NOW,
     isClaudeRunning: setup.isClaudeRunning ?? (() => Promise.resolve(running.shift() ?? false)),
