@@ -140,9 +140,11 @@ open, such as a chat or an option letter from a discussion.
     (`setMemoryDirectory`, `memoryDir`, and any project's by its folder name, `projectMemory`,
     T110), a claude.ai synced skills folder (`synced`, `syncedSetup`), and the project's entry in
     `~/.claude.json` (T109: `claudeJsonKey`, the folder as Claude Code writes it as a key,
-    `writeClaudeJsonProject` and `LOCAL_MCP_SERVER`); for pull (DUP-03 of review 15), a global plan
-    step's context (`planContext`), the plan step itself on a PC whose `claude` answers validate
-    with a report (`planStepWith`) and the restorer (`testRestorer`).
+    `writeClaudeJsonProject` and `LOCAL_MCP_SERVER`); for pull (DUP-03 of review 15), the plan
+    step with a global plan step's context, on a PC whose `claude` answers validate with a report
+    or that has no `claude`, with any adapter options (`planStepWith`, DUP-04 of review 16), a
+    Linux PC without managed settings for the adapter (`noManagedSystem`) and the restorer
+    (`testRestorer`).
   - `packages/cli/test/claude-code-state-names.ts`: the state names the Claude Code program lists
     for its own folder, read from the version in `STATE_NAMES_VERSION` (T108): `STATE_FOLDER_NAMES`,
     and with the names a self-hosted runner leaves out, `STATE_NAMES`. A newer Claude Code's lists

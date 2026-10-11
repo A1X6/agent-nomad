@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   base,
-  home,
   synced,
   syncedSetup,
   useProjectFolders,
@@ -315,14 +314,12 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   // UX-01 (review 15, T118): pull's summary names what the agent's questions chose.
   it("names a yes in pull's summary", async () => {
-    const t = await run([saved('mine', 'Plain.')], {}, [true]);
-    const { plan } = t;
+    const { plan } = await run([saved('mine', 'Plain.')], {}, [true]);
     expect(plan.summary?.chosen).toContain('--account-skills yes (mine)');
   });
 
   it("names a no in pull's summary", async () => {
-    const t = await run([saved('mine', 'Plain.')], {}, [false]);
-    const { plan } = t;
+    const { plan } = await run([saved('mine', 'Plain.')], {}, [false]);
     expect(plan.summary?.chosen).toContain('--account-skills no (mine)');
   });
 
@@ -332,7 +329,7 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
   });
 
   it('a no adds none', async () => {
-    const no = await run([saved('mine', 'Plain.')], {}, [false]);
+    await run([saved('mine', 'Plain.')], {}, [false]);
     await expect(skillFile('mine')).rejects.toThrow();
   });
 
@@ -352,7 +349,7 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('--yes with --allow-commands adds one that runs commands', async () => {
     const files = [saved('runner', 'Run !`git status`')];
-    const allowed = await run(files, { assumeYes: true, allowCommands: true });
+    await run(files, { assumeYes: true, allowCommands: true });
     expect(await skillFile('runner')).toContain('git status');
   });
 
@@ -374,7 +371,7 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     expect(flag.lines.join('\n')).toContain('runner  ⚠ runs commands');
     expect(flag.lines.join('\n')).toContain('Skipped runner: it runs commands as a local skill.');
 
-    const allowed = await run(files, { accountSkills: true, allowCommands: true });
+    await run(files, { accountSkills: true, allowCommands: true });
     expect(await skillFile('runner')).toContain('git status');
   });
 
@@ -402,16 +399,15 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('never touches a local skill of the same name', async () => {
     await writeTestFile(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
-    const t = await run([saved('local-one', 'Theirs.')], { accountSkills: true });
+    await run([saved('local-one', 'Theirs.')], { accountSkills: true });
     expect(await skillFile('local-one')).toBe('My own local version.');
   });
 
   // SEC-03 (review 15): a saved skill folder that is a plugin gets the plugin review (T97).
   it('--yes never adds a saved skill that is a plugin with code', async () => {
     const t = await run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), { assumeYes: true });
-    const { plan, report } = t;
-    expect(report.written).toEqual([]);
-    expect(plan.declined).toBe(true);
+    expect(t.report.written).toEqual([]);
+    expect(t.plan.declined).toBe(true);
     expect(t.lines.join('\n')).toContain(
       `Skipped skills/${MOD_NAME}: ${MOD_NAME}@skills-dir runs code inside Claude Code.`,
     );
@@ -420,12 +416,11 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('asks before writing a saved skill that is a plugin with code', async () => {
     const t = await run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), {}, [true, false]);
-    const { report } = t;
     expect(t.asked).toEqual([
       'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
       `Write ${MOD_NAME}@skills-dir? It runs code inside Claude Code.`,
     ]);
-    expect(report.written).toEqual([]);
+    expect(t.report.written).toEqual([]);
   });
 
   it('never adds a saved skill in the folder of a saved plugin added in the same pull', async () => {

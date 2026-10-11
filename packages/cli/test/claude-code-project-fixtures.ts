@@ -87,7 +87,7 @@ export const claudeCodeAdapter = (
  * The context of a global plan step asking `prompter` and telling `reporter`: no files, no
  * conflicts, no flags and no parts named, unless `overrides` say otherwise.
  */
-export const planContext = (
+const planContext = (
   prompter: Prompter,
   reporter: Reporter,
   overrides: Partial<RestorePlanContext> = {},
@@ -132,7 +132,9 @@ export async function planStepWith(
     ...options.adapter,
   });
   if (!adapter.planRestore) throw new Error('no plan step');
-  const planned = await adapter.planRestore(planContext(script.prompter, reporter, overrides));
+  const planned = await adapter.planRestore(
+    planContext(script.prompter, reporter, options.overrides),
+  );
   return {
     planned,
     reporter,
