@@ -5,18 +5,22 @@ import { BACKUP_MARKER } from '@agentnomad/core';
 import { describe, expect, it } from 'vitest';
 
 import {
+  base,
+  claudeJsonKey,
   collect,
   collectSkipped,
   home,
+  LOCAL_MCP_SERVER,
   memoryDir,
   options,
   project,
   root,
   stopHook,
   useProjectFolders,
+  writeClaudeJsonProject,
 } from './claude-code-project-fixtures.ts';
 import { linkFolder, paths, text, writeTestFile } from './fakes.ts';
-import { createClaudeCodeProjectCollector } from '../src/index.ts';
+import { CLAUDE_JSON_PROJECT_BUNDLE_PATH, createClaudeCodeProjectCollector } from '../src/index.ts';
 
 useProjectFolders('agentnomad-project-');
 
@@ -73,6 +77,13 @@ describe('project collector: what is taken', () => {
       'CLAUDE.local.md',
       'CLAUDE.md',
     ]);
+  });
+
+  it('takes .claude/loop.md, the prompt a bare /loop runs there (T113)', async () => {
+    await writeTestFile(join(project, '.claude', 'loop.md'), 'Keep the release branch green.');
+    const files = await collect();
+    expect(paths(files)).toEqual(['.claude/loop.md']);
+    expect(text(files, '.claude/loop.md')).toBe('Keep the release branch green.');
   });
 
   it('never takes app code, .env, .git, local agent memory or worktrees', async () => {
@@ -213,5 +224,96 @@ describe('project collector: links and size (T45)', () => {
     const { found, skipped } = await collectSkipped(createClaudeCodeProjectCollector(options()));
     expect(paths(found)).toContain('.claude/skills/big/SKILL.md');
     expect(skipped).toEqual(['.claude/skills/big/data.bin: it is larger than 10 MB']);
+  });
+});
+
+describe("project collector: the folder's entry in ~/.claude.json (T109)", () => {
+  const CHOICES = { enabledMcpjsonServers: ['shared'], disabledMcpjsonServers: ['other'] };
+
+  it('takes its local MCP servers and .mcp.json choices, nothing else of the entry', async () => {
+    await writeClaudeJsonProject(
+      {
+        allowedTools: ['Bash(rm:*)'],
+        hasTrustDialogAccepted: true,
+        history: [{ display: 'SECRET prompt' }],
+        mcpServers: { local: LOCAL_MCP_SERVER },
+        ...CHOICES,
+      },
+      { oauthAccount: { emailAddress: 'SECRET@example.com' }, diffTool: 'terminal' },
+    );
+    const files = await collect();
+    expect(paths(files)).toEqual([CLAUDE_JSON_PROJECT_BUNDLE_PATH]);
+    expect(JSON.parse(text(files, CLAUDE_JSON_PROJECT_BUNDLE_PATH))).toEqual({
+      mcpServers: { local: LOCAL_MCP_SERVER },
+      ...CHOICES,
+    });
+  });
+
+  it('takes nothing when no entry is this folder’s', async () => {
+    await writeTestFile(
+      join(home, '.claude.json'),
+      JSON.stringify({
+        projects: { [claudeJsonKey(root)]: { mcpServers: { x: LOCAL_MCP_SERVER } } },
+      }),
+    );
+    expect(await collect()).toEqual([]);
+  });
+
+  it('takes the .mcp.json choices alone when the entry has no servers', async () => {
+    await writeClaudeJsonProject({ mcpServers: {}, ...CHOICES });
+    expect(JSON.parse(text(await collect(), CLAUDE_JSON_PROJECT_BUNDLE_PATH))).toEqual(CHOICES);
+  });
+
+  it('takes nothing from an entry whose servers and choices are empty', async () => {
+    // What `claude mcp add` leaves once its server is removed again.
+    await writeClaudeJsonProject({
+      mcpServers: {},
+      enabledMcpjsonServers: [],
+      disabledMcpjsonServers: [],
+      hasTrustDialogAccepted: true,
+    });
+    expect(await collect()).toEqual([]);
+  });
+
+  it('reads it from CLAUDE_CONFIG_DIR when that is set', async () => {
+    await writeTestFile(
+      join(base, '.claude.json'),
+      JSON.stringify({ projects: { [claudeJsonKey()]: CHOICES } }),
+    );
+    const files = await createClaudeCodeProjectCollector({
+      ...options(),
+      customConfigDir: true,
+    }).collect({ kind: 'project', projectDir: project }, { includeMemory: false });
+    expect(JSON.parse(text(files, CLAUDE_JSON_PROJECT_BUNDLE_PATH))).toEqual(CHOICES);
+  });
+});
+
+describe('project collector: files the memory files import (T111)', () => {
+  it('takes a file inside the project at its project path', async () => {
+    await writeTestFile(join(project, 'CLAUDE.md'), 'See @docs/guide.md\n');
+    await writeTestFile(join(project, 'docs', 'guide.md'), 'Guide\n');
+    expect(text(await collect(), 'docs/guide.md')).toBe('Guide\n');
+  });
+
+  it('follows the imports of CLAUDE.local.md, AGENTS.md and the rules', async () => {
+    await writeTestFile(join(project, 'CLAUDE.local.md'), '@docs/a.md\n');
+    await writeTestFile(join(project, 'AGENTS.md'), '@docs/b.md\n');
+    await writeTestFile(join(project, '.claude', 'rules', 'x.md'), '@../../docs/c.md\n');
+    for (const name of ['a', 'b', 'c']) {
+      await writeTestFile(join(project, 'docs', `${name}.md`), name);
+    }
+    expect(paths(await collect())).toEqual(
+      expect.arrayContaining(['docs/a.md', 'docs/b.md', 'docs/c.md']),
+    );
+  });
+
+  it('names a file outside the project, who imports it and how', async () => {
+    await writeTestFile(join(project, 'CLAUDE.md'), '@~/my-project-instructions.md\n');
+    await writeTestFile(join(home, 'my-project-instructions.md'), 'Mine\n');
+    const { found, skipped } = await collectSkipped(createClaudeCodeProjectCollector(options()));
+    expect(paths(found)).toEqual(['CLAUDE.md']);
+    expect(skipped).toEqual([
+      `~/my-project-instructions.md: ${join(project, 'CLAUDE.md')} imports it on line 1 (@~/my-project-instructions.md), but it is outside the project`,
+    ]);
   });
 });

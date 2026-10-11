@@ -105,6 +105,18 @@ const MCP_JSON = {
 };
 
 /**
+ * T109: the project's part of `~/.claude.json`, a local-scope MCP server and an approved
+ * `.mcp.json` server, in the project folder's entry. Its trust choice is never synced.
+ */
+const PROJECT_CLAUDE_JSON = {
+  mcpServers: { notes: { type: 'stdio', command: 'node', args: ['notes-mcp.js'] } },
+  enabledMcpjsonServers: ['db'],
+};
+
+/** The key of `pc`'s project in `~/.claude.json`, as Claude Code writes it on this OS. */
+const projectKey = (pc: Pc) => (posix ? pc.project : forward(pc.project));
+
+/**
  * Where Claude Code itself runs (a developer's PC, never CI), pull --yes leaves
  * `~/.claude.json` alone by design, so its MCP servers are only checked elsewhere.
  */
@@ -233,8 +245,11 @@ async function expectRestored(pc: Pc, edited: boolean): Promise<void> {
   if (!claudeRunningHere) {
     const claudeJson = JSON.parse(await read(join(pc.home, '.claude.json'))) as {
       mcpServers?: Record<string, unknown>;
+      projects?: Record<string, unknown>;
     };
     expect(claudeJson.mcpServers).toEqual({ docs: { command: 'npx', args: ['-y', 'docs-mcp'] } });
+    // In this PC's entry for the folder pull ran in, keyed as Claude Code does here (T109).
+    expect(claudeJson.projects?.[projectKey(pc)]).toEqual(PROJECT_CLAUDE_JSON);
   }
   expect(await read(join(pc.project, 'CLAUDE.md'))).toBe('Project rules.\n');
   expect(JSON.parse(await read(join(pc.project, '.mcp.json')))).toEqual(MCP_JSON);
@@ -363,6 +378,9 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
       JSON.stringify({
         oauthAccount: { emailAddress: 'first@example.com' },
         mcpServers: { docs: { command: 'npx', args: ['-y', 'docs-mcp'] } },
+        projects: {
+          [projectKey(pc)]: { ...PROJECT_CLAUDE_JSON, hasTrustDialogAccepted: true },
+        },
       }),
     );
     await write(join(pc.project, 'CLAUDE.md'), 'Project rules.\n');

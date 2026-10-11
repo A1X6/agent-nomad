@@ -20,8 +20,12 @@ const RAW = {
   reviewedVersion: '2.1.296',
 
   global: {
-    /** Single files in the base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
-    files: ['settings.json', 'CLAUDE.md', 'keybindings.json'],
+    /**
+     * Single files in the base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`). `loop.md` is the
+     * user's own prompt for a bare `/loop` (T113): the 2.1.296 program reads it as text into the
+     * prompt, cut at 25,000 bytes, and runs nothing from it.
+     */
+    files: ['settings.json', 'CLAUDE.md', 'keybindings.json', 'loop.md'],
     /**
      * Folders taken whole. `hooks/` (T112) is where users keep the scripts their hooks run:
      * Claude Code never loads it by itself, a script there runs only when a settings file
@@ -114,10 +118,11 @@ const RAW = {
       'storage-v2',
       // Plugins installed for Cowork, used instead of `plugins/` there.
       'cowork_plugins',
-      // May be the user's own (T108, for a later decision): /loop's task list, shared zips,
-      // session scratch, local agent memory (when the project is the home folder) and the
-      // program's local and project settings folders. Never synced until then.
-      'loop.md',
+      // Checked on the 2.1.296 program (T113): zips it deletes when they get old (`shares/`),
+      // the session storage's per-session scratch (`scratch/`), and its per-project folders,
+      // laid out in bytecode the program never shows: local and project subagent memory and a
+      // project's local and shared settings. The user's own copies live in the project, which
+      // project push takes; local agent memory is personal by design.
       'shares',
       'scratch',
       'agent-memory-local',
@@ -166,8 +171,8 @@ const RAW = {
   project: {
     /** Files in the project root; `CLAUDE.local.md` is personal and usually gitignored. */
     rootFiles: ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.mcp.json', '.worktreeinclude'],
-    /** Single files in `<project>/.claude/`. */
-    claudeFiles: ['settings.json', 'settings.local.json', 'CLAUDE.md'],
+    /** Single files in `<project>/.claude/`; `loop.md` wins over the global one (T113). */
+    claudeFiles: ['settings.json', 'settings.local.json', 'CLAUDE.md', 'loop.md'],
     /** Folders in `<project>/.claude/`, taken whole; `hooks/` as in the base folder (T112). */
     claudeFolders: ['rules', 'skills', 'commands', 'agents', 'workflows', 'output-styles', 'hooks'],
     /** Opt-in: subagent memory with `memory: project`. */
@@ -235,16 +240,33 @@ const RAW = {
   ignoredCopyPatterns: ['\\.bak$', '\\.orig$', '\\.old$', '~$', '\\.swp$'],
 
   /**
-   * `~/.claude.json` keys that are preferences: the "Global config" keys in Claude Code's
-   * settings reference. Everything else there is account, machine or project state.
+   * `~/.claude.json` keys that are preferences: every key with the scope "Global config" in
+   * Claude Code's settings reference (https://code.claude.com/docs/en/settings-reference,
+   * 2.1.296; the drift check compares them, T109). Everything else there is account, machine
+   * or project state. `permissionExplainerEnabled` and `teammateDefaultModel` are listed
+   * there as removed (2.1.257, 2.1.234) and still taken, so an older Claude Code keeps them.
    */
   claudeJsonPreferenceKeys: [
     'autoConnectIde',
     'autoInstallIdeExtension',
+    'claudeInChromeDefaultEnabled',
+    'copyFullResponse',
     'copyOnSelect',
+    'defaultToAgentsView',
     'diffTool',
     'externalEditorContext',
+    'leftArrowOpensAgents',
+    'permissionExplainerEnabled',
+    'prStatusFooterEnabled',
+    'teammateDefaultModel',
   ],
+
+  /**
+   * Keys of a project's entry in `~/.claude.json` (`projects[<path>]`) that are its setup
+   * (T109): local-scope MCP servers (the default of `claude mcp add`) and the choices made for
+   * the project's `.mcp.json` servers. Trust, history and allowed tools are never taken.
+   */
+  claudeJsonProjectKeys: ['mcpServers', 'enabledMcpjsonServers', 'disabledMcpjsonServers'],
 
   /** A hook argument is only taken as a script with one of these extensions. */
   scriptExtensions: [
@@ -369,6 +391,7 @@ const PathsDataSchema = z.strictObject({
   skippedNames: names,
   ignoredCopyPatterns: z.array(Pattern),
   claudeJsonPreferenceKeys: names,
+  claudeJsonProjectKeys: names,
   scriptExtensions: z.array(z.string().regex(/^\.[a-z0-9]+$/)),
   autostartHomeDirs: names,
   toolConfigFiles: z.record(z.string(), names),

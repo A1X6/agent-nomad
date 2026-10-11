@@ -270,6 +270,8 @@ export interface AgentContents {
   readonly globalAlso: readonly string[];
   /** Always saved with a project. */
   readonly project: readonly string[];
+  /** Also always saved with it, from outside its folder (other README rows). */
+  readonly projectAlso: readonly string[];
   /** Never saved from the global setup. */
   readonly globalNever: readonly string[];
   /** Never saved from outside its folder either (other README rows). */

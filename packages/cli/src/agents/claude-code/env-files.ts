@@ -1,9 +1,13 @@
 import type { EnvReferenceFiles } from '../adapter.ts';
 import { CLAUDE_JSON_BUNDLE_PATH, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
-import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
+import { CLAUDE_JSON_PROJECT_BUNDLE_PATH, PROJECT_SETTINGS_FILES } from './project-paths.ts';
 
 /** Files that can hold `${VAR}` references: MCP servers and settings. */
-export const MCP_FILES: ReadonlySet<string> = new Set(['.mcp.json', CLAUDE_JSON_BUNDLE_PATH]);
+export const MCP_FILES: ReadonlySet<string> = new Set([
+  '.mcp.json',
+  CLAUDE_JSON_BUNDLE_PATH,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
+]);
 export const SETTINGS_FILES: ReadonlySet<string> = new Set([
   ...GLOBAL_SETTINGS_FILES,
   ...PROJECT_SETTINGS_FILES,
@@ -20,6 +24,11 @@ export const CLAUDE_ENV_REFERENCES: EnvReferenceFiles = {
     'CLAUDE_PLUGIN_DATA',
     'CLAUDE_CONFIG_DIR',
   ]),
-  /** `~/.claude.json` for the reserved entry. */
-  label: (path) => (path === CLAUDE_JSON_BUNDLE_PATH ? '~/.claude.json' : path),
+  /** `~/.claude.json` for the reserved entries (a project's part too, T109). */
+  label: (path) =>
+    path === CLAUDE_JSON_BUNDLE_PATH
+      ? '~/.claude.json'
+      : path === CLAUDE_JSON_PROJECT_BUNDLE_PATH
+        ? '~/.claude.json, this project'
+        : path,
 };

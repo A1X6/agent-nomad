@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   collected,
+  collectedJson,
   executableLookup,
   paths,
   readJson,
@@ -23,10 +24,15 @@ import {
   savedLocalMarketplace,
   savedPluginDir,
 } from './claude-code-plugin-fixtures.ts';
-import { claudeCodeAdapter } from './claude-code-project-fixtures.ts';
+import {
+  claudeCodeAdapter,
+  claudeJsonKey,
+  LOCAL_MCP_SERVER,
+} from './claude-code-project-fixtures.ts';
 import {
   AnswerNeededError,
   CLAUDE_JSON_BUNDLE_PATH,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   createNoTerminalPrompter,
   findPluginValidator,
   type ConflictChoice,
@@ -123,6 +129,52 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
     const t = planStep([true], [], createNoTerminalPrompter());
     await expect(t.plan()).rejects.toBeInstanceOf(AnswerNeededError);
     expect(await readText(join(home, '.claude.json'))).toBe('{}');
+  });
+});
+
+describe("Claude Code plan step: the project's part of ~/.claude.json (T109)", () => {
+  const incoming = collectedJson(CLAUDE_JSON_PROJECT_BUNDLE_PATH, {
+    mcpServers: { local: LOCAL_MCP_SERVER },
+    enabledMcpjsonServers: ['shared'],
+  });
+  const NOTE =
+    '~/.claude.json for this project: MCP servers local; .mcp.json servers approved: shared';
+
+  it("names it in push's summary", () => {
+    expect(claudeCodeAdapter(home).inspector?.pushNotes?.([incoming])).toEqual([NOTE]);
+  });
+
+  it('names it before pull writes, and has Claude Code closed first, as for the global part', async () => {
+    await writeTestFile(join(home, '.claude.json'), '{}');
+    const running = [true, false, false];
+    const script = scriptedPrompter(['retry']);
+    const { reporter, lines } = recordingReporter({ levels: false });
+    const adapter = claudeCodeAdapter(home, {
+      isClaudeRunning: () => Promise.resolve(running.shift() ?? false),
+      managedSystem: fakeManagedSystem({ platform: 'linux' }),
+    });
+    if (!adapter.planRestore) throw new Error('no plan step');
+    const project = join(home, 'app');
+    const planned = await adapter.planRestore({
+      target: { kind: 'project', projectDir: project },
+      files: [incoming],
+      conflicts: new Map([[CLAUDE_JSON_PROJECT_BUNDLE_PATH, 'merge']]),
+      conflictAnswer: undefined,
+      prompter: script.prompter,
+      reporter,
+      assumeYes: false,
+      allowCommands: false,
+      parts: new Map(),
+    });
+    expect(lines).toContain(NOTE);
+    expect(script.asked).toEqual([
+      'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.',
+    ]);
+    const report = await planned.restore(answer('merge'), {});
+    expect(report.written).toEqual([CLAUDE_JSON_PROJECT_BUNDLE_PATH]);
+    expect(Object.keys((await readJson(join(home, '.claude.json')))['projects'] ?? {})).toEqual([
+      claudeJsonKey(project),
+    ]);
   });
 });
 
@@ -356,5 +408,20 @@ describe('Claude Code plan step: plugin folders in CLAUDE_CODE_PLUGIN_DIRS (T99)
     await writeModFolder(join(home, 'dev', 'probe-mod'));
     const t = await planStep([], { files: files() });
     expect(t.asked).toEqual([]);
+  });
+});
+
+describe('Claude Code auto memory of every project (T110)', () => {
+  it("names auto memory of every project in push's memory question", () => {
+    expect(claudeCodeAdapter(home).memoryDescription).toBe(
+      "what Claude learned: subagent memory, and auto memory: every project's with the global setup, this project's with a project",
+    );
+  });
+
+  it("says in push's summary that a shared memory folder is saved once", () => {
+    const files = [collected('.agentnomad/auto-memory/_shared/MEMORY.md', 'shared')];
+    expect(claudeCodeAdapter(home).inspector?.pushNotes?.(files)).toEqual([
+      'Auto memory: autoMemoryDirectory in your user settings is one folder for every project, so it is saved once',
+    ]);
   });
 });

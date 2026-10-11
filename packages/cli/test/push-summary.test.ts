@@ -25,7 +25,7 @@ describe('pushSummary (T115)', () => {
       [
         'Ready to save:',
         '  The Claude Code project "my-app": 1 file',
-        "    Always saved: CLAUDE.md, CLAUDE.local.md, AGENTS.md, .mcp.json, .worktreeinclude, .claude/ settings and folders, scripts the project's hooks run",
+        "    Always saved: CLAUDE.md, CLAUDE.local.md, AGENTS.md, .mcp.json, .worktreeinclude, .claude/ settings, loop.md and folders, scripts the project's hooks run, its local MCP servers, .mcp.json approvals",
         '    Saved only when you choose (a question, or the flag): --memory no; --env-values GITHUB_TOKEN',
       ].join('\n'),
     );

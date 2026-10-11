@@ -36,7 +36,7 @@ export function pushSummary(uploads: readonly SummaryUpload[]): string {
           ? []
           : scope.kind === 'global'
             ? [...contents.global, ...contents.globalAlso]
-            : contents.project;
+            : [...contents.project, ...contents.projectAlso];
       const count = bundle.files.length;
       return [
         `  The ${setup}: ${String(count)} file${count === 1 ? '' : 's'}`,

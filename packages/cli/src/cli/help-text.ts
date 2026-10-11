@@ -135,7 +135,7 @@ export function contentsHelp(
       `${groups.title} (${displayName}):`,
       `  ${groups.always}:`,
       item(contents.globalLabel, [...contents.global, ...contents.globalAlso]),
-      item('a project', contents.project),
+      item('a project', [...contents.project, ...contents.projectAlso]),
       `  ${groups.chosen}:`,
       ...chosen.map(({ flag, help }) => wrap('    ', `${flag}: ${help}`)),
       `  ${groups.never}:`,

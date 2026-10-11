@@ -55,6 +55,19 @@ describe('unknown-file check (T32 done-when)', () => {
     ]);
   });
 
+  it('does not report a folder holding a file CLAUDE.md or a rule imports (T111)', async () => {
+    const home = dirname(base);
+    await writeTestFile(join(base, 'CLAUDE.md'), '@shared/style.md\n');
+    await writeTestFile(join(base, 'rules', 'team', 'x.md'), '@../../team/rules.md\n');
+    await writeTestFile(join(base, 'shared', 'style.md'));
+    await writeTestFile(join(base, 'team', 'rules.md'));
+    await writeTestFile(join(base, 'notes', 'other.md'));
+    // push saves shared/style.md and team/rules.md; nothing in notes/ is saved.
+    expect(await findUnknownEntries({ kind: 'global' }, { ...input(), homedir: home })).toEqual([
+      'notes/',
+    ]);
+  });
+
   it('does not report a folder whose script a hook in exec form runs (BUG-01)', async () => {
     await writeTestFile(join(base, 'hooks', 'check.js'));
     await writeFile(
@@ -117,6 +130,11 @@ describe('unknown-file check (T32 done-when)', () => {
     expect(await findUnknownEntries({ kind: 'project', projectDir: project }, input())).toEqual([
       '.claude/brand-new.json',
     ]);
+  });
+
+  it('does not report a project’s .claude/loop.md, which is synced (T113)', async () => {
+    await writeTestFile(join(project, '.claude', 'loop.md'));
+    expect(await findUnknownEntries({ kind: 'project', projectDir: project }, input())).toEqual([]);
   });
 
   it('a missing folder reports nothing', async () => {

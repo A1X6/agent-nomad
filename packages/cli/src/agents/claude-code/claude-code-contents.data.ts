@@ -12,6 +12,7 @@ export const CLAUDE_CODE_CONTENTS: AgentContents = {
     'settings.json',
     'CLAUDE.md',
     'keybindings.json',
+    'loop.md (your /loop prompt)',
     'rules/',
     'skills/',
     'commands/',
@@ -32,9 +33,11 @@ export const CLAUDE_CODE_CONTENTS: AgentContents = {
     'AGENTS.md',
     '.mcp.json',
     '.worktreeinclude',
-    '.claude/ settings and folders',
+    '.claude/ settings',
+    'loop.md and folders',
     "scripts the project's hooks run",
   ],
+  projectAlso: ['its local MCP servers', '.mcp.json approvals'],
   globalNever: [
     'credentials',
     'history',
@@ -45,6 +48,9 @@ export const CLAUDE_CODE_CONTENTS: AgentContents = {
     'settings.local.json',
     'skills/synced/ (claude.ai syncs those itself)',
   ],
-  globalNeverAlso: ['your login, project list, usage and onboarding state', 'plugin caches'],
+  globalNeverAlso: [
+    'your login, project trust, history and allowed tools, usage and onboarding state',
+    'plugin caches',
+  ],
   projectNever: ['your code', '.env', '.git', '.claude/agent-memory-local/', '.claude/worktrees/'],
 };

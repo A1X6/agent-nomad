@@ -33,10 +33,11 @@ describe('contents data file (T115): push --help and the README name the same it
     expect(CLAUDE_CODE_CONTENTS.projectNever).toEqual(items(never));
   });
 
-  it('what the global setup takes from outside its folder is in the README table too', () => {
+  it('what a setup takes from outside its folder is in the README table too', () => {
     const table = readmeSection('## What is synced').replaceAll('`', '').toLowerCase();
     for (const item of [
       ...CLAUDE_CODE_CONTENTS.globalAlso,
+      ...CLAUDE_CODE_CONTENTS.projectAlso,
       ...CLAUDE_CODE_CONTENTS.globalNeverAlso,
     ]) {
       expect(table).toContain(item.toLowerCase());

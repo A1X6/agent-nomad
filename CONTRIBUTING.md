@@ -134,53 +134,59 @@ open, such as a chat or an option letter from a discussion.
     project folder nobody looks in (`CWD`).
   - `packages/cli/test/claude-code-project-fixtures.ts`: the Claude Code tests' temporary
     home and project (`useProjectFolders`, then `root`, `home`, `base` and `project`), the
-    collectors (`options`, `globalCollector`, `collect`, `collectSkipped`), the real adapter
-    (`claudeCodeAdapter`), settings with one Stop hook (`stopHook`), an auto memory folder
-    (`setMemoryDirectory`, `memoryDir`) and a claude.ai synced skills folder (`synced`,
-    `syncedSetup`).
-  - `packages/cli/test/claude-code-state-names.ts`: the state names the Claude Code program
-    lists for its own folder, read from the version in `STATE_NAMES_VERSION` (T108):
-    `STATE_FOLDER_NAMES`, and with the names a self-hosted runner leaves out, `STATE_NAMES`.
-    A newer Claude Code's lists replace them, with the new version.
-  - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
-    `putJson`, `realisticPlugins`), managed settings (`fakeManagedSystem` with
-    `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`) and the plugin sources Claude
-    Code 2.1.295 keeps (T96, checked on 2.1.296 in T107): the names `SKILLS_DIR_MARKETPLACE`,
-    `PLUGIN_DATA_FOLDERS`, `PLUGIN_STORE_FILES` (names cut at `STORE_NAME_LENGTH`) and
-    `PLUGIN_STORE_MODES`; `claude plugin validate` runs as
-    `ValidateRun` (`validatePassWithWarning`, `validateBrokenManifest`, the mod folder shown
-    as `VALIDATED_MOD`); and the claude.ai synced files of `SYNCED_ACCOUNT`
-    (`syncedSkillsManifest`, `olderSyncedSkillsManifest`, `syncedPluginsManifest`,
-    `syncedPluginMeta`, `syncedMarketplaces`, all written by `syncedSources`), with more skill
-    entries (`SyncedSkillEntry`: `syncedOrganizationSkill`, `syncedDirectorySkill`) and
-    `syncedAccount`, which also writes each skill's folder (T105), and `syncedAccountPlugins`,
-    which writes each plugin's folder (T101: `syncedPluginFiles`, entries as
-    `SyncedPluginEntry`); and a mod in `skills/` (T97: `MOD_NAME`, `MOD_MODULE`, `modFiles`),
-    a validate report with other `$` calls (`validatePassCalling`) or for a plugin without
-    hooks (`validatePassNoHooks`, T101) and a `claude` that answers validate with a report
-    (`validateCli`, for `findPluginValidator` with `executableLookup`); a marketplace added
-    from a local folder (T98: `writeLocalMarketplace`, `addedFromFolders`, `localModId`), its
-    saved entry (`savedLocalMarketplace`, T104) and a scripted `git` (`scriptedGit` with
-    `GitAnswer`); the mod as a plugin folder of its own (`writeModFolder`) and its saved
-    `CLAUDE_CODE_PLUGIN_DIRS` entry (T99: `savedPluginDir`, `SAVED_PLUGIN_DIR_ENTRY`); files
-    as a saved folder lists them (`savedFiles`, T104); a plugin's data folder and store file
-    (T102: `writePluginData`, `writePluginStore`).
-  - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
-    other parts (`stubRestorer`).
-  - `packages/cli/test/readme.ts`: the repository README as the tests that keep it and the
-    CLI's words the same read it (T115): the text under one heading (`readmeSection`) and a
-    table's rows as cells (`tableRows`).
-  - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`
-    or `createTestDatabase` and `migrationsFolder` in `database.ts`; `useTestApp` or
-    `createTestApp`, `TEST_IP_HEADER` and `postJson` in `app.ts`). In `fixtures.ts`: values
-    (`b64`, `bytes`, `sha256Hex`, `scopeKeyOf`, `UNKNOWN_ID`, `authKey`), requests as the
-    CLI sends them (`registration`, `registerUser`, `registerForToken`, `preloginRequest`,
-    `loginRequest`, `putSetup`, `deleteAccountRequest`, the `bearer` header) and their
-    `errorCode`, users and sessions (`newUser`, `createUser`, `newSession`), setups
-    (`bundleRow`, `globalKey`, `metaWrite`, `seedSetups`) and `memoryLogger`.
-  - `packages/core/test/fixtures.ts`: `useDataKey`, then `crypto` and `dataKey`.
-  - `packages/contracts/test/fixtures.ts`: a session `token`, the `kdfParams` as the wire
-    carries them and a bundle list `summary`.
+    collectors (`options`, `globalCollector`, `collect`, `collectSkipped`, with or without
+    memory), the real adapter (`claudeCodeAdapter`), settings with one Stop hook (`stopHook`), an
+    auto memory folder (`setMemoryDirectory`, `memoryDir`, and any project's by its folder name,
+    `projectMemory`, T110), a claude.ai synced skills folder (`synced`, `syncedSetup`), and the
+    project's entry in `~/.claude.json` (T109: `claudeJsonKey`, the folder as Claude Code writes
+    it as a key, `writeClaudeJsonProject` and `LOCAL_MCP_SERVER`).
+- `packages/cli/test/claude-code-state-names.ts`: the state names the Claude Code program
+  lists for its own folder, read from the version in `STATE_NAMES_VERSION` (T108):
+  `STATE_FOLDER_NAMES`, and with the names a self-hosted runner leaves out, `STATE_NAMES`.
+  A newer Claude Code's lists replace them, with the new version.
+- `packages/cli/test/claude-code-settings-reference.ts`: an excerpt of Claude Code's settings
+  reference saved on 2026-10-11 (`SETTINGS_REFERENCE_2026_10_11`) and its "Global config"
+  keys (`GLOBAL_CONFIG_KEYS_2026_10_11`), for the drift check (T109). A newer page's excerpt
+  replaces it, with its date.
+- `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
+  `putJson`, `realisticPlugins`), managed settings (`fakeManagedSystem` with
+  `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`) and the plugin sources Claude
+  Code 2.1.295 keeps (T96, checked on 2.1.296 in T107): the names `SKILLS_DIR_MARKETPLACE`,
+  `PLUGIN_DATA_FOLDERS`, `PLUGIN_STORE_FILES` (names cut at `STORE_NAME_LENGTH`) and
+  `PLUGIN_STORE_MODES`; `claude plugin validate` runs as
+  `ValidateRun` (`validatePassWithWarning`, `validateBrokenManifest`, the mod folder shown
+  as `VALIDATED_MOD`); and the claude.ai synced files of `SYNCED_ACCOUNT`
+  (`syncedSkillsManifest`, `olderSyncedSkillsManifest`, `syncedPluginsManifest`,
+  `syncedPluginMeta`, `syncedMarketplaces`, all written by `syncedSources`), with more skill
+  entries (`SyncedSkillEntry`: `syncedOrganizationSkill`, `syncedDirectorySkill`) and
+  `syncedAccount`, which also writes each skill's folder (T105), and `syncedAccountPlugins`,
+  which writes each plugin's folder (T101: `syncedPluginFiles`, entries as
+  `SyncedPluginEntry`); and a mod in `skills/` (T97: `MOD_NAME`, `MOD_MODULE`, `modFiles`),
+  a validate report with other `$` calls (`validatePassCalling`) or for a plugin without
+  hooks (`validatePassNoHooks`, T101) and a `claude` that answers validate with a report
+  (`validateCli`, for `findPluginValidator` with `executableLookup`); a marketplace added
+  from a local folder (T98: `writeLocalMarketplace`, `addedFromFolders`, `localModId`), its
+  saved entry (`savedLocalMarketplace`, T104) and a scripted `git` (`scriptedGit` with
+  `GitAnswer`); the mod as a plugin folder of its own (`writeModFolder`) and its saved
+  `CLAUDE_CODE_PLUGIN_DIRS` entry (T99: `savedPluginDir`, `SAVED_PLUGIN_DIR_ENTRY`); files
+  as a saved folder lists them (`savedFiles`, T104); a plugin's data folder and store file
+  (T102: `writePluginData`, `writePluginStore`).
+- `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
+  other parts (`stubRestorer`).
+- `packages/cli/test/readme.ts`: the repository README as the tests that keep it and the
+  CLI's words the same read it (T115): the text under one heading (`readmeSection`) and a
+  table's rows as cells (`tableRows`).
+- `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`
+  or `createTestDatabase` and `migrationsFolder` in `database.ts`; `useTestApp` or
+  `createTestApp`, `TEST_IP_HEADER` and `postJson` in `app.ts`). In `fixtures.ts`: values
+  (`b64`, `bytes`, `sha256Hex`, `scopeKeyOf`, `UNKNOWN_ID`, `authKey`), requests as the
+  CLI sends them (`registration`, `registerUser`, `registerForToken`, `preloginRequest`,
+  `loginRequest`, `putSetup`, `deleteAccountRequest`, the `bearer` header) and their
+  `errorCode`, users and sessions (`newUser`, `createUser`, `newSession`), setups
+  (`bundleRow`, `globalKey`, `metaWrite`, `seedSetups`) and `memoryLogger`.
+- `packages/core/test/fixtures.ts`: `useDataKey`, then `crypto` and `dataKey`.
+- `packages/contracts/test/fixtures.ts`: a session `token`, the `kdfParams` as the wire
+  carries them and a bundle list `summary`.
 - Use a named constant instead of its value: `GLOBAL_SCOPE_KEY`, `BUNDLE_FORMAT_VERSION`,
   `AUTH_KEY_BYTES`, `KDF_SALT_BYTES`, `WRAPPED_DATA_KEY_BYTES` and `MAX_BUNDLE_BYTES`
   (contracts); `AEAD_KEY_BYTES`, `DATA_KEY_BYTES`, `BACKUP_MARKER`, `INCOMING_MARKER` and

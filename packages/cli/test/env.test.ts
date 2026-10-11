@@ -20,6 +20,7 @@ import {
   BLOCK_START,
   chooseEnvValues,
   CLAUDE_JSON_BUNDLE_PATH,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   createEnvCommand,
   createShellProfileWriter,
   createWindowsEnvWriter,
@@ -87,6 +88,24 @@ describe('finding ${VAR} references', () => {
       { name: 'NOTION_KEY', usedBy: ['MCP server notion (~/.claude.json), global'] },
     ]);
     expect([...scan.setBySettings]).toEqual(['COMPANY_PROXY']);
+  });
+
+  it("reads a project's local MCP servers in ~/.claude.json (T109)", () => {
+    const scan = scanEnvReferences(
+      [
+        collectedJson(CLAUDE_JSON_PROJECT_BUNDLE_PATH, {
+          mcpServers: { local: { command: 'node', env: { TOKEN: '${LOCAL_TOKEN}' } } },
+        }),
+      ],
+      CLAUDE_ENV_REFERENCES,
+      'this project',
+    );
+    expect(scan.variables).toEqual([
+      {
+        name: 'LOCAL_TOKEN',
+        usedBy: ['MCP server local (~/.claude.json, this project), this project'],
+      },
+    ]);
   });
 
   it('finds nothing for an agent that names no files to scan', () => {
