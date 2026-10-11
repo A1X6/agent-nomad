@@ -15,7 +15,7 @@ import { pathsOf } from '../shared/detector-system.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
 import { readSyncedPlugins } from './account-plugins.ts';
 import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
-import { PLUGIN_DATA_PREFIX, PLUGIN_STORE_PREFIX } from './global-paths.ts';
+import { canRun, hasSkippedName, PLUGIN_DATA_PREFIX, PLUGIN_STORE_PREFIX } from './global-paths.ts';
 import {
   readInstalledPlugins,
   readLocalMarketplaces,
@@ -31,7 +31,9 @@ import { PLUGIN_MANIFEST, SKILLS_DIR_MARKETPLACE } from './skills-dir-plugins.ts
  * leaves them behind when the plugin is removed. Push takes them only for the plugins the
  * setup restores, by the names computed from their ids, and never lists those folders, so a
  * removed plugin's leftovers are never saved. Pull writes them only for plugins installed
- * here once the setup and its plugins are in, under the same id.
+ * here once the setup and its plugins are in, under the same id. Plugins keep installed
+ * dependencies there too (`node_modules`, virtual environments) and run them, so neither side
+ * takes what push never saves (the skipped names) or a file that can run (SEC-06).
  */
 
 /** The id of the optional part for plugin data (T102); also the flag name. */
@@ -148,7 +150,8 @@ export async function idsWithPluginData(
 
 /**
  * The data folder and store file of each of `ids`, as `.agentnomad/plugin-data/<folder>/...`
- * and `.agentnomad/plugin-store/<file>`, minus the skipped names. A plugin whose files pass
+ * and `.agentnomad/plugin-store/<file>`, minus the skipped names in any case and the files
+ * that can run (one line per plugin says how many). A plugin whose files pass
  * {@link PLUGIN_DATA_MAX_BYTES} in all is left out and said. Nothing else in `plugins/data`
  * or `plugins/store` is read.
  */
@@ -163,16 +166,24 @@ export async function collectPluginData(
   for (const id of ids) {
     const folder = pluginDataFolder(id);
     const store = pluginStoreFile(id);
-    const own = await files.walk(
+    let own = await files.walk(
       path.join(dataDir(path, baseDir), folder),
       `${PLUGIN_DATA_PREFIX}${folder}`,
-      () => false,
+      hasSkippedName,
     );
     const storeFile = await files.readIfFile(
       path.join(storeDir(path, baseDir), store),
       `${PLUGIN_STORE_PREFIX}${store}`,
     );
     if (storeFile !== null) own.push(storeFile);
+    const runnable = own.filter(canRun).length;
+    if (runnable > 0) {
+      onSkipped?.(
+        `${PLUGIN_DATA_PREFIX}${folder}`,
+        `${String(runnable)} file${runnable === 1 ? '' : 's'} of ${id} can run, and pull never puts back plugin data that can`,
+      );
+    }
+    own = own.filter((file) => !canRun(file));
     const size = own.reduce((total, file) => total + file.content.length, 0);
     if (size > PLUGIN_DATA_MAX_BYTES) {
       onSkipped?.(
@@ -192,14 +203,25 @@ interface SavedPluginData {
   readonly data: readonly CollectedFile[];
   /** Paths from `plugins/store/` (`<file>.json`). */
   readonly store: readonly CollectedFile[];
+  /** Bundle paths never put back: what push never saves, or a file that can run (SEC-06). */
+  readonly refused: readonly string[];
 }
 
-/** The saved plugin data among `files`; a name the rules could not have made is left out. */
+/**
+ * The saved plugin data among `files`; a name the rules could not have made is left out, and
+ * a path with a skipped name (`node_modules` first, in any case) or a file that can run (a
+ * script extension, the executable flag, a `#!` line) is refused: plugins load and run those.
+ */
 function savedPluginData(files: readonly CollectedFile[]): SavedPluginData {
   const data: CollectedFile[] = [];
   const store: CollectedFile[] = [];
+  const refused: string[] = [];
   for (const file of files) {
-    if (file.path.startsWith(PLUGIN_DATA_PREFIX)) {
+    const saved =
+      file.path.startsWith(PLUGIN_DATA_PREFIX) || file.path.startsWith(PLUGIN_STORE_PREFIX);
+    if (saved && (hasSkippedName(file.path) || canRun(file))) {
+      refused.push(file.path);
+    } else if (file.path.startsWith(PLUGIN_DATA_PREFIX)) {
       const rest = file.path.slice(PLUGIN_DATA_PREFIX.length);
       const folder = rest.split('/')[0] ?? '';
       if (SAFE_NAME.test(folder) && rest.length > folder.length + 1)
@@ -209,7 +231,7 @@ function savedPluginData(files: readonly CollectedFile[]): SavedPluginData {
       if (isStoreFileName(name)) store.push({ ...file, path: name });
     }
   }
-  return { data, store };
+  return { data, store, refused };
 }
 
 /** The names saved data goes under: data folders and store files. */
@@ -239,9 +261,10 @@ export type PluginDataFollowUp = (context: AfterRestoreContext) => Promise<void>
 /**
  * Saved plugin data (T102): listed, and put back only after a yes or `--plugin-data` (`--yes`
  * alone never). Each file that is here and differs is asked about as pull asks about the
- * setup's files (T34). The follow-up runs after the plugins are installed, and writes a data
- * folder or store file only when a plugin installed here has that name, so only under the
- * same id; the store keeps Claude Code's permissions (folder 700, file 600).
+ * setup's files (T34). What push never saves and files that can run are refused, and said,
+ * before the question (SEC-06). The follow-up runs after the plugins are installed, and
+ * writes a data folder or store file only when a plugin installed here has that name, so only
+ * under the same id; the store keeps Claude Code's permissions (folder 700, file 600).
  */
 export async function planPluginData(
   context: PluginDataContext,
@@ -251,6 +274,14 @@ export async function planPluginData(
 ): Promise<PluginDataFollowUp> {
   const nothing: PluginDataFollowUp = () => Promise.resolve();
   const saved = savedPluginData(context.files);
+  if (saved.refused.length > 0) {
+    context.reporter.warn(
+      [
+        'Refused in the plugin data from the other PC, as plugins could run it (push never saves it):',
+        ...saved.refused.map((path) => `  - ${printableLine(path)}`),
+      ].join('\n'),
+    );
+  }
   const names = savedNames(saved);
   if (names.length === 0) return nothing;
   context.reporter.info(
@@ -263,7 +294,7 @@ export async function planPluginData(
     context.parts.get(PLUGIN_DATA_PART) ??
     (!context.assumeYes &&
       (await context.prompter.confirm(
-        "Put back this plugin data? It holds what plugins and mods keep, e.g. a mod's saved choices.",
+        "Put back this plugin data? It holds what plugins and mods keep, e.g. a mod's saved choices, and can hold installed dependencies plugins run; those and files that can run are never put back.",
         false,
       )));
   summary.push(`--plugin-data ${add ? 'yes' : 'no'} (${names.join(', ')})`);
