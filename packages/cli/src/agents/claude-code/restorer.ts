@@ -473,7 +473,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           continue;
         found.push({
           path: file.path,
-          question: claudeJson ? claudeJsonQuestion(file.path) : { overwriteAllowed: true },
+          question: claudeJson ? claudeJsonQuestion(file) : { overwriteAllowed: true },
         });
       }
       return found;

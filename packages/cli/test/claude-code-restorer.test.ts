@@ -22,7 +22,7 @@ import { collected, collectedJson, readJson, readText, writeTestFile } from './f
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_PROJECT_BUNDLE_PATH,
-  CLAUDE_JSON_PROJECT_QUESTION,
+  claudeJsonProjectQuestion,
   createClaudeCodeRestorer,
   LOCAL_MARKETPLACES_PREFIX,
   hooksForOtherOs,
@@ -472,7 +472,7 @@ describe("restorer: the project's part of ~/.claude.json (T109)", () => {
         {
           overwriteAllowed: false,
           message:
-            "~/.claude.json: add this project's MCP servers and .mcp.json choices (its trust and history stay)?",
+            "~/.claude.json: add this project's MCP servers local; .mcp.json servers approved: shared to its entry for this folder? Claude Code keeps them there next to your login and the folder's trust, which stay as they are. Merge (the default) adds them; Skip leaves the file as it is.",
         },
       ],
     ]);
@@ -968,7 +968,10 @@ describe('restorer: what pull asks before writing (T61)', () => {
   it("lists the project's part of ~/.claude.json whenever it is pulled, with its question (T109)", () => {
     const part = collected(CLAUDE_JSON_PROJECT_BUNDLE_PATH, '{"enabledMcpjsonServers":["shared"]}');
     expect(restorer().conflicts([part], [])).toEqual([
-      { path: CLAUDE_JSON_PROJECT_BUNDLE_PATH, question: CLAUDE_JSON_PROJECT_QUESTION },
+      {
+        path: CLAUDE_JSON_PROJECT_BUNDLE_PATH,
+        question: claudeJsonProjectQuestion(['.mcp.json servers approved: shared']),
+      },
     ]);
   });
 

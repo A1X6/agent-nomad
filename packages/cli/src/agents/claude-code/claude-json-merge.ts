@@ -28,20 +28,24 @@ export const CLAUDE_JSON_QUESTION: ConflictQuestion = {
   message: '~/.claude.json: add your MCP servers and preferences (your login and history stay)?',
 };
 
-/** The same for a project's entry in it (T109). */
-export const CLAUDE_JSON_PROJECT_QUESTION: ConflictQuestion = {
+/**
+ * The same for a project's entry in it (T109), naming what is added and why it is asked, in
+ * the words of push's summary: e.g. `MCP servers notes; .mcp.json servers approved: db`.
+ */
+export const claudeJsonProjectQuestion = (items: readonly string[]): ConflictQuestion => ({
   overwriteAllowed: false,
-  message:
-    "~/.claude.json: add this project's MCP servers and .mcp.json choices (its trust and history stay)?",
-};
+  message: `~/.claude.json: add this project's ${items.join('; ')} to its entry for this folder? Claude Code keeps them there next to your login and the folder's trust, which stay as they are. Merge (the default) adds them; Skip leaves the file as it is.`,
+});
 
 /** Whether `path` is a saved part of `~/.claude.json`: the global one or a project's (T109). */
 export const isClaudeJsonPath = (path: string): boolean =>
   path === CLAUDE_JSON_BUNDLE_PATH || path === CLAUDE_JSON_PROJECT_BUNDLE_PATH;
 
 /** The question for a saved part of `~/.claude.json`. */
-export const claudeJsonQuestion = (path: string): ConflictQuestion =>
-  path === CLAUDE_JSON_PROJECT_BUNDLE_PATH ? CLAUDE_JSON_PROJECT_QUESTION : CLAUDE_JSON_QUESTION;
+export const claudeJsonQuestion = (file: CollectedFile): ConflictQuestion =>
+  file.path === CLAUDE_JSON_PROJECT_BUNDLE_PATH
+    ? claudeJsonProjectQuestion(projectPartItems(file))
+    : CLAUDE_JSON_QUESTION;
 
 /** Where `~/.claude.json` is: in the base folder when `CLAUDE_CONFIG_DIR` is set, else home. */
 export const claudeJsonFileOf = (place: {
@@ -173,20 +177,17 @@ export function projectClaudeJson(
 }
 
 /**
- * What push's summary and pull's plan say about a project's part of `~/.claude.json` (T109),
- * e.g. `~/.claude.json for this project: MCP servers db, docs; .mcp.json servers approved:
- * github`; `null` when the setup has none.
+ * What a saved project's part of `~/.claude.json` holds, as push, pull and its question name
+ * it (T109): e.g. `MCP servers db, docs` and `.mcp.json servers approved: github`.
  */
-export function claudeJsonProjectNote(files: readonly CollectedFile[]): string | null {
-  const file = files.find((entry) => entry.path === CLAUDE_JSON_PROJECT_BUNDLE_PATH);
-  if (file === undefined) return null;
+function projectPartItems(file: CollectedFile): string[] {
   let saved: unknown;
   try {
     saved = JSON.parse(new TextDecoder().decode(file.content));
   } catch {
-    return null;
+    return [];
   }
-  if (!isJsonObject(saved)) return null;
+  if (!isJsonObject(saved)) return [];
   const servers = isJsonObject(saved[CLAUDE_JSON_MCP_KEY])
     ? Object.keys(saved[CLAUDE_JSON_MCP_KEY])
     : [];
@@ -199,7 +200,18 @@ export function claudeJsonProjectNote(files: readonly CollectedFile[]): string |
       ? [`.mcp.json servers rejected: ${strings(saved['disabledMcpjsonServers']).join(', ')}`]
       : []),
   ];
-  return parts.length === 0 ? null : `~/.claude.json for this project: ${parts.join('; ')}`;
+  return parts;
+}
+
+/**
+ * What push's summary and pull's plan say about a project's part of `~/.claude.json` (T109),
+ * e.g. `~/.claude.json for this project: MCP servers db, docs; .mcp.json servers approved:
+ * github`; `null` when the setup has none.
+ */
+export function claudeJsonProjectNote(files: readonly CollectedFile[]): string | null {
+  const file = files.find((entry) => entry.path === CLAUDE_JSON_PROJECT_BUNDLE_PATH);
+  const items = file === undefined ? [] : projectPartItems(file);
+  return items.length === 0 ? null : `~/.claude.json for this project: ${items.join('; ')}`;
 }
 
 /**
@@ -374,7 +386,7 @@ export function createClaudeJsonMerge(options: ClaudeJsonMergeOptions): ClaudeJs
       }
       if (before.existing !== null) {
         if (part.merge(before.current, incoming).unchanged) return;
-        const choice = await onConflict(file.path, claudeJsonQuestion(file.path));
+        const choice = await onConflict(file.path, claudeJsonQuestion(file));
         if (choice === 'skip') {
           report.skipped.push(file.path);
           return;
