@@ -72,4 +72,19 @@ describe('BlobStore.deleteOrphans (T47)', () => {
     expect(await blobs.get(current)).not.toBeNull();
     expect(await blobs.get(fresh)).not.toBeNull();
   });
+
+  it('deletes at most 100 files per sweep, the oldest first (DB-01)', async () => {
+    const user = await createUser(database.db, 'ahmed');
+    await Promise.all(
+      Array.from({ length: 100 }, (_, fill) => blobs.put(user.id, bytes(40, fill))),
+    );
+    await database.db.execute(sql`update bundle_blobs set created_at = now() - interval '3 hours'`);
+    const newer = await blobs.put(user.id, bytes(40, 100));
+    await database.db.execute(
+      sql`update bundle_blobs set created_at = now() - interval '2 hours' where id = ${newer.blobId}`,
+    );
+    expect(await blobs.deleteOrphans?.(60 * 60)).toBe(100);
+    expect(await blobs.get(newer)).not.toBeNull();
+    expect(await blobs.deleteOrphans?.(60 * 60)).toBe(1);
+  });
 });

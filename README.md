@@ -87,7 +87,8 @@ new PC, and shows you anything that would run programs before writing it.
 - **Plugin data too (opt-in).** Save what your plugins and mods keep between sessions, such
   as a mod's saved choices, for the plugins the setup puts back; data a removed plugin left
   behind is never saved. Pull puts it back once the plugin is installed. It is left out
-  unless you say yes, as it can be large and private.
+  unless you say yes, as it can be large and private. Installed dependencies (`node_modules`)
+  and files that can run are never saved or put back, as plugins run them.
 - **Scriptable.** Every command runs from a script or CI with flags and clear exit codes.
 
 ## Install
@@ -187,8 +188,8 @@ agentnomad pull --global --merge --yes
 
 Exit codes: `0` done, `1` failed (or an answer was needed), `130` cancelled. Push and pull
 also exit with `1` when a setup was skipped or refused without you answering no: a newer copy
-on the server, an older copy than this PC had, a setup over 5 MB, or a skip made by `--yes`.
-The other setups are still done first, and one message lists what was not.
+on the server, an older copy than this PC had, a setup over 5 MB or 10,000 files, or a skip
+made by `--yes`. The other setups are still done first, and one message lists what was not.
 
 ## What is synced
 
@@ -242,7 +243,7 @@ with forward slashes: Claude Code ends a path at a backslash.
 | [A plugin or mod in `~/.claude/skills/`](#plugins-and-mods-in-skills)                                   | Saved with `skills/`                                                                                                | Written back to `skills/`                                                                                           | Yes: `claude plugin validate` and what each module hooks into and calls    |
 | [A folder in `CLAUDE_CODE_PLUGIN_DIRS`](#plugin-folders-in-claude_code_plugin_dirs)                     | Saves its files, as for a local marketplace                                                                         | Writes the folder back and points the value at it, with this PC's separator                                         | Yes, as for `skills/`                                                      |
 | A plugin you uploaded to claude.ai (unless `--no-account-plugins`)                                      | Saves a copy of its folder                                                                                          | Adds it to `skills/` on a PC without that claude.ai account                                                         | Yes, as for `skills/`                                                      |
-| [Plugin data](#plugin-data) (opt-in, `--plugin-data`)                                                   | Saves it for the plugins the setup puts back                                                                        | Puts it back after they are installed, only for a plugin installed here                                             | No (it is data, not code); a file here that differs is asked about         |
+| [Plugin data](#plugin-data) (opt-in, `--plugin-data`)                                                   | Saves it for the plugins the setup puts back                                                                        | Puts it back after they are installed, only for a plugin installed here                                             | No: `node_modules` and runnable files are refused; a changed file is asked |
 | claude.ai's directory (Anthropic's plugins), your organization's, and ones claude.ai installs by itself | Never: claude.ai or your organization gives them to each PC; push names the ones it leaves out                      |                                                                                                                     |                                                                            |
 | Mods in development (`~/.claude/dev-mods/`)                                                             | Never: Claude Code deletes them after a while; push names each one so you can move it to `skills/` or a marketplace |                                                                                                                     |                                                                            |
 | `--plugin-dir` and plugins an SDK passes                                                                | Never: they are given to one run and written nowhere agentnomad can see                                             |                                                                                                                     |                                                                            |
@@ -307,13 +308,16 @@ removed. With `--plugin-data` (or a yes to push's question), push saves them onl
 plugins the setup puts back: those it reinstalls, the plugins of saved local marketplaces,
 plugins and mods in `skills/`, and saved claude.ai plugins. It looks them up by the names
 Claude Code gives them and never lists those folders, so a removed plugin's leftovers are
-never saved. A plugin whose data passes 5 MB is left out, and push says why. Pull lists what
-was saved and puts it back only after a yes or `--plugin-data` (`--yes` alone never: plugin
-data stays opt-in, as it can be large and private), after
-the setup is written and its plugins installed, and only for a plugin installed here under the
-same id; a file here that differs is asked about like the setup's files, and the store keeps
-its permissions (only you can read it). Older agentnomad versions skip saved plugin data with
-one warning per file and restore the rest.
+never saved. A plugin whose data passes 5 MB is left out, and push says why. Plugins keep
+installed dependencies there too (`node_modules`, virtual environments) and run them, so
+neither push nor pull takes the names push always skips (in any case) or a file that can run
+(a script extension, the executable flag or a `#!` first line): push leaves them out and says
+how many, pull refuses them and names each one. Pull lists what was saved and puts it back
+only after a yes or `--plugin-data` (`--yes` alone never: plugin data stays opt-in, as it can
+be large and private), after the setup is written and its plugins installed, and only for a
+plugin installed here under the same id; a file here that differs is asked about like the
+setup's files, and the store keeps its permissions (only you can read it). Older agentnomad
+versions skip saved plugin data with one warning per file and restore the rest.
 
 ## Security
 

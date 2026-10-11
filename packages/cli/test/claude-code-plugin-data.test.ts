@@ -137,6 +137,25 @@ describe('plugin data (T102): what push takes', () => {
     expect(paths(found)).toEqual([`${PLUGIN_DATA_PREFIX}${MOD_DATA}/notes.md`]);
   });
 
+  it('leaves out a skipped name in any case inside a data folder (SEC-06)', async () => {
+    await writePluginData(base, MOD_DATA, { 'notes.md': 'x', 'Node_Modules/a/package.json': '{}' });
+    const { found } = await collectFor([MOD_ID]);
+    expect(paths(found)).toEqual([`${PLUGIN_DATA_PREFIX}${MOD_DATA}/notes.md`]);
+  });
+
+  it('leaves out the files of a data folder that can run, and says how many (SEC-06)', async () => {
+    await writePluginData(base, MOD_DATA, {
+      'notes.md': 'x',
+      'bin/tool.sh': 'echo hi',
+      'bin/run': '#!/bin/sh\necho hi',
+    });
+    const { found, skipped } = await collectFor([MOD_ID]);
+    expect(paths(found)).toEqual([`${PLUGIN_DATA_PREFIX}${MOD_DATA}/notes.md`]);
+    expect(skipped).toEqual([
+      `${PLUGIN_DATA_PREFIX}${MOD_DATA}: 2 files of ${MOD_ID} can run (a script or program), which plugin data never carries`,
+    ]);
+  });
+
   it("leaves out a plugin's data over the size limit, and says so", async () => {
     await writePluginData(base, MOD_DATA, { 'big.bin': 'x'.repeat(5 * 1024 * 1024 + 1) });
     const { found, skipped } = await collectFor([MOD_ID]);
@@ -188,7 +207,7 @@ const storePath = () => join(base, 'plugins', 'store', MOD_STORE);
 
 describe("plugin data (T102): pull's plan step", () => {
   const QUESTION =
-    "Put back this plugin data? It holds what plugins and mods keep, e.g. a mod's saved choices.";
+    "Put back this plugin data? It holds what plugins and mods keep, e.g. a mod's saved choices, and can hold installed dependencies plugins run; those and files that can run are never put back.";
 
   /** The plan step for `files` with these answers, then the restore and its follow-up. */
   async function pull(
@@ -287,6 +306,43 @@ describe("plugin data (T102): pull's plan step", () => {
     });
     expect(asked).toEqual([`${PLUGIN_STORE_PREFIX}${MOD_STORE}`]);
     expect(await readJson(storePath())).toEqual(after);
+  });
+
+  const LM_DATA = `${PLUGIN_DATA_PREFIX}lm-plugin-my-local-mkt`;
+  const lmData = (file: string) => join(base, 'plugins', 'data', 'lm-plugin-my-local-mkt', file);
+  const REFUSED = 'Refused in the plugin data from the other PC, as plugins could run it';
+
+  it('refuses a node_modules file in saved plugin data: not written, and said (SEC-06)', async () => {
+    await installed('lm-plugin@my-local.mkt');
+    const t = await pull(
+      [
+        collected(`${LM_DATA}/state.json`, '{}'),
+        collected(`${LM_DATA}/node_modules/dep/package.json`, '{}'),
+      ],
+      [true],
+    );
+    expect(await readText(lmData('state.json'))).toBe('{}');
+    expect(await exists(lmData('node_modules'))).toBe(false);
+    expect(t.lines).toContain(
+      `${REFUSED} (push never saves it):\n  - ${LM_DATA}/node_modules/dep/package.json`,
+    );
+    expect(t.summary?.chosen).toEqual(['--plugin-data yes (lm-plugin-my-local-mkt)']);
+  });
+
+  it.each<[string, CollectedFile]>([
+    ['a skipped name in another case', collected(`${LM_DATA}/Node_Modules/dep/package.json`, '{}')],
+    ['a virtual environment', collected(`${LM_DATA}/.venv/pyvenv.cfg`, 'x')],
+    ['a script extension', collected(`${LM_DATA}/hook.js`, 'x')],
+    ['a #! first line', collected(`${LM_DATA}/run`, '#!/bin/sh\necho hi')],
+    ['the executable flag', collected(`${LM_DATA}/tool`, 'x', true)],
+  ])('refuses %s in saved plugin data: not written, and said (SEC-06)', async (_, file) => {
+    await installed('lm-plugin@my-local.mkt');
+    const t = await pull([collected(`${LM_DATA}/state.json`, '{}'), file], [true]);
+    expect(await readText(lmData('state.json'))).toBe('{}');
+    expect(await exists(lmData(file.path.slice(LM_DATA.length + 1).split('/')[0] ?? ''))).toBe(
+      false,
+    );
+    expect(t.lines.some((line) => line.startsWith(REFUSED) && line.endsWith(file.path))).toBe(true);
   });
 
   it('ignores a saved name the naming rules could not make', async () => {

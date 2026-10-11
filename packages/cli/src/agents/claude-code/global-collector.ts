@@ -17,9 +17,9 @@ import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './a
 import { allAutoMemoryFolders } from './auto-memory.ts';
 import { claudeJsonFileOf, readClaudeJsonFile } from './claude-json-merge.ts';
 import {
-  followImports,
+  GLOBAL_MEMORY_FILES,
   globalImportPlace,
-  isGlobalMemoryFile,
+  importsOf,
   shownImportPath,
   skippedImportReason,
 } from './claude-md-imports.ts';
@@ -107,16 +107,11 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
     found: readonly CollectedFile[],
     onSkipped: CollectOptions['onSkipped'],
   ): Promise<CollectedFile[]> {
-    const memoryFiles = found
-      .filter((file) => isGlobalMemoryFile(file.path))
-      .map((file) => ({
-        nativePath: path.join(baseDir, ...file.path.split('/')),
-        bundlePath: file.path,
-        text: new TextDecoder().decode(file.content),
-      }));
     const imported: CollectedFile[] = [];
-    const { skipped } = await followImports(
-      memoryFiles,
+    const { skipped } = await importsOf(
+      baseDir,
+      GLOBAL_MEMORY_FILES,
+      found,
       {
         place: (nativePath) => globalImportPlace(nativePath, options),
         isFile,

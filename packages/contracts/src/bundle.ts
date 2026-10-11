@@ -8,6 +8,9 @@ import { hasControlCharacter } from './primitives.ts';
  */
 export const BUNDLE_FORMAT_VERSION = 1;
 
+/** Most files one bundle holds; push checks it in its plan, before anything is encoded. */
+export const MAX_BUNDLE_FILES = 10_000;
+
 /** Agent identifier, e.g. `claude-code`. Lowercase letters, digits and dashes. */
 export const AgentIdSchema = z
   .string()
@@ -86,7 +89,7 @@ const BundleFileSchema = z.discriminatedUnion('encoding', [
 
 const BundleFilesSchema = z
   .array(BundleFileSchema)
-  .max(10_000)
+  .max(MAX_BUNDLE_FILES)
   .superRefine((files, ctx) => {
     const seen = new Set<string>();
     files.forEach((file, index) => {

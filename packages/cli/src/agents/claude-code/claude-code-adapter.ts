@@ -13,13 +13,11 @@ import {
   askAccountPlugins,
   localSkillNames,
   namesHere,
-  planAccountPlugins,
   readSyncedPlugins,
 } from './account-plugins.ts';
 import {
   ACCOUNT_SKILLS_PART,
   askAccountSkills,
-  planAccountSkills,
   readSyncedSkills,
   reportAccountSkills,
 } from './account-skills.ts';
@@ -43,6 +41,7 @@ import {
   askPluginFolders,
   findPluginValidator,
   pluginFolderChange,
+  withPartsHere,
   type PluginGateContext,
   type PluginValidator,
 } from './plugin-review.ts';
@@ -62,7 +61,12 @@ import {
   systemProcessLister,
   type ClaudeRunningCheck,
 } from './running-claude.ts';
-import { modsVersionNotice, skillsPluginFolders, skillsPluginsNote } from './skills-dir-plugins.ts';
+import {
+  modsVersionNotice,
+  skillsFoldersToReview,
+  skillsPluginFolders,
+  skillsPluginsNote,
+} from './skills-dir-plugins.ts';
 import { findUnknownEntries } from './unknown-files.ts';
 
 export interface ClaudeCodeAdapterOptions {
@@ -123,7 +127,9 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
 
   /**
    * The plugin folders in `skills/` that a global setup would add or change (T97), reviewed and
-   * asked about; the files of the declined ones are left out.
+   * asked about; the files of the declined ones are left out. A folder whose name differs only
+   * in case is one folder, and a part that runs code is reviewed with the manifest and parts
+   * this PC already has there (review 16 SEC-02).
    */
   async function reviewSkillsPlugins(
     files: readonly CollectedFile[],
@@ -131,9 +137,11 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
   ): Promise<{ files: readonly CollectedFile[]; leftOut: readonly string[] }> {
     const path = pathsOf(options.platform);
     const toReview = [];
-    for (const folder of skillsPluginFolders(files)) {
-      const change = await pluginFolderChange(path.join(baseDir, 'skills', folder.name), folder);
-      if (change !== null) toReview.push({ folder, change });
+    for (const incoming of skillsFoldersToReview(files)) {
+      const dir = path.join(baseDir, 'skills', incoming.name);
+      const change = await pluginFolderChange(dir, incoming);
+      const folder = change === null ? null : await withPartsHere(dir, incoming);
+      if (change !== null && folder !== null) toReview.push({ folder, change });
     }
     if (toReview.length === 0) return { files, leftOut: [] };
     const accepted = await askPluginFolders(toReview, await validator(), gate);
@@ -141,7 +149,9 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       .map(({ folder }) => folder.folder)
       .filter((folder) => !accepted.has(folder));
     return {
-      files: files.filter((file) => !leftOut.some((folder) => underFolder(file.path, folder))),
+      files: files.filter(
+        (file) => !leftOut.some((folder) => underFolder(file.path, folder, { ignoreCase: true })),
+      ),
       leftOut,
     };
   }
@@ -237,30 +247,22 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
   };
 
   /**
-   * Saved claude.ai plugins (T101) the user agreed to add, as `skills/<name>/` files next to
-   * the setup's own, so the plugin review (T97) checks them like any plugin folder.
-   */
-  /**
    * Saved claude.ai plugins (T101) and skills (T42), asked about before the plugin review, so it
    * sees every folder they add to `skills/` (SEC-03); a skill never takes a plugin's folder.
    */
   async function withAccountCopies(context: RestorePlanContext) {
     const path = pathsOf(options.platform);
     const here = await namesHere(path, baseDir, context.files);
-    const added = await askAccountPlugins(context, here);
+    const plugins = await askAccountPlugins(context, here);
+    const added = plugins.files;
     const localNames = await localSkillNames(path, baseDir, [...context.files, ...added]);
     const skills = await askAccountSkills(context, { ...here, localNames });
-    // The ones it offered, for pull's summary (UX-01).
-    const offered = planAccountPlugins(context.files, here).toAdd;
-    const skillsOffered = planAccountSkills(context.files, { ...here, localNames }).toAdd.map(
-      (skill) => skill.name,
-    );
     return {
       files: [...context.files, ...added, ...skills.files],
       added,
-      offered,
       skills: skills.names,
-      skillsOffered,
+      // What they added and left out, for pull's summary (UX-01).
+      chosen: [plugins.chosen, skills.chosen].filter((line) => line !== null),
     };
   }
 
@@ -316,8 +318,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
      * Pull's Claude Code questions (T61), before anything is written: closing Claude Code
      * when `~/.claude.json` would change (it rewrites the file while open), plugin folders in
      * `skills/` (T97) with saved claude.ai plugins (T101) and skills (T42, SEC-03), saved local
-     * marketplaces (T98), then plugins, programs and plugin data (T102). `--yes` never waits:
-     * the file is left with a warning.
+     * marketplaces (T98) and `CLAUDE_CODE_PLUGIN_DIRS` folders (T99), then plugins, programs and
+     * plugin data (T102). `--yes` never waits: the file is left with a warning.
      */
     async planRestore(context) {
       let leaveClaudeJson = false;
@@ -349,22 +351,12 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       if (claudeJsonNote !== null) context.reporter.info(claudeJsonNote);
       const withSaved = global
         ? await withAccountCopies(context)
-        : { files: context.files, added: [], offered: [], skills: [], skillsOffered: [] };
+        : { files: context.files, added: [], skills: [], chosen: [] };
       const plugins = global
         ? await reviewSkillsPlugins(withSaved.files, context)
         : { files: context.files, leftOut: [] };
       // What the questions chose, for pull's summary (UX-01).
-      const chosen: string[] = [];
-      if (withSaved.offered.length > 0) {
-        chosen.push(
-          `--account-plugins ${withSaved.added.length > 0 ? 'yes' : 'no'} (${withSaved.offered.join(', ')})`,
-        );
-      }
-      if (withSaved.skillsOffered.length > 0) {
-        chosen.push(
-          `--account-skills ${withSaved.skills.length > 0 ? 'yes' : 'no'} (${withSaved.skillsOffered.join(', ')})`,
-        );
-      }
+      const chosen: string[] = [...withSaved.chosen];
       if (plugins.leftOut.length > 0)
         chosen.push(`plugin folders left out: ${plugins.leftOut.join(', ')}`);
       const kept = skillsPluginFolders(withSaved.added).filter((folder) =>

@@ -3,6 +3,7 @@ import { basename } from 'node:path';
 import {
   BUNDLE_FORMAT_VERSION,
   MAX_BUNDLE_BYTES,
+  MAX_BUNDLE_FILES,
   ProjectNameSchema,
   type Bundle,
   toBase64,
@@ -404,6 +405,16 @@ export function createPushPlanner(deps: PushDeps) {
     return { expectedRevision: onServer ?? 0 };
   }
 
+  /** A setup over the bundle's file limit is not done, before anything is encoded (BUG-01). */
+  function tooManyFiles(setup: string, count: number): SetupOutcome {
+    const files = `${count.toLocaleString('en-US')} files`;
+    const limit = MAX_BUNDLE_FILES.toLocaleString('en-US');
+    reporter.error(
+      `The ${setup} has ${files}; the limit is ${limit}. Leave some out (e.g. old memory or unused skills) and try again.`,
+    );
+    return { setup, result: 'not-done', reason: `${files}, over the ${limit} limit` };
+  }
+
   return {
     async plan(options: PushOptions, keys: PushKeys): Promise<PushPlan> {
       const agents = await chooseAgents(options);
@@ -429,6 +440,8 @@ export function createPushPlanner(deps: PushDeps) {
       for (const item of items) {
         const found = await collectItem(item, contents, options);
         if (found === null) outcomes.push({ setup: describe(item), result: 'done' });
+        else if (found.bundle.files.length > MAX_BUNDLE_FILES)
+          outcomes.push(tooManyFiles(describe(item), found.bundle.files.length));
         else collected.push({ item, ...found });
       }
       if (collected.length === 0) return { uploads: [], outcomes };

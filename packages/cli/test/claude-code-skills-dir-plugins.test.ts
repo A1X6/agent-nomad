@@ -5,6 +5,7 @@ import { collected, collectedJson, paths } from './fakes.ts';
 import {
   isGeneratedInSkillsPlugin,
   modsVersionNotice,
+  skillsFoldersToReview,
   skillsPluginFolders,
   skillsPluginsNote,
 } from '../src/index.ts';
@@ -57,6 +58,45 @@ describe('plugin folders in skills/ (T97)', () => {
   it('skills/synced/ is never a plugin folder', () => {
     const synced = [collectedJson('skills/synced/.claude-plugin/plugin.json', {})];
     expect(skillsPluginFolders(synced)).toEqual([]);
+  });
+});
+
+// SEC-01 and SEC-02 (review 16): Windows and macOS write `Evil/` and `evil/` into one folder.
+describe('skills/ folders in any case (SEC-01, SEC-02 of review 16)', () => {
+  const hooks = (folder: string) => collectedJson(`skills/${folder}/hooks/hooks.json`, {});
+
+  it('a folder with .Claude-Plugin/plugin.json is a plugin', () => {
+    const files = [collectedJson('skills/x/.Claude-Plugin/plugin.json', { name: 'x' })];
+    expect(skillsPluginFolders(files).map((folder) => folder.id)).toEqual(['x@skills-dir']);
+  });
+
+  it('folders whose names differ only in case are one, named as the first in path order', () => {
+    const files = [collectedJson('skills/evil/.claude-plugin/plugin.json', {}), hooks('Evil')];
+    const folders = skillsPluginFolders(files);
+    expect(folders.map((folder) => [folder.folder, folder.mod])).toEqual([['skills/Evil', true]]);
+    expect(paths(folders[0]?.files ?? [])).toEqual([
+      '.claude-plugin/plugin.json',
+      'hooks/hooks.json',
+    ]);
+  });
+
+  it('Hooks/hooks.json makes a mod', () => {
+    const files = [...plainPlugin, collectedJson('skills/notes/Hooks/hooks.json', {})];
+    expect(skillsPluginFolders(files).map((folder) => folder.mod)).toEqual([true]);
+  });
+
+  it('pull reviews a folder with a part that starts programs, with or without a manifest', () => {
+    const files = [
+      ...plainPlugin,
+      hooks('lone'),
+      collectedJson('skills/servers/.MCP.json', {}),
+      collected('skills/plain/SKILL.md', '# Plain'),
+    ];
+    expect(skillsFoldersToReview(files).map((folder) => folder.name)).toEqual([
+      'lone',
+      'notes',
+      'servers',
+    ]);
   });
 });
 

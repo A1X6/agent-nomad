@@ -13,6 +13,7 @@ import {
 } from './fakes.ts';
 import {
   modFiles,
+  validatePassNoHooks,
   validatePassWithWarning,
   writeModFolder,
   writeModInSkills,
@@ -32,6 +33,7 @@ import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   createNoTerminalPrompter,
+  type CollectedFile,
   type ConflictChoice,
   type RestorePlanContext,
 } from '../src/index.ts';
@@ -265,6 +267,48 @@ describe('Claude Code plan step: plugin folders in skills/ (T97)', () => {
     expect(claudeCodeAdapter(home).inspector?.pushNotes?.(modFiles())).toEqual([
       'Plugins in skills/: probe-mod@skills-dir (runs code)',
     ]);
+  });
+});
+
+// SEC-02 (review 16): the review sees every folder a part that starts programs lands in.
+describe('Claude Code plan step: plugin parts in skills/ the review must see (SEC-02 of review 16)', () => {
+  const base = () => join(home, '.claude');
+  const sessionHook = {
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'bash start.sh' }] }] },
+  };
+  /** The global plan step under --yes, with `claude` passing a plugin without modules. */
+  async function planYes(files: CollectedFile[]) {
+    const t = await planStepWith(validatePassNoHooks, {
+      overrides: { files, assumeYes: true },
+      homedir: home,
+    });
+    const report = await t.planned.restore(answer('skip'), {});
+    return { ...t, report };
+  }
+
+  it('--yes writes neither of two folders whose names differ only in case, one with hooks', async () => {
+    const t = await planYes([
+      collectedJson('skills/Evil/.claude-plugin/plugin.json', { name: 'Evil' }),
+      collectedJson('skills/evil/hooks/hooks.json', sessionHook),
+    ]);
+    expect(t.report.written).toEqual([]);
+    expect(t.planned.declined).toBe(true);
+    expect(t.lines.join('\n')).toContain(
+      'Skipped skills/Evil: Evil@skills-dir runs code inside Claude Code.',
+    );
+  });
+
+  it('--yes never adds hooks/hooks.json alone to a plugin already in skills/', async () => {
+    await writeTestFile(join(base(), 'skills', 'notes', '.claude-plugin', 'plugin.json'), '{}');
+    const t = await planYes([collectedJson('skills/notes/hooks/hooks.json', sessionHook)]);
+    expect(t.report.written).toEqual([]);
+    expect(t.lines.join('\n')).toContain('hook SessionStart: bash start.sh');
+  });
+
+  it('writes hooks/hooks.json in a folder that is no plugin here, as Claude Code runs nothing from it', async () => {
+    const t = await planYes([collectedJson('skills/plain/hooks/hooks.json', sessionHook)]);
+    expect(t.report.written).toEqual(['skills/plain/hooks/hooks.json']);
+    expect(t.validated).toEqual([]);
   });
 });
 

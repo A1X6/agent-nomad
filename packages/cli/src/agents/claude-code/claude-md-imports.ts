@@ -1,5 +1,5 @@
 import { printableLine } from '../../ui/printable.ts';
-import { RESERVED_DIR } from '../adapter.ts';
+import { RESERVED_DIR, type CollectedFile } from '../adapter.ts';
 import { underFolder } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import { bundlePathInside } from '../shared/file-gathering.ts';
@@ -45,20 +45,27 @@ const IMPORT_DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set([
   '.patch',
 ]);
 
-/** Memory files of a global setup whose imports Claude Code follows. */
-export const isGlobalMemoryFile = (bundlePath: string): boolean =>
-  bundlePath === 'CLAUDE.md' || (bundlePath.startsWith('rules/') && bundlePath.endsWith('.md'));
+/** The memory files of a setup whose imports Claude Code follows, by bundle path. */
+export interface MemoryFileNames {
+  /** The memory files by name. */
+  readonly files: readonly string[];
+  /** The rules folder, with its `/`: each `.md` file in it, at any depth. */
+  readonly rules: string;
+}
 
-/** The same for a project setup, besides its rules. */
-export const PROJECT_MEMORY_FILES: readonly string[] = [
-  'CLAUDE.md',
-  'CLAUDE.local.md',
-  'AGENTS.md',
-  '.claude/CLAUDE.md',
-];
-export const isProjectMemoryFile = (bundlePath: string): boolean =>
-  PROJECT_MEMORY_FILES.includes(bundlePath) ||
-  (bundlePath.startsWith('.claude/rules/') && bundlePath.endsWith('.md'));
+/** The memory files of a global setup. */
+export const GLOBAL_MEMORY_FILES: MemoryFileNames = { files: ['CLAUDE.md'], rules: 'rules/' };
+
+/** The memory files of a project setup. */
+export const PROJECT_MEMORY_FILES: MemoryFileNames = {
+  files: ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.claude/CLAUDE.md'],
+  rules: '.claude/rules/',
+};
+
+/** Whether `bundlePath` is one of the memory files `names`. */
+export const isMemoryFile = (names: MemoryFileNames, bundlePath: string): boolean =>
+  names.files.includes(bundlePath) ||
+  (bundlePath.startsWith(names.rules) && bundlePath.endsWith('.md'));
 
 /** One import as a memory file writes it. */
 export interface ImportLine {
@@ -324,6 +331,29 @@ export async function followImports(
 
   for (const file of memoryFiles) await follow(file.nativePath, file.text, 1);
   return { files, skipped };
+}
+
+/**
+ * Follows the imports of the memory files `names` among `files`, a setup's files in `folder`
+ * by bundle path, with {@link followImports}: the one way push, pull and the unknown-files
+ * check find them (DUP-03).
+ */
+export function importsOf(
+  folder: string,
+  names: MemoryFileNames,
+  files: readonly Pick<CollectedFile, 'path' | 'content'>[],
+  source: ImportSource,
+  context: ImportPathContext,
+): Promise<ImportsFound> {
+  const path = pathsOf(context.platform);
+  const memoryFiles = files
+    .filter((file) => isMemoryFile(names, file.path))
+    .map((file) => ({
+      nativePath: path.join(folder, ...file.path.split('/')),
+      bundlePath: file.path,
+      text: new TextDecoder().decode(file.content),
+    }));
+  return followImports(memoryFiles, source, context);
 }
 
 /** A path as push shows it: from `~` when it is in the home folder. */

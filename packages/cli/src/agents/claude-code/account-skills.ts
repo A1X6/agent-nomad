@@ -7,12 +7,16 @@ import { isDirectory } from '../../system/files.ts';
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import type { Reporter } from '../../ui/prompter.ts';
 import type { CollectedFile } from '../adapter.ts';
+import { foldedName } from '../shared/bundle-paths.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
 import {
   askSavedCopies,
   filesInSkills,
+  MARKETPLACE_UNKNOWN,
   NAME_NOT_A_FOLDER,
+  NOT_FROM_YOU,
   planSavedCopies,
+  savedCopiesChoice,
   savedCopiesIn,
   type NamesHere,
   type SavedCopiesContext,
@@ -95,9 +99,9 @@ function ownershipOf(skill: SyncedSkillEntry, scopes: PluginScopes): Ownership {
       : scopes.get(skill.backingPluginId);
   if (scope === 'account') return 'own';
   if (scope !== undefined && NOT_OWN_SCOPES.has(scope)) {
-    return { leftOut: 'it comes from your organization or claude.ai, not from you' };
+    return { leftOut: NOT_FROM_YOU };
   }
-  return { leftOut: 'agentnomad cannot tell which claude.ai marketplace it comes from' };
+  return { leftOut: MARKETPLACE_UNKNOWN };
 }
 
 /**
@@ -155,7 +159,7 @@ export async function readSyncedSkills(path: PlatformPath, baseDir: string): Pro
       const parsed = EntrySchema.safeParse(entry);
       if (!parsed.success) continue;
       const skill = parsed.data;
-      allNames.add(skill.name.toLowerCase());
+      allNames.add(foldedName(skill.name));
       const ownership = ownershipOf(skill, scopes);
       if (typeof ownership === 'object') leftOut.push(`${skill.name} (${ownership.leftOut})`);
       if (ownership !== 'own' || own.has(skill.name)) continue;
@@ -257,12 +261,17 @@ export type AccountSkillsContext = SavedCopiesContext & { readonly allowCommands
  * lines runs those as a local skill (a synced one does not), so it is marked, and a flag or
  * --yes (no question asked) adds it only with --allow-commands too. Planned in pull's plan
  * step with the saved plugins, so a skill folder that is a plugin gets the plugin review
- * (SEC-03). Returns the skills to add and their files, as `skills/<name>/...`.
+ * (SEC-03). Returns the skills to add, their files as `skills/<name>/...`, and pull's summary
+ * line about them (UX-01), `null` when none could be added.
  */
 export async function askAccountSkills(
   context: AccountSkillsContext,
   here: NamesHere,
-): Promise<{ readonly names: readonly string[]; readonly files: readonly CollectedFile[] }> {
+): Promise<{
+  readonly names: readonly string[];
+  readonly files: readonly CollectedFile[];
+  readonly chosen: string | null;
+}> {
   const plan = planSkills(context.files, here);
   const { add, answered } = await askSavedCopies(context, plan, {
     heading: 'Skills from your claude.ai account on the other PC:',
@@ -272,7 +281,8 @@ export async function askAccountSkills(
       'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
     part: ACCOUNT_SKILLS_PART,
   });
-  if (!add) return { names: [], files: [] };
+  if (!add)
+    return { names: [], files: [], chosen: savedCopiesChoice(ACCOUNT_SKILLS_PART, plan, add) };
   // Answered by a flag or --yes, not a person: commands only run with --allow-commands too.
   const blocked = answered && !context.allowCommands ? plan.toAdd.filter(runsCommands) : [];
   for (const { name } of blocked) {
@@ -281,7 +291,16 @@ export async function askAccountSkills(
     );
   }
   const approved = plan.toAdd.filter((copy) => !blocked.includes(copy));
-  return { names: approved.map((copy) => copy.name), files: filesInSkills(approved) };
+  return {
+    names: approved.map((copy) => copy.name),
+    files: filesInSkills(approved),
+    chosen: savedCopiesChoice(
+      ACCOUNT_SKILLS_PART,
+      plan,
+      add,
+      blocked.map((copy) => copy.name),
+    ),
+  };
 }
 
 /**

@@ -23,6 +23,7 @@ import type {
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
+import { foldedName, foldsNames } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import { findAutoMemory, findSharedAutoMemory } from './auto-memory.ts';
 import {
@@ -33,15 +34,16 @@ import {
   type MutableReport,
 } from './claude-json-merge.ts';
 import {
-  followImports,
+  GLOBAL_MEMORY_FILES,
   globalImportPlace,
-  isGlobalMemoryFile,
-  isProjectMemoryFile,
+  importsOf,
+  PROJECT_MEMORY_FILES,
   projectImportPlace,
   type ImportPlace,
+  type MemoryFileNames,
 } from './claude-md-imports.ts';
 import { reviewRunnable } from './command-review.ts';
-import { extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
+import { extensionOf, GLOBAL_SETTINGS_FILES, startsWithShebang } from './global-paths.ts';
 import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { PROJECT_SETTINGS_FILES, SHARED_AUTO_MEMORY } from './project-paths.ts';
 import {
@@ -192,8 +194,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     overwrite: strategies.overwrite,
   };
   // Windows and macOS ignore case and Unicode form: two names may be one file there (T43).
-  const foldsNames = options.platform === 'win32' || options.platform === 'darwin';
-  const sameFileKey = (name: string) => (foldsNames ? name.normalize('NFC').toLowerCase() : name);
+  const foldsHere = foldsNames(options.platform);
+  const sameFileKey = (name: string) => (foldsHere ? foldedName(name) : name);
   /**
    * Auto memory files written in this run, by OS path (T110). A global and a project setup
    * pulled together can hold the same note; pull writes the global setup first, and the
@@ -242,8 +244,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   /** Permissions: a replaced file keeps its own; new scripts may run on macOS and Linux. */
   function modeFor(file: CollectedFile, content: Uint8Array, existingMode: number | null) {
     if (options.platform === 'win32') return null;
-    const runnable =
-      file.executable || (content[0] === 0x23 && content[1] === 0x21); /* starts with "#!" */
+    const runnable = file.executable || startsWithShebang(content);
     if (existingMode !== null) return runnable ? existingMode | 0o111 : existingMode;
     return runnable ? 0o755 : null;
   }
@@ -286,19 +287,14 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   async function importedIn(
     incoming: readonly CollectedFile[],
     folder: string,
-    isMemoryFile: (bundlePath: string) => boolean,
+    names: MemoryFileNames,
     place: (nativePath: string) => ImportPlace,
   ): Promise<string[]> {
     const byPath = new Map(incoming.map((entry) => [entry.path, entry]));
-    const memoryFiles = incoming
-      .filter((entry) => isMemoryFile(entry.path))
-      .map((entry) => ({
-        nativePath: path.join(folder, ...entry.path.split('/')),
-        bundlePath: entry.path,
-        text: new TextDecoder().decode(entry.content),
-      }));
-    const { files } = await followImports(
-      memoryFiles,
+    const { files } = await importsOf(
+      folder,
+      names,
+      incoming,
       {
         place,
         isFile: () => Promise.resolve(false),
@@ -327,7 +323,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       hookScripts(json, options).map((script) => script.bundlePath),
     );
     if (target.kind === 'global') {
-      const imported = await importedIn(incoming, options.baseDir, isGlobalMemoryFile, (file) =>
+      const imported = await importedIn(incoming, options.baseDir, GLOBAL_MEMORY_FILES, (file) =>
         globalImportPlace(file, options),
       );
       for (const bundlePath of imported) globalScripts.add(bundlePath);
@@ -343,7 +339,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         : new Set<string>();
     if (target.kind === 'project') {
       const { projectDir } = target;
-      const imported = await importedIn(incoming, projectDir, isProjectMemoryFile, (file) =>
+      const imported = await importedIn(incoming, projectDir, PROJECT_MEMORY_FILES, (file) =>
         projectImportPlace(file, { projectDir, platform: options.platform }),
       );
       for (const bundlePath of imported) projectScripts.add(bundlePath);
@@ -538,7 +534,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     // where names fold: only the first is written (T43).
     const seen = new Map<string, string>();
     for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
-      if (foldsNames) {
+      if (foldsHere) {
         const folded = sameFileKey(file.path);
         const first = seen.get(folded);
         if (first !== undefined) {

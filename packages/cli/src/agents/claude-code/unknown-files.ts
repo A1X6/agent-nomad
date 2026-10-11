@@ -6,12 +6,15 @@ import { TEMP_MARKER } from '../../system/files.ts';
 import { RESERVED_DIR, type ScopeTarget } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import {
-  followImports,
+  GLOBAL_MEMORY_FILES,
   globalImportPlace,
-  isGlobalMemoryFile,
-  isProjectMemoryFile,
+  importsOf,
+  isMemoryFile,
   PROJECT_MEMORY_FILES,
   projectImportPlace,
+  type ImportPathContext,
+  type ImportPlace,
+  type MemoryFileNames,
 } from './claude-md-imports.ts';
 import {
   GLOBAL_FILES,
@@ -67,38 +70,56 @@ async function hookScriptNames(input: UnknownFilesInput): Promise<string[]> {
 }
 
 /**
+ * The bundle paths of the files the memory files `names` of the setup in `folder` import on
+ * this PC (T111), as push follows them.
+ */
+async function importedOnThisPc(
+  folder: string,
+  names: MemoryFileNames,
+  place: (nativePath: string) => ImportPlace,
+  context: ImportPathContext,
+): Promise<string[]> {
+  const path = pathsOf(context.platform);
+  const rulesDir = path.join(folder, ...names.rules.split('/'));
+  const rules = await readdir(rulesDir, { recursive: true }).catch(() => []);
+  const memoryFiles = [];
+  for (const bundlePath of [
+    ...names.files,
+    ...rules.map((rule) => names.rules + rule.split(path.sep).join('/')),
+  ]) {
+    if (!isMemoryFile(names, bundlePath)) continue;
+    const content = await readFile(path.join(folder, ...bundlePath.split('/'))).catch(() => null);
+    if (content !== null) memoryFiles.push({ path: bundlePath, content });
+  }
+  const { files } = await importsOf(
+    folder,
+    names,
+    memoryFiles,
+    {
+      place,
+      read: (nativePath) => readFile(nativePath, 'utf8').catch(() => null),
+      isFile: () => Promise.resolve(false),
+    },
+    context,
+  );
+  return files.map((file) => file.bundlePath);
+}
+
+/**
  * Top-level names in the base folder that hold a file `CLAUDE.md` or the rules import (T111):
  * push saves those files by that route, so such a folder is not unknown either.
  */
 async function importedNames(input: UnknownFilesInput): Promise<string[]> {
   const { homedir } = input;
   if (homedir === undefined) return [];
-  const path = pathsOf(input.platform);
-  const rules = await readdir(path.join(input.baseDir, 'rules'), { recursive: true }).catch(
-    () => [],
-  );
-  const memoryFiles = [];
-  for (const bundlePath of ['CLAUDE.md', ...rules.map((name) => `rules/${name}`)]) {
-    const portable = bundlePath.split(path.sep).join('/');
-    if (!isGlobalMemoryFile(portable)) continue;
-    const nativePath = path.join(input.baseDir, ...portable.split('/'));
-    const text = await readFile(nativePath, 'utf8').catch(() => null);
-    if (text !== null) memoryFiles.push({ nativePath, bundlePath: portable, text });
-  }
   const context = { homedir, baseDir: input.baseDir, platform: input.platform };
-  const { files } = await followImports(
-    memoryFiles,
-    {
-      place: (nativePath) => globalImportPlace(nativePath, context),
-      read: (nativePath) => readFile(nativePath, 'utf8').catch(() => null),
-      isFile: () => Promise.resolve(false),
-    },
+  const files = await importedOnThisPc(
+    input.baseDir,
+    GLOBAL_MEMORY_FILES,
+    (nativePath) => globalImportPlace(nativePath, context),
     context,
   );
-  return files
-    .map((file) => file.bundlePath)
-    .filter((bundlePath) => !bundlePath.startsWith(`${RESERVED_DIR}/`))
-    .map(topLevel);
+  return files.filter((bundlePath) => !bundlePath.startsWith(`${RESERVED_DIR}/`)).map(topLevel);
 }
 
 /**
@@ -120,33 +141,14 @@ async function projectSavedNames(projectDir: string, input: UnknownFilesInput) {
   }
   const { homedir } = input;
   if (homedir !== undefined) {
-    const rules = await readdir(path.join(projectDir, '.claude', 'rules'), {
-      recursive: true,
-    }).catch(() => []);
-    const memoryFiles = [];
-    for (const name of [
-      ...PROJECT_MEMORY_FILES,
-      ...rules.map((rule) => `.claude/rules/${rule.split(path.sep).join('/')}`),
-    ]) {
-      const text = isProjectMemoryFile(name) ? await read(name) : null;
-      if (text !== null) {
-        memoryFiles.push({
-          nativePath: path.join(projectDir, ...name.split('/')),
-          bundlePath: name,
-          text,
-        });
-      }
-    }
-    const { files } = await followImports(
-      memoryFiles,
-      {
-        place: (nativePath) => projectImportPlace(nativePath, context),
-        read: (nativePath) => readFile(nativePath, 'utf8').catch(() => null),
-        isFile: () => Promise.resolve(false),
-      },
-      { homedir, platform: input.platform },
+    saved.push(
+      ...(await importedOnThisPc(
+        projectDir,
+        PROJECT_MEMORY_FILES,
+        (nativePath) => projectImportPlace(nativePath, context),
+        { homedir, platform: input.platform },
+      )),
     );
-    saved.push(...files.map((file) => file.bundlePath));
   }
   return saved
     .filter((bundlePath) => bundlePath.startsWith('.claude/'))

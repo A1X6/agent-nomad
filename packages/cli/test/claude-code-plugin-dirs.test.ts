@@ -33,6 +33,7 @@ import {
   writeTestFile,
 } from './fakes.ts';
 import {
+  homeFolderFor,
   planPluginDirs,
   pluginDirFiles,
   pluginDirsSeparator,
@@ -457,5 +458,16 @@ describe('pull writes a saved plugin folder (T99)', () => {
     ).toBe(true);
     expect(await exists(modFolder())).toBe(false);
     expect(await exists(join(home, '.agentnomad', 'plugin-dirs'))).toBe(false);
+  });
+});
+
+// SEC-03 (review 16): a Mac's file system folds case, so `~/.Claude` is `~/.claude` there.
+describe("a saved plugin folder at Claude Code's own folder in another case on macOS (SEC-03 of review 16)", () => {
+  const FALLBACK = `/Users/me/.agentnomad/plugin-dirs/${MOD_NAME}`;
+  const deps = { homedir: '/Users/me', baseDir: '/Users/me/.claude', platform: 'darwin' } as const;
+  const files = [{ path: 'hooks/hooks.json', content: '', executable: false }];
+
+  it.each(['.Claude', '.CLAUDE/plugins'])('%s goes to ~/.agentnomad/plugin-dirs', (path) => {
+    expect(homeFolderFor({ path, files }, FALLBACK, deps)).toBe(FALLBACK);
   });
 });

@@ -323,6 +323,20 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     expect(plan.summary?.chosen).toContain('--account-skills no (mine)');
   });
 
+  // UX-01 (review 16): the line names what --yes added and what it left out.
+  it("names the skills --yes leaves out for want of --allow-commands in pull's summary", async () => {
+    const files = [saved('mine', 'Plain.'), saved('runner', 'Run !`git status`')];
+    const { plan } = await run(files, { assumeYes: true });
+    expect(plan.summary?.chosen).toContain(
+      '--account-skills yes (mine); runner needs --allow-commands',
+    );
+  });
+
+  it("says yes, not no, in pull's summary when --yes leaves out every skill", async () => {
+    const { plan } = await run([saved('runner', 'Run !`git status`')], { assumeYes: true });
+    expect(plan.summary?.chosen).toContain('--account-skills yes; runner needs --allow-commands');
+  });
+
   it('asks with yes as the default (T114)', async () => {
     const t = await run([saved('mine', 'Plain.')], {}, [true]);
     expect(t.defaults).toEqual([true]);
@@ -436,6 +450,21 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
       'shared: skipped, you already have a local skill with this name',
     );
     await expect(skillFile('shared')).rejects.toThrow();
+  });
+});
+
+// SEC-02 (review 16): Windows and macOS write `Evil/` and `evil/` into one folder.
+describe('claude.ai skills whose names differ only in case (SEC-02 of review 16)', () => {
+  it('adds only the first by name, so two saved skills never make one plugin with hooks', () => {
+    const files = [
+      ...modFiles(`${ACCOUNT_SKILLS_PREFIX}Evil/`).filter((file) => !file.path.includes('/hooks/')),
+      collected(`${ACCOUNT_SKILLS_PREFIX}evil/hooks/hooks.json`, '{"hooks":{}}'),
+      saved('evil', 'Plain.'),
+    ];
+    const plan = planAccountSkills(files, { syncedNames: new Set(), localNames: new Set() });
+    expect(plan.toAdd.map((skill) => skill.name)).toEqual(['evil']);
+    expect(plan.skipped).toEqual([{ name: 'Evil', reason: 'another saved copy has this name' }]);
+    expect(paths(plan.files)).toEqual(['skills/evil/hooks/hooks.json', 'skills/evil/SKILL.md']);
   });
 });
 
