@@ -1,8 +1,9 @@
 import { delimiter, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { expect, it } from 'vitest';
 
+import { FAKE_CLAUDE, MOD_MODULE, writeMod } from '../src/fixtures.ts';
+import { expectNoLeaks, secretsOf } from '../src/leaks.ts';
 import { startLocalServer } from '../src/local-server.ts';
 import { newPc, read, write, type RunResult } from '../src/pc.ts';
 
@@ -12,19 +13,9 @@ import { newPc, read, write, type RunResult } from '../src/pc.ts';
  * wrote. Push and pull run on this OS only (cross-OS is T104), so it runs once, never in the
  * CI step jobs.
  */
-const FAKE_CLAUDE = fileURLToPath(new URL('../dist/src/fake-claude.js', import.meta.url));
-const LOGIN = ['--username', 'e2e-plugin-dirs', '--password-stdin'];
-const stdin = 'amber-harbor-violet-sketch-73\n';
-
-const MOD_MODULE =
-  'export function register(on, options) {\n  on("session.start", async ($, e) => {\n    await $.store.get("e2e-seen");\n  });\n}\n';
-
-/** The mod `name` as a plugin folder `dir` of its own. */
-async function pluginFolder(dir: string, name: string): Promise<void> {
-  await write(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name }));
-  await write(join(dir, 'hooks', 'hooks.json'), JSON.stringify({ modules: ['./register.ts'] }));
-  await write(join(dir, 'hooks', 'register.ts'), MOD_MODULE);
-}
+const USER = { username: 'e2e-plugin-dirs', password: 'amber-harbor-violet-sketch-73' };
+const LOGIN = ['--username', USER.username, '--password-stdin'];
+const stdin = `${USER.password}\n`;
 
 const ok = (result: RunResult) => {
   expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -53,8 +44,8 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
       // On the first PC: one folder in home, one outside it, both in the user settings.
       const inHome = join(first.home, 'dev', 'pd-home');
       const outside = join(dirname(first.home), 'pd-outside');
-      await pluginFolder(inHome, 'pd-home');
-      await pluginFolder(outside, 'pd-outside');
+      await writeMod(inHome, 'pd-home');
+      await writeMod(outside, 'pd-outside');
       await write(
         join(first.home, '.claude', 'settings.json'),
         JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: [inHome, outside].join(delimiter) } }),
@@ -82,6 +73,12 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
         await second.run(['pull', '--global', '--merge', '--yes', '--allow-commands']),
       );
       expect(again.stdout).toContain('Restored the Claude Code global setup: 0 written');
+
+      expectNoLeaks(server, await secretsOf(USER, first, second), [
+        MOD_MODULE,
+        'pd-home',
+        'pd-outside',
+      ]);
     } finally {
       await Promise.all([first.remove(), second.remove()]);
       await server.close();

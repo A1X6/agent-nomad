@@ -184,6 +184,12 @@ open, such as a chat or an option letter from a discussion.
   `loginRequest`, `putSetup`, `deleteAccountRequest`, the `bearer` header) and their
   `errorCode`, users and sessions (`newUser`, `createUser`, `newSession`), setups
   (`bundleRow`, `globalKey`, `metaWrite`, `seedSetups`) and `memoryLogger`.
+- `packages/e2e/src/`: in `pc.ts`, a simulated PC (`newPc`) and file helpers (`read`,
+  `write`, `forward`, `isExecutable`); in `fixtures.ts`, the built fake `claude`
+  (`FAKE_CLAUDE`), a mod (`writeMod`, `MOD_MODULE`, `MOD_HOOKS`) and a marketplace in a
+  folder (`writeLocalMarketplace`); in `leaks.ts`, the check that nothing readable left the
+  PC (`secretsOf`, then `expectNoLeaks` with the test's own strings), which every e2e test
+  that pushes ends with.
 - `packages/core/test/fixtures.ts`: `useDataKey`, then `crypto` and `dataKey`.
 - `packages/contracts/test/fixtures.ts`: a session `token`, the `kdfParams` as the wire
   carries them and a bundle list `summary`.
@@ -201,7 +207,8 @@ open, such as a chat or an option letter from a discussion.
   on all three (use `path.join`, never assume `/`).
 - A change to push, pull or the bundle belongs in the end-to-end steps too
   (`packages/e2e/src/steps.ts`), including the check that nothing readable leaves the PC
-  (`packages/e2e/src/plaintext.ts`: as text, encoded or compressed). A PC that pulls plugins
+  (`expectNoLeaks` in `packages/e2e/src/leaks.ts`, which searches with
+  `packages/e2e/src/plaintext.ts`: as text, encoded or compressed). A PC that pulls plugins
   gets the `claude` command of `packages/e2e/src/fake-claude.ts` (`newPc` option `claude`),
   never the real Claude Code.
 

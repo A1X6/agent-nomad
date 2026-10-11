@@ -45,8 +45,6 @@ export interface Pc {
   readonly project: string;
   /** Runs `agentnomad <args>` here with no terminal; `input` is piped to stdin. */
   run(args: readonly string[], input?: string): Promise<RunResult>;
-  /** Runs another Node.js script as this PC: same environment, keychain rule and folder. */
-  runScript(file: string, args: readonly string[]): Promise<RunResult>;
   /** A secret the CLI keeps on this PC after login, as it stores it (T48: leak check). */
   secret(name: 'session-token' | 'data-key'): Promise<string | null>;
   remove(): Promise<void>;
@@ -96,11 +94,11 @@ export async function newPc(
     env[key] = [bin, env[key]].filter(Boolean).join(delimiter);
   }
 
-  const start = (entry: string, args: readonly string[], input: string) =>
+  const start = (args: readonly string[], input: string) =>
     new Promise<RunResult>((resolve, reject) => {
       const child = spawn(
         process.execPath,
-        [...(options.keychain ? [] : ['--import', NO_KEYCHAIN]), entry, ...args],
+        [...(options.keychain ? [] : ['--import', NO_KEYCHAIN]), BIN, ...args],
         { cwd: project, env, stdio: ['pipe', 'pipe', 'pipe'] },
       );
       let stdout = '';
@@ -118,8 +116,7 @@ export async function newPc(
     name,
     home,
     project,
-    run: (args, input = '') => start(BIN, args, input),
-    runScript: (file, args) => start(file, args, ''),
+    run: (args, input = '') => start(args, input),
     // Read-only: never createSecretStore, which may move a login between the file and the
     // keychain (T46), and the CLI's process may not reach the keychain the test's can.
     secret: async (name) => {

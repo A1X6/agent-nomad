@@ -1,24 +1,24 @@
 import { readdir } from 'node:fs/promises';
 import { basename, delimiter, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   createClaudeRunningCheck,
   projectDirName,
+  readBlock,
   shellProfileFor,
   systemProcessLister,
 } from '@agentnomad/cli';
 import { expect } from 'vitest';
 
+import { FAKE_CLAUDE, MOD_HOOKS, MOD_MODULE, writeLocalMarketplace, writeMod } from './fixtures.ts';
+import { expectNoLeaks, secretsOf, type Known } from './leaks.ts';
 import type { LocalServer } from './local-server.ts';
 import { forward, isExecutable, newPc, read, write, type Pc, type RunResult } from './pc.ts';
-import { looksCompressedOnly, plaintextLeaks } from './plaintext.ts';
 
 /** A throwaway account on the throwaway local server; strong enough for the T23 policy. */
-const USERNAME = 'e2e-user';
-const PASSWORD = 'quartz-lantern-meadow-pilot-58';
-const LOGIN = ['--username', USERNAME, '--password-stdin'];
-const stdin = `${PASSWORD}\n`;
+const USER = { username: 'e2e-user', password: 'quartz-lantern-meadow-pilot-58' };
+const LOGIN = ['--username', USER.username, '--password-stdin'];
+const stdin = `${USER.password}\n`;
 
 const HOOK_SCRIPT = '#!/bin/sh\necho ok\n';
 const SKILL = '---\nname: deploy\ndescription: Deploy the app\n---\nRun the deploy script.\n';
@@ -43,13 +43,8 @@ const PRESET_ENV: Readonly<Record<string, string>> =
  * generates when it reloads the mod, and never leaves the PC.
  */
 const MOD_MANIFEST = JSON.stringify({ name: 'probe-mod' });
-const MOD_HOOKS = JSON.stringify({ modules: ['./register.ts'] });
-const MOD_MODULE =
-  'export function register(on, options) {\n  on("session.start", async ($, e) => {\n    await $.store.get("e2e-mod-seen");\n  });\n}\n';
 const MOD_TYPES = 'declare const generatedByClaudeCode: true;\n';
 const mod = (pc: Pc, ...parts: string[]) => claude(pc, 'skills', 'probe-mod', ...parts);
-/** The `claude` command of the PCs that pull (T100): installs plugins at version 9.9.0. */
-const FAKE_CLAUDE = fileURLToPath(new URL('../dist/src/fake-claude.js', import.meta.url));
 /** A marketplace plugin installed on the first PC, at an older version than pull gets. */
 const PLUGIN_ID = 'e2e-plugin@e2e-market';
 const PLUGIN_VERSION = '9.8.7-e2e';
@@ -80,13 +75,6 @@ const pluginDirsPulled = (pc: Pc) => [
   join(pc.home, 'dev', 'pd-home'),
   join(pc.home, '.agentnomad', 'plugin-dirs', 'pd-outside'),
 ];
-
-/** The mod `name` as a plugin folder `dir` of its own, its module {@link MOD_MODULE}. */
-async function writeMod(dir: string, name: string): Promise<void> {
-  await write(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name }));
-  await write(join(dir, 'hooks', 'hooks.json'), MOD_HOOKS);
-  await write(join(dir, 'hooks', 'register.ts'), MOD_MODULE);
-}
 
 interface StepContext {
   readonly server: LocalServer;
@@ -125,19 +113,11 @@ const claudeRunningHere = await createClaudeRunningCheck(
 )();
 
 /**
- * T38: nothing readable left the PC. Every request the server received (URL, headers,
- * body) is searched for the password, file contents, commands, memory, the project name and
- * the login state in `~/.claude.json`. Only the username and device name are sent readable.
+ * T38: nothing readable left the PC: no file contents, commands, memory, project name or
+ * login state in `~/.claude.json` of the steps is in any request (see {@link expectNoLeaks}).
  */
-function expectNothingReadable(server: LocalServer, known: Known): void {
-  expect(server.requests.length).toBeGreaterThan(0);
-  const dataKey = known.dataKey;
-  const secrets = [
-    // T48: what only this PC may know, and where it keeps it.
-    dataKey,
-    Buffer.from(dataKey, 'base64').toString('hex'),
-    ...known.homes.flatMap((home) => [home, forward(home)]),
-    PASSWORD,
+function expectNothingReadable(server: LocalServer, secrets: Known): void {
+  expectNoLeaks(server, secrets, [
     'Notes live in',
     'Deploy the app',
     'Run the deploy script',
@@ -146,11 +126,13 @@ function expectNothingReadable(server: LocalServer, known: Known): void {
     'Project rules.',
     'docs-mcp',
     'db.js',
+    'notes-mcp.js',
     'check.sh',
     'echo ok',
     EDIT.trim(),
     'Old notes on the third PC',
     'Write release notes.',
+    'my-account-plugin',
     'e2e-mod-seen',
     'generatedByClaudeCode',
     // What the stale PC uploads in step 3 (QA-07).
@@ -165,34 +147,7 @@ function expectNothingReadable(server: LocalServer, known: Known): void {
     PLUGIN_VERSION,
     LOCAL_MOD_ID,
     'pd-outside',
-  ];
-  expect(plaintextLeaks(server.requests, secrets)).toEqual([]);
-  // A session token goes only in the Authorization header.
-  expect(plaintextLeaks(server.requests, known.tokens, 'authorization')).toEqual([]);
-  // Every upload is encrypted, not just compressed (T48).
-  for (const upload of server.requests.filter((request) => request.method === 'PUT')) {
-    expect(looksCompressedOnly(upload.body)).toBe(false);
-  }
-  // Control: the username is sent readable (register, login), so the search does see bodies.
-  expect(plaintextLeaks(server.requests, [USERNAME])).toEqual([USERNAME]);
-}
-
-/** What only the PCs of a step know, gathered while they are logged in (T48). */
-interface Known {
-  dataKey: string;
-  tokens: string[];
-  homes: string[];
-}
-
-async function known(...pcs: Pc[]): Promise<Known> {
-  const dataKey = await pcs[0]?.secret('data-key');
-  if (!dataKey) throw new Error('The PC is not logged in: no data key to look for.');
-  const tokens: string[] = [];
-  for (const pc of pcs) {
-    const token = await pc.secret('session-token');
-    if (token) tokens.push(token);
-  }
-  return { dataKey, tokens, homes: pcs.map((pc) => pc.home) };
+  ]);
 }
 
 /** Exit 0, or a failure that shows what the CLI printed. */
@@ -258,7 +213,7 @@ async function expectRestored(pc: Pc, edited: boolean): Promise<void> {
   // The saved environment value: in the shell profile, or already set on Windows.
   if (posix) {
     const profile = shellProfileFor(process.env['SHELL'], pc.home, process.platform);
-    expect(await read(profile.path)).toContain(ENV_NAME);
+    expect(readBlock(await read(profile.path), profile.kind).get(ENV_NAME)).toBe(ENV_VALUE);
   }
 }
 
@@ -358,20 +313,10 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     );
     // T104: the plugin folders that value names, and the local marketplace with its mod.
     for (const dir of pluginDirsFirst(pc)) await writeMod(dir, basename(dir));
-    await write(
-      join(localMarket(pc), '.claude-plugin', 'marketplace.json'),
-      JSON.stringify({
-        name: LOCAL_MARKET,
-        owner: { name: 'e2e' },
-        plugins: [{ name: 'lm-mod', source: './lm-mod' }],
-      }),
-    );
-    await writeMod(join(localMarket(pc), 'lm-mod'), 'lm-mod');
+    await writeLocalMarketplace(localMarket(pc), LOCAL_MARKET);
     await write(claude(pc, 'hooks', 'check.sh'), HOOK_SCRIPT, true);
     await write(claude(pc, 'skills', 'deploy', 'SKILL.md'), SKILL);
-    await write(mod(pc, '.claude-plugin', 'plugin.json'), MOD_MANIFEST);
-    await write(mod(pc, 'hooks', 'hooks.json'), MOD_HOOKS);
-    await write(mod(pc, 'hooks', 'register.ts'), MOD_MODULE);
+    await writeMod(mod(pc), 'probe-mod');
     await write(mod(pc, '.claude-plugin', 'types', 'register.d.ts'), MOD_TYPES);
     await write(
       join(pc.home, '.claude.json'),
@@ -476,7 +421,7 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     );
 
     ok(await pc.run(['register', ...LOGIN, '--yes'], stdin));
-    const secretsHere = await known(pc);
+    const secretsHere = await secretsOf(USER, pc);
 
     // No terminal and not enough flags: stops before changing anything, naming the flags.
     const unanswered = await pc.run(['push']);
@@ -560,7 +505,7 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
     expect(notLoggedIn.stderr).toContain('agentnomad login');
 
     ok(await pc.run(['login', ...LOGIN], stdin));
-    const secretsHere = await known(pc);
+    const secretsHere = await secretsOf(USER, pc);
     const pulled = ok(
       await pc.run([
         'pull',
@@ -684,7 +629,7 @@ async function thirdPc({ server, keychain }: StepContext): Promise<void> {
     await write(claude(stale, 'CLAUDE.md'), 'Stale notes.\n');
     await write(join(stale.project, 'CLAUDE.md'), 'Stale project.\n');
     ok(await stale.run(['login', ...LOGIN], stdin));
-    const secretsHere = await known(pc, stale);
+    const secretsHere = await secretsOf(USER, pc, stale);
     const skipped = await stale.run(['push', '--global', '--project', 'stale-only', '--yes']);
     expect(skipped.code, `${skipped.stdout}\n${skipped.stderr}`).toBe(1);
     expect(skipped.stderr).toContain('a newer copy exists. Run `agentnomad pull` first');

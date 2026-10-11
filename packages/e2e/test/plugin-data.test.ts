@@ -1,9 +1,10 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { expect, it } from 'vitest';
 
+import { FAKE_CLAUDE, writeMod } from '../src/fixtures.ts';
+import { expectNoLeaks, secretsOf } from '../src/leaks.ts';
 import { startLocalServer } from '../src/local-server.ts';
 import { newPc, read, write, type RunResult } from '../src/pc.ts';
 
@@ -13,9 +14,9 @@ import { newPc, read, write, type RunResult } from '../src/pc.ts';
  * in `plugins/data/` never goes into the bundle, so the second PC, which has a plugin of that
  * id installed, gets none of it. Runs on this OS only, never in the CI step jobs.
  */
-const FAKE_CLAUDE = fileURLToPath(new URL('../dist/src/fake-claude.js', import.meta.url));
-const LOGIN = ['--username', 'e2e-plugin-data', '--password-stdin'];
-const stdin = 'amber-harbor-violet-cedar-71\n';
+const USER = { username: 'e2e-plugin-data', password: 'amber-harbor-violet-cedar-71' };
+const LOGIN = ['--username', USER.username, '--password-stdin'];
+const stdin = `${USER.password}\n`;
 
 const MOD = 'data-mod';
 const MOD_MODULE =
@@ -50,10 +51,7 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
     });
     try {
       const claude = join(first.home, '.claude');
-      const mod = join(claude, 'skills', MOD);
-      await write(join(mod, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: MOD }));
-      await write(join(mod, 'hooks', 'hooks.json'), JSON.stringify({ modules: ['./register.ts'] }));
-      await write(join(mod, 'hooks', 'register.ts'), MOD_MODULE);
+      await writeMod(join(claude, 'skills', MOD), MOD, MOD_MODULE);
       await write(join(claude, 'plugins', 'store', STORE_FILE), CHOICE);
       await write(join(claude, 'plugins', 'data', LEFTOVER_FOLDER, 'state.json'), '{"old":1}');
 
@@ -79,6 +77,13 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
       expect(said).toContain(`Put back plugin data: ${STORE_FILE}.`);
       expect(said).not.toContain(LEFTOVER_FOLDER);
       expect(await exists(join(here, 'plugins', 'data', LEFTOVER_FOLDER))).toBe(false);
+
+      expectNoLeaks(server, await secretsOf(USER, first, second), [
+        CHOICE,
+        MOD_MODULE,
+        STORE_FILE,
+        LEFTOVER_FOLDER,
+      ]);
     } finally {
       await Promise.all([first.remove(), second.remove()]);
       await server.close();
