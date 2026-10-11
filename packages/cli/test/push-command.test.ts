@@ -338,7 +338,8 @@ describe('agentnomad push', () => {
         'Also save a copy of your 1 claude.ai skill (my-skill)? Your claude.ai account already syncs them; the copy is for PCs without that account. Saved unless you say no.',
         UPLOAD_IT,
       ]);
-      expect(t.script.confirmDefaults).toEqual([true, true]); // the part, then the upload question (T115);
+      // The part's default, then the upload question's (T115).
+      expect(t.script.confirmDefaults).toEqual([true, true]);
       expect(some.seen).toEqual([true]);
     });
 
@@ -394,7 +395,8 @@ describe('agentnomad push', () => {
       const plugins = withClaudePart(['my-upload'], null, null, 'account-plugins');
       const t = setup([true], { adapter: plugins.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
-      expect(t.script.confirmDefaults).toEqual([true, true]); // the part, then the upload question (T115);
+      // The part's default, then the upload question's (T115).
+      expect(t.script.confirmDefaults).toEqual([true, true]);
       expect(plugins.seen).toEqual([true]);
     });
 
@@ -430,7 +432,8 @@ describe('agentnomad push', () => {
       const data = withClaudePart(['probe-mod@skills-dir'], null, null, 'plugin-data');
       const t = setup([false], { adapter: data.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
-      expect(t.script.confirmDefaults).toEqual([false, true]); // the part, then the upload question (T115);
+      // The part's default, then the upload question's (T115).
+      expect(t.script.confirmDefaults).toEqual([false, true]);
     });
   });
 
