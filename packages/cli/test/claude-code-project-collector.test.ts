@@ -75,6 +75,13 @@ describe('project collector: what is taken', () => {
     ]);
   });
 
+  it('takes .claude/loop.md, the prompt a bare /loop runs there (T113)', async () => {
+    await writeTestFile(join(project, '.claude', 'loop.md'), 'Keep the release branch green.');
+    const files = await collect();
+    expect(paths(files)).toEqual(['.claude/loop.md']);
+    expect(text(files, '.claude/loop.md')).toBe('Keep the release branch green.');
+  });
+
   it('never takes app code, .env, .git, local agent memory or worktrees', async () => {
     await realisticProject();
     const files = await collect(true);

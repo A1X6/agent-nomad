@@ -114,6 +114,11 @@ describe('unknown-file check (T32 done-when)', () => {
     ]);
   });
 
+  it('does not report a project’s .claude/loop.md, which is synced (T113)', async () => {
+    await writeTestFile(join(project, '.claude', 'loop.md'));
+    expect(await findUnknownEntries({ kind: 'project', projectDir: project }, input())).toEqual([]);
+  });
+
   it('a missing folder reports nothing', async () => {
     expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([]);
   });

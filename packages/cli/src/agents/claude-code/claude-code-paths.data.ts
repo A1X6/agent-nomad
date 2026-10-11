@@ -20,8 +20,12 @@ const RAW = {
   reviewedVersion: '2.1.296',
 
   global: {
-    /** Single files in the base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
-    files: ['settings.json', 'CLAUDE.md', 'keybindings.json'],
+    /**
+     * Single files in the base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`). `loop.md` is the
+     * user's own prompt for a bare `/loop` (T113): the 2.1.296 program reads it as text into the
+     * prompt, cut at 25,000 bytes, and runs nothing from it.
+     */
+    files: ['settings.json', 'CLAUDE.md', 'keybindings.json', 'loop.md'],
     /** Folders taken whole. */
     folders: ['rules', 'skills', 'commands', 'agents', 'workflows', 'output-styles', 'themes'],
     /** Opt-in: subagent memory with `memory: user` (auto memory is per project). */
@@ -101,10 +105,11 @@ const RAW = {
       'storage-v2',
       // Plugins installed for Cowork, used instead of `plugins/` there.
       'cowork_plugins',
-      // May be the user's own (T108, for a later decision): /loop's task list, shared zips,
-      // session scratch, local agent memory (when the project is the home folder) and the
-      // program's local and project settings folders. Never synced until then.
-      'loop.md',
+      // Checked on the 2.1.296 program (T113): zips it deletes when they get old (`shares/`),
+      // the session storage's per-session scratch (`scratch/`), and its per-project folders,
+      // laid out in bytecode the program never shows: local and project subagent memory and a
+      // project's local and shared settings. The user's own copies live in the project, which
+      // project push takes; local agent memory is personal by design.
       'shares',
       'scratch',
       'agent-memory-local',
@@ -153,8 +158,8 @@ const RAW = {
   project: {
     /** Files in the project root; `CLAUDE.local.md` is personal and usually gitignored. */
     rootFiles: ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.mcp.json', '.worktreeinclude'],
-    /** Single files in `<project>/.claude/`. */
-    claudeFiles: ['settings.json', 'settings.local.json', 'CLAUDE.md'],
+    /** Single files in `<project>/.claude/`; `loop.md` wins over the global one (T113). */
+    claudeFiles: ['settings.json', 'settings.local.json', 'CLAUDE.md', 'loop.md'],
     /** Folders in `<project>/.claude/`, taken whole. */
     claudeFolders: ['rules', 'skills', 'commands', 'agents', 'workflows', 'output-styles'],
     /** Opt-in: subagent memory with `memory: project`. */
