@@ -310,10 +310,10 @@ neither push nor pull takes the names push always skips (in any case) or a file 
 (a script extension, the executable flag or a `#!` first line): push leaves them out and says
 how many, pull refuses them and names each one. Pull lists what was saved and puts it back
 only after a yes or `--plugin-data` (`--yes` alone never: plugin data stays opt-in, as it can
-be large and private), after the setup is written and its plugins installed, and only for a plugin installed here under the
-same id; a file here that differs is asked about like the setup's files, and the store keeps
-its permissions (only you can read it). Older agentnomad versions skip saved plugin data with
-one warning per file and restore the rest.
+be large and private), after the setup is written and its plugins installed, and only for a
+plugin installed here under the same id; a file here that differs is asked about like the
+setup's files, and the store keeps its permissions (only you can read it). Older agentnomad
+versions skip saved plugin data with one warning per file and restore the rest.
 
 ## Security
 
