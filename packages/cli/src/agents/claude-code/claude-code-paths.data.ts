@@ -26,8 +26,21 @@ const RAW = {
      * prompt, cut at 25,000 bytes, and runs nothing from it.
      */
     files: ['settings.json', 'CLAUDE.md', 'keybindings.json', 'loop.md'],
-    /** Folders taken whole. */
-    folders: ['rules', 'skills', 'commands', 'agents', 'workflows', 'output-styles', 'themes'],
+    /**
+     * Folders taken whole. `hooks/` (T112) is where users keep the scripts their hooks run:
+     * Claude Code never loads it by itself, a script there runs only when a settings file
+     * names it, and pull shows every such setting for review first.
+     */
+    folders: [
+      'rules',
+      'skills',
+      'commands',
+      'agents',
+      'workflows',
+      'output-styles',
+      'themes',
+      'hooks',
+    ],
     /** Opt-in: subagent memory with `memory: user` (auto memory is per project). */
     memoryFolders: ['agent-memory'],
     /**
@@ -160,14 +173,14 @@ const RAW = {
     rootFiles: ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.mcp.json', '.worktreeinclude'],
     /** Single files in `<project>/.claude/`; `loop.md` wins over the global one (T113). */
     claudeFiles: ['settings.json', 'settings.local.json', 'CLAUDE.md', 'loop.md'],
-    /** Folders in `<project>/.claude/`, taken whole. */
-    claudeFolders: ['rules', 'skills', 'commands', 'agents', 'workflows', 'output-styles'],
+    /** Folders in `<project>/.claude/`, taken whole; `hooks/` as in the base folder (T112). */
+    claudeFolders: ['rules', 'skills', 'commands', 'agents', 'workflows', 'output-styles', 'hooks'],
     /** Opt-in: subagent memory with `memory: project`. */
     memoryFolders: ['agent-memory'],
     /** Never taken from a project (paths from the project root). */
     neverSynced: ['.git', '.claude/agent-memory-local', '.claude/worktrees'],
     /** Known entries in `<project>/.claude/` that are left out on purpose. */
-    knownState: ['hooks'],
+    knownState: [],
   },
 
   plugins: {

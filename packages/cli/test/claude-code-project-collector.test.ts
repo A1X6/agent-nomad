@@ -141,6 +141,23 @@ describe('project collector: what is taken', () => {
     expect(paths(await collect())).toEqual(['.claude/settings.local.json', 'scripts/mine.py']);
   });
 
+  it('takes .claude/hooks/ whole, also the scripts no setting runs (T112)', async () => {
+    await writeTestFile(join(project, '.claude', 'hooks', 'lint.sh'), 'npm run lint');
+    await writeTestFile(join(project, '.claude', 'hooks', 'lib', 'common.sh'), 'shared');
+    expect(paths(await collect())).toEqual([
+      '.claude/hooks/lib/common.sh',
+      '.claude/hooks/lint.sh',
+    ]);
+  });
+
+  it('tells push about each script its hooks run that it cannot take, once (T112)', async () => {
+    const hooks = { Stop: [{ hooks: [{ type: 'command', command: 'bash ~/bin/stop.sh' }] }] };
+    await writeTestFile(join(project, '.claude', 'settings.json'), JSON.stringify({ hooks }));
+    await writeTestFile(join(project, '.claude', 'settings.local.json'), JSON.stringify({ hooks }));
+    const { skipped } = await collectSkipped(createClaudeCodeProjectCollector(options()));
+    expect(skipped).toEqual(['script ~/bin/stop.sh: it is outside the project']);
+  });
+
   it('returns nothing for a folder without a Claude Code setup', async () => {
     await writeTestFile(join(project, 'README.md'));
     expect(await collect(true)).toEqual([]);

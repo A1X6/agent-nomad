@@ -71,6 +71,17 @@ too. A control check confirms the same search does find the username, which is s
 `hfi-auth.json` in its folder are in the data file's `neverSynced` list: push never takes them,
 even when a hook names one, and pull refuses them (T108).
 
+**`hooks/` is synced whole, and nothing new runs unasked (T112).** `hooks/` in Claude Code's
+folder and `.claude/hooks/` in a project are taken whole like `skills/`, so pull also writes
+scripts no setting runs yet. Claude Code never loads that folder by itself (its 2.1.296 program
+names `.claude/hooks` only in its sandbox's list of protected paths and reads
+`hooks/hooks.json` only inside a plugin folder): a script there runs only when a settings file
+names it, and every new or changed hook, with the scripts it runs, is shown in pull's review
+first (threat 13). Scripts outside the synced folders keep the T38/T55 rule. A script a hook
+names that push cannot take (outside the home folder or the project, in a never-synced or
+known-state folder, in a folder for keys and logins or one whose files run by themselves) is
+named in push's left-out list, never skipped in silence.
+
 ## Findings
 
 Found in the T38 review, all fixed:

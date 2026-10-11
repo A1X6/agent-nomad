@@ -4,7 +4,7 @@ import { pathsOf } from '../shared/detector-system.ts';
 import { createFileGatherer, type FileGatherer, uniqueByPath } from '../shared/file-gathering.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { SKIPPED_NAMES } from './global-paths.ts';
-import { projectHookScripts } from './hook-scripts.ts';
+import { onceEachScript, projectHookScripts, type SkippedScript } from './hook-scripts.ts';
 import { localMarketplaceFiles } from './local-marketplaces.ts';
 import type { ProgramCli } from './plugin-sync.ts';
 import { pluginFiles } from './plugins.ts';
@@ -38,17 +38,19 @@ const isNeverSynced = underAnyFolder(PROJECT_NEVER_SYNCED);
 export function createClaudeCodeProjectCollector(options: ProjectCollectorOptions): Collector {
   const path = pathsOf(options.platform);
 
-  /** The script files the project's hooks run, when they are inside the project. */
+  /**
+   * The script files the project's hooks run, when they are inside the project; the others
+   * are told to `onSkipped` (T112).
+   */
   async function projectHookScriptFiles(
     files: FileGatherer,
     projectDir: string,
     settingsJson: string,
+    onSkipped: SkippedScript | undefined,
   ): Promise<CollectedFile[]> {
     const found: CollectedFile[] = [];
-    for (const script of projectHookScripts(settingsJson, {
-      projectDir,
-      platform: options.platform,
-    })) {
+    const context = { projectDir, platform: options.platform };
+    for (const script of projectHookScripts(settingsJson, context, onSkipped)) {
       const file = await files.readIfFile(script.nativePath, script.bundlePath);
       if (file) found.push(file);
     }
@@ -107,6 +109,7 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
         );
       }
 
+      const skippedScript = onceEachScript(collectOptions.onSkipped);
       for (const settings of PROJECT_SETTINGS_FILES) {
         const file = found.find((entry) => entry.path === settings);
         if (file)
@@ -115,6 +118,7 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
               files,
               projectDir,
               new TextDecoder().decode(file.content),
+              skippedScript,
             )),
           );
       }
