@@ -11,8 +11,8 @@ import {
 import { findAutoMemory, repositoryRoot } from './auto-memory.ts';
 import { claudeJsonFileOf, projectClaudeJson, readClaudeJsonFile } from './claude-json-merge.ts';
 import {
-  followImports,
-  isProjectMemoryFile,
+  importsOf,
+  PROJECT_MEMORY_FILES,
   projectImportPlace,
   shownImportPath,
   skippedImportReason,
@@ -111,16 +111,11 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
     found: readonly CollectedFile[],
     onSkipped: CollectOptions['onSkipped'],
   ): Promise<CollectedFile[]> {
-    const memoryFiles = found
-      .filter((file) => isProjectMemoryFile(file.path))
-      .map((file) => ({
-        nativePath: path.join(projectDir, ...file.path.split('/')),
-        bundlePath: file.path,
-        text: new TextDecoder().decode(file.content),
-      }));
     const imported: CollectedFile[] = [];
-    const { skipped } = await followImports(
-      memoryFiles,
+    const { skipped } = await importsOf(
+      projectDir,
+      PROJECT_MEMORY_FILES,
+      found,
       {
         place: (nativePath) =>
           projectImportPlace(nativePath, { projectDir, platform: options.platform }),

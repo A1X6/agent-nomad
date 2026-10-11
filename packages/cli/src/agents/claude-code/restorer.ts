@@ -33,12 +33,13 @@ import {
   type MutableReport,
 } from './claude-json-merge.ts';
 import {
-  followImports,
+  GLOBAL_MEMORY_FILES,
   globalImportPlace,
-  isGlobalMemoryFile,
-  isProjectMemoryFile,
+  importsOf,
+  PROJECT_MEMORY_FILES,
   projectImportPlace,
   type ImportPlace,
+  type MemoryFileNames,
 } from './claude-md-imports.ts';
 import { reviewRunnable } from './command-review.ts';
 import { extensionOf, GLOBAL_SETTINGS_FILES, startsWithShebang } from './global-paths.ts';
@@ -285,19 +286,14 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   async function importedIn(
     incoming: readonly CollectedFile[],
     folder: string,
-    isMemoryFile: (bundlePath: string) => boolean,
+    names: MemoryFileNames,
     place: (nativePath: string) => ImportPlace,
   ): Promise<string[]> {
     const byPath = new Map(incoming.map((entry) => [entry.path, entry]));
-    const memoryFiles = incoming
-      .filter((entry) => isMemoryFile(entry.path))
-      .map((entry) => ({
-        nativePath: path.join(folder, ...entry.path.split('/')),
-        bundlePath: entry.path,
-        text: new TextDecoder().decode(entry.content),
-      }));
-    const { files } = await followImports(
-      memoryFiles,
+    const { files } = await importsOf(
+      folder,
+      names,
+      incoming,
       {
         place,
         isFile: () => Promise.resolve(false),
@@ -326,7 +322,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       hookScripts(json, options).map((script) => script.bundlePath),
     );
     if (target.kind === 'global') {
-      const imported = await importedIn(incoming, options.baseDir, isGlobalMemoryFile, (file) =>
+      const imported = await importedIn(incoming, options.baseDir, GLOBAL_MEMORY_FILES, (file) =>
         globalImportPlace(file, options),
       );
       for (const bundlePath of imported) globalScripts.add(bundlePath);
@@ -342,7 +338,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         : new Set<string>();
     if (target.kind === 'project') {
       const { projectDir } = target;
-      const imported = await importedIn(incoming, projectDir, isProjectMemoryFile, (file) =>
+      const imported = await importedIn(incoming, projectDir, PROJECT_MEMORY_FILES, (file) =>
         projectImportPlace(file, { projectDir, platform: options.platform }),
       );
       for (const bundlePath of imported) projectScripts.add(bundlePath);
