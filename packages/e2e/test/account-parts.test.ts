@@ -1,8 +1,9 @@
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { expect, it } from 'vitest';
 
+import { FAKE_CLAUDE } from '../src/fixtures.ts';
+import { expectNoLeaks, secretsOf } from '../src/leaks.ts';
 import { startLocalServer } from '../src/local-server.ts';
 import { newPc, read, write, type RunResult } from '../src/pc.ts';
 
@@ -12,9 +13,9 @@ import { newPc, read, write, type RunResult } from '../src/pc.ts';
  * claude.ai account carry both across as a local skill and a local plugin. Runs on this OS
  * only, never in the CI step jobs.
  */
-const FAKE_CLAUDE = fileURLToPath(new URL('../dist/src/fake-claude.js', import.meta.url));
-const LOGIN = ['--username', 'e2e-account-parts', '--password-stdin'];
-const stdin = 'amber-harbor-violet-cedar-71\n';
+const USER = { username: 'e2e-account-parts', password: 'amber-harbor-violet-cedar-71' };
+const LOGIN = ['--username', USER.username, '--password-stdin'];
+const stdin = `${USER.password}\n`;
 
 /** The folder Claude Code 2.1.296 syncs one claude.ai account into: `<org>_<account>`. */
 const ACCOUNT = '22222222-2222-4222-8222-222222222222_33333333-3333-4333-8333-333333333333';
@@ -108,6 +109,15 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
       expect(await read(join(here, SKILL, 'SKILL.md'))).toBe(SKILL_MD);
       expect(await read(join(here, PLUGIN, '.claude-plugin', 'plugin.json'))).toBe(PLUGIN_JSON);
       expect(said).toContain(`Added ${SKILL} as local skills.`);
+
+      expectNoLeaks(server, await secretsOf(USER, first, second), [
+        SKILL_MD,
+        PLUGIN_JSON,
+        ACCOUNT,
+        SKILL,
+        PLUGIN,
+        'A plugin the user uploaded.',
+      ]);
     } finally {
       await Promise.all([first.remove(), second.remove()]);
       await server.close();

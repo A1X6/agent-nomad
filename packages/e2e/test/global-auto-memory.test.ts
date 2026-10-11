@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { projectDirName } from '@agentnomad/cli';
 import { expect, it } from 'vitest';
 
+import { expectNoLeaks, secretsOf } from '../src/leaks.ts';
 import { startLocalServer } from '../src/local-server.ts';
 import { newPc, read, write, type RunResult } from '../src/pc.ts';
 
@@ -12,8 +13,9 @@ import { newPc, read, write, type RunResult } from '../src/pc.ts';
  * writes it back to `~/.claude/projects/<same name>/memory/`. Transcripts beside it never go.
  * Runs on this OS only, never in the CI step jobs.
  */
-const LOGIN = ['--username', 'e2e-global-memory', '--password-stdin'];
-const stdin = 'amber-harbor-violet-cedar-71\n';
+const USER = { username: 'e2e-global-memory', password: 'amber-harbor-violet-cedar-71' };
+const LOGIN = ['--username', USER.username, '--password-stdin'];
+const stdin = `${USER.password}\n`;
 
 /** A project folder name as Claude Code makes it, for a project never pushed as a project. */
 const OTHER_PROJECT = '-home-me-site';
@@ -49,6 +51,14 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
         OTHER_NOTES,
       );
       await expect(read(join(here, OTHER_PROJECT, 'session.jsonl'))).rejects.toThrow();
+
+      expectNoLeaks(server, await secretsOf(USER, first, second), [
+        'The user prefers small commits.',
+        OTHER_NOTES,
+        OTHER_PROJECT,
+        name,
+        'SECRET transcript',
+      ]);
     } finally {
       await Promise.all([first.remove(), second.remove()]);
       await server.close();

@@ -2,13 +2,14 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { expect, it } from 'vitest';
 
+import { FAKE_CLAUDE, MOD_MODULE, writeLocalMarketplace } from '../src/fixtures.ts';
+import { expectNoLeaks, secretsOf } from '../src/leaks.ts';
 import { startLocalServer } from '../src/local-server.ts';
-import { newPc, read, write, type RunResult } from '../src/pc.ts';
+import { forward, newPc, read, write, type RunResult } from '../src/pc.ts';
 
 /**
  * T98: marketplaces added from a local folder, each with a mod installed, restore on a second
@@ -18,44 +19,34 @@ import { newPc, read, write, type RunResult } from '../src/pc.ts';
  * repositories are folders here), so it runs once, never in the CI step jobs.
  */
 const run = promisify(execFile);
-const FAKE_CLAUDE = fileURLToPath(new URL('../dist/src/fake-claude.js', import.meta.url));
-const LOGIN = ['--username', 'e2e-markets', '--password-stdin'];
-const stdin = 'quartz-lantern-meadow-pilot-58\n';
+const USER = { username: 'e2e-markets', password: 'quartz-lantern-meadow-pilot-58' };
+const LOGIN = ['--username', USER.username, '--password-stdin'];
+const stdin = `${USER.password}\n`;
 
-const MOD_MODULE =
-  'export function register(on, options) {\n  on("session.start", async ($, e) => {\n    await $.store.get("e2e-seen");\n  });\n}\n';
 const EDIT = '# Edited, not committed\n';
 const NEW_FILE = 'A new file, not committed.\n';
+const COMMITTED = 'Committed, never pushed.\n';
 
-/** A marketplace named `name` in `dir`, with the mod `lm-mod` in it. */
+/** A marketplace named `name` in `dir`, with the mod `lm-mod` and a README in it. */
 async function marketplace(dir: string, name: string): Promise<void> {
-  await write(
-    join(dir, '.claude-plugin', 'marketplace.json'),
-    JSON.stringify({
-      name,
-      owner: { name: 'e2e' },
-      plugins: [{ name: 'lm-mod', source: './lm-mod' }],
-    }),
-  );
-  await write(
-    join(dir, 'lm-mod', '.claude-plugin', 'plugin.json'),
-    JSON.stringify({ name: 'lm-mod' }),
-  );
-  await write(
-    join(dir, 'lm-mod', 'hooks', 'hooks.json'),
-    JSON.stringify({ modules: ['./register.ts'] }),
-  );
-  await write(join(dir, 'lm-mod', 'hooks', 'register.ts'), MOD_MODULE);
+  await writeLocalMarketplace(dir, name);
   await write(join(dir, 'README.md'), `# ${name}\n`);
 }
 
-/** Runs git in `cwd` with no user or system configuration of this machine. */
-async function git(cwd: string, config: string, ...args: string[]): Promise<string> {
+/**
+ * Runs git in `cwd` with no user or system configuration of this machine: `home` (with an
+ * empty `gitconfig`) stands in for the home folder, so git reads no global ignore or
+ * attributes file of the real one (QA-06).
+ */
+async function git(cwd: string, home: string, ...args: string[]): Promise<string> {
   const { stdout } = await run('git', args, {
     cwd,
     env: {
       ...process.env,
-      GIT_CONFIG_GLOBAL: config,
+      HOME: home,
+      USERPROFILE: home,
+      XDG_CONFIG_HOME: undefined,
+      GIT_CONFIG_GLOBAL: join(home, 'gitconfig'),
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_AUTHOR_NAME: 'e2e',
       GIT_AUTHOR_EMAIL: 'e2e@example.com',
@@ -67,13 +58,13 @@ async function git(cwd: string, config: string, ...args: string[]): Promise<stri
 }
 
 /** `dir` as a repository with every file committed and pushed to a new bare `remote`. */
-async function pushedRepo(dir: string, remote: string, config: string): Promise<void> {
-  await git(dirname(remote), config, 'init', '--bare', '--quiet', '-b', 'main', remote);
-  await git(dir, config, 'init', '--quiet', '-b', 'main');
-  await git(dir, config, 'add', '-A');
-  await git(dir, config, 'commit', '--quiet', '-m', 'marketplace');
-  await git(dir, config, 'remote', 'add', 'origin', remote);
-  await git(dir, config, 'push', '--quiet', '-u', 'origin', 'main');
+async function pushedRepo(dir: string, remote: string, home: string): Promise<void> {
+  await git(dirname(remote), home, 'init', '--bare', '--quiet', '-b', 'main', remote);
+  await git(dir, home, 'init', '--quiet', '-b', 'main');
+  await git(dir, home, 'add', '-A');
+  await git(dir, home, 'commit', '--quiet', '-m', 'marketplace');
+  await git(dir, home, 'remote', 'add', 'origin', remote);
+  await git(dir, home, 'push', '--quiet', '-u', 'origin', 'main');
 }
 
 const exists = (path: string) =>
@@ -94,8 +85,7 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
   async () => {
     const server = await startLocalServer(undefined);
     const remotes = await realpath(await mkdtemp(join(tmpdir(), 'agentnomad-e2e-remotes-')));
-    const config = join(remotes, 'gitconfig');
-    await writeFile(config, '');
+    await writeFile(join(remotes, 'gitconfig'), '');
     const first = await newPc('lm-first', { apiUrl: server.url, keychain: false });
     const second = await newPc('lm-second', {
       apiUrl: server.url,
@@ -112,18 +102,18 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
         'lm-unpushed': join(first.home, 'markets', 'unpushed'),
       };
       for (const name of NAMES) await marketplace(folders[name], name);
-      await pushedRepo(folders['lm-clean'], join(remotes, 'clean.git'), config);
-      await pushedRepo(folders['lm-gone'], join(remotes, 'gone.git'), config);
+      await pushedRepo(folders['lm-clean'], join(remotes, 'clean.git'), remotes);
+      await pushedRepo(folders['lm-gone'], join(remotes, 'gone.git'), remotes);
       const unpushed = folders['lm-unpushed'];
       await write(join(unpushed, '.gitignore'), 'secret.log\n');
-      await pushedRepo(unpushed, join(remotes, 'unpushed.git'), config);
-      await write(join(unpushed, 'CHANGELOG.md'), 'Committed, never pushed.\n');
-      await git(unpushed, config, 'add', 'CHANGELOG.md');
-      await git(unpushed, config, 'commit', '--quiet', '-m', 'not pushed');
+      await pushedRepo(unpushed, join(remotes, 'unpushed.git'), remotes);
+      await write(join(unpushed, 'CHANGELOG.md'), COMMITTED);
+      await git(unpushed, remotes, 'add', 'CHANGELOG.md');
+      await git(unpushed, remotes, 'commit', '--quiet', '-m', 'not pushed');
       await write(join(unpushed, 'README.md'), EDIT);
       await write(join(unpushed, 'notes.md'), NEW_FILE);
       await write(join(unpushed, 'secret.log'), 'ignored by git\n');
-      const cleanCommit = await git(folders['lm-clean'], config, 'rev-parse', 'HEAD');
+      const cleanCommit = await git(folders['lm-clean'], remotes, 'rev-parse', 'HEAD');
 
       const plugins = join(first.home, '.claude', 'plugins');
       await write(
@@ -167,17 +157,15 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
         expect(said).toContain(`+ lm-mod@${name}`);
       }
       // Re-cloned at the saved commit, and the folder is as git left it on the first PC.
-      expect(await git(here['lm-clean'], config, 'rev-parse', 'HEAD')).toBe(cleanCommit);
-      expect(await git(here['lm-clean'], config, 'status', '--porcelain')).toBe('');
+      expect(await git(here['lm-clean'], remotes, 'rev-parse', 'HEAD')).toBe(cleanCommit);
+      expect(await git(here['lm-clean'], remotes, 'status', '--porcelain')).toBe('');
       // No re-clone: the remote is gone, or the commit was never pushed. The files came.
       expect(said).toContain('Could not re-clone the marketplace lm-gone');
       expect(await exists(join(here['lm-gone'], '.git'))).toBe(false);
       expect(await exists(join(here['lm-unpushed'], '.git'))).toBe(false);
       expect(await read(join(here['lm-unpushed'], 'README.md'))).toBe(EDIT);
       expect(await read(join(here['lm-unpushed'], 'notes.md'))).toBe(NEW_FILE);
-      expect(await read(join(here['lm-unpushed'], 'CHANGELOG.md'))).toBe(
-        'Committed, never pushed.\n',
-      );
+      expect(await read(join(here['lm-unpushed'], 'CHANGELOG.md'))).toBe(COMMITTED);
       expect(await exists(join(here['lm-unpushed'], 'secret.log'))).toBe(false);
       expect(await readdir(here['lm-plain'])).not.toContain('.git');
 
@@ -195,6 +183,17 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
         await second.run(['pull', '--global', '--merge', '--yes', '--allow-commands']),
       );
       expect(again.stdout).toContain('Restored the Claude Code global setup: 0 written');
+
+      expectNoLeaks(server, await secretsOf(USER, first, second), [
+        MOD_MODULE,
+        EDIT,
+        NEW_FILE,
+        COMMITTED,
+        cleanCommit,
+        remotes,
+        forward(remotes),
+        ...NAMES,
+      ]);
     } finally {
       await Promise.all([
         first.remove(),

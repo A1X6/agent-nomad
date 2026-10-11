@@ -2,6 +2,7 @@ import { BUNDLE_FORMAT_VERSION, fromHex } from '@agentnomad/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
+  BundleNotFoundError,
   StorageLimitError,
   createBundleService,
   overLimit,
@@ -55,6 +56,77 @@ describe('BundleService cleanup', () => {
     const second = await upload(1, 2);
     expect(second).toMatchObject({ outcome: 'stored', meta: { revision: 2 } });
     expect(logged).toHaveLength(1);
+  });
+});
+
+describe('BundleService download', () => {
+  /**
+   * The real store, except that the first `get` waits for `release()`: a download is held
+   * between reading its setup and reading the file while another request runs (BUG-03).
+   */
+  function heldStore() {
+    const real = createPostgresBlobStore(database.db);
+    let reached: () => void = () => undefined;
+    let release: () => void = () => undefined;
+    const arrived = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const store: BlobStore = {
+      ...real,
+      async get(ref) {
+        if (!held) {
+          held = true;
+          reached();
+          await gate;
+        }
+        return real.get(ref);
+      },
+    };
+    return { store, arrived, release };
+  }
+
+  it('returns the new copy when a save replaces the file during the download', async () => {
+    const { store, arrived, release } = heldStore();
+    const service = serviceWith({ blobs: store });
+    const user = await createUser(database.db);
+    await service.upload(input(user.id, 1));
+
+    const download = service.download(globalKey(user.id));
+    await arrived;
+    // The save commits revision 2 and deletes the file the download is about to read.
+    await service.upload(input(user.id, 2, 1));
+    release();
+
+    const { meta, ciphertext } = await download;
+    expect(meta.revision).toBe(2);
+    expect(ciphertext).toEqual(bytes(64, 2));
+  });
+
+  it('answers not found when a delete removes the setup during the download', async () => {
+    const { store, arrived, release } = heldStore();
+    const service = serviceWith({ blobs: store });
+    const user = await createUser(database.db);
+    await service.upload(input(user.id));
+
+    const download = service.download(globalKey(user.id));
+    await arrived;
+    await service.delete(globalKey(user.id));
+    release();
+
+    await expect(download).rejects.toBeInstanceOf(BundleNotFoundError);
+  });
+
+  it('still fails loudly when the current file is missing for good', async () => {
+    const real = createPostgresBlobStore(database.db);
+    const service = serviceWith({ blobs: { ...real, get: () => Promise.resolve(null) } });
+    const user = await createUser(database.db);
+    await service.upload(input(user.id));
+
+    await expect(service.download(globalKey(user.id))).rejects.toThrow(/is missing/);
   });
 });
 

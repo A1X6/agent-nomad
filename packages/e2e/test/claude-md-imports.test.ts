@@ -2,6 +2,7 @@ import { join } from 'node:path';
 
 import { expect, it } from 'vitest';
 
+import { expectNoLeaks, secretsOf } from '../src/leaks.ts';
 import { startLocalServer } from '../src/local-server.ts';
 import { newPc, read, write, type RunResult } from '../src/pc.ts';
 
@@ -10,8 +11,9 @@ import { newPc, read, write, type RunResult } from '../src/pc.ts';
  * where the import points on a second PC; one push cannot take is named. Push and pull run on
  * this OS only, so it runs once, never in the CI step jobs.
  */
-const LOGIN = ['--username', 'e2e-claude-md-imports', '--password-stdin'];
-const stdin = 'amber-harbor-violet-sketch-73\n';
+const USER = { username: 'e2e-claude-md-imports', password: 'amber-harbor-violet-sketch-73' };
+const LOGIN = ['--username', USER.username, '--password-stdin'];
+const stdin = `${USER.password}\n`;
 
 const ok = (result: RunResult) => {
   expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -43,6 +45,14 @@ it.skipIf(process.env['E2E_STEP'] !== undefined)(
       expect(await read(join(second.home, 'notes', 'style.md'))).toBe('Use tabs.\n@team.md\n');
       expect(await read(join(second.home, 'notes', 'team.md'))).toBe('Team rules.\n');
       await expect(read(join(second.home, 'notes', 'run.sh'))).rejects.toThrow();
+
+      expectNoLeaks(server, await secretsOf(USER, first, second), [
+        'Use tabs.',
+        'Team rules.',
+        'style.md',
+        'team.md',
+        'echo hi',
+      ]);
     } finally {
       await Promise.all([first.remove(), second.remove()]);
       await server.close();
