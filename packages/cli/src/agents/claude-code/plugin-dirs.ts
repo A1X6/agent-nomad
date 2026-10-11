@@ -1,5 +1,6 @@
 import * as z from 'zod';
 
+import { exists } from '../../system/files.ts';
 import {
   JsonObjectSchema,
   parseJsonWith,
@@ -13,7 +14,6 @@ import { pathsOf } from '../shared/detector-system.ts';
 import { PLUGIN_DIRS_PREFIX } from './global-paths.ts';
 import {
   askFolderConflicts,
-  exists,
   homeFolderFor,
   SAVED_FOLDER_SHAPE,
   saveFolder,
@@ -261,7 +261,7 @@ export async function planPluginDirs(
       path.join(deps.homedir, '.agentnomad', 'plugin-dirs', name);
     let fallback = fallbackOf(saved.name);
     for (let n = 2; used.has(fallback); n += 1) fallback = fallbackOf(`${saved.name}-${String(n)}`);
-    const dir = homeFolderFor(saved.path, fallback, deps);
+    const dir = homeFolderFor(saved, fallback, deps);
     if (used.has(dir)) continue;
     used.add(dir);
     const key = entry.path.slice(0, -'.json'.length);

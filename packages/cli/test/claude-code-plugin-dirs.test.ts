@@ -216,6 +216,8 @@ async function pull(
     answers?: unknown[];
     conflict?: ConflictChoice;
     flags?: { assumeYes: boolean; allowCommands: boolean };
+    /** Claude Code's base folder, `~/.claude` unless said. */
+    baseDir?: string;
   } = {},
 ) {
   const fake = validateCli(validatePassWithWarning);
@@ -250,7 +252,7 @@ async function pull(
     },
     {
       homedir: home,
-      baseDir: base,
+      baseDir: options.baseDir ?? base,
       platform: process.platform,
       validator: () => Promise.resolve(validator),
       restorer,
@@ -287,6 +289,32 @@ describe('pull writes a saved plugin folder (T99)', () => {
 
   it('never writes into a folder for keys and logins: ~/.agentnomad/plugin-dirs instead', async () => {
     await pull([savedMod({ path: `.ssh/${MOD_NAME}` })]);
+    expect(await exists(join(home, '.agentnomad', 'plugin-dirs', MOD_NAME))).toBe(true);
+  });
+
+  // SEC-01 (review 15): each saved file is checked from home, not only the saved folder.
+  it('never writes a file into an autostart folder inside the saved one: ~/.agentnomad/plugin-dirs instead', async () => {
+    const files = savedFiles([...modFiles(''), collected('fish/config.fish', 'echo hi')]);
+    await pull([savedMod({ path: '.config', files })]);
+    expect(await exists(join(home, '.config', 'fish', 'config.fish'))).toBe(false);
+    expect(
+      await readText(join(home, '.agentnomad', 'plugin-dirs', MOD_NAME, 'fish', 'config.fish')),
+    ).toBe('echo hi');
+  });
+
+  it('never writes a LaunchAgent inside the saved folder: ~/.agentnomad/plugin-dirs instead', async () => {
+    const files = savedFiles([...modFiles(''), collected('LaunchAgents/x.plist', '<plist/>')]);
+    await pull([savedMod({ path: 'Library', files })]);
+    expect(await exists(join(home, 'Library', 'LaunchAgents', 'x.plist'))).toBe(false);
+    expect(await exists(join(home, '.agentnomad', 'plugin-dirs', MOD_NAME))).toBe(true);
+  });
+
+  it("never writes a folder that holds Claude Code's own folder: ~/.agentnomad/plugin-dirs instead", async () => {
+    const files = savedFiles([...modFiles(''), collectedJson('claude/settings.json', {})]);
+    await pull([savedMod({ path: '.config', files })], {
+      baseDir: join(home, '.config', 'claude'),
+    });
+    expect(await exists(join(home, '.config', 'claude', 'settings.json'))).toBe(false);
     expect(await exists(join(home, '.agentnomad', 'plugin-dirs', MOD_NAME))).toBe(true);
   });
 

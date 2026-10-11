@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { BACKUP_MARKER, backupStamp } from '@agentnomad/core';
 import * as z from 'zod';
 
-import { JsonObjectSchema } from '../../system/json.ts';
+import { isJsonObject, JsonObjectSchema, strings } from '../../system/json.ts';
 import type { CollectedFile, ConflictQuestion, ConflictResolver, ScopeTarget } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import {
@@ -107,12 +107,6 @@ export interface ClaudeJsonMerge {
     target?: ScopeTarget,
   ): Promise<void>;
 }
-
-const isJsonObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const strings = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 
 /**
  * `~/.claude.json` at `file`, parsed, or `null` when it is missing. Push reads it for the

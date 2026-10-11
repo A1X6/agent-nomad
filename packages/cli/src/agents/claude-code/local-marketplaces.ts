@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { BundlePathSchema, MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
 import * as z from 'zod';
 
+import { exists } from '../../system/files.ts';
 import { parseJsonWith, valueOrNull, type JsonResult } from '../../system/json.ts';
 import { formatSize } from '../../ui/format-size.ts';
 import { printableLine } from '../../ui/printable.ts';
@@ -416,19 +417,28 @@ async function cloneInto(
 /**
  * The folder for a saved folder on this PC: the same path from home, or `fallback` for one
  * that was outside home or would land in a refused place (keys, autostart folders, Claude
- * Code's own folder).
+ * Code's own folder). Each saved file is checked from home too, and a folder that holds Claude
+ * Code's own folder goes to `fallback`, so no file lands in a refused place (SEC-01); the
+ * folder then stays in one piece.
  */
 export function homeFolderFor(
-  savedPath: string | null,
+  saved: Pick<SavedFolder, 'path' | 'files'>,
   fallback: string,
   deps: FolderPlaceDeps,
 ): string {
   const path = pathsOf(deps.platform);
-  if (savedPath === null || homePathProblem(savedPath) !== null) return fallback;
+  const savedPath = saved.path;
+  if (savedPath === null) return fallback;
+  const refused = [savedPath, ...saved.files.map((file) => `${savedPath}/${file.path}`)].some(
+    (fromHome) => homePathProblem(fromHome) !== null,
+  );
+  if (refused) return fallback;
   const dir = path.join(deps.homedir, ...savedPath.split('/'));
-  const inClaude =
-    bundlePathInside(path, deps.baseDir, dir) !== null || path.relative(dir, deps.baseDir) === '';
-  return inClaude ? fallback : dir;
+  const holds = (folder: string, inner: string) => {
+    const relative = path.relative(folder, inner);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  };
+  return holds(deps.baseDir, dir) || holds(dir, deps.baseDir) ? fallback : dir;
 }
 
 /**
@@ -451,14 +461,8 @@ function folderFor(
     'marketplaces',
     saved.name,
   );
-  return { dir: homeFolderFor(saved.path, fallback, deps), add: true };
+  return { dir: homeFolderFor(saved, fallback, deps), add: true };
 }
-
-export const exists = (path: string) =>
-  stat(path).then(
-    () => true,
-    () => false,
-  );
 
 /** The parts of pull's plan context the saved local marketplaces need. */
 export type LocalMarketplaceContext = Pick<

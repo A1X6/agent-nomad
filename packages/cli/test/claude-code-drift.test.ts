@@ -132,6 +132,27 @@ describe('drift check (T55): settings the pull review watches', () => {
       },
     ]);
   });
+
+  // SEC-02 (review 15): the plugin parts the pull review asks about are watched too.
+  it('keeps changelog entries that name a plugin part Claude Code starts programs from', () => {
+    const changelog = [
+      '## 2.1.300',
+      '',
+      '- Added `lspServers` entries that start on demand',
+      '- Changed plugin `monitors` to also arm on resume',
+      '- Added a new theme',
+      '',
+    ].join('\n');
+    expect(changelogSince(changelog, '2.1.299')).toEqual([
+      {
+        version: '2.1.300',
+        lines: [
+          '- Added `lspServers` entries that start on demand',
+          '- Changed plugin `monitors` to also arm on resume',
+        ],
+      },
+    ]);
+  });
 });
 
 describe('drift check (T41): comparing with the data file', () => {
