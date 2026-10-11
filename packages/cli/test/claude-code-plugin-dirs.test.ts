@@ -279,6 +279,7 @@ describe('pull writes a saved plugin folder (T99)', () => {
   it('never writes into a folder for keys and logins: ~/.agentnomad/plugin-dirs instead', async () => {
     await pull([savedMod({ path: `.ssh/${MOD_NAME}` })]);
     expect(await exists(join(home, '.agentnomad', 'plugin-dirs', MOD_NAME))).toBe(true);
+    expect(await exists(join(home, '.ssh', MOD_NAME))).toBe(false);
   });
 
   // SEC-01 (review 15): each saved file is checked from home, not only the saved folder.
@@ -414,5 +415,7 @@ describe('pull writes a saved plugin folder (T99)', () => {
         line.startsWith(`The saved plugin folder ${SAVED_PATH} could not be read:`),
       ),
     ).toBe(true);
+    expect(await exists(modFolder())).toBe(false);
+    expect(await exists(join(home, '.agentnomad', 'plugin-dirs'))).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, readdir } from 'node:fs/promises';
+import { delimiter, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -14,8 +14,8 @@ import {
   savedLocalMarketplace,
   scriptedGit,
   validatePassWithWarning,
-  writeLocalMarketplace,
   validatorFor,
+  writeLocalMarketplace,
   type GitAnswer,
 } from './claude-code-plugin-fixtures.ts';
 import {
@@ -28,6 +28,7 @@ import {
 import {
   collected,
   collectedJson,
+  executableLookup,
   exists,
   readJson,
   readText,
@@ -36,6 +37,7 @@ import {
   writeTestFile,
 } from './fakes.ts';
 import {
+  findGit,
   localMarketplaceFiles,
   planLocalMarketplaces,
   readSavedLocalMarketplace,
@@ -53,6 +55,8 @@ useProjectFolders('agentnomad-local-markets-');
 const TOOLS = 'tools';
 const COMMIT = '3f2a9c1e5b7d4a6f8e0c2b4d6f8a0c2e4b6d8f0a';
 const REMOTE = 'https://example.com/me/tools.git';
+/** A control character, which git would read as part of the remote. */
+const BELL = String.fromCharCode(7);
 const toolsFolder = () => join(home, 'markets', TOOLS);
 const SAVED_PATH = `.agentnomad/local-marketplaces/${TOOLS}.json`;
 
@@ -309,6 +313,7 @@ describe('pull writes a saved local marketplace (T98)', () => {
     expect(plan.marketplaces).toEqual([
       { name: TOOLS, add: join(home, '.agentnomad', 'marketplaces', TOOLS) },
     ]);
+    expect(await exists(join(home, '.ssh', TOOLS))).toBe(false);
   });
 
   it("never writes into Claude Code's own folder: ~/.agentnomad/marketplaces instead", async () => {
@@ -434,5 +439,93 @@ describe('pull writes a saved local marketplace (T98)', () => {
         line.startsWith(`The saved marketplace ${SAVED_PATH} could not be read:`),
       ),
     ).toBe(true);
+  });
+
+  // QA-01 (review 15): pull runs git on the saved remote and commit, so an entry git could
+  // take as an option or a command is refused whole, before git runs.
+  it.each([
+    ['a git helper that runs a command', { remote: 'ext::sh -c touch% x', commit: COMMIT }],
+    ['a git helper without white space', { remote: 'ext::sh', commit: COMMIT }],
+    ['an option for a remote', { remote: '--upload-pack=x', commit: COMMIT }],
+    [
+      'white space in the remote',
+      { remote: 'https://example.com/me/my tools.git', commit: COMMIT },
+    ],
+    ['a control character in the remote', { remote: `${REMOTE}${BELL}`, commit: COMMIT }],
+    ['an option for a commit', { remote: REMOTE, commit: '--hard' }],
+    ['a short commit', { remote: REMOTE, commit: COMMIT.slice(0, 7) }],
+    ['a commit that is not hex', { remote: REMOTE, commit: `g${COMMIT.slice(1)}` }],
+  ])('refuses a saved entry with %s and runs no git', async (_, git) => {
+    const scripted = scriptedGit({});
+    const { plan, lines } = await pull([savedTools({ git })], { git: scripted.git });
+    expect(plan.marketplaces).toEqual([]);
+    expect(
+      lines.some((line) =>
+        line.startsWith(`The saved marketplace ${SAVED_PATH} could not be read:`),
+      ),
+    ).toBe(true);
+    expect(scripted.calls).toEqual([]);
+    expect(await exists(toolsFolder())).toBe(false);
+  });
+});
+
+describe('the git that pull re-clones with never waits for an answer (QA-01 of review 15)', () => {
+  const windows = process.platform === 'win32';
+  const GUARDED = [
+    'GIT_ALLOW_PROTOCOL',
+    'GIT_TERMINAL_PROMPT',
+    'GCM_INTERACTIVE',
+    'GIT_SSH_COMMAND',
+  ] as const;
+
+  /** What `findGit` runs as git with `env`: one that prints the guarded variables. */
+  async function guardedEnv(env: Record<string, string>): Promise<string[]> {
+    const folder = join(root, 'bin');
+    const program = join(folder, windows ? 'git.cmd' : 'git');
+    const lines = GUARDED.map((name) =>
+      windows ? `echo ${name}=%${name}%` : `echo "${name}=$${name}"`,
+    );
+    await writeTestFile(
+      program,
+      windows ? ['@echo off', ...lines].join('\r\n') : ['#!/bin/sh', ...lines].join('\n'),
+    );
+    await chmod(program, 0o755);
+    // cmd.exe, which runs a .cmd, is found on the PATH given.
+    const path = windows ? [folder, process.env['PATH'] ?? ''].join(delimiter) : folder;
+    const git = await findGit(
+      executableLookup({
+        platform: process.platform,
+        homedir: home,
+        env: { ...env, PATH: path },
+        executables: [program],
+      }),
+    );
+    if (git === null) throw new Error('git not found');
+    const result = await git.run(['--version'], root);
+    return result.stdout.split(/\r?\n/).filter((line) => line !== '');
+  }
+
+  it('allows only the safe protocols, no password prompt and ssh in batch mode', async () => {
+    expect(await guardedEnv({})).toEqual([
+      'GIT_ALLOW_PROTOCOL=file:git:http:https:ssh',
+      'GIT_TERMINAL_PROMPT=0',
+      'GCM_INTERACTIVE=never',
+      'GIT_SSH_COMMAND=ssh -o BatchMode=yes',
+    ]);
+  });
+
+  it("keeps the user's own ssh command, and overrides their protocols and prompt", async () => {
+    const env = {
+      GIT_ALLOW_PROTOCOL: 'ext',
+      GIT_TERMINAL_PROMPT: '1',
+      GCM_INTERACTIVE: 'always',
+      GIT_SSH_COMMAND: 'ssh -i work_key',
+    };
+    expect(await guardedEnv(env)).toEqual([
+      'GIT_ALLOW_PROTOCOL=file:git:http:https:ssh',
+      'GIT_TERMINAL_PROMPT=0',
+      'GCM_INTERACTIVE=never',
+      'GIT_SSH_COMMAND=ssh -i work_key',
+    ]);
   });
 });
