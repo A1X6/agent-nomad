@@ -40,7 +40,7 @@ import { listSavedRevisions } from '../pull/saved-setups.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
 import { countingPrompter } from '../ui/counting-prompter.ts';
-import { formatSize } from '../ui/format-size.ts';
+import { formatSize, formatSizeOver } from '../ui/format-size.ts';
 import { printableLine } from '../ui/printable.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { localPathResolver, toBundleFiles } from './bundle-files.ts';
@@ -522,12 +522,12 @@ export function createPushApplier(deps: PushApplyDeps) {
 
     if (result.kind === 'too-large') {
       reporter.error(
-        `The ${setup} is ${formatSize(result.size)} after compression and encryption; the limit is ${formatSize(MAX_BUNDLE_BYTES)}. Remove large files (e.g. images in skills) and try again.`,
+        `The ${setup} is ${formatSizeOver(result.size, MAX_BUNDLE_BYTES)} after compression and encryption; the limit is ${formatSize(MAX_BUNDLE_BYTES)}. Remove large files (e.g. images in skills) and try again.`,
       );
       return {
         setup,
         result: 'not-done',
-        reason: `${formatSize(result.size)}, over the ${formatSize(MAX_BUNDLE_BYTES)} limit`,
+        reason: `${formatSizeOver(result.size, MAX_BUNDLE_BYTES)}, over the ${formatSize(MAX_BUNDLE_BYTES)} limit`,
       };
     }
     if (result.kind === 'conflict') {

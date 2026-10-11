@@ -3,7 +3,7 @@ import { chmod, mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import type { PlatformPath } from 'node:path';
 
 import { isFile } from '../../system/files.ts';
-import { formatSize } from '../../ui/format-size.ts';
+import { formatSize, formatSizeOver } from '../../ui/format-size.ts';
 import { printableLine } from '../../ui/printable.ts';
 import type {
   AfterRestoreContext,
@@ -177,7 +177,7 @@ export async function collectPluginData(
     if (size > PLUGIN_DATA_MAX_BYTES) {
       onSkipped?.(
         `${PLUGIN_DATA_PREFIX}${folder}`,
-        `the data of ${id} is ${formatSize(size)}, over the ${formatSize(PLUGIN_DATA_MAX_BYTES)} limit for one plugin`,
+        `the data of ${id} is ${formatSizeOver(size, PLUGIN_DATA_MAX_BYTES)}, over the ${formatSize(PLUGIN_DATA_MAX_BYTES)} limit for one plugin`,
       );
       continue;
     }
@@ -246,6 +246,8 @@ export type PluginDataFollowUp = (context: AfterRestoreContext) => Promise<void>
 export async function planPluginData(
   context: PluginDataContext,
   deps: PluginDataRestoreDeps,
+  /** Gets the answer, for pull's summary (UX-01). */
+  summary: string[] = [],
 ): Promise<PluginDataFollowUp> {
   const nothing: PluginDataFollowUp = () => Promise.resolve();
   const saved = savedPluginData(context.files);
@@ -264,6 +266,7 @@ export async function planPluginData(
         "Put back this plugin data? It holds what plugins and mods keep, e.g. a mod's saved choices.",
         false,
       )));
+  summary.push(`--plugin-data ${add ? 'yes' : 'no'} (${names.join(', ')})`);
   if (!add) {
     context.reporter.info(
       'Not put back. To put it back later: agentnomad pull --global --plugin-data',

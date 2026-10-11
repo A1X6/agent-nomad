@@ -155,7 +155,7 @@ describe('push saves a local marketplace (T98)', () => {
     const { files, skipped } = await save(null);
     expect(files).toEqual([]);
     expect(skipped).toEqual([
-      'marketplace tools: its files are 5.0 MB, more than the 5.0 MB a saved setup can hold. Ignore large files in git or move them out of the folder, then push again',
+      'marketplace tools: its files are 5.0 MB and 263 B, more than the 5.0 MB a saved setup can hold. Ignore large files in git or move them out of the folder, then push again',
     ]);
   });
 

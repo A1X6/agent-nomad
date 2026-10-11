@@ -20,7 +20,7 @@ import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
 import { QUESTION_REASON } from '../cli/help-text.ts';
 import { checkProjectFolder, ProjectFolderError } from '../cli/project-folder.ts';
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
-import { planEnvRestore, writeEnvValues } from '../env/env-restore.ts';
+import { planEnvRestore, warnNotSaved, writeEnvValues } from '../env/env-restore.ts';
 import { ENV_BUNDLE_PATH, parseEnvSection, type EnvSection } from '../env/env-section.ts';
 import type { EnvWriter } from '../env/shell-profile.ts';
 import {
@@ -455,6 +455,8 @@ export function createPullPlanner(deps: PullDeps) {
         const answers = await answerConflicts(ready, conflicts.ask);
         const envFile = ready.files.find((file) => file.path === ENV_BUNDLE_PATH);
         const section = envFile ? parseEnvSection(envFile.content) : null;
+        // Saved without values (or unreadable): a name given to --env-values is not added.
+        if (section === null) warnNotSaved(reporter, options.envValues, []);
         const env = section
           ? {
               section,

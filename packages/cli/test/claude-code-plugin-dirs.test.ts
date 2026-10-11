@@ -196,7 +196,7 @@ describe('push saves the plugin folders the user settings name (T99)', () => {
     expect([files, skipped]).toEqual([
       [],
       [
-        `plugin folder ${modFolder()}: its files are 5.0 MB, more than the 5.0 MB a saved setup can hold. Ignore large files in git or move them out of the folder, then push again`,
+        `plugin folder ${modFolder()}: its files are 5.0 MB and 169 B, more than the 5.0 MB a saved setup can hold. Ignore large files in git or move them out of the folder, then push again`,
       ],
     ]);
   });

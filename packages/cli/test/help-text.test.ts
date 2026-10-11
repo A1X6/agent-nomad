@@ -28,6 +28,13 @@ describe('COMMAND_HELP (T115)', () => {
       expect(readme.get(command)).toBe(`${help.charAt(0).toUpperCase()}${help.slice(1)}.`);
     }
   });
+
+  it('has an entry for every command the README Commands table names (QA-04)', () => {
+    const named = tableRows(readmeSection('## Commands')).map(([command = '']) =>
+      command.replace('agentnomad ', ''),
+    );
+    expect(named.filter((command) => !(command in COMMAND_HELP))).toEqual([]);
+  });
 });
 
 describe('contentsHelp (T115)', () => {
