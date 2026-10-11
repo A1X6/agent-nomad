@@ -165,8 +165,8 @@ open, such as a chat or an option letter from a discussion.
     `syncedAccountPlugins`, which writes each plugin's folder (T101: `syncedPluginFiles`, entries as
     `SyncedPluginEntry`); and a mod in `skills/` (T97: `MOD_NAME`, `MOD_MODULE`, `modFiles`), a
     validate report with other `$` calls (`validatePassCalling`) or for a plugin without hooks
-    (`validatePassNoHooks`, T101) and a `claude` that answers validate with a report (`validateCli`,
-    for `findPluginValidator` with `executableLookup`, or both at once: `validatorFor`); a
+    (`validatePassNoHooks`, T101) and the validator of a PC whose `claude` answers validate with a
+    report (`validatorFor`); a
     marketplace added from a local folder (T98: `writeLocalMarketplace`, its catalog `localCatalog`,
     `addedFromFolders`, `localModId`), its saved entry (`savedLocalMarketplace`, T104) and a
     scripted `git` (`scriptedGit` with `GitAnswer`); the mod as a plugin folder of its own

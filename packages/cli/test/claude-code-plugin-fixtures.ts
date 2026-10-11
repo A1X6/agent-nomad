@@ -424,7 +424,7 @@ export const MOD_CALLS = [
  * place of `VALIDATED_MOD`, and records each call's arguments, the files the folder held and
  * the `CLAUDE_CONFIG_DIR` it ran with.
  */
-export function validateCli(run: ValidateRun) {
+function validateCli(run: ValidateRun) {
   const calls: { args: readonly string[]; files: readonly string[]; configDir?: string }[] = [];
   const cli = (_path: string, env: Readonly<Record<string, string | undefined>>): ProgramCli => ({
     async run(args) {
