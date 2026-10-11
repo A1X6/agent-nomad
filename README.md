@@ -291,7 +291,8 @@ repository only what git lists (tracked files with your current edits, and new f
 are not ignored), elsewhere the whole folder, never `.git/`, `node_modules` or the other
 folders push always skips. When the folder's commit is on its remote, push also saves the
 remote and the commit. Pull writes the folder back at the same place in your home folder (one
-that was outside it goes to `~/.agentnomad/marketplaces/<name>`), re-cloning it first when it
+that was outside it, or with a file that would land in a refused folder, goes to
+`~/.agentnomad/marketplaces/<name>`), re-cloning it first when it
 can and writing the saved files whatever happens, reviews each mod in it as above, then adds
 the marketplace and installs its plugins. A marketplace over 5 MB is left out, and push says
 why.
