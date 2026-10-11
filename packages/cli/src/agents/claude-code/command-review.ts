@@ -1,7 +1,7 @@
 import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
-import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
+import { isLoaderVariable } from '../../env/loader-variables.ts';
 import { JsonObjectSchema, parseJsonWith, strings, valueOrNull } from '../../system/json.ts';
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
@@ -14,7 +14,7 @@ import {
 import { CLAUDE_JSON_PROJECT_BUNDLE_PATH } from './project-paths.ts';
 import {
   COMMAND_SETTINGS,
-  isRedirectVariable,
+  isWatchedVariable,
   LOGIN_GATEWAY_SETTING,
 } from './reviewed-settings.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
@@ -155,7 +155,7 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
   for (const [name, value] of Object.entries(env.success ? env.data : {})) {
     // In a settings `env` block they reach Claude Code and every hook it starts. Redirect
     // variables send its requests elsewhere or choose what it runs commands with (T55).
-    if (LOADER_VARIABLE.test(name.toUpperCase()) || isRedirectVariable(name)) {
+    if (isLoaderVariable(name) || isWatchedVariable(name)) {
       entries.push(entry(file.path, `setting env ${name}`, `${name}=${String(value)}`));
     }
   }

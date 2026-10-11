@@ -33,6 +33,7 @@ import {
 } from './plugin-review.ts';
 import type { ProgramCli } from './plugin-sync.ts';
 import { MarketplaceNameSchema } from './plugins.ts';
+import { PLUGIN_DIRS_VARIABLE } from './reviewed-settings.ts';
 import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
 
 /*
@@ -43,8 +44,6 @@ import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
  * to one run only and are never seen, so they are not handled.
  */
 
-/** The `env` name, as Claude Code 2.1.296 reads it. */
-const PLUGIN_DIRS_VARIABLE = 'CLAUDE_CODE_PLUGIN_DIRS';
 
 /** The user settings file, the only one that sets it: see `pluginDirFiles`. */
 const USER_SETTINGS = 'settings.json';

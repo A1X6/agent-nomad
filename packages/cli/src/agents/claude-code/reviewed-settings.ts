@@ -61,6 +61,16 @@ const REDIRECT_NAMES = new Set(REDIRECT_VARIABLES);
 export const isRedirectVariable = (name: string): boolean => REDIRECT_NAMES.has(name.toUpperCase());
 
 /**
+ * The `env` name whose folders Claude Code loads as plugins every session (T99, as Claude Code
+ * 2.1.296 reads it). A pulled value is reviewed like a redirect (SEC-04 of review 16).
+ */
+export const PLUGIN_DIRS_VARIABLE = 'CLAUDE_CODE_PLUGIN_DIRS';
+
+/** A settings `env` name the review shows: a redirect variable or the plugin folders. */
+export const isWatchedVariable = (name: string): boolean =>
+  isRedirectVariable(name) || name.toUpperCase() === PLUGIN_DIRS_VARIABLE;
+
+/**
  * Permission and sandbox settings that let Claude Code act without asking (T44, T55). Each
  * takes effect from any settings file, except the two modes noted in `command-review.ts`.
  */
@@ -77,6 +87,7 @@ export const WATCHED_SETTINGS: readonly string[] = [
   ...COMMAND_SETTINGS,
   ...LOOSENING_SETTINGS,
   ...REDIRECT_VARIABLES,
+  PLUGIN_DIRS_VARIABLE,
   LOGIN_GATEWAY_SETTING,
 ];
 
