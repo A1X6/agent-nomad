@@ -201,6 +201,28 @@ describe('global collector: ~/.claude.json', () => {
     expect(text(files, '.agentnomad/claude.json')).not.toContain('SECRET');
   });
 
+  it('keeps every "Global config" key of the settings reference (T109)', async () => {
+    const preferences = {
+      claudeInChromeDefaultEnabled: true,
+      copyFullResponse: true,
+      defaultToAgentsView: true,
+      leftArrowOpensAgents: false,
+      permissionExplainerEnabled: false,
+      prStatusFooterEnabled: false,
+      teammateDefaultModel: 'sonnet',
+    };
+    await writeTestFile(
+      join(home, '.claude.json'),
+      JSON.stringify({ ...claudeJson, ...preferences }),
+    );
+    expect(JSON.parse(text(await collect(), '.agentnomad/claude.json'))).toEqual({
+      mcpServers: claudeJson.mcpServers,
+      diffTool: 'terminal',
+      autoConnectIde: true,
+      ...preferences,
+    });
+  });
+
   it('adds nothing when there are no servers or preferences', async () => {
     await writeTestFile(
       join(home, '.claude.json'),
