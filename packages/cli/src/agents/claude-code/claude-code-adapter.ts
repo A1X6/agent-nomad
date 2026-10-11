@@ -11,10 +11,16 @@ import { nodeDetectorSystem, pathsOf } from '../shared/detector-system.ts';
 import {
   ACCOUNT_PLUGINS_PART,
   askAccountPlugins,
+  localSkillNames,
   namesHere,
   readSyncedPlugins,
 } from './account-plugins.ts';
-import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
+import {
+  ACCOUNT_SKILLS_PART,
+  askAccountSkills,
+  readSyncedSkills,
+  reportAccountSkills,
+} from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
 import { sharedMemoryNote } from './auto-memory.ts';
 import { CLAUDE_CODE_CONTENTS } from './claude-code-contents.data.ts';
@@ -109,7 +115,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     customConfigDir,
     isClaudeRunning,
   });
-  const followUp = createClaudeCodeAfterRestore({ system, restorer, managedSettings });
+  const followUp = createClaudeCodeAfterRestore({ system, managedSettings });
   const validator = async () => options.pluginValidator ?? (await findPluginValidator(system));
 
   /**
@@ -231,10 +237,17 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
    * Saved claude.ai plugins (T101) the user agreed to add, as `skills/<name>/` files next to
    * the setup's own, so the plugin review (T97) checks them like any plugin folder.
    */
-  async function withAccountPlugins(context: RestorePlanContext) {
+  /**
+   * Saved claude.ai plugins (T101) and skills (T42), asked about before the plugin review, so it
+   * sees every folder they add to `skills/` (SEC-03); a skill never takes a plugin's folder.
+   */
+  async function withAccountCopies(context: RestorePlanContext) {
     const path = pathsOf(options.platform);
-    const added = await askAccountPlugins(context, await namesHere(path, baseDir, context.files));
-    return { files: [...context.files, ...added], added };
+    const here = await namesHere(path, baseDir, context.files);
+    const added = await askAccountPlugins(context, here);
+    const localNames = await localSkillNames(path, baseDir, [...context.files, ...added]);
+    const skills = await askAccountSkills(context, { ...here, localNames });
+    return { files: [...context.files, ...added, ...skills.files], added, skills: skills.names };
   }
 
   return {
@@ -288,9 +301,9 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     /**
      * Pull's Claude Code questions (T61), before anything is written: closing Claude Code
      * when `~/.claude.json` would change (it rewrites the file while open), plugin folders in
-     * `skills/` (T97) with saved claude.ai plugins (T101), saved local marketplaces (T98),
-     * then plugins, programs, claude.ai skills and plugin data (T102). `--yes` never waits: the
-     * file is left with a warning.
+     * `skills/` (T97) with saved claude.ai plugins (T101) and skills (T42, SEC-03), saved local
+     * marketplaces (T98), then plugins, programs and plugin data (T102). `--yes` never waits:
+     * the file is left with a warning.
      */
     async planRestore(context) {
       let leaveClaudeJson = false;
@@ -321,8 +334,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       const claudeJsonNote = global ? null : claudeJsonProjectNote(context.files);
       if (claudeJsonNote !== null) context.reporter.info(claudeJsonNote);
       const withSaved = global
-        ? await withAccountPlugins(context)
-        : { files: context.files, added: [] };
+        ? await withAccountCopies(context)
+        : { files: context.files, added: [], skills: [] };
       const plugins = global
         ? await reviewSkillsPlugins(withSaved.files, context)
         : { files: context.files, declined: false };
@@ -354,6 +367,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       const data = global
         ? await planPluginData(context, { baseDir, platform: options.platform, restorer })
         : null;
+      // What the setup's restore wrote, for naming the saved claude.ai skills it added.
+      let written: readonly string[] = [];
       return {
         // The folders first: Claude Code adds the marketplaces after the setup is written.
         async restore(onConflict, restoreContext) {
@@ -365,14 +380,13 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
                   context.conflictAnswer ?? (question.overwriteAllowed ? 'overwrite' : 'merge'),
                 )
               : onConflict(path, question);
-          const reports = [
-            await local.restore(onConflict),
-            await dirs.restore(onConflict),
-            await restorer.restore(context.target, files, answer, {
-              ...restoreContext,
-              leaveClaudeJson,
-            }),
-          ];
+          const folders = [await local.restore(onConflict), await dirs.restore(onConflict)];
+          const setup = await restorer.restore(context.target, files, answer, {
+            ...restoreContext,
+            leaveClaudeJson,
+          });
+          written = setup.written;
+          const reports = [...folders, setup];
           return {
             written: reports.flatMap((report) => report.written),
             skipped: reports.flatMap((report) => report.skipped),
@@ -383,6 +397,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
         // Plugin data last (T102): it goes only to plugins installed by then.
         async afterRestore(afterContext) {
           await afterRestore(afterContext);
+          reportAccountSkills(withSaved.skills, written, afterContext.reporter);
           await data?.(afterContext);
         },
         declined: plugins.declined || local.declined || dirs.declined,

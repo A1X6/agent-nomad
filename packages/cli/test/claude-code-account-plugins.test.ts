@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   modFiles,
+  savedFiles,
   SYNCED_ACCOUNT,
   syncedAccountPlugins,
   syncedPluginFiles,
@@ -21,6 +22,7 @@ import {
 } from './claude-code-project-fixtures.ts';
 import {
   collected,
+  collectedJson,
   executableLookup,
   paths,
   readText,
@@ -180,13 +182,20 @@ describe('claude.ai plugins (T101): what push saves', () => {
     );
   });
 
+  // UX-02 (review 15): one reserved file per plugin, so an older CLI warns once per plugin.
   it('saves the folder whole under the reserved folder, without types/ or OS clutter', async () => {
     await syncedAccountPlugins(base);
     const files = createFileGatherer(process.platform, { skippedNames: SKIPPED_NAMES });
     const found = await collectAccountPlugins(files, await readSyncedPlugins(files.path, base));
-    expect(paths(found).sort()).toEqual([
-      `${ACCOUNT_PLUGINS_PREFIX}my-upload/.claude-plugin/plugin.json`,
-      `${ACCOUNT_PLUGINS_PREFIX}my-upload/skills/my-upload/SKILL.md`,
+    expect(paths(found)).toEqual([`${ACCOUNT_PLUGINS_PREFIX}my-upload.json`]);
+    const saved = JSON.parse(new TextDecoder().decode(found[0]?.content)) as {
+      name: string;
+      files: { path: string }[];
+    };
+    expect(saved.name).toBe('my-upload');
+    expect(saved.files.map((file) => file.path).sort()).toEqual([
+      '.claude-plugin/plugin.json',
+      'skills/my-upload/SKILL.md',
     ]);
   });
 
@@ -208,7 +217,41 @@ const savedPlugin = (name: string): CollectedFile[] =>
 
 const noNames = { syncedNames: new Set<string>(), localNames: new Set<string>() };
 
+/** A claude.ai plugin as push saves it since UX-02 (review 15): one `<name>.json`. */
+const packedPlugin = (name: string, value?: unknown) =>
+  collectedJson(
+    `${ACCOUNT_PLUGINS_PREFIX}${name}.json`,
+    value ?? {
+      name,
+      files: savedFiles(
+        Object.entries(syncedPluginFiles(name))
+          .filter(([file]) => file !== '.DS_Store')
+          .map(([file, content]) => collected(file, content)),
+      ),
+    },
+  );
+
 describe('claude.ai plugins (T101): what pull may add', () => {
+  it('adds a plugin saved as one file as skills/<name>/, never its types/', () => {
+    const plan = planAccountPlugins([packedPlugin('my-upload')], noNames);
+    expect(plan.toAdd).toEqual(['my-upload']);
+    expect(paths(plan.files)).toEqual([
+      'skills/my-upload/.claude-plugin/plugin.json',
+      'skills/my-upload/skills/my-upload/SKILL.md',
+    ]);
+  });
+
+  it('skips a plugin saved as one file that cannot be read, and says why', () => {
+    const plan = planAccountPlugins(
+      [packedPlugin('my-upload', { name: 'other', files: [] })],
+      noNames,
+    );
+    expect(plan.toAdd).toEqual([]);
+    expect(plan.skipped).toEqual([
+      { name: 'my-upload', reason: 'its saved copy could not be read (it holds another plugin)' },
+    ]);
+  });
+
   it('adds a saved plugin as skills/<name>/, never its types/', () => {
     const plan = planAccountPlugins(savedPlugin('my-upload'), noNames);
     expect(plan.toAdd).toEqual(['my-upload']);

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   MOD_CALLS,
+  MOD_CALLS_VERSION,
   MOD_MODULE,
   MOD_NAME,
   modFiles,
@@ -27,6 +28,7 @@ import {
 } from './fakes.ts';
 import {
   askPluginFolders,
+  CLAUDE_CODE_PATHS,
   findPluginValidator,
   pluginFolderChange,
   reviewPluginFolder,
@@ -280,7 +282,11 @@ describe('the review of a plugin folder (T97)', () => {
     ]);
   });
 
-  it(`flags exactly these of the program's mod calls`, () => {
+  it('pins the mod calls of the Claude Code the paths data was reviewed against', () => {
+    expect(MOD_CALLS_VERSION).toBe(CLAUDE_CODE_PATHS.reviewedVersion);
+  });
+
+  it("flags exactly these of the program's mod calls", () => {
     const flagged = MOD_CALLS.flatMap((name) => {
       const does = riskOfCall(`$.${name}`);
       return does === null ? [] : [`${name}: ${does}`];

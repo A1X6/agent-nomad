@@ -221,13 +221,17 @@ export async function saveFolder(
   return {
     path: bundlePathInside(path, options.homedir, folder),
     git: top && git !== null ? await gitSourceOf(git, folder) : null,
-    files: files.map((file) => ({
-      path: file.path,
-      content: Buffer.from(file.content).toString('base64'),
-      executable: file.executable,
-    })),
+    files: savedFilesOf(files),
   };
 }
+
+/** Files as a saved folder holds them, the content in base64; also a saved claude.ai plugin's. */
+export const savedFilesOf = (files: readonly CollectedFile[]): SavedFolder['files'] =>
+  files.map((file) => ({
+    path: file.path,
+    content: Buffer.from(file.content).toString('base64'),
+    executable: file.executable,
+  }));
 
 /**
  * The saved files of each local marketplace with a plugin installed in the setup's scope
@@ -352,7 +356,7 @@ const filesUnder = (files: readonly CollectedFile[], folder: string): CollectedF
         .map((file) => ({ ...file, path: file.path.slice(folder.length + 1) }));
 
 /** A saved folder's files as pull writes them. */
-export const savedFolderFiles = (saved: SavedFolder): CollectedFile[] =>
+export const savedFolderFiles = (saved: Pick<SavedFolder, 'files'>): CollectedFile[] =>
   saved.files.map((file) => ({
     path: file.path,
     content: new Uint8Array(Buffer.from(file.content, 'base64')),

@@ -1,15 +1,19 @@
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import {
   base,
+  claudeCodeAdapter,
   home,
   synced,
   syncedSetup,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
 import {
+  MOD_NAME,
+  modFiles,
   olderSyncedSkillsManifest,
   SYNCED_ACCOUNT,
   syncedAccount,
@@ -20,7 +24,6 @@ import {
 } from './claude-code-plugin-fixtures.ts';
 import {
   collected,
-  executableLookup,
   paths,
   readText,
   recordingReporter,
@@ -29,10 +32,9 @@ import {
 } from './fakes.ts';
 
 import {
+  ACCOUNT_PLUGINS_PREFIX,
   ACCOUNT_SKILLS_PREFIX,
   collectAccountSkills,
-  createClaudeCodeAfterRestore,
-  createClaudeCodeRestorer,
   createFileGatherer,
   pathsOf,
   planAccountSkills,
@@ -220,6 +222,23 @@ describe('claude.ai skills on Claude Code 2.1.295, without creatorType (T105)', 
       `Claude Code's list of synced skills (skills/synced/${SYNCED_ACCOUNT}/manifest.json) is missing or in a format agentnomad does not know.`,
     );
   });
+
+  // UX-03 (review 15): push names every skill of the user's it leaves out, as for plugins.
+  it('names an own skill whose folder is not on this PC', async () => {
+    await syncedAccount(base, { skills: [syncedSkill('my-custom')] });
+    await rm(join(base, 'skills', 'synced', SYNCED_ACCOUNT, 'my-custom'), { recursive: true });
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
+    expect(found.own).toEqual([]);
+    expect(found.notice).toBe(`${notSavedFrom} my-custom (its folder here is missing).`);
+  });
+
+  it('names an own skill whose name cannot be a folder in ~/.claude/skills', async () => {
+    const found = await syncedWith([{ ...syncedSkill('my-custom'), name: 'my custom' }]);
+    expect(found.ownNames).toEqual([]);
+    expect(found.notice).toBe(
+      `${notSavedFrom} my custom (its name cannot be a folder in ~/.claude/skills).`,
+    );
+  });
 });
 
 /** A claude.ai skill as push saves it, holding `content` as it is. */
@@ -262,27 +281,15 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
   ) {
     const script = scriptedPrompter(answers);
     const { reporter, lines } = recordingReporter({ levels: false });
-    const system = executableLookup({
-      platform: process.platform,
-      homedir: home,
-      env: { PATH: '' },
-    });
-    const restorer = createClaudeCodeRestorer({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      env: {},
-      customConfigDir: false,
-      isClaudeRunning: () => Promise.resolve(false),
-    });
-    // The plan step asks; the follow-up it returns writes, with no prompter (T61).
-    const planned = createClaudeCodeAfterRestore({
-      system,
-      restorer,
-      managedSettings: () => Promise.reject(new Error('not read for skills')),
-    })({
+    const adapter = claudeCodeAdapter(home);
+    if (!adapter.planRestore) throw new Error('no plan step');
+    // The plan step asks (SEC-03: with the saved plugins); writing asks nothing (T61). Pull
+    // shows the restore's warnings.
+    const planned = adapter.planRestore({
       target: { kind: 'global' },
       files,
+      conflicts: new Map(),
+      conflictAnswer: undefined,
       assumeYes: options.assumeYes ?? false,
       allowCommands: options.allowCommands ?? false,
       parts: new Map(
@@ -291,7 +298,12 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
       prompter: script.prompter,
       reporter,
     });
-    const done = planned.then((followUp) => followUp({ reporter }));
+    const done = planned.then(async (plan) => {
+      const report = await plan.restore(() => Promise.resolve('skip'), {});
+      for (const warning of report.warnings) reporter.warn(warning);
+      await plan.afterRestore({ reporter });
+      return { plan, report };
+    });
     return { planned, done, asked: script.asked, defaults: script.confirmDefaults, lines };
   }
   const skillFile = (name: string) => readText(join(base, 'skills', name, 'SKILL.md'));
@@ -396,6 +408,41 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     const t = run([saved('local-one', 'Theirs.')], { accountSkills: true });
     await t.done;
     expect(await skillFile('local-one')).toBe('My own local version.');
+  });
+
+  // SEC-03 (review 15): a saved skill folder that is a plugin gets the plugin review (T97).
+  it('--yes never adds a saved skill that is a plugin with code', async () => {
+    const t = run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), { assumeYes: true });
+    const { plan, report } = await t.done;
+    expect(report.written).toEqual([]);
+    expect(plan.declined).toBe(true);
+    expect(t.lines.join('\n')).toContain(
+      `Skipped skills/${MOD_NAME}: ${MOD_NAME}@skills-dir runs code inside Claude Code.`,
+    );
+    expect(t.lines.join('\n')).toContain(`Not added: ${MOD_NAME}.`);
+  });
+
+  it('asks before writing a saved skill that is a plugin with code', async () => {
+    const t = run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), {}, [true, false]);
+    const { report } = await t.done;
+    expect(t.asked).toEqual([
+      'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
+      `Write ${MOD_NAME}@skills-dir? It runs code inside Claude Code.`,
+    ]);
+    expect(report.written).toEqual([]);
+  });
+
+  it('never adds a saved skill in the folder of a saved plugin added in the same pull', async () => {
+    const plugin = collected(
+      `${ACCOUNT_PLUGINS_PREFIX}shared/.claude-plugin/plugin.json`,
+      JSON.stringify({ name: 'shared' }),
+    );
+    const t = run([plugin, saved('shared', 'Plain.')], { assumeYes: true, allowCommands: true });
+    await t.done;
+    expect(t.lines.join('\n')).toContain(
+      'shared: skipped, you already have a local skill with this name',
+    );
+    await expect(skillFile('shared')).rejects.toThrow();
   });
 });
 

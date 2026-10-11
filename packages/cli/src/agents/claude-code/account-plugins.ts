@@ -1,11 +1,27 @@
 import { readdir } from 'node:fs/promises';
 import type { PlatformPath } from 'node:path';
 
+import * as z from 'zod';
+
 import { isFile } from '../../system/files.ts';
-import type { CollectedFile, RestorePlanContext } from '../adapter.ts';
-import type { FileGatherer } from '../shared/file-gathering.ts';
+import { parseJsonWith } from '../../system/json.ts';
+import type { CollectedFile } from '../adapter.ts';
+import { jsonFile, type FileGatherer } from '../shared/file-gathering.ts';
+import {
+  askSavedCopies,
+  filesInSkills,
+  NAME_NOT_A_FOLDER,
+  planSavedCopies,
+  savedCopiesIn,
+  sortedCopies,
+  type NamesHere,
+  type SavedCopiesContext,
+  type SavedCopiesPlan,
+  type SavedCopy,
+} from './account-copies.ts';
 import { isUsableSkillName, readSyncedSkills } from './account-skills.ts';
 import { ACCOUNT_PLUGINS_PREFIX } from './global-paths.ts';
+import { SAVED_FOLDER_SHAPE, savedFilesOf, savedFolderFiles } from './local-marketplaces.ts';
 import {
   isGeneratedInPlugin,
   PLUGIN_MANIFEST,
@@ -111,7 +127,7 @@ export async function readSyncedPlugins(
         continue;
       }
       if (!isUsableSkillName(name)) {
-        leftOut.push(`${name} (its name cannot be a folder in ~/.claude/skills)`);
+        leftOut.push(`${name} (${NAME_NOT_A_FOLDER})`);
         continue;
       }
       if (own.has(name)) continue;
@@ -141,9 +157,16 @@ export async function readSyncedPlugins(
   };
 }
 
+/** A saved claude.ai plugin, `.agentnomad/account-plugins/<name>.json` (UX-02). */
+const SavedPluginSchema = z.strictObject({ name: z.string(), files: SAVED_FOLDER_SHAPE.files });
+
+/** The bundle path of a saved claude.ai plugin: one file each, as for local marketplaces. */
+const bundlePathOf = (name: string) => `${ACCOUNT_PLUGINS_PREFIX}${name}.json`;
+
 /**
- * The user's own synced plugins as bundle files, under `.agentnomad/account-plugins/<name>/`,
- * without what Claude Code generates in a plugin (T97).
+ * The user's own synced plugins as bundle files, one `.agentnomad/account-plugins/<name>.json`
+ * each, without what Claude Code generates in a plugin (T97). One file per plugin, so an older
+ * CLI, which refuses an unknown reserved entry with a warning, warns once per plugin (UX-02).
  */
 export async function collectAccountPlugins(
   files: FileGatherer,
@@ -151,11 +174,16 @@ export async function collectAccountPlugins(
 ): Promise<CollectedFile[]> {
   const found: CollectedFile[] = [];
   for (const plugin of plugins.own) {
-    const prefix = `${ACCOUNT_PLUGINS_PREFIX}${plugin.name}`;
-    const generated = (bundlePath: string) =>
-      bundlePath.startsWith(`${prefix}/`) &&
-      isGeneratedInPlugin(bundlePath.slice(prefix.length + 1));
-    found.push(...(await files.walk(plugin.dir, prefix, generated)));
+    const prefix = `${plugin.name}/`;
+    const generated = (path: string) =>
+      path.startsWith(prefix) && isGeneratedInPlugin(path.slice(prefix.length));
+    const inside = (await files.walk(plugin.dir, plugin.name, generated)).map((file) => ({
+      ...file,
+      path: file.path.slice(prefix.length),
+    }));
+    found.push(
+      jsonFile(bundlePathOf(plugin.name), { name: plugin.name, files: savedFilesOf(inside) }),
+    );
   }
   return found;
 }
@@ -169,12 +197,49 @@ export interface AccountPluginPlan {
   readonly files: readonly CollectedFile[];
 }
 
-/** Names on this PC a saved plugin must not take, lower case. */
-export interface NamesHere {
-  /** Plugins and skills this PC already gets from its own claude.ai sync. */
-  readonly syncedNames: ReadonlySet<string>;
-  /** Folders in `~/.claude/skills/` (local skills and plugins), with those the pull writes. */
-  readonly localNames: ReadonlySet<string>;
+/**
+ * The saved plugins in `bundleFiles`: one `<name>.json` each (UX-02), or a folder of files as
+ * bundles saved before that keep them; a file that cannot be read is skipped with why.
+ */
+function savedPlugins(bundleFiles: readonly CollectedFile[]) {
+  const copies = new Map<string, SavedCopy>();
+  const unreadable: { name: string; reason: string }[] = [];
+  for (const file of bundleFiles) {
+    const name = file.path.slice(ACCOUNT_PLUGINS_PREFIX.length, -'.json'.length);
+    if (file.path !== bundlePathOf(name) || name.includes('/') || !isUsableSkillName(name)) {
+      continue;
+    }
+    const read = parseJsonWith(SavedPluginSchema, file.content);
+    if (!('value' in read) || read.value.name !== name) {
+      const problem = 'value' in read ? 'it holds another plugin' : read.problem;
+      unreadable.push({ name, reason: `its saved copy could not be read (${problem})` });
+      continue;
+    }
+    const files = savedFolderFiles(read.value).filter((entry) => !isGeneratedInPlugin(entry.path));
+    copies.set(name, { name, files });
+  }
+  const inFolders = savedCopiesIn(
+    ACCOUNT_PLUGINS_PREFIX,
+    bundleFiles,
+    isUsableSkillName,
+    isGeneratedInPlugin,
+  ).filter((copy) => !copies.has(copy.name));
+  return { copies: sortedCopies([...copies.values(), ...inFolders]), unreadable };
+}
+
+/** The saved plugins pull may add here, as {@link planAccountPlugins} says. */
+function planPlugins(bundleFiles: readonly CollectedFile[], here: NamesHere): SavedCopiesPlan {
+  const { copies, unreadable } = savedPlugins(bundleFiles);
+  const plan = planSavedCopies(
+    copies,
+    here,
+    'you already have a local skill or plugin with this name',
+    (copy) =>
+      copy.files.some((file) => file.path === PLUGIN_MANIFEST)
+        ? null
+        : `it has no ${PLUGIN_MANIFEST}`,
+  );
+  return { toAdd: plan.toAdd, skipped: [...plan.skipped, ...unreadable] };
 }
 
 /**
@@ -186,40 +251,12 @@ export function planAccountPlugins(
   bundleFiles: readonly CollectedFile[],
   here: NamesHere,
 ): AccountPluginPlan {
-  const byName = new Map<string, CollectedFile[]>();
-  for (const file of bundleFiles) {
-    if (!file.path.startsWith(ACCOUNT_PLUGINS_PREFIX)) continue;
-    const rest = file.path.slice(ACCOUNT_PLUGINS_PREFIX.length);
-    const name = rest.split('/')[0] ?? '';
-    if (!isUsableSkillName(name) || rest === name) continue;
-    if (isGeneratedInPlugin(rest.slice(name.length + 1))) continue;
-    const pluginFiles = byName.get(name);
-    if (pluginFiles === undefined) byName.set(name, [file]);
-    else pluginFiles.push(file);
-  }
-  const toAdd: string[] = [];
-  const skipped: { name: string; reason: string }[] = [];
-  const files: CollectedFile[] = [];
-  for (const [name, pluginFiles] of [...byName.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    if (here.syncedNames.has(name.toLowerCase())) {
-      skipped.push({ name, reason: 'this PC already gets it from claude.ai' });
-      continue;
-    }
-    if (here.localNames.has(name.toLowerCase())) {
-      skipped.push({ name, reason: 'you already have a local skill or plugin with this name' });
-      continue;
-    }
-    const manifest = `${ACCOUNT_PLUGINS_PREFIX}${name}/${PLUGIN_MANIFEST}`;
-    if (!pluginFiles.some((file) => file.path === manifest)) {
-      skipped.push({ name, reason: `it has no ${PLUGIN_MANIFEST}` });
-      continue;
-    }
-    toAdd.push(name);
-    for (const file of pluginFiles) {
-      files.push({ ...file, path: `skills/${file.path.slice(ACCOUNT_PLUGINS_PREFIX.length)}` });
-    }
-  }
-  return { toAdd, skipped, files };
+  const plan = planPlugins(bundleFiles, here);
+  return {
+    toAdd: plan.toAdd.map((copy) => copy.name),
+    skipped: plan.skipped,
+    files: filesInSkills(plan.toAdd),
+  };
 }
 
 /**
@@ -263,43 +300,22 @@ export async function namesHere(
   };
 }
 
-/** What the plan step of pull gives the question about saved plugins (T61). */
-export type AccountPluginsContext = Pick<
-  RestorePlanContext,
-  'files' | 'prompter' | 'reporter' | 'assumeYes' | 'parts'
->;
-
 /**
  * Saved claude.ai plugins (T101): listed, and added as plugins in `skills/<name>/` unless the
  * user says no or `--no-account-plugins` (`--yes` adds them, T114). Returns the files to add,
  * as `skills/<name>/...`; the plugin review (T97) then checks them like any plugin folder.
  */
 export async function askAccountPlugins(
-  context: AccountPluginsContext,
+  context: SavedCopiesContext,
   here: NamesHere,
 ): Promise<readonly CollectedFile[]> {
-  const plan = planAccountPlugins(context.files, here);
-  if (plan.toAdd.length === 0 && plan.skipped.length === 0) return [];
-  context.reporter.info(
-    [
-      'Plugins from your claude.ai account on the other PC:',
-      ...plan.toAdd.map((name) => `  + ${name}@${SKILLS_DIR_MARKETPLACE} (skills/${name})`),
-      ...plan.skipped.map((plugin) => `  - ${plugin.name}: skipped, ${plugin.reason}`),
-    ].join('\n'),
-  );
-  if (plan.toAdd.length === 0) return [];
-  const add =
-    context.parts.get(ACCOUNT_PLUGINS_PART) ??
-    (context.assumeYes ||
-      (await context.prompter.confirm(
-        'Add them as local plugins in ~/.claude/skills/? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
-        true,
-      )));
-  if (!add) {
-    context.reporter.info(
-      'Not added. To add them later: agentnomad pull --global --account-plugins',
-    );
-    return [];
-  }
-  return plan.files;
+  const plan = planPlugins(context.files, here);
+  const { add } = await askSavedCopies(context, plan, {
+    heading: 'Plugins from your claude.ai account on the other PC:',
+    line: (copy) => `${copy.name}@${SKILLS_DIR_MARKETPLACE} (skills/${copy.name})`,
+    question:
+      'Add them as local plugins in ~/.claude/skills/? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
+    part: ACCOUNT_PLUGINS_PART,
+  });
+  return add ? filesInSkills(plan.toAdd) : [];
 }

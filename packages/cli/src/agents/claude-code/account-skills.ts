@@ -5,8 +5,20 @@ import * as z from 'zod';
 
 import { isDirectory } from '../../system/files.ts';
 import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import type { Reporter } from '../../ui/prompter.ts';
 import type { CollectedFile } from '../adapter.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
+import {
+  askSavedCopies,
+  filesInSkills,
+  NAME_NOT_A_FOLDER,
+  planSavedCopies,
+  savedCopiesIn,
+  type NamesHere,
+  type SavedCopiesContext,
+  type SavedCopiesPlan,
+  type SavedCopy,
+} from './account-copies.ts';
 import { ACCOUNT_SKILLS_PREFIX } from './global-paths.ts';
 import { runnableInMarkdown } from './runnable-markdown.ts';
 import { NOT_OWN_SCOPES, readSyncedPluginsOf, SYNCED_PLUGINS_DIR } from './synced-plugins.ts';
@@ -146,18 +158,21 @@ export async function readSyncedSkills(path: PlatformPath, baseDir: string): Pro
       allNames.add(skill.name.toLowerCase());
       const ownership = ownershipOf(skill, scopes);
       if (typeof ownership === 'object') leftOut.push(`${skill.name} (${ownership.leftOut})`);
-      const dir = path.join(accountDir, skill.name);
-      if (
-        ownership === 'own' &&
-        isUsableSkillName(skill.name) &&
-        !own.has(skill.name) &&
-        (await isDirectory(dir))
-      ) {
-        own.set(skill.name, dir);
-        // A plugin skill picked without the marketplaces list may be an organization's.
-        cannotTell ||=
-          scopes === 'no list' && skill.creatorType === undefined && skill.source === 'plugin';
+      if (ownership !== 'own' || own.has(skill.name)) continue;
+      // Named, as for plugins (UX-03): push names every skill of the user's it leaves out.
+      if (!isUsableSkillName(skill.name)) {
+        leftOut.push(`${skill.name} (${NAME_NOT_A_FOLDER})`);
+        continue;
       }
+      const dir = path.join(accountDir, skill.name);
+      if (!(await isDirectory(dir))) {
+        leftOut.push(`${skill.name} (its folder here is missing)`);
+        continue;
+      }
+      own.set(skill.name, dir);
+      // A plugin skill picked without the marketplaces list may be an organization's.
+      cannotTell ||=
+        scopes === 'no list' && skill.creatorType === undefined && skill.source === 'plugin';
     }
     if (leftOut.length > 0) {
       notices.push(`Not saved from claude.ai account ${account.name}: ${leftOut.join(', ')}.`);
@@ -201,45 +216,90 @@ export interface AccountSkillPlan {
   readonly files: readonly CollectedFile[];
 }
 
+/** The saved skills pull may add here, as {@link planAccountSkills} says. */
+const planSkills = (bundleFiles: readonly CollectedFile[], here: NamesHere): SavedCopiesPlan =>
+  planSavedCopies(
+    savedCopiesIn(ACCOUNT_SKILLS_PREFIX, bundleFiles, isUsableSkillName),
+    here,
+    'you already have a local skill with this name',
+  );
+
+/** Whether a skill runs commands as a local skill (T44's detector). */
+const runsCommands = (copy: SavedCopy) =>
+  copy.files.some(
+    (file) =>
+      file.path.toLowerCase().endsWith('.md') &&
+      runnableInMarkdown(new TextDecoder().decode(file.content)).length > 0,
+  );
+
 /**
  * Which saved account skills pull may add on this PC as local skills: not one this PC already
  * gets from its own claude.ai sync, and never over a local skill of the same name.
  */
 export function planAccountSkills(
   bundleFiles: readonly CollectedFile[],
-  here: { syncedNames: ReadonlySet<string>; localNames: ReadonlySet<string> },
+  here: NamesHere,
 ): AccountSkillPlan {
-  const byName = new Map<string, CollectedFile[]>();
-  for (const file of bundleFiles) {
-    if (!file.path.startsWith(ACCOUNT_SKILLS_PREFIX)) continue;
-    const rest = file.path.slice(ACCOUNT_SKILLS_PREFIX.length);
-    const name = rest.split('/')[0] ?? '';
-    if (!isUsableSkillName(name) || rest === name) continue;
-    const skillFiles = byName.get(name);
-    if (skillFiles === undefined) byName.set(name, [file]);
-    else skillFiles.push(file);
-  }
-  const toAdd: { name: string; runsCommands: boolean }[] = [];
-  const skipped: { name: string; reason: string }[] = [];
-  const files: CollectedFile[] = [];
-  for (const [name, skillFiles] of [...byName.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    if (here.syncedNames.has(name.toLowerCase())) {
-      skipped.push({ name, reason: 'this PC already gets it from claude.ai' });
-      continue;
-    }
-    if (here.localNames.has(name.toLowerCase())) {
-      skipped.push({ name, reason: 'you already have a local skill with this name' });
-      continue;
-    }
-    const runsCommands = skillFiles.some(
-      (file) =>
-        file.path.toLowerCase().endsWith('.md') &&
-        runnableInMarkdown(new TextDecoder().decode(file.content)).length > 0,
+  const plan = planSkills(bundleFiles, here);
+  return {
+    toAdd: plan.toAdd.map((copy) => ({ name: copy.name, runsCommands: runsCommands(copy) })),
+    skipped: plan.skipped,
+    files: filesInSkills(plan.toAdd),
+  };
+}
+
+/** What the plan step gives the question about saved skills (T61). */
+export type AccountSkillsContext = SavedCopiesContext & { readonly allowCommands: boolean };
+
+/**
+ * Saved claude.ai skills (T42): added as local skills on a PC that does not already get them
+ * from its own claude.ai sync, unless the user says no (T114). A skill with `` !`command` ``
+ * lines runs those as a local skill (a synced one does not), so it is marked, and a flag or
+ * --yes (no question asked) adds it only with --allow-commands too. Planned in pull's plan
+ * step with the saved plugins, so a skill folder that is a plugin gets the plugin review
+ * (SEC-03). Returns the skills to add and their files, as `skills/<name>/...`.
+ */
+export async function askAccountSkills(
+  context: AccountSkillsContext,
+  here: NamesHere,
+): Promise<{ readonly names: readonly string[]; readonly files: readonly CollectedFile[] }> {
+  const plan = planSkills(context.files, here);
+  const { add, answered } = await askSavedCopies(context, plan, {
+    heading: 'Skills from your claude.ai account on the other PC:',
+    line: (copy) =>
+      `${copy.name}${runsCommands(copy) ? '  ⚠ runs commands as a local skill (! lines, ```! blocks or hooks)' : ''}`,
+    question:
+      'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
+    part: ACCOUNT_SKILLS_PART,
+  });
+  if (!add) return { names: [], files: [] };
+  // Answered by a flag or --yes, not a person: commands only run with --allow-commands too.
+  const blocked = answered && !context.allowCommands ? plan.toAdd.filter(runsCommands) : [];
+  for (const { name } of blocked) {
+    context.reporter.warn(
+      `Skipped ${name}: it runs commands as a local skill. Add --allow-commands to add it anyway.`,
     );
-    toAdd.push({ name, runsCommands });
-    for (const file of skillFiles) {
-      files.push({ ...file, path: `skills/${file.path.slice(ACCOUNT_SKILLS_PREFIX.length)}` });
-    }
   }
-  return { toAdd, skipped, files };
+  const approved = plan.toAdd.filter((copy) => !blocked.includes(copy));
+  return { names: approved.map((copy) => copy.name), files: filesInSkills(approved) };
+}
+
+/**
+ * Says which of the saved skills `names` pull added, from the paths it `written` (UX-01 of an
+ * earlier review): the restorer or the plugin review may leave a skill's files out.
+ */
+export function reportAccountSkills(
+  names: readonly string[],
+  written: readonly string[],
+  reporter: Reporter,
+): void {
+  if (names.length === 0) return;
+  const added = new Set(written.map((path) => path.split('/')[1] ?? ''));
+  const missing = names.filter((name) => !added.has(name));
+  if (missing.length > 0) reporter.warn(`Not added: ${missing.join(', ')}.`);
+  const done = names.filter((name) => added.has(name));
+  if (done.length === 0) return;
+  reporter.success(
+    `Added ${done.join(', ')} as local skills. If this PC later signs in to the claude.ai account they came from, they sync there too, and your local copy keeps the short name.`,
+  );
 }

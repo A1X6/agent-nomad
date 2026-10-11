@@ -529,10 +529,7 @@ describe('global collector: claude.ai plugins (T101)', () => {
     );
     expect(
       paths(withPlugins.filter((file) => file.path.startsWith(ACCOUNT_PLUGINS_PREFIX))).sort(),
-    ).toEqual([
-      `${ACCOUNT_PLUGINS_PREFIX}my-upload/.claude-plugin/plugin.json`,
-      `${ACCOUNT_PLUGINS_PREFIX}my-upload/skills/my-upload/SKILL.md`,
-    ]);
+    ).toEqual([`${ACCOUNT_PLUGINS_PREFIX}my-upload.json`]);
     expect(withPlugins.some((file) => file.path.startsWith('plugins/synced'))).toBe(false);
   });
 });
