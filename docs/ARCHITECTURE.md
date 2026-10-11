@@ -288,8 +288,8 @@ flowchart TD
 
 Pull is split like push (T59). The **plan** step lists, downloads and checks every chosen
 setup and asks every question before anything is written: an older copy, new commands, each
-file here that differs (`~/.claude.json` whenever the setup has it, or a project's part of it, T109) and missing environment
-values, then each agent's own questions (T61): for Claude Code, closing Claude Code when
+file here that differs (`~/.claude.json` whenever the setup has it, or a project's part of it,
+T109) and missing environment values, then each agent's own questions (T61): for Claude Code, closing Claude Code when
 `~/.claude.json` would change, then saved claude.ai plugins and the plugin folders in
 `skills/`, then plugins, programs and claude.ai skills. Without a
 terminal, an open question stops pull here, before any file changes. The **apply** step
@@ -377,6 +377,35 @@ new. The "will likely not run here" warning for a setup from another OS looks on
 command's program and the scripts it runs, and shows the command as written, with line breaks
 escaped.
 
+**Imports** (`claude-md-imports.ts`, T111): the `@path` lines of the synced memory files
+(global `CLAUDE.md` and `rules/**/*.md`; project `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`,
+`.claude/CLAUDE.md` and `.claude/rules/**/*.md`) are read as the 2.1.296 program reads them
+(function `UZn`, loader `YU`): the pattern `(?:^|\s)@((?:[^\s\\]|\\ )+)` over the text
+outside code spans, fenced code blocks (its Markdown lexer's `code` and `codespan` tokens) and
+HTML comments, after the frontmatter; the path cut at `#`, `\ ` read as a space, and taken only
+when it starts with `./`, `~/`, `/` (not `/` alone) or a letter, digit, `.`, `_` or `-`, never
+a network path. A path resolves from the importing file's folder, `~/` from the home folder,
+`/c/x` as `C:\x` on Windows. Imports of imported files are followed depth first, each file
+once, four hops deep (`$nr=5` counts the memory file itself). The program loads any text
+extension (its `DZn` list); agentnomad takes only Markdown and plain text
+(`IMPORT_DOCUMENT_EXTENSIONS`), because pull writes them without a review: never code, scripts,
+settings programs read (`~/.claude.json`, which pull only ever merges, or a tool config naming a
+command) nor names without an extension (`.bashrc`, `.husky/pre-commit`). Global placement
+follows the hook-script rule: in the base folder at its own path (never `.agentnomad/` nor a
+refused name), elsewhere in the home under `.agentnomad/home/` (never a folder for keys and
+logins nor an autostart folder); project placement keeps the project path, never in a
+never-synced entry (`.git`, `.agentnomad`, ...).
+Files are read through the gatherer, so its link rules and 10 MB limit apply. Push passes each
+existing file it cannot take to `onSkipped` with the importing file, the line and the `@` text;
+a missing one is skipped without a word, as the program skips it. Pull follows the same imports
+through the bundle and adds what it finds to the restore rules' allowed set, so it writes an
+imported file only when the setup's own memory files import it. An imported file never runs
+anything: the loader (`LLe`) only reads its text, strips HTML comments and looks for more
+imports; the `` !`command` `` forms belong to skills and commands, so imports need no review.
+Not modelled: indented code blocks (an import there is still followed) and emphasis around an
+import (`**@a.md**` is read with the asterisks and finds no file). The unknown-file check is
+quiet for a base-folder folder that holds an imported file, as for hook scripts.
+
 **Restore rules** (`restore-rules.ts`): a file is written only if a collector could have
 produced it. A home-folder file must be a known tool's settings or a script the setup's
 own hooks or status line run, and never in a folder whose files run by themselves (Startup,
@@ -398,8 +427,8 @@ entry that cannot be written is skipped with a warning; the rest continue. `~/.c
 is only ever merged, with a backup: only `mcpServers` and the preference keys, never
 `projects` or account state. A project setup's part (T109) goes into the entry of the folder
 pull runs in, made when missing, and changes nothing else of the entry: servers by name and
-each `.mcp.json` approval or rejection by server name, the pulled one winning. It is skipped while Claude Code is running (it rewrites the file
-while open): pull's plan step asks to close it ("I closed it, continue" checks again,
+each `.mcp.json` approval or rejection by server name, the pulled one winning. It is skipped
+while Claude Code is running (it rewrites the file while open): pull's plan step asks to close it ("I closed it, continue" checks again,
 "Skip ~/.claude.json this time" leaves it with a warning; `--yes` never waits), and the
 restorer checks once more right before writing and leaves the file if it is open again. It is
 read again at that point, as Claude Code saves it while closing. Running means a `claude` program
@@ -941,12 +970,12 @@ of these:
 
 ### `system/`: files and programs, one copy each (T62)
 
-| File                    | Responsible for                                                                                                                                                                                                                                                                                                             |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `system/files.ts`       | `writeFileAtomically` (temporary file, then rename; mode, folder mode, following a link, a step before the rename), `TEMP_MARKER` (its temporary files, which collectors skip), `writeTargetOf`, `isMissing` and `freeSuffix` (the first free `-2`, `-3`, … for a backup name, used by the restorer and the shell profile). |
-| `system/paths.ts`       | `samePath` and `pathKey`: folders compared per OS (Windows ignores case).                                                                                                                                                                                                                                                   |
-| `system/json.ts`        | `parseJsonWith`: JSON text or bytes checked with a schema, the value or why it could not be read; `valueOrNull` when the reason does not matter. `JsonObjectSchema`: any JSON object, values unchecked.                                                                                                                     |
-| `system/run-program.ts` | `runProgram`: one `execFile` wrapper (no shell, timeout, never rejects) for every program the CLI starts.                                                                                                                                                                                                                   |
+| File                    | Responsible for                                                                                                                                                                                                                                                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system/files.ts`       | `writeFileAtomically` (temporary file, then rename; mode, folder mode, following a link, a step before the rename), `TEMP_MARKER` (its temporary files, which collectors skip), `writeTargetOf`, `isMissing`, `isFile` (a file is there) and `freeSuffix` (the first free `-2`, `-3`, … for a backup name). |
+| `system/paths.ts`       | `samePath` and `pathKey`: folders compared per OS (Windows ignores case).                                                                                                                                                                                                                                   |
+| `system/json.ts`        | `parseJsonWith`: JSON text or bytes checked with a schema, the value or why it could not be read; `valueOrNull` when the reason does not matter. `JsonObjectSchema`: any JSON object, values unchecked.                                                                                                     |
+| `system/run-program.ts` | `runProgram`: one `execFile` wrapper (no shell, timeout, never rejects) for every program the CLI starts.                                                                                                                                                                                                   |
 
 ### `push/`, `pull/`, `commands/`: the setup commands
 
@@ -998,6 +1027,7 @@ of these:
 | `settings-commands.ts`                | Parsing settings and command lines: the commands a `settings.json` runs as the words each program gets (hooks read one by one, so a malformed one hides no other; exec form keeps each `args` element whole), the words that can name a script (`pathWords`: also inside a command line a word carries, such as `bash -c "a.sh; b"`, at any depth, and split on shell operators) and the program. No file access (a lint rule checks it).                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `global-collector.ts`                 | Collecting the global setup, `~/.claude.json` keys (read with `readClaudeJsonFile`), hook scripts, tool settings, programs, plugins, local marketplaces (`findGit`, T98), plugin folders the user settings load (T99), and on request the user's claude.ai skills and plugins and the data of the plugins it restores (T102). Names each hook script it cannot take (T112).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `project-collector.ts`                | Collecting a project's setup, its part of `~/.claude.json` (T109; `customConfigDir` says where that file is) and, when chosen, its auto memory and local marketplaces (`findGit`, T98); names each hook script it cannot take (T112).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `claude-md-imports.ts`                | `@path` imports in memory files (T111): `importsIn`, `resolveImport`, `globalImportPlace` and `projectImportPlace` (where push saves an imported document, or why not), `followImports` (depth first, `MAX_IMPORT_HOPS` deep, push and pull), `isGlobalMemoryFile`, `isProjectMemoryFile`, `shownImportPath` and `skippedImportReason` (push's warning).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `hook-scripts.ts`                     | Which scripts the hooks and status line run, for the global setup and for a project: what push collects and pull allows back (one rule for both). Each script they cannot take goes to an optional `SkippedScript` with why (T112); `onceEachScript` tells each script once per push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `account-skills.ts`                   | claude.ai skills (T42): reading `skills/synced/` (the user's own: `creatorType: user`, or from Claude Code 2.1.295 (checked on 2.1.296) `source` `custom` or `plugin` from an `account` marketplace, T105, read through `synced-plugins.ts`), with a `notice` of those left out, saving a copy, and what pull may add as local skills; `isUsableSkillName` (a safe folder name in `skills/`, not a reserved one).                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `account-plugins.ts`                  | claude.ai plugins (T101): `readSyncedPlugins` (the user's own in `plugins/synced/`: an `account` marketplace, not `required` or `auto_install`, with a plugin manifest in its `syncedPluginFolder`; a `notice` of those left out), `collectAccountPlugins` (the folder under `.agentnomad/account-plugins/`), `planAccountPlugins` and `askAccountPlugins` (what pull may add as `skills/<name>/`, asked in the plan step), `namesHere` and `localSkillNames` (names a saved skill or plugin must not take).                                                                                                                                                                                                                                                                                                                                               |

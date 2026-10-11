@@ -1,3 +1,4 @@
+import { isFile } from '../../system/files.ts';
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { underAnyFolder } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
@@ -9,6 +10,13 @@ import {
 } from '../shared/file-gathering.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import { claudeJsonFileOf, projectClaudeJson, readClaudeJsonFile } from './claude-json-merge.ts';
+import {
+  followImports,
+  isProjectMemoryFile,
+  projectImportPlace,
+  shownImportPath,
+  skippedImportReason,
+} from './claude-md-imports.ts';
 import { SKIPPED_NAMES } from './global-paths.ts';
 import { onceEachScript, projectHookScripts, type SkippedScript } from './hook-scripts.ts';
 import { localMarketplaceFiles } from './local-marketplaces.ts';
@@ -64,6 +72,45 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
       if (file) found.push(file);
     }
     return found;
+  }
+
+  /**
+   * The files the project's memory files import (T111) that are inside the project, at their
+   * project path. Each one push cannot take (outside the project, never synced) is named.
+   */
+  async function importedFiles(
+    files: FileGatherer,
+    projectDir: string,
+    found: readonly CollectedFile[],
+    onSkipped: CollectOptions['onSkipped'],
+  ): Promise<CollectedFile[]> {
+    const memoryFiles = found
+      .filter((file) => isProjectMemoryFile(file.path))
+      .map((file) => ({
+        nativePath: path.join(projectDir, ...file.path.split('/')),
+        bundlePath: file.path,
+        text: new TextDecoder().decode(file.content),
+      }));
+    const imported: CollectedFile[] = [];
+    const { skipped } = await followImports(
+      memoryFiles,
+      {
+        place: (nativePath) =>
+          projectImportPlace(nativePath, { projectDir, platform: options.platform }),
+        isFile,
+        async read(nativePath, bundlePath) {
+          const file = await files.readIfFile(nativePath, bundlePath);
+          if (file === null) return null;
+          imported.push(file);
+          return new TextDecoder().decode(file.content);
+        },
+      },
+      options,
+    );
+    for (const entry of skipped) {
+      onSkipped?.(shownImportPath(entry.nativePath, options), skippedImportReason(entry, options));
+    }
+    return imported;
   }
 
   async function autoMemory(
@@ -143,6 +190,7 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
             )),
           );
       }
+      found.push(...(await importedFiles(files, projectDir, found, collectOptions.onSkipped)));
       if (collectOptions.includeMemory) {
         found.push(...(await autoMemory(projectDir, collectOptions.onSkipped)));
       }

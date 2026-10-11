@@ -248,3 +248,27 @@ describe('claude.ai plugins (T101)', () => {
     ).toEqual({ kind: 'metadata' });
   });
 });
+
+describe('restore rules: files the memory files import (T111)', () => {
+  it('global: a file outside the synced folders only when the setup imports it', () => {
+    expect(globalDestination('shared/team.md', new Set(['shared/team.md']))).toEqual({
+      kind: 'target',
+      path: 'shared/team.md',
+    });
+    expect(globalDestination('shared/team.md', new Set())).toEqual({
+      kind: 'refused',
+      reason: 'not part of a Claude Code setup',
+    });
+  });
+
+  it('project: a file outside .claude/ only when the setup imports it', () => {
+    expect(projectDestination('docs/guide.md', new Set(['docs/guide.md']))).toEqual({
+      kind: 'target',
+      path: 'docs/guide.md',
+    });
+    expect(projectDestination('docs/guide.md')).toEqual({
+      kind: 'refused',
+      reason: 'not part of a Claude Code setup',
+    });
+  });
+});

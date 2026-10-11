@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import type { PlatformPath } from 'node:path';
 
+import { isFile } from '../../system/files.ts';
 import { formatSize } from '../../ui/format-size.ts';
 import { printableLine } from '../../ui/printable.ts';
 import type {
@@ -67,8 +68,6 @@ const SAFE_NAME = /^[A-Za-z0-9_*-]+$/;
 const isStoreFileName = (name: string) =>
   name.endsWith(STORE_RULE.extension) &&
   SAFE_NAME.test(name.slice(0, -STORE_RULE.extension.length));
-
-const isFile = async (path: string) => (await stat(path).catch(() => null))?.isFile() ?? false;
 
 /** `<name>@skills-dir` for each plugin folder in `skills/` on this PC (T97). */
 async function skillsDirPluginIds(path: PlatformPath, baseDir: string): Promise<string[]> {
