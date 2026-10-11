@@ -84,11 +84,11 @@ auto memory) keep a code adapter, which can still use the generic parts.
 Claude Code also brings in things from the user's claude.ai account: skills, plugins and
 connectors. Saving a copy lets a PC with another claude.ai account, or none, have them too.
 
-| Item                               | Status                    | Notes                                                                                                                                               |
-| ---------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Skills you made on claude.ai**   | Done (`--account-skills`) | Only your own; saved unless you say no, and restored as local skills where claude.ai does not already sync them.                                    |
-| **Plugins turned on in claude.ai** | Planned                   | No marketplace to reinstall from: their files would be restored as a local plugin, without organization plugins.                                    |
-| **Connectors**                     | Research                  | They are not files (Claude Code fetches them and their logins from claude.ai); at most the list could be offered as MCP servers to log in to again. |
+| Item                                  | Status                     | Notes                                                                                                                                               |
+| ------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Skills you made on claude.ai**      | Done (`--account-skills`)  | Only your own; saved unless you say no, and restored as local skills where claude.ai does not already sync them.                                    |
+| **Plugins you uploaded to claude.ai** | Done (`--account-plugins`) | Only your own uploads; saved unless you say no, added as `skills/<name>/` after the plugin review; directory and organization plugins never.        |
+| **Connectors**                        | Research                   | They are not files (Claude Code fetches them and their logins from claude.ai); at most the list could be offered as MCP servers to log in to again. |
 
 ## v2: one setup, every agent
 
