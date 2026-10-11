@@ -111,6 +111,32 @@ describe('help and version', () => {
     expect(out).not.toContain('subagent');
   });
 
+  it.each([
+    [
+      'push',
+      'skills',
+      'save a copy of your own claude.ai skills, for PCs without that claude.ai account (saved unless you say no)',
+    ],
+    [
+      'push',
+      'plugins',
+      'save a copy of your own claude.ai plugins, for PCs without that claude.ai account (saved unless you say no)',
+    ],
+    [
+      'pull',
+      'skills',
+      'add saved claude.ai skills as local skills, for a PC without that claude.ai account (added unless you say no)',
+    ],
+    [
+      'pull',
+      'plugins',
+      'add saved claude.ai plugins as local plugins, for a PC without that claude.ai account (added unless you say no)',
+    ],
+  ])('%s --help says claude.ai %s are taken by default (T114)', async (command, _, help) => {
+    const { out } = await run([command, '--help']);
+    expect(out.replace(/\s+/g, ' ')).toContain(help);
+  });
+
   it('shows the flags of a command', async () => {
     const { code, out } = await run(['pull', '--help']);
     expect(code).toBe(EXIT.ok);
