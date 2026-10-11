@@ -178,7 +178,7 @@ async function pushedEnvSetup() {
   await pushFrom(a, server, ['global', false, ['GITHUB_TOKEN']], {
     env: { GITHUB_TOKEN: 'ghp_secret' },
   })(none);
-  return { server };
+  return { server, a };
 }
 
 /** PC A with a global setup (a hook, a home path) and a project; pushed as "both". */
@@ -1055,6 +1055,25 @@ describe('pull: the summary before writing, --skip-existing and --env-values (T1
     await t.pull({ global: true, yes: false, allowCommands: true, envValues: ['GITHUB_TOKEN'] });
     expect(t.lines).toContain('warn: Not in the saved setup, so not added: GITHUB_TOKEN.');
     expect(written).toEqual([]);
+  });
+
+  it('--env-values with a name one setup saved says nothing of another setup without values (UX-02 of review 16)', async () => {
+    const { server, a } = await pushedEnvSetup();
+    await writeTestFile(join(a.project, 'CLAUDE.md'), 'Project rules.');
+    await pushFrom(a, server, ['project', 'my-app', false])(none);
+    const b = pc('desktop');
+    const { writer, written } = fakeEnvWriter();
+    const t = pullOn(b, server, [], { writer });
+    await t.pull({
+      global: true,
+      project: 'my-app',
+      yes: false,
+      allowCommands: true,
+      conflict: 'merge',
+      envValues: ['GITHUB_TOKEN'],
+    });
+    expect(t.lines.filter((line) => line.includes('not added'))).toEqual([]);
+    expect(written).toEqual([{ GITHUB_TOKEN: 'ghp_secret' }]);
   });
 });
 

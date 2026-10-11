@@ -44,8 +44,8 @@ async function splitEnvValues(
 }
 
 /**
- * Names `--env-values` gives that the saved setup does not hold (`saved`): they are not added,
- * so pull says so, also for a setup saved without values (UX-05).
+ * Names `--env-values` gives that no setup of the pull saved a value for (`saved`): they are
+ * not added, so pull says so, once for the whole pull (UX-05; UX-02 of review 16).
  */
 export function warnNotSaved(
   reporter: Pick<Reporter, 'warn'>,
@@ -81,7 +81,6 @@ export async function planEnvRestore(
 ): Promise<EnvRestorePlan> {
   const names = Object.keys(deps.section.variables);
   const { choice } = deps;
-  warnNotSaved(deps.reporter, choice, names);
   const { alreadySet, missing: all } = await splitEnvValues(
     deps.section.variables,
     deps.env,
