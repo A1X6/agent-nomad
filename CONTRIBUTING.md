@@ -200,9 +200,9 @@ open, such as a chat or an option letter from a discussion.
   - `packages/contracts/test/fixtures.ts`: a session `token`, the `kdfParams` as the wire carries
     them and a bundle list `summary`.
 - Use a named constant instead of its value: `GLOBAL_SCOPE_KEY`, `BUNDLE_FORMAT_VERSION`,
-  `AUTH_KEY_BYTES`, `KDF_SALT_BYTES`, `WRAPPED_DATA_KEY_BYTES` and `MAX_BUNDLE_BYTES`
-  (contracts); `AEAD_KEY_BYTES`, `DATA_KEY_BYTES`, `BACKUP_MARKER`, `INCOMING_MARKER` and
-  `HOME_PLACEHOLDER` (core); `SECRETS_FILE`, `STATE_FILE`, `TEMP_MARKER`,
+  `AUTH_KEY_BYTES`, `KDF_SALT_BYTES`, `WRAPPED_DATA_KEY_BYTES`, `MAX_BUNDLE_BYTES` and
+  `MAX_BUNDLE_FILES` (contracts); `AEAD_KEY_BYTES`, `DATA_KEY_BYTES`, `BACKUP_MARKER`,
+  `INCOMING_MARKER` and `HOME_PLACEHOLDER` (core); `SECRETS_FILE`, `STATE_FILE`, `TEMP_MARKER`,
   `CLAUDE_JSON_BUNDLE_PATH`, `BLOCK_START` and `BLOCK_END` (the CLI). A value an assertion
   compares against stays written out, and so do the header names, sizes and settings that
   pin the API format in the contracts tests and the server's `support/fixtures.ts`.

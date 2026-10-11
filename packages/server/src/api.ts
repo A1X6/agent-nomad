@@ -22,8 +22,8 @@ export interface ApiDeps {
   readonly randomBytes: (length: number) => Uint8Array;
   /** Whether a rate-limit hit also prunes expired counters and sessions. */
   readonly shouldPrune: () => boolean;
-  /** Whether a save also sweeps unused bundle files; about one in 50 when left out. */
-  readonly shouldSweep?: () => boolean;
+  /** Whether a save also sweeps unused bundle files, without waiting for it (DB-01). */
+  readonly shouldSweep: () => boolean;
   /** Reports housekeeping failures; the request itself still succeeds. */
   readonly logError: (message: string, error: unknown) => void;
 }
@@ -57,7 +57,7 @@ export function createApi(deps: ApiDeps) {
       bundles: createBundleRepository(db),
       blobs: createPostgresBlobStore(db),
       logError,
-      ...(deps.shouldSweep && { shouldSweep: deps.shouldSweep }),
+      shouldSweep: deps.shouldSweep,
     }),
     limiter,
     clientIp: deps.clientIp,

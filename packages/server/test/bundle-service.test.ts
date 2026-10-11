@@ -1,5 +1,5 @@
 import { BUNDLE_FORMAT_VERSION, fromHex } from '@agentnomad/contracts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   BundleNotFoundError,
@@ -29,12 +29,16 @@ const input = (userId: string, fill = 1, expectedRevision = 0) => ({
   nameEnc: null,
 });
 
-/** The bundle service on the test database; `parts` replace its repository, store or logger. */
+/**
+ * The bundle service on the test database, never sweeping; `parts` replace its repository,
+ * store, logger or sweep chance.
+ */
 const serviceWith = (parts: Partial<Parameters<typeof createBundleService>[0]>) =>
   createBundleService({
     bundles: createBundleRepository(database.db),
     blobs: createPostgresBlobStore(database.db),
     logError: () => undefined,
+    shouldSweep: () => false,
     ...parts,
   });
 
@@ -56,6 +60,58 @@ describe('BundleService cleanup', () => {
     const second = await upload(1, 2);
     expect(second).toMatchObject({ outcome: 'stored', meta: { revision: 2 } });
     expect(logged).toHaveLength(1);
+  });
+});
+
+describe('BundleService sweep (QA-05)', () => {
+  /** The real store, with `deleteOrphans` replaced by `sweep`. */
+  const sweepingWith = (sweep: NonNullable<BlobStore['deleteOrphans']>): BlobStore => {
+    const real = createPostgresBlobStore(database.db);
+    return {
+      put: (userId, data) => real.put(userId, data),
+      get: (ref) => real.get(ref),
+      delete: (ref) => real.delete(ref),
+      deleteOrphans: sweep,
+    };
+  };
+
+  it('a save that draws the sweep chance sweeps files over an hour old once', async () => {
+    const sweep = vi.fn(() => Promise.resolve(0));
+    const service = serviceWith({ blobs: sweepingWith(sweep), shouldSweep: () => true });
+    const user = await createUser(database.db);
+    await service.upload(input(user.id));
+    expect(sweep.mock.calls).toEqual([[60 * 60]]);
+  });
+
+  it('a failed sweep is logged and the save still answers stored', async () => {
+    const logged: string[] = [];
+    const service = serviceWith({
+      blobs: sweepingWith(() => Promise.reject(new Error('storage down'))),
+      shouldSweep: () => true,
+      logError: (message) => logged.push(message),
+    });
+    const user = await createUser(database.db);
+    expect(await service.upload(input(user.id))).toMatchObject({ outcome: 'stored' });
+    await vi.waitFor(() => {
+      expect(logged).toEqual(['Could not sweep unused bundle files']);
+    });
+  });
+
+  it('a save answers before its sweep ends (DB-01)', async () => {
+    let finish = (): void => undefined;
+    const sweep = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          finish = () => {
+            resolve(0);
+          };
+        }),
+    );
+    const service = serviceWith({ blobs: sweepingWith(sweep), shouldSweep: () => true });
+    const user = await createUser(database.db);
+    expect(await service.upload(input(user.id))).toMatchObject({ outcome: 'stored' });
+    expect(sweep).toHaveBeenCalledOnce();
+    finish();
   });
 });
 

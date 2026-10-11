@@ -1,4 +1,4 @@
-import { MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
+import { MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES } from '@agentnomad/contracts';
 import { Command, Option, type CommandUnknownOpts } from '@commander-js/extra-typings';
 
 import type { OptionalPart } from '../agents/adapter.ts';
@@ -51,7 +51,8 @@ Examples:
 With no terminal (a script or CI), nothing is asked: a question the flags do not
 answer stops the command with exit code 1 and names the flags to add. Push and pull
 also exit with code 1 when a setup was skipped or refused without a "no" from you
-(a newer or older copy, over ${formatSize(MAX_BUNDLE_BYTES)}, or skipped by --yes); the rest is done first.`;
+(a newer or older copy, over ${formatSize(MAX_BUNDLE_BYTES)} or ${MAX_BUNDLE_FILES.toLocaleString('en-US')} files,
+or skipped by --yes); the rest is done first.`;
 
 /** `--<id>` and `--no-<id>` for each optional part, with the command's help texts. */
 function addPartOptions(

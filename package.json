@@ -2,7 +2,7 @@
   "name": "agentnomad-monorepo",
   "private": true,
   "type": "module",
-  "description": "agentnomad monorepo: contracts, core, cli and server packages",
+  "description": "agentnomad monorepo: contracts, core, cli, server and e2e packages",
   "license": "MIT",
   "repository": {
     "type": "git",

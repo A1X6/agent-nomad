@@ -24,6 +24,9 @@ export interface Server {
 /** Share of rate-limit hits that also prune expired counters and sessions. */
 const PRUNE_CHANCE = 0.01;
 
+/** Share of saves that also sweep files no setup points to. */
+const SWEEP_CHANCE = 0.02;
+
 /**
  * Neon's pooled URL in production; connections open lazily on the first query. An idle
  * connection that drops (Neon suspending, a network blip) emits `error` on the pool, which
@@ -59,6 +62,7 @@ export async function createServerFromEnv(
     now: () => new Date(),
     randomBytes: (length) => crypto.getRandomValues(new Uint8Array(length)),
     shouldPrune: () => Math.random() < PRUNE_CHANCE,
+    shouldSweep: () => Math.random() < SWEEP_CHANCE,
     logError: (message, error) => {
       logger.error('cleanup_failed', { message, ...describeError(error) });
     },
