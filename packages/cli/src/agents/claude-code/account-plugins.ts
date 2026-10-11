@@ -1,6 +1,7 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import type { PlatformPath } from 'node:path';
 
+import { isFile } from '../../system/files.ts';
 import type { CollectedFile, RestorePlanContext } from '../adapter.ts';
 import type { FileGatherer } from '../shared/file-gathering.ts';
 import { isUsableSkillName, readSyncedSkills } from './account-skills.ts';
@@ -62,8 +63,6 @@ export interface SyncedAccountPlugins {
   /** What push says before saving them: plugins left out with why; `null` when nothing. */
   readonly notice: string | null;
 }
-
-const isFile = async (path: string) => (await stat(path).catch(() => null))?.isFile() ?? false;
 
 /** Whether an account folder holds any folder of a plugin (not Claude Code's dot files). */
 const hasPluginFolder = async (accountDir: string) =>

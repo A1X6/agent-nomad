@@ -968,3 +968,49 @@ describe('restorer: hooks for another OS, by what they run (review 6 UX-02)', ()
     ]);
   });
 });
+
+describe('restorer: files the memory files import (T111)', () => {
+  it('puts a global import back where the setup imports it from', async () => {
+    const report = await restoreGlobal(
+      [
+        collected('CLAUDE.md', '@~/notes/a.md\n@shared/team.md\n'),
+        collected('.agentnomad/home/notes/a.md', '@b.md\n'),
+        collected('.agentnomad/home/notes/b.md', 'B\n'),
+        collected('shared/team.md', 'Team\n'),
+        collected('.agentnomad/home/notes/other.md', 'not imported\n'),
+      ],
+      'skip',
+    );
+    expect(report.written).toEqual([
+      '.agentnomad/home/notes/a.md',
+      '.agentnomad/home/notes/b.md',
+      'CLAUDE.md',
+      'shared/team.md',
+    ]);
+    expect(report.skipped).toEqual(['.agentnomad/home/notes/other.md']);
+    expect(await readText(join(home, 'notes', 'b.md'))).toBe('B\n');
+    expect(await readText(join(base, 'shared', 'team.md'))).toBe('Team\n');
+  });
+
+  it('puts a project import back at its project path', async () => {
+    const report = await restoreProject(
+      [collected('CLAUDE.md', '@docs/guide.md\n'), collected('docs/guide.md', 'Guide\n')],
+      'skip',
+    );
+    expect(report.written).toEqual(['CLAUDE.md', 'docs/guide.md']);
+    expect(await readText(join(project, 'docs', 'guide.md'))).toBe('Guide\n');
+  });
+
+  it('never writes an imported script or a file without an extension', async () => {
+    const report = await restoreProject(
+      [
+        collected('CLAUDE.md', '@tools/run.sh @.husky/pre-commit\n'),
+        collected('tools/run.sh', 'echo pwned\n'),
+        collected('.husky/pre-commit', 'echo pwned\n'),
+      ],
+      'skip',
+    );
+    expect(report.written).toEqual(['CLAUDE.md']);
+    expect(report.skipped).toEqual(['.husky/pre-commit', 'tools/run.sh']);
+  });
+});
