@@ -25,7 +25,7 @@ export const PROJECT_MEMORY_FOLDERS: readonly string[] = DATA.project.memoryFold
 /** Never taken from a project, even when a hook names it; plus agentnomad's reserved folder. */
 export const PROJECT_NEVER_SYNCED: readonly string[] = [...DATA.project.neverSynced, RESERVED_DIR];
 
-/** Known `<project>/.claude/` entries left out on purpose (hook scripts come via the hooks). */
+/** Known `<project>/.claude/` entries left out on purpose (none since `hooks/` is synced, T112). */
 export const PROJECT_KNOWN_STATE: readonly string[] = DATA.project.knownState;
 
 /** Opt-in auto memory of the project, stored under this bundle folder. */
