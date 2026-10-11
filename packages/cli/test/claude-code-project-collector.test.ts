@@ -5,18 +5,22 @@ import { BACKUP_MARKER } from '@agentnomad/core';
 import { describe, expect, it } from 'vitest';
 
 import {
+  base,
+  claudeJsonKey,
   collect,
   collectSkipped,
   home,
+  LOCAL_MCP_SERVER,
   memoryDir,
   options,
   project,
   root,
   stopHook,
   useProjectFolders,
+  writeClaudeJsonProject,
 } from './claude-code-project-fixtures.ts';
 import { linkFolder, paths, text, writeTestFile } from './fakes.ts';
-import { createClaudeCodeProjectCollector } from '../src/index.ts';
+import { CLAUDE_JSON_PROJECT_BUNDLE_PATH, createClaudeCodeProjectCollector } from '../src/index.ts';
 
 useProjectFolders('agentnomad-project-');
 
@@ -213,6 +217,67 @@ describe('project collector: links and size (T45)', () => {
     const { found, skipped } = await collectSkipped(createClaudeCodeProjectCollector(options()));
     expect(paths(found)).toContain('.claude/skills/big/SKILL.md');
     expect(skipped).toEqual(['.claude/skills/big/data.bin: it is larger than 10 MB']);
+  });
+});
+
+describe("project collector: the folder's entry in ~/.claude.json (T109)", () => {
+  const CHOICES = { enabledMcpjsonServers: ['shared'], disabledMcpjsonServers: ['other'] };
+
+  it('takes its local MCP servers and .mcp.json choices, nothing else of the entry', async () => {
+    await writeClaudeJsonProject(
+      {
+        allowedTools: ['Bash(rm:*)'],
+        hasTrustDialogAccepted: true,
+        history: [{ display: 'SECRET prompt' }],
+        mcpServers: { local: LOCAL_MCP_SERVER },
+        ...CHOICES,
+      },
+      { oauthAccount: { emailAddress: 'SECRET@example.com' }, diffTool: 'terminal' },
+    );
+    const files = await collect();
+    expect(paths(files)).toEqual([CLAUDE_JSON_PROJECT_BUNDLE_PATH]);
+    expect(JSON.parse(text(files, CLAUDE_JSON_PROJECT_BUNDLE_PATH))).toEqual({
+      mcpServers: { local: LOCAL_MCP_SERVER },
+      ...CHOICES,
+    });
+  });
+
+  it('takes nothing when no entry is this folder’s', async () => {
+    await writeTestFile(
+      join(home, '.claude.json'),
+      JSON.stringify({
+        projects: { [claudeJsonKey(root)]: { mcpServers: { x: LOCAL_MCP_SERVER } } },
+      }),
+    );
+    expect(await collect()).toEqual([]);
+  });
+
+  it('takes the .mcp.json choices alone when the entry has no servers', async () => {
+    await writeClaudeJsonProject({ mcpServers: {}, ...CHOICES });
+    expect(JSON.parse(text(await collect(), CLAUDE_JSON_PROJECT_BUNDLE_PATH))).toEqual(CHOICES);
+  });
+
+  it('takes nothing from an entry whose servers and choices are empty', async () => {
+    // What `claude mcp add` leaves once its server is removed again.
+    await writeClaudeJsonProject({
+      mcpServers: {},
+      enabledMcpjsonServers: [],
+      disabledMcpjsonServers: [],
+      hasTrustDialogAccepted: true,
+    });
+    expect(await collect()).toEqual([]);
+  });
+
+  it('reads it from CLAUDE_CONFIG_DIR when that is set', async () => {
+    await writeTestFile(
+      join(base, '.claude.json'),
+      JSON.stringify({ projects: { [claudeJsonKey()]: CHOICES } }),
+    );
+    const files = await createClaudeCodeProjectCollector({
+      ...options(),
+      customConfigDir: true,
+    }).collect({ kind: 'project', projectDir: project }, { includeMemory: false });
+    expect(JSON.parse(text(files, CLAUDE_JSON_PROJECT_BUNDLE_PATH))).toEqual(CHOICES);
   });
 });
 

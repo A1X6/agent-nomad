@@ -2,8 +2,14 @@ import { isFile } from '../../system/files.ts';
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { underAnyFolder } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
-import { createFileGatherer, type FileGatherer, uniqueByPath } from '../shared/file-gathering.ts';
+import {
+  createFileGatherer,
+  type FileGatherer,
+  jsonFile,
+  uniqueByPath,
+} from '../shared/file-gathering.ts';
 import { findAutoMemory } from './auto-memory.ts';
+import { claudeJsonFileOf, projectClaudeJson, readClaudeJsonFile } from './claude-json-merge.ts';
 import {
   followImports,
   isProjectMemoryFile,
@@ -18,6 +24,7 @@ import type { ProgramCli } from './plugin-sync.ts';
 import { pluginFiles } from './plugins.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   PROJECT_CLAUDE_FILES,
   PROJECT_CLAUDE_FOLDERS,
   PROJECT_MEMORY_FOLDERS,
@@ -32,6 +39,8 @@ export interface ProjectCollectorOptions {
   readonly homedir: string;
   readonly platform: NodeJS.Platform;
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** Whether `CLAUDE_CONFIG_DIR` is set: `.claude.json` then lives in the base folder. */
+  readonly customConfigDir?: boolean;
   /** Finds `git` for saved local marketplaces (T98); without it their folders are walked. */
   readonly findGit?: () => Promise<ProgramCli | null>;
 }
@@ -122,6 +131,18 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
     return found.filter((file) => file.path.toLowerCase().endsWith('.md'));
   }
 
+  /**
+   * The project's local MCP servers and `.mcp.json` choices from its entry in
+   * `~/.claude.json` (T109), keyed by the folder as Claude Code writes it; nothing else there.
+   */
+  async function claudeJson(projectDir: string): Promise<CollectedFile | null> {
+    const all = await readClaudeJsonFile(
+      claudeJsonFileOf({ ...options, customConfigDir: options.customConfigDir ?? false }),
+    );
+    const selected = all === null ? null : projectClaudeJson(all, projectDir, options.platform);
+    return selected === null ? null : jsonFile(CLAUDE_JSON_PROJECT_BUNDLE_PATH, selected);
+  }
+
   return {
     async collect(target: ScopeTarget, collectOptions: CollectOptions) {
       if (target.kind !== 'project') {
@@ -173,6 +194,8 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
       if (collectOptions.includeMemory) {
         found.push(...(await autoMemory(projectDir, collectOptions.onSkipped)));
       }
+      const selected = await claudeJson(projectDir);
+      if (selected) found.push(selected);
 
       const plugins = {
         baseDir: options.baseDir,

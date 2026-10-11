@@ -16,11 +16,11 @@ import {
 } from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
+import { claudeJsonProjectNote, isClaudeJsonPath } from './claude-json-merge.ts';
 import { claudeConfigDir, createClaudeCodeDetector } from './detector.ts';
 import { devModsNotice, readDevMods } from './dev-mods.ts';
 import { CLAUDE_ENV_REFERENCES } from './env-files.ts';
 import { createClaudeCodeGlobalCollector } from './global-collector.ts';
-import { CLAUDE_JSON_BUNDLE_PATH } from './global-paths.ts';
 import { findGit, planLocalMarketplaces, savedMarketplaceMods } from './local-marketplaces.ts';
 import {
   detectManagedSettings,
@@ -93,6 +93,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
   const project = createClaudeCodeProjectCollector({
     ...shared,
     env: options.env,
+    customConfigDir,
     findGit: findGitHere,
   });
   const collector: Collector = {
@@ -270,8 +271,10 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
         return notes.length === 0 ? null : notes.join('\n');
       },
       pushNotes(files) {
-        const note = skillsPluginsNote(files);
-        return note === null ? [] : [note];
+        // Plugins in skills/ (T97) and the project's part of ~/.claude.json (T109).
+        return [skillsPluginsNote(files), claudeJsonProjectNote(files)].filter(
+          (note) => note !== null,
+        );
       },
     },
 
@@ -284,9 +287,12 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
      */
     async planRestore(context) {
       let leaveClaudeJson = false;
-      const change = await restorer.claudeJsonChange(context.files);
+      const change = await restorer.claudeJsonChange(context.files, context.target);
       // An unanswered file is left as it is, like a skip.
-      const answer = context.conflicts.get(CLAUDE_JSON_BUNDLE_PATH) ?? context.conflictAnswer;
+      const claudeJsonPath = context.files.find((file) => isClaudeJsonPath(file.path))?.path;
+      const answer =
+        (claudeJsonPath === undefined ? undefined : context.conflicts.get(claudeJsonPath)) ??
+        context.conflictAnswer;
       const merging = change === 'merge' && answer !== undefined && answer !== 'skip';
       if (!context.assumeYes && (change === 'new' || merging)) {
         while (await isClaudeRunning()) {
@@ -304,6 +310,9 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
         }
       }
       const global = context.target.kind === 'global';
+      // What a project setup adds to ~/.claude.json for this folder (T109).
+      const claudeJsonNote = global ? null : claudeJsonProjectNote(context.files);
+      if (claudeJsonNote !== null) context.reporter.info(claudeJsonNote);
       const withSaved = global
         ? await withAccountPlugins(context)
         : { files: context.files, added: [] };

@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { stopHook } from './claude-code-project-fixtures.ts';
+import { LOCAL_MCP_SERVER, stopHook } from './claude-code-project-fixtures.ts';
 import { collected, collectedJson } from './fakes.ts';
 
-import { reviewRunnable, type CollectedFile } from '../src/index.ts';
+import {
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
+  reviewRunnable,
+  type CollectedFile,
+} from '../src/index.ts';
 
 const labels = (incoming: CollectedFile[], current: CollectedFile[] = []) =>
   reviewRunnable(incoming, current).map((entry) => `${entry.change} ${entry.label}`);
@@ -447,5 +451,26 @@ describe('reviewRunnable: a hook that moves between exec and shell form (review 
 
   it('an unchanged hook in exec form is not shown', () => {
     expect(labels([exec], [exec])).toEqual([]);
+  });
+});
+
+describe("reviewRunnable: the project's part of ~/.claude.json (T109)", () => {
+  const part = (value: unknown) => collectedJson(CLAUDE_JSON_PROJECT_BUNDLE_PATH, value);
+
+  it('lists its local MCP servers as it lists .mcp.json servers', () => {
+    const review = reviewRunnable([part({ mcpServers: { local: LOCAL_MCP_SERVER } })], []);
+    expect(review.map((entry) => [entry.change, entry.label, entry.command])).toEqual([
+      ['new', 'MCP server local', 'node server.js  (env: TOKEN)'],
+    ]);
+  });
+
+  it('lists each newly approved .mcp.json server, which then starts without asking', () => {
+    const here = part({ enabledMcpjsonServers: ['shared'] });
+    expect(
+      labels(
+        [part({ enabledMcpjsonServers: ['shared', 'deploy'], disabledMcpjsonServers: ['x'] })],
+        [here],
+      ),
+    ).toEqual(['new approved .mcp.json server']);
   });
 });

@@ -1,7 +1,4 @@
-import { readFile } from 'node:fs/promises';
-
 import { isFile } from '../../system/files.ts';
-import { JsonObjectSchema } from '../../system/json.ts';
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { underAnyFolder } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
@@ -17,7 +14,7 @@ import {
   readSyncedPlugins,
 } from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
-import { ClaudeJsonError } from './claude-json-merge.ts';
+import { claudeJsonFileOf, readClaudeJsonFile } from './claude-json-merge.ts';
 import {
   followImports,
   globalImportPlace,
@@ -179,31 +176,16 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
 
   /** MCP servers and preference keys from `~/.claude.json`; nothing else in it. */
   async function claudeJson(): Promise<CollectedFile | null> {
-    const file = options.customConfigDir
-      ? path.join(baseDir, '.claude.json')
-      : path.join(homedir, '.claude.json');
-    let text: string;
-    try {
-      text = await readFile(file, 'utf8');
-    } catch {
-      return null;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch (error) {
-      throw new ClaudeJsonError(file, { cause: error });
-    }
-    const all = JsonObjectSchema.safeParse(parsed);
-    if (!all.success) throw new ClaudeJsonError(file, { cause: all.error });
+    const all = await readClaudeJsonFile(claudeJsonFileOf(options));
+    if (all === null) return null;
 
     const selected: Record<string, unknown> = {};
-    const mcpServers = all.data[CLAUDE_JSON_MCP_KEY];
+    const mcpServers = all[CLAUDE_JSON_MCP_KEY];
     if (mcpServers && typeof mcpServers === 'object' && Object.keys(mcpServers).length > 0) {
       selected[CLAUDE_JSON_MCP_KEY] = mcpServers;
     }
     for (const key of CLAUDE_JSON_PREFERENCE_KEYS) {
-      if (all.data[key] !== undefined) selected[key] = all.data[key];
+      if (all[key] !== undefined) selected[key] = all[key];
     }
     return Object.keys(selected).length === 0 ? null : jsonFile(CLAUDE_JSON_BUNDLE_PATH, selected);
   }
