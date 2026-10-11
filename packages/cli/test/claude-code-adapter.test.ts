@@ -278,7 +278,10 @@ describe('Claude Code plan step: plugin parts in skills/ the review must see (SE
   };
   /** The global plan step under --yes, with `claude` passing a plugin without modules. */
   async function planYes(files: CollectedFile[]) {
-    const t = await planStepWith(validatePassNoHooks, [], { files, assumeYes: true }, home);
+    const t = await planStepWith(validatePassNoHooks, {
+      overrides: { files, assumeYes: true },
+      homedir: home,
+    });
     const report = await t.planned.restore(answer('skip'), {});
     return { ...t, report };
   }

@@ -1,0 +1,1 @@
+CREATE INDEX "bundle_blobs_created_at_idx" ON "bundle_blobs" USING btree ("created_at");

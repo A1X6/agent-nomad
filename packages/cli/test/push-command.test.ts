@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-import { BUNDLE_FORMAT_VERSION, GLOBAL_SCOPE_KEY } from '@agentnomad/contracts';
+import { BUNDLE_FORMAT_VERSION, GLOBAL_SCOPE_KEY, MAX_BUNDLE_FILES } from '@agentnomad/contracts';
 import {
   createGzipBundleCodec,
   DATA_KEY_BYTES,
@@ -599,6 +599,26 @@ describe('agentnomad push', () => {
     expect(t.lines.at(-1)).toBe(
       'error: The Claude Code global setup is 6.0 MB after compression and encryption; the limit is 5.0 MB. Remove large files (e.g. images in skills) and try again.',
     );
+  });
+
+  it('a setup over MAX_BUNDLE_FILES is not done before encode; the next setup is saved (BUG-01)', async () => {
+    const files = Array.from({ length: MAX_BUNDLE_FILES + 1 }, (_, i) =>
+      collected(`skills/s${String(i)}.md`, 'x'),
+    );
+    const codec = createGzipBundleCodec();
+    const encode = vi.spyOn(codec, 'encode');
+    const t = setup([], { adapter: collectingAdapter({ global: files }), codec });
+    await expect(t.command.push({ global: true, project: 'my-app', yes: true })).rejects.toThrow(
+      'Not saved:\n  - the Claude Code global setup: 10,001 files, over the 10,000 limit',
+    );
+    expect(t.lines).toContain(
+      'error: The Claude Code global setup has 10,001 files; the limit is 10,000. Leave some out (e.g. old memory or unused skills) and try again.',
+    );
+    expect(encode.mock.calls.map(([bundle]) => bundle.scope)).toEqual([
+      { kind: 'project', name: 'my-app' },
+    ]);
+    expect((await received(t.server, { kind: 'project', name: 'my-app' })).revision).toBe(1);
+    expect(t.server.puts).toHaveLength(1);
   });
 
   it('--yes skips a newer copy, saves the other setups, then exits with code 1 (BUG-03)', async () => {

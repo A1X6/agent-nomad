@@ -17,6 +17,8 @@ import { forward, isExecutable, newPc, read, write, type Pc, type RunResult } fr
 
 /** A throwaway account on the throwaway local server; strong enough for the T23 policy. */
 const USER = { username: 'e2e-user', password: 'quartz-lantern-meadow-pilot-58' };
+/** The plugin gate's own account (T104), so its skipped plugins never reach USER's revisions. */
+const GATE_USER = { username: 'e2e-gate', password: USER.password };
 const LOGIN = ['--username', USER.username, '--password-stdin'];
 const stdin = `${USER.password}\n`;
 
@@ -666,8 +668,10 @@ async function thirdPc({ server, keychain }: StepContext): Promise<void> {
  * setup of its own account, so its skipped plugins never reach the main account's revisions.
  * A plugin without hooks, a mod and a mod whose manifest does not parse, in `skills/`.
  */
-const GATE_LOGIN = ['--username', 'e2e-gate', '--password-stdin'];
+const GATE_LOGIN = ['--username', GATE_USER.username, '--password-stdin'];
 type GatePlugin = 'gate-broken' | 'gate-mod' | 'gate-plain';
+/** What the gate's setup holds that must never leave a PC readable (QA-07). */
+const GATE_READABLE = ['Read the diff', 'e2e-mod-seen', 'gate-plain', 'gate-mod', 'gate-broken'];
 const gatePlugin = (pc: Pc, name: GatePlugin, ...parts: string[]) =>
   claude(pc, 'skills', name, ...parts);
 
@@ -684,10 +688,12 @@ async function gateFirstPc({ server }: StepContext): Promise<void> {
     await writeMod(claude(pc, 'skills', 'gate-broken'), 'gate-broken');
     await write(gatePlugin(pc, 'gate-broken', '.claude-plugin', 'plugin.json'), '{"name": "gate');
     ok(await pc.run(['register', ...GATE_LOGIN, '--yes'], stdin));
+    const secretsHere = await secretsOf(GATE_USER, pc);
     const pushed = ok(await pc.run(['push', '--global', '--yes']));
     expect(pushed.stdout).toContain(
       'Plugins in skills/: gate-broken@skills-dir (runs code), gate-mod@skills-dir (runs code), gate-plain@skills-dir',
     );
+    expectNoLeaks(server, secretsHere, GATE_READABLE);
   } finally {
     await pc.remove();
   }
@@ -706,6 +712,7 @@ async function gateSecondPc({ server }: StepContext): Promise<void> {
   });
   try {
     ok(await pc.run(['login', ...GATE_LOGIN], stdin));
+    const secretsHere = await secretsOf(GATE_USER, pc);
     const yes = ok(await pc.run(['pull', '--global', '--yes']));
     const said = `${yes.stdout}\n${yes.stderr}`;
     expect(said).toContain('+ gate-plain@skills-dir (skills/gate-plain)');
@@ -731,6 +738,7 @@ async function gateSecondPc({ server }: StepContext): Promise<void> {
     await expect(read(gatePlugin(pc, 'gate-broken', 'hooks', 'register.ts'))).rejects.toThrow();
 
     ok(await pc.run(['account', 'delete', ...GATE_LOGIN, '--yes'], stdin));
+    expectNoLeaks(server, secretsHere, GATE_READABLE);
   } finally {
     await pc.remove();
   }

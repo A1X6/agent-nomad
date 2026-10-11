@@ -1,8 +1,11 @@
-import { and, eq, lt, notExists, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, lt, notExists, sql } from 'drizzle-orm';
 
 import { FOREIGN_KEY_VIOLATION, postgresErrorCode, type Database } from '../db/database.ts';
 import { bundleBlobs, bundles } from '../db/schema.ts';
 import { BlobInUseError, type BlobRef, type BlobStore } from './blob-store.ts';
+
+/** Most files one sweep deletes, oldest first; the next sweep takes the rest (DB-01). */
+const ORPHANS_PER_SWEEP = 100;
 
 const matchesRef = (ref: BlobRef) =>
   and(eq(bundleBlobs.id, ref.blobId), eq(bundleBlobs.userId, ref.userId));
@@ -40,8 +43,10 @@ export function createPostgresBlobStore(db: Database): BlobStore {
 
     async deleteOrphans(olderThanSeconds) {
       // Old enough that no upload is still between storing its file and saving its setup.
-      const removed = await db
-        .delete(bundleBlobs)
+      // One batch, the oldest first (bundle_blobs_created_at_idx).
+      const orphans = db
+        .select({ id: bundleBlobs.id })
+        .from(bundleBlobs)
         .where(
           and(
             lt(bundleBlobs.createdAt, sql`now() - make_interval(secs => ${olderThanSeconds})`),
@@ -50,6 +55,11 @@ export function createPostgresBlobStore(db: Database): BlobStore {
             ),
           ),
         )
+        .orderBy(asc(bundleBlobs.createdAt))
+        .limit(ORPHANS_PER_SWEEP);
+      const removed = await db
+        .delete(bundleBlobs)
+        .where(inArray(bundleBlobs.id, orphans))
         .returning({ id: bundleBlobs.id });
       return removed.length;
     },

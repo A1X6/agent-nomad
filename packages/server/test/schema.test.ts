@@ -53,6 +53,7 @@ describe('migrations', () => {
       `select indexname from pg_indexes where schemaname = 'public' order by indexname`,
     );
     expect(indexes.map((row) => row.indexname)).toEqual([
+      'bundle_blobs_created_at_idx',
       'bundle_blobs_pkey',
       'bundle_blobs_user_id_id_key',
       'bundles_blob_id_key',

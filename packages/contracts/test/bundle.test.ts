@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BUNDLE_FORMAT_VERSION,
   BundleSchema,
+  MAX_BUNDLE_FILES,
   ProjectNameSchema,
   type Bundle,
 } from '../src/index.ts';
@@ -162,6 +163,16 @@ describe('BundleSchema', () => {
       expect(result.success).toBe(false);
       expect(result.error?.issues[0]?.path).toEqual(['files', 2, 'path']);
     });
+  });
+
+  it('accepts MAX_BUNDLE_FILES files and refuses one more (BUG-01)', () => {
+    const files = (count: number) =>
+      Array.from({ length: count }, (_, i) => fileAt(`f${String(i)}`));
+    expect(BundleSchema.safeParse({ ...validBundle, files: files(MAX_BUNDLE_FILES) }).success).toBe(
+      true,
+    );
+    const over = BundleSchema.safeParse({ ...validBundle, files: files(MAX_BUNDLE_FILES + 1) });
+    expect(over.error?.issues[0]).toMatchObject({ code: 'too_big', path: ['files'] });
   });
 
   describe('file content', () => {

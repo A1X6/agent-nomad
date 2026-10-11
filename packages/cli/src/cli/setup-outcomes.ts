@@ -1,8 +1,8 @@
 /**
  * What happened to one setup in push or pull (T59). `declined`: the user answered a question
  * with no, which is their choice and not a failure. `not-done`: skipped or refused without
- * the user saying so (by `--yes`, a newer or older copy, the size limit, a question that was
- * never asked), which makes the command exit with code 1.
+ * the user saying so (by `--yes`, a newer or older copy, the size or file limit, a question that
+ * was never asked), which makes the command exit with code 1.
  */
 export type SetupOutcome =
   | { readonly setup: string; readonly result: 'done' | 'declined' }

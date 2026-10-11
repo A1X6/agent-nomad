@@ -326,14 +326,14 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
   // UX-01 (review 16): the line names what --yes added and what it left out.
   it("names the skills --yes leaves out for want of --allow-commands in pull's summary", async () => {
     const files = [saved('mine', 'Plain.'), saved('runner', 'Run !`git status`')];
-    const { plan } = await run(files, { assumeYes: true }).done;
+    const { plan } = await run(files, { assumeYes: true });
     expect(plan.summary?.chosen).toContain(
       '--account-skills yes (mine); runner needs --allow-commands',
     );
   });
 
   it("says yes, not no, in pull's summary when --yes leaves out every skill", async () => {
-    const { plan } = await run([saved('runner', 'Run !`git status`')], { assumeYes: true }).done;
+    const { plan } = await run([saved('runner', 'Run !`git status`')], { assumeYes: true });
     expect(plan.summary?.chosen).toContain('--account-skills yes; runner needs --allow-commands');
   });
 
