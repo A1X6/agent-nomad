@@ -6,12 +6,16 @@ import * as z from 'zod';
 import { isFile } from '../../system/files.ts';
 import { parseJsonWith } from '../../system/json.ts';
 import type { CollectedFile } from '../adapter.ts';
+import { foldedName } from '../shared/bundle-paths.ts';
 import { jsonFile, type FileGatherer } from '../shared/file-gathering.ts';
 import {
   askSavedCopies,
   filesInSkills,
+  MARKETPLACE_UNKNOWN,
   NAME_NOT_A_FOLDER,
+  NOT_FROM_YOU,
   planSavedCopies,
+  savedCopiesChoice,
   savedCopiesIn,
   sortedCopies,
   type NamesHere,
@@ -23,6 +27,7 @@ import { isUsableSkillName, readSyncedSkills } from './account-skills.ts';
 import { ACCOUNT_PLUGINS_PREFIX } from './global-paths.ts';
 import { SAVED_FOLDER_SHAPE, savedFilesOf, savedFolderFiles } from './local-marketplaces.ts';
 import {
+  hasManifest,
   isGeneratedInPlugin,
   PLUGIN_MANIFEST,
   SKILLS_DIR_MARKETPLACE,
@@ -57,10 +62,10 @@ const INSTALLED_BY_CLAUDE_AI = new Set(['required', 'auto_install']);
 /** Why a synced plugin is not the user's own, or `null` when it is. When in doubt, left out. */
 function leftOutReason(plugin: SyncedPlugin): string | null {
   if (plugin.scope !== undefined && NOT_OWN_SCOPES.has(plugin.scope)) {
-    return 'it comes from your organization or claude.ai, not from you';
+    return NOT_FROM_YOU;
   }
   if (plugin.scope !== 'account') {
-    return 'agentnomad cannot tell which claude.ai marketplace it comes from';
+    return MARKETPLACE_UNKNOWN;
   }
   const preference = plugin.installationPreference;
   if (preference !== undefined && INSTALLED_BY_CLAUDE_AI.has(preference)) {
@@ -120,7 +125,7 @@ export async function readSyncedPlugins(
     for (const plugin of plugins) {
       const { name } = plugin;
       if (name === undefined) continue;
-      allNames.add(name.toLowerCase());
+      allNames.add(foldedName(name));
       const reason = leftOutReason(plugin);
       if (reason !== null) {
         leftOut.push(`${name} (${reason})`);
@@ -234,10 +239,7 @@ function planPlugins(bundleFiles: readonly CollectedFile[], here: NamesHere): Sa
     copies,
     here,
     'you already have a local skill or plugin with this name',
-    (copy) =>
-      copy.files.some((file) => file.path === PLUGIN_MANIFEST)
-        ? null
-        : `it has no ${PLUGIN_MANIFEST}`,
+    (copy) => (hasManifest(copy.files) ? null : `it has no ${PLUGIN_MANIFEST}`),
   );
   return { toAdd: plan.toAdd, skipped: [...plan.skipped, ...unreadable] };
 }
@@ -280,7 +282,7 @@ export async function localSkillNames(
       ? [name]
       : [];
   });
-  return new Set([...here, ...writing].map((name) => name.toLowerCase()));
+  return new Set([...here, ...writing].map(foldedName));
 }
 
 /**
@@ -303,12 +305,13 @@ export async function namesHere(
 /**
  * Saved claude.ai plugins (T101): listed, and added as plugins in `skills/<name>/` unless the
  * user says no or `--no-account-plugins` (`--yes` adds them, T114). Returns the files to add,
- * as `skills/<name>/...`; the plugin review (T97) then checks them like any plugin folder.
+ * as `skills/<name>/...`, and pull's summary line about them (UX-01), `null` when none could be
+ * added; the plugin review (T97) then checks them like any plugin folder.
  */
 export async function askAccountPlugins(
   context: SavedCopiesContext,
   here: NamesHere,
-): Promise<readonly CollectedFile[]> {
+): Promise<{ readonly files: readonly CollectedFile[]; readonly chosen: string | null }> {
   const plan = planPlugins(context.files, here);
   const { add } = await askSavedCopies(context, plan, {
     heading: 'Plugins from your claude.ai account on the other PC:',
@@ -317,5 +320,8 @@ export async function askAccountPlugins(
       'Add them as local plugins in ~/.claude/skills/? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
     part: ACCOUNT_PLUGINS_PART,
   });
-  return add ? filesInSkills(plan.toAdd) : [];
+  return {
+    files: add ? filesInSkills(plan.toAdd) : [],
+    chosen: savedCopiesChoice(ACCOUNT_PLUGINS_PART, plan, add),
+  };
 }

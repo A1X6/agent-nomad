@@ -23,6 +23,7 @@ import type {
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
+import { foldedName, foldsNames } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import { findAutoMemory, findSharedAutoMemory } from './auto-memory.ts';
 import {
@@ -193,8 +194,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     overwrite: strategies.overwrite,
   };
   // Windows and macOS ignore case and Unicode form: two names may be one file there (T43).
-  const foldsNames = options.platform === 'win32' || options.platform === 'darwin';
-  const sameFileKey = (name: string) => (foldsNames ? name.normalize('NFC').toLowerCase() : name);
+  const foldsHere = foldsNames(options.platform);
+  const sameFileKey = (name: string) => (foldsHere ? foldedName(name) : name);
   /**
    * Auto memory files written in this run, by OS path (T110). A global and a project setup
    * pulled together can hold the same note; pull writes the global setup first, and the
@@ -533,7 +534,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     // where names fold: only the first is written (T43).
     const seen = new Map<string, string>();
     for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
-      if (foldsNames) {
+      if (foldsHere) {
         const folded = sameFileKey(file.path);
         const first = seen.get(folded);
         if (first !== undefined) {

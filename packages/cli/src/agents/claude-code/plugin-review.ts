@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -10,13 +10,19 @@ import { printable, printableLine } from '../../ui/printable.ts';
 import type { Prompter, Reporter } from '../../ui/prompter.ts';
 import type { CollectedFile } from '../adapter.ts';
 import type { ExecutableLookupSystem } from '../shared/detector-system.ts';
-import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
 import { describeServer } from './command-review.ts';
 import { findClaudeExecutable } from './detector.ts';
 import { createProgramCli, type ProgramCli } from './plugin-sync.ts';
 import { riskOfCall } from './reviewed-settings.ts';
 import { commandText, hookItems } from './settings-commands.ts';
-import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
+import {
+  hasManifest,
+  isRunsCodePath,
+  PLUGIN_HOOKS,
+  PLUGIN_MANIFEST,
+  RUNS_CODE,
+  samePluginPath,
+} from './skills-dir-plugins.ts';
 
 /*
  * The pull review of a plugin or mod folder (T97, T44 rule), shared by every place pull writes
@@ -260,28 +266,32 @@ function modulesOf(notes: readonly string[]): ModuleReview[] {
   }));
 }
 
-/** The parts of a plugin Claude Code starts programs from (SEC-02). */
-const RUNS_CODE = DATA.plugins.runsCode;
-
 /** The MCP servers, LSP servers and monitors a plugin has without naming them in its manifest. */
 const MCP_FILE = '.mcp.json';
 const LSP_FILE = '.lsp.json';
 const MONITORS_FILE = 'monitors/monitors.json';
 
-/**
- * The folder's JSON file at `path` as a manifest names it (`./config/servers.json`):
- * `undefined` when it is not in the folder, `null` when it cannot be read.
- */
-function jsonAt(files: readonly CollectedFile[], path: string): unknown {
-  const at = insideFolder(path.split('/'));
-  const file = at === null ? undefined : files.find((entry) => entry.path === at);
-  return file === undefined ? undefined : valueOrNull(parseJsonWith(z.unknown(), file.content));
-}
-
 /** A part a manifest key declares: inline (`from` names the key) or from a file. */
 interface Declared {
   readonly from: string;
   readonly value: unknown;
+}
+
+/**
+ * The folder's JSON files at `path` as a manifest names it (`./config/servers.json`), in any
+ * case (review 16 SEC-01): Windows and macOS open `Hooks/hooks.json` as `hooks/hooks.json`.
+ * Each with its value, `null` when it cannot be read; `from` is `path`, or the file's own
+ * spelling when that differs. None when the folder has no such file.
+ */
+function jsonsAt(files: readonly CollectedFile[], path: string): Declared[] {
+  const at = insideFolder(path.split('/'));
+  if (at === null) return [];
+  return files
+    .filter((entry) => samePluginPath(entry.path, at))
+    .map((entry) => ({
+      from: entry.path === at ? path : entry.path,
+      value: valueOrNull(parseJsonWith(z.unknown(), entry.content)),
+    }));
 }
 
 /**
@@ -297,15 +307,12 @@ function declared(
   const value = manifest?.[key];
   const items: unknown[] =
     value === undefined ? [] : file.list && Array.isArray(value) ? value : [value];
-  const parts = items.map((item) =>
-    typeof item === 'string'
-      ? { from: item, value: jsonAt(files, item) }
-      : { from: `${PLUGIN_MANIFEST} ${key}`, value: item },
-  );
-  const fromFile = jsonAt(files, file.path);
-  if (fromFile !== undefined && (value === undefined || file.beside)) {
-    parts.push({ from: file.path, value: fromFile });
-  }
+  const parts = items.flatMap((item): Declared[] => {
+    if (typeof item !== 'string') return [{ from: `${PLUGIN_MANIFEST} ${key}`, value: item }];
+    const found = jsonsAt(files, item);
+    return found.length === 0 ? [{ from: item, value: undefined }] : found;
+  });
+  if (value === undefined || file.beside) parts.push(...jsonsAt(files, file.path));
   return parts;
 }
 
@@ -370,7 +377,8 @@ function commandHooksOf(
     if (!isJsonObject(part.value)) return [`${part.from} (unreadable)`];
     // A hooks file holds `hooks` (and a mod's `modules`); the manifest may hold the events.
     const inline =
-      part.from !== PLUGIN_HOOKS && !('hooks' in part.value || 'modules' in part.value);
+      !samePluginPath(part.from, PLUGIN_HOOKS) &&
+      !('hooks' in part.value || 'modules' in part.value);
     return commandHookLines(inline ? part.value : part.value['hooks']);
   });
 }
@@ -391,29 +399,34 @@ function commandHookLines(hooks: unknown): string[] {
   });
 }
 
-/** Reviews one plugin folder: validate's report, its modules and its command hooks. */
+/**
+ * Reviews one plugin folder: validate's report, its modules and its command hooks. Every
+ * manifest in the folder is read, in any case (review 16 SEC-01), and a case variant of a part
+ * Claude Code starts programs from counts as that part on every OS.
+ */
 export async function reviewPluginFolder(
   folder: PluginFolderToReview,
   validator: PluginValidator,
 ): Promise<PluginReview> {
   const validation = await validator.validate(folder);
   const modules = validation.kind === 'checked' ? modulesOf(validation.notes) : [];
-  const json = jsonAt(folder.files, PLUGIN_MANIFEST);
-  const manifest = isJsonObject(json) ? json : null;
-  const commandHooks = commandHooksOf(folder.files, manifest);
-  const starts = startsOf(folder.files, manifest);
+  const manifests = jsonsAt(folder.files, PLUGIN_MANIFEST).flatMap((part) =>
+    isJsonObject(part.value) ? [part.value] : [],
+  );
+  const each = manifests.length === 0 ? [null] : manifests;
+  // A file beside two manifests is read for each: shown once.
+  const commandHooks = [
+    ...new Set(each.flatMap((manifest) => commandHooksOf(folder.files, manifest))),
+  ];
+  const starts = [...new Set(each.flatMap((manifest) => startsOf(folder.files, manifest)))];
   const runsCode =
     validation.kind === 'unavailable' ||
     !validation.passed ||
     modules.length > 0 ||
     commandHooks.length > 0 ||
     starts.length > 0 ||
-    folder.files.some(
-      (file) =>
-        RUNS_CODE.files.includes(file.path) ||
-        RUNS_CODE.folders.some((part) => file.path.startsWith(`${part}/`)),
-    ) ||
-    RUNS_CODE.manifestKeys.some((key) => manifest?.[key] !== undefined);
+    folder.files.some((file) => isRunsCodePath(file.path)) ||
+    manifests.some((manifest) => RUNS_CODE.manifestKeys.some((key) => manifest[key] !== undefined));
   return {
     id: folder.id,
     folder: folder.folder,
@@ -542,4 +555,32 @@ export async function pluginFolderChange(
   }
   if (!differs) return null;
   return found ? 'changed' : 'new';
+}
+
+/**
+ * The folder with the manifest and the parts that start programs that it has in `dir`, where
+ * pull writes it, and that its own files lack (review 16 SEC-02): a lone `hooks/hooks.json`
+ * adds command hooks to a plugin already there, and a lone manifest makes a plugin of hooks
+ * already there. `null` when neither has a manifest: not a plugin, so Claude Code runs nothing
+ * from it.
+ */
+export async function withPartsHere(
+  dir: string,
+  folder: PluginFolderToReview,
+): Promise<PluginFolderToReview | null> {
+  const parts = [PLUGIN_MANIFEST, ...RUNS_CODE.files];
+  for (const part of RUNS_CODE.folders) {
+    const entries = await readdir(join(dir, part), { withFileTypes: true }).catch(() => []);
+    parts.push(
+      ...entries.filter((entry) => entry.isFile()).map((entry) => `${part}/${entry.name}`),
+    );
+  }
+  const here: CollectedFile[] = [];
+  for (const part of parts) {
+    if (folder.files.some((file) => samePluginPath(file.path, part))) continue;
+    const content = await readFile(join(dir, ...part.split('/'))).catch(() => null);
+    if (content !== null) here.push({ path: part, content, executable: false });
+  }
+  const files = [...folder.files, ...here];
+  return hasManifest(files) ? { ...folder, files } : null;
 }

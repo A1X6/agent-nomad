@@ -38,6 +38,7 @@ import {
 } from './fakes.ts';
 import {
   findGit,
+  homeFolderFor,
   localMarketplaceFiles,
   planLocalMarketplaces,
   readSavedLocalMarketplace,
@@ -528,5 +529,31 @@ describe('the git that pull re-clones with never waits for an answer (QA-01 of r
       'GCM_INTERACTIVE=never',
       'GIT_SSH_COMMAND=ssh -i work_key',
     ]);
+  });
+});
+
+// SEC-03 (review 16): a Mac's file system folds case, so `~/.Claude` is `~/.claude` there.
+describe("Claude Code's own folder in another case (SEC-03 of review 16)", () => {
+  const FALLBACK = '/Users/me/.agentnomad/marketplaces/tools';
+  const placed = (path: string, platform: NodeJS.Platform, baseDir = '/Users/me/.claude') =>
+    homeFolderFor(
+      {
+        path,
+        files: [{ path: 'skills/evil/.claude-plugin/plugin.json', content: '', executable: false }],
+      },
+      FALLBACK,
+      { homedir: '/Users/me', baseDir, platform },
+    );
+
+  it.each(['.claude', '.Claude', '.CLAUDE'])('on macOS, %s goes to the fallback', (path) => {
+    expect(placed(path, 'darwin')).toBe(FALLBACK);
+  });
+
+  it('on macOS, a case variant of a folder holding CLAUDE_CONFIG_DIR goes to the fallback', () => {
+    expect(placed('.Config', 'darwin', '/Users/me/.config/claude')).toBe(FALLBACK);
+  });
+
+  it('on Linux, .Claude is another folder than .claude', () => {
+    expect(placed('.Claude', 'linux')).toBe('/Users/me/.Claude');
   });
 });

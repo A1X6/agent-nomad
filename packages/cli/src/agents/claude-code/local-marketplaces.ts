@@ -14,6 +14,7 @@ import type {
   RestorePlanContext,
   RestoreReport,
 } from '../adapter.ts';
+import { foldedName, foldsNames, underFolder } from '../shared/bundle-paths.ts';
 import { bundlePathInside, createFileGatherer, jsonFile } from '../shared/file-gathering.ts';
 import { findExecutable, pathsOf, type ExecutableLookupSystem } from '../shared/detector-system.ts';
 import {
@@ -38,7 +39,7 @@ import {
   type PluginManifestInput,
 } from './plugins.ts';
 import { sameForRestore, type ClaudeCodeRestorer } from './restorer.ts';
-import { PLUGIN_HOOKS } from './skills-dir-plugins.ts';
+import { PLUGIN_HOOKS, samePluginPath } from './skills-dir-plugins.ts';
 
 /*
  * Marketplaces added from a folder on this PC (T98). Plugins are reinstalled with Claude
@@ -353,8 +354,11 @@ const filesUnder = (files: readonly CollectedFile[], folder: string): CollectedF
   folder === ''
     ? [...files]
     : files
-        .filter((file) => file.path.startsWith(`${folder}/`))
-        .map((file) => ({ ...file, path: file.path.slice(folder.length + 1) }));
+        .filter((file) => underFolder(file.path, folder, { ignoreCase: true }))
+        .map((file) => ({
+          ...file,
+          path: file.path.split('/').slice(folder.split('/').length).join('/'),
+        }));
 
 /** A saved folder's files as pull writes them. */
 export const savedFolderFiles = (saved: Pick<SavedFolder, 'files'>): CollectedFile[] =>
@@ -380,7 +384,10 @@ export function savedMarketplaceMods(files: readonly CollectedFile[]): string[] 
       return saved.plugins
         .filter((plugin) => {
           const at = pluginFolderOf(inside, plugin.id);
-          return at !== null && filesUnder(inside, at).some((entry) => entry.path === PLUGIN_HOOKS);
+          return (
+            at !== null &&
+            filesUnder(inside, at).some((entry) => samePluginPath(entry.path, PLUGIN_HOOKS))
+          );
         })
         .map((plugin) => plugin.id);
     });
@@ -423,8 +430,9 @@ async function cloneInto(
  * The folder for a saved folder on this PC: the same path from home, or `fallback` for one
  * that was outside home or would land in a refused place (keys, autostart folders, Claude
  * Code's own folder). Each saved file is checked from home too, and a folder that holds Claude
- * Code's own folder goes to `fallback`, so no file lands in a refused place (SEC-01); the
- * folder then stays in one piece.
+ * Code's own folder goes to `fallback`, so no file lands in a refused place (SEC-01); compared
+ * without case where the platform folds names (review 16 SEC-03). The folder then stays in
+ * one piece.
  */
 export function homeFolderFor(
   saved: Pick<SavedFolder, 'path' | 'files'>,
@@ -439,8 +447,10 @@ export function homeFolderFor(
   );
   if (refused) return fallback;
   const dir = path.join(deps.homedir, ...savedPath.split('/'));
+  // Without case where names fold: `~/.Claude` is `~/.claude` on a Mac (review 16 SEC-03).
+  const key = (folder: string) => (foldsNames(deps.platform) ? foldedName(folder) : folder);
   const holds = (folder: string, inner: string) => {
-    const relative = path.relative(folder, inner);
+    const relative = path.relative(key(folder), key(inner));
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
   };
   return holds(deps.baseDir, dir) || holds(dir, deps.baseDir) ? fallback : dir;
@@ -627,7 +637,8 @@ export async function planLocalMarketplaces(
     return {
       ...marketplace,
       files: marketplace.files.filter(
-        (file) => !declinedAt.some((at) => at === '' || file.path.startsWith(`${at}/`)),
+        (file) =>
+          !declinedAt.some((at) => at === '' || underFolder(file.path, at, { ignoreCase: true })),
       ),
       plugins: marketplace.plugins.filter((plugin) => !declinedIds.has(plugin.id)),
     };

@@ -34,6 +34,7 @@ import {
   pluginFolderChange,
   reviewPluginFolder,
   riskOfCall,
+  withPartsHere,
   type CollectedFile,
   type PluginFolderToReview,
 } from '../src/index.ts';
@@ -392,6 +393,54 @@ describe('plugin parts Claude Code starts programs from (SEC-02)', () => {
   });
 });
 
+// SEC-01 (review 16): Windows and macOS open `Hooks/hooks.json` as `hooks/hooks.json`.
+describe('plugin file names in any case (SEC-01 of review 16)', () => {
+  const HOOKS_FILE = { hooks: STOP_HOOK };
+
+  it.each([
+    ['Hooks/hooks.json', pluginWith([collectedJson('Hooks/hooks.json', HOOKS_FILE)])],
+    ['hooks/Hooks.json', pluginWith([collectedJson('hooks/Hooks.json', HOOKS_FILE)])],
+    ['.MCP.json', pluginWith([collectedJson('.MCP.json', { mcpServers: { db: MCP_SERVER } })])],
+    ['Monitors/monitors.json', pluginWith([collectedJson('Monitors/monitors.json', [MONITOR])])],
+    [
+      '.Claude-Plugin/plugin.json with hooks',
+      mod([collectedJson('.Claude-Plugin/plugin.json', { name: MOD_NAME, hooks: STOP_HOOK })]),
+    ],
+  ])('--yes skips a plugin with %s', async (_part, folder) => {
+    const t = await gate(validatePassNoHooks, { assumeYes: true }, [], folder);
+    expect(t.accepted).toEqual([]);
+    expect(t.lines).toContain(
+      'Skipped skills/probe-mod: probe-mod@skills-dir runs code inside Claude Code. --yes never accepts a plugin with code; add --allow-commands to accept it.',
+    );
+  });
+
+  it('shows the command hooks of Hooks/hooks.json', async () => {
+    const { validator } = await validatorFor(validatePassNoHooks);
+    const folder = pluginWith([collectedJson('Hooks/hooks.json', HOOKS_FILE)]);
+    expect((await reviewPluginFolder(folder, validator)).commandHooks).toEqual([
+      'hook Stop: bash stop.sh',
+    ]);
+  });
+
+  it('shows the servers of .MCP.json', async () => {
+    const { validator } = await validatorFor(validatePassNoHooks);
+    const folder = pluginWith([collectedJson('.MCP.json', { mcpServers: { db: MCP_SERVER } })]);
+    expect((await reviewPluginFolder(folder, validator)).starts).toEqual([
+      'MCP server db: node srv.js',
+    ]);
+  });
+
+  it('reads both manifests when two differ only in case', async () => {
+    const { validator } = await validatorFor(validatePassNoHooks);
+    const folder = pluginWith([
+      collectedJson('.Claude-Plugin/plugin.json', { name: MOD_NAME, hooks: STOP_HOOK }),
+    ]);
+    const review = await reviewPluginFolder(folder, validator);
+    expect(review.commandHooks).toEqual(['hook Stop: bash stop.sh']);
+    expect(review.runsCode).toBe(true);
+  });
+});
+
 describe('asking before writing a plugin folder with code (T97)', () => {
   it('shows the hooks: and calls: lines before asking', async () => {
     const t = await gate(validatePassWithWarning, {}, [true]);
@@ -479,5 +528,45 @@ describe('whether a plugin folder is new or changed here (T97)', () => {
   it('null when every file is here as it is', async () => {
     await writeModFolder(dir);
     expect(await pluginFolderChange(dir, mod())).toBeNull();
+  });
+});
+
+describe('the parts of a plugin folder already here (SEC-02 of review 16)', () => {
+  let dir: string;
+  useTempDir('agentnomad-plugin-here-', (made) => (dir = made));
+  const hooksOnly = (): PluginFolderToReview =>
+    mod([collectedJson('hooks/hooks.json', { hooks: STOP_HOOK })]);
+
+  it('adds the manifest here to a folder without one', async () => {
+    await writeTestFile(join(dir, '.claude-plugin', 'plugin.json'), '{"name":"probe-mod"}');
+    const folder = await withPartsHere(dir, hooksOnly());
+    expect(folder?.files.map((file) => file.path)).toEqual([
+      'hooks/hooks.json',
+      '.claude-plugin/plugin.json',
+    ]);
+  });
+
+  it('adds the hooks file and monitors here to a lone manifest', async () => {
+    await writeTestFile(join(dir, 'hooks', 'hooks.json'), JSON.stringify({ hooks: STOP_HOOK }));
+    await writeTestFile(join(dir, 'monitors', 'monitors.json'), JSON.stringify([MONITOR]));
+    const folder = await withPartsHere(dir, pluginWith([]));
+    expect(folder?.files.map((file) => file.path)).toEqual([
+      '.claude-plugin/plugin.json',
+      'hooks/hooks.json',
+      'monitors/monitors.json',
+    ]);
+  });
+
+  it('never adds a part the folder has in another case', async () => {
+    await writeTestFile(join(dir, 'hooks', 'hooks.json'), 'here');
+    const folder = await withPartsHere(dir, pluginWith([collected('Hooks/hooks.json', 'new')]));
+    expect(folder?.files.map((file) => file.path)).toEqual([
+      '.claude-plugin/plugin.json',
+      'Hooks/hooks.json',
+    ]);
+  });
+
+  it('null when neither the folder nor this PC has a manifest: not a plugin', async () => {
+    expect(await withPartsHere(dir, hooksOnly())).toBeNull();
   });
 });

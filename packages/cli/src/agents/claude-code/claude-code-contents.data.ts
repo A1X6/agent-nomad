@@ -3,8 +3,8 @@ import type { AgentContents } from '../adapter.ts';
 /**
  * What a Claude Code setup holds, as `push --help`, `pull --help` and the README "What is
  * synced" table say it (T115). Each list is one cell of that table, item for item (first letter
- * aside): program.test.ts fails when they differ. The collectors and the restorer decide what is
- * synced; this only names it.
+ * aside): claude-code-contents-data.test.ts fails when they differ. The collectors and the
+ * restorer decide what is synced; this only names it.
  */
 export const CLAUDE_CODE_CONTENTS: AgentContents = {
   globalLabel: 'global setup (~/.claude)',

@@ -1,4 +1,5 @@
 import type { CollectedFile, RestorePlanContext } from '../adapter.ts';
+import { foldedName } from '../shared/bundle-paths.ts';
 
 /*
  * What saved claude.ai skills (T42) and plugins (T101) share on pull (DUP-01): which saved
@@ -9,7 +10,14 @@ import type { CollectedFile, RestorePlanContext } from '../adapter.ts';
 /** Why push leaves out a skill or plugin whose name is no folder name in `skills/`. */
 export const NAME_NOT_A_FOLDER = 'its name cannot be a folder in ~/.claude/skills';
 
-/** Names on this PC a saved claude.ai skill or plugin must not take, lower case. */
+/** Why push leaves out a skill or plugin from an organization's or claude.ai's marketplace. */
+export const NOT_FROM_YOU = 'it comes from your organization or claude.ai, not from you';
+
+/** Why push leaves out a skill or plugin whose claude.ai marketplace is not known here. */
+export const MARKETPLACE_UNKNOWN =
+  'agentnomad cannot tell which claude.ai marketplace it comes from';
+
+/** Names on this PC a saved claude.ai skill or plugin must not take, as `foldedName` folds them. */
 export interface NamesHere {
   /** Plugins and skills this PC already gets from its own claude.ai sync. */
   readonly syncedNames: ReadonlySet<string>;
@@ -63,7 +71,9 @@ export interface SavedCopiesPlan {
 /**
  * Which saved copies pull may add as `skills/<name>/`: not one this PC already gets from its
  * own claude.ai sync, never over a local folder of the same name (`localReason` says what it
- * is), nor one `problem` refuses.
+ * is), nor one `problem` refuses. Names are compared without case, as Windows and macOS write
+ * `Evil/` and `evil/` into one folder: of two copies whose names differ only in case, the first
+ * by name is added (review 16 SEC-02).
  */
 export function planSavedCopies(
   copies: readonly SavedCopy[],
@@ -73,16 +83,43 @@ export function planSavedCopies(
 ): SavedCopiesPlan {
   const toAdd: SavedCopy[] = [];
   const skipped: { name: string; reason: string }[] = [];
+  const taken = new Set<string>();
   for (const copy of copies) {
-    const reason = here.syncedNames.has(copy.name.toLowerCase())
+    const name = foldedName(copy.name);
+    const reason = here.syncedNames.has(name)
       ? 'this PC already gets it from claude.ai'
-      : here.localNames.has(copy.name.toLowerCase())
+      : here.localNames.has(name)
         ? localReason
-        : problem(copy);
-    if (reason === null) toAdd.push(copy);
-    else skipped.push({ name: copy.name, reason });
+        : taken.has(name)
+          ? 'another saved copy has this name'
+          : problem(copy);
+    if (reason === null) {
+      toAdd.push(copy);
+      taken.add(name);
+    } else skipped.push({ name: copy.name, reason });
   }
   return { toAdd, skipped };
+}
+
+/**
+ * Pull's summary line for one kind of saved copy (UX-01): what was added and what was left
+ * out, not what was offered, e.g. `--account-skills yes (a); b needs --allow-commands`;
+ * `null` when none could be added. `blocked`: copies a yes left out for want of
+ * --allow-commands.
+ */
+export function savedCopiesChoice(
+  part: string,
+  plan: SavedCopiesPlan,
+  add: boolean,
+  blocked: readonly string[] = [],
+): string | null {
+  const offered = plan.toAdd.map((copy) => copy.name);
+  if (offered.length === 0) return null;
+  if (!add) return `--${part} no (${offered.join(', ')})`;
+  const added = offered.filter((name) => !blocked.includes(name));
+  const yes = `--${part} yes${added.length === 0 ? '' : ` (${added.join(', ')})`}`;
+  if (blocked.length === 0) return yes;
+  return `${yes}; ${blocked.join(', ')} ${blocked.length === 1 ? 'needs' : 'need'} --allow-commands`;
 }
 
 /** A copy's files as global bundle paths, `skills/<name>/...`. */

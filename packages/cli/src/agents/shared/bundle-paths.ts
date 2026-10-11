@@ -4,6 +4,17 @@
  */
 
 /**
+ * Whether a platform's file system sees names that differ only in case or Unicode form as one
+ * name: Windows and macOS do (T43). The one rule for comparing names from a bundle with names
+ * on this PC (review 16): with {@link foldedName} where it folds.
+ */
+export const foldsNames = (platform: NodeJS.Platform): boolean =>
+  platform === 'win32' || platform === 'darwin';
+
+/** A name or path as Windows and macOS compare it: Unicode NFC, lower case. */
+export const foldedName = (name: string): string => name.normalize('NFC').toLowerCase();
+
+/**
  * `path` is `folder` or inside it. `ignoreCase` where Windows and macOS would see the same
  * file (`Plugins/…` is `plugins/…` there, T43): refusals, and what push may take so that
  * pull does not refuse it.
@@ -13,7 +24,7 @@ export function underFolder(
   folder: string,
   { ignoreCase = false }: { readonly ignoreCase?: boolean } = {},
 ): boolean {
-  const [inside, entry] = ignoreCase ? [path.toLowerCase(), folder.toLowerCase()] : [path, folder];
+  const [inside, entry] = ignoreCase ? [foldedName(path), foldedName(folder)] : [path, folder];
   return inside === entry || inside.startsWith(`${entry}/`);
 }
 
