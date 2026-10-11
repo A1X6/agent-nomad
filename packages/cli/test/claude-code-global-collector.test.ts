@@ -104,6 +104,13 @@ describe('global collector: what is taken', () => {
     ]);
   });
 
+  it('takes loop.md, the prompt a bare /loop runs (T113)', async () => {
+    await writeTestFile(join(base, 'loop.md'), 'Check the release PR.');
+    const files = await collect();
+    expect(paths(files)).toEqual(['loop.md']);
+    expect(text(files, 'loop.md')).toBe('Check the release PR.');
+  });
+
   it('never takes credentials, history, transcripts or other state', async () => {
     await realisticSetup();
     const files = await collect(true);

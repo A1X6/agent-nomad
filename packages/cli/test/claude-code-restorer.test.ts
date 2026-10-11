@@ -222,6 +222,24 @@ describe('restorer: existing files', () => {
     expect(report.backups).toEqual([`CLAUDE.md.agentnomad-backup-${STAMP}`]);
   });
 
+  it('overwrite backs up loop.md first, as CLAUDE.md (T113)', async () => {
+    await writeTestFile(join(base, 'loop.md'), 'mine');
+    const report = await restoreGlobal([collected('loop.md', 'theirs')], 'overwrite');
+    expect(await readText(join(base, 'loop.md'))).toBe('theirs');
+    expect(await readText(join(base, `loop.md.agentnomad-backup-${STAMP}`))).toBe('mine');
+    expect(report.backups).toEqual([`loop.md.agentnomad-backup-${STAMP}`]);
+  });
+
+  it('merge keeps a project’s own loop.md and puts the pulled one next to it (T113)', async () => {
+    await writeTestFile(join(project, '.claude', 'loop.md'), 'mine');
+    const report = await restoreProject([collected('.claude/loop.md', 'theirs')], 'merge');
+    expect(await readText(join(project, '.claude', 'loop.md'))).toBe('mine');
+    expect(await readText(join(project, '.claude', `loop.md.agentnomad-incoming-${STAMP}`))).toBe(
+      'theirs',
+    );
+    expect(report.written).toEqual([`.claude/loop.md.agentnomad-incoming-${STAMP}`]);
+  });
+
   it('never replaces an earlier backup made in the same second (T45)', async () => {
     await writeTestFile(join(base, 'CLAUDE.md'), 'first');
     await writeTestFile(join(base, `CLAUDE.md.agentnomad-backup-${STAMP}`), 'older backup');

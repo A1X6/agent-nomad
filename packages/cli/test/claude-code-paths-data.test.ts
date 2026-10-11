@@ -42,8 +42,8 @@ describe('paths data file', () => {
     expect(STATE_NAMES.filter((name) => !known.has(name))).toEqual([]);
   });
 
-  // T108: logins, account state, session content and what may be the user's own (loop.md to
-  // project-settings, for a later decision) are never synced.
+  // T108: logins, account state and session content are never synced. T113 checked the six
+  // that might be the user's own (shares to project-settings): state, or kept in bytecode.
   it.each([
     '.session_ingress_token',
     'hfi-auth.json',
@@ -65,7 +65,6 @@ describe('paths data file', () => {
     'teams',
     'storage-v2',
     'cowork_plugins',
-    'loop.md',
     'shares',
     'scratch',
     'agent-memory-local',
@@ -74,6 +73,12 @@ describe('paths data file', () => {
     'project-settings',
   ])('never syncs %s (Claude Code 2.1.296, T108)', (name) => {
     expect(NEVER_SYNCED).toContain(name);
+  });
+
+  it('syncs loop.md, the prompt a bare /loop runs, globally and in a project (T113)', () => {
+    expect(CLAUDE_CODE_PATHS.global.files).toContain('loop.md');
+    expect(CLAUDE_CODE_PATHS.project.claudeFiles).toContain('loop.md');
+    expect(NEVER_SYNCED).not.toContain('loop.md');
   });
 
   // T108: Claude Code's own caches, profiles, traces, locks and markers are known state.
