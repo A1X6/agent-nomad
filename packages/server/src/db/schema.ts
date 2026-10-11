@@ -130,6 +130,8 @@ export const bundleBlobs = pgTable(
   (table) => [
     /** Lets `bundles` point at a file of the same user only; also indexes `user_id`. */
     uniqueIndex('bundle_blobs_user_id_id_key').on(table.userId, table.id),
+    /** The orphan sweep deletes the oldest unused files first, one batch at a time (DB-01). */
+    index('bundle_blobs_created_at_idx').on(table.createdAt),
     check(
       'bundle_blobs_ciphertext_size',
       sql`octet_length(${table.ciphertext}) <= ${lit(MAX_BUNDLE_BYTES)}`,

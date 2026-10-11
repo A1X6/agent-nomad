@@ -90,10 +90,10 @@ export interface BundleServiceDeps {
   /** Reports cleanup failures; the request itself still succeeds. */
   readonly logError: (message: string, error: unknown) => void;
   /**
-   * Whether this save also sweeps files no setup points to (T47); about one save in 50 by
-   * default, so the work is spread thin. Injectable for tests.
+   * Whether this save also sweeps files no setup points to (T47); `SWEEP_CHANCE` in
+   * production, so the work is spread thin. The save answers without waiting for it (DB-01).
    */
-  readonly shouldSweep?: () => boolean;
+  readonly shouldSweep: () => boolean;
 }
 
 /** Files left unused for this long are swept: far longer than any upload takes. */
@@ -103,9 +103,9 @@ const ORPHAN_AGE_SECONDS = 60 * 60;
 const DOWNLOAD_TRIES = 3;
 
 export function createBundleService(deps: BundleServiceDeps): BundleService {
-  const { bundles, blobs, logError } = deps;
-  const shouldSweep = deps.shouldSweep ?? (() => Math.random() < 0.02);
+  const { bundles, blobs, logError, shouldSweep } = deps;
 
+  /** Never rejects, so a save can start it and answer without waiting. */
   async function sweepQuietly(): Promise<void> {
     try {
       await blobs.deleteOrphans?.(ORPHAN_AGE_SECONDS);
@@ -194,7 +194,8 @@ export function createBundleService(deps: BundleServiceDeps): BundleService {
       switch (result.outcome) {
         case 'saved':
           if (result.replacedBlobId) await deleteQuietly(userId, result.replacedBlobId);
-          if (shouldSweep()) await sweepQuietly();
+          // The sweep reads every user's files (DB-01): the save answers without waiting.
+          if (shouldSweep()) void sweepQuietly();
           return { outcome: 'stored', meta: result.meta };
         case 'unchanged':
           await deleteQuietly(userId, uploaded.blobId);

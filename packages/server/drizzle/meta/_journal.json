@@ -50,6 +50,13 @@
       "when": 1791036010621,
       "tag": "0006_sessions_expires_at_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791743885043,
+      "tag": "0007_bundle_blobs_created_at_idx",
+      "breakpoints": true
     }
   ]
 }
