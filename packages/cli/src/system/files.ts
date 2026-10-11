@@ -1,10 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import { chmod, lstat, mkdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 /** Nothing is at the path: the only file error that may count as "empty" (BUG-06). */
 export const isMissing = (error: unknown) =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+/** A file is at `path` (a link to one counts); `false` for a folder, nothing or an error. */
+export const isFile = async (path: string) =>
+  (await stat(path).catch(() => null))?.isFile() ?? false;
 
 /**
  * Where to write `path`: a file linked from a dotfiles folder (stow, chezmoi) is written where

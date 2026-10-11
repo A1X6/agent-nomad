@@ -198,3 +198,33 @@ describe('project collector: links and size (T45)', () => {
     expect(skipped).toEqual(['.claude/skills/big/data.bin: it is larger than 10 MB']);
   });
 });
+
+describe('project collector: files the memory files import (T111)', () => {
+  it('takes a file inside the project at its project path', async () => {
+    await writeTestFile(join(project, 'CLAUDE.md'), 'See @docs/guide.md\n');
+    await writeTestFile(join(project, 'docs', 'guide.md'), 'Guide\n');
+    expect(text(await collect(), 'docs/guide.md')).toBe('Guide\n');
+  });
+
+  it('follows the imports of CLAUDE.local.md, AGENTS.md and the rules', async () => {
+    await writeTestFile(join(project, 'CLAUDE.local.md'), '@docs/a.md\n');
+    await writeTestFile(join(project, 'AGENTS.md'), '@docs/b.md\n');
+    await writeTestFile(join(project, '.claude', 'rules', 'x.md'), '@../../docs/c.md\n');
+    for (const name of ['a', 'b', 'c']) {
+      await writeTestFile(join(project, 'docs', `${name}.md`), name);
+    }
+    expect(paths(await collect())).toEqual(
+      expect.arrayContaining(['docs/a.md', 'docs/b.md', 'docs/c.md']),
+    );
+  });
+
+  it('names a file outside the project, who imports it and how', async () => {
+    await writeTestFile(join(project, 'CLAUDE.md'), '@~/my-project-instructions.md\n');
+    await writeTestFile(join(home, 'my-project-instructions.md'), 'Mine\n');
+    const { found, skipped } = await collectSkipped(createClaudeCodeProjectCollector(options()));
+    expect(paths(found)).toEqual(['CLAUDE.md']);
+    expect(skipped).toEqual([
+      `~/my-project-instructions.md: ${join(project, 'CLAUDE.md')} imports it on line 1 (@~/my-project-instructions.md), but it is outside the project`,
+    ]);
+  });
+});
