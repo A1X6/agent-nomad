@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import * as z from 'zod';
 
 import { exists } from '../../system/files.ts';
@@ -10,6 +12,7 @@ import {
 import { printableLine } from '../../ui/printable.ts';
 import type { CollectedFile, ConflictResolver, RestoreReport } from '../adapter.ts';
 import { jsonFile } from '../shared/file-gathering.ts';
+import { foldedName, foldsNames } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import { PLUGIN_DIRS_PREFIX } from './global-paths.ts';
 import {
@@ -33,7 +36,8 @@ import {
 } from './plugin-review.ts';
 import type { ProgramCli } from './plugin-sync.ts';
 import { MarketplaceNameSchema } from './plugins.ts';
-import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
+import { PLUGIN_DIRS_VARIABLE } from './reviewed-settings.ts';
+import { PLUGIN_HOOKS, PLUGIN_MANIFEST, samePluginPath } from './skills-dir-plugins.ts';
 
 /*
  * Plugin folders that `env.CLAUDE_CODE_PLUGIN_DIRS` in the user's settings loads every session
@@ -42,9 +46,6 @@ import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
  * points the value at the folders it wrote. `--plugin-dir` and plugins an SDK passes are given
  * to one run only and are never seen, so they are not handled.
  */
-
-/** The `env` name, as Claude Code 2.1.296 reads it. */
-const PLUGIN_DIRS_VARIABLE = 'CLAUDE_CODE_PLUGIN_DIRS';
 
 /** The user settings file, the only one that sets it: see `pluginDirFiles`. */
 const USER_SETTINGS = 'settings.json';
@@ -164,7 +165,8 @@ export interface PluginDirPlan {
   readonly declined: boolean;
   /**
    * `files` with the value in `settings.json` naming the folders pull writes, joined with this
-   * PC's separator; a declined folder is taken out of it. The rest as it is.
+   * PC's separator; a declined folder is taken out of it, and so is a folder that is neither
+   * saved nor in this PC's own value (said). The rest as it is.
    */
   withPluginDirs(files: readonly CollectedFile[]): CollectedFile[];
   /** Writes the folders, re-cloning first where it can; asks nothing. */
@@ -186,9 +188,12 @@ const keepDriveLetters = (entries: readonly string[]): string[] =>
     return joined;
   }, []);
 
-/** How Claude Code names a folder it loads this way: its manifest's name, `@inline`. */
+/**
+ * How Claude Code names a folder it loads this way: its manifest's name, `@inline`. The
+ * manifest in any case, as the plugin review finds it (SEC-01 of review 16).
+ */
 function inlineId(files: readonly CollectedFile[], name: string): string {
-  const manifest = files.find((file) => file.path === PLUGIN_MANIFEST);
+  const manifest = files.find((file) => samePluginPath(file.path, PLUGIN_MANIFEST));
   const named = manifest
     ? valueOrNull(parseJsonWith(z.looseObject({ name: z.string() }), manifest.content))?.name
     : undefined;
@@ -196,7 +201,8 @@ function inlineId(files: readonly CollectedFile[], name: string): string {
 }
 
 /**
- * The mods among the saved plugin folders in `files` (T104): those with `hooks/hooks.json`, by
+ * The mods among the saved plugin folders in `files` (T104): those with `hooks/hooks.json` in
+ * any case (SEC-01 of review 16), by
  * the id Claude Code gives them, e.g. `pd-mod@inline`. For pull's notice when this PC's Claude
  * Code is too old to load mods (T103); a saved file it cannot read is left to `planPluginDirs`.
  */
@@ -207,7 +213,7 @@ export function savedPluginDirMods(files: readonly CollectedFile[]): string[] {
       const saved = valueOrNull(readSavedPluginDir(file.content));
       if (saved === null) return [];
       const inside = savedFolderFiles(saved);
-      return inside.some((entry) => entry.path === PLUGIN_HOOKS)
+      return inside.some((entry) => samePluginPath(entry.path, PLUGIN_HOOKS))
         ? [inlineId(inside, saved.name)]
         : [];
     });
@@ -297,41 +303,57 @@ export async function planPluginDirs(
 
   const answers = await askFolderConflicts(kept, context, deps.platform);
   const separator = pluginDirsSeparator(deps.platform);
+  // A folder by its full path, folded where Windows and macOS ignore case (`foldsNames`).
+  // Compared so, an entry still matches when pull kept this PC's own copy of a saved file (`/`
+  // and `\` in its path).
+  const folderOf = (entry: string) => {
+    const full = path.resolve(fromHome(entry, deps.homedir, deps.platform));
+    return foldsNames(deps.platform) ? foldedName(full) : full;
+  };
+  // The folders this PC's own value names. A pulled entry that names no folder pull writes is
+  // kept only when it is one of them: else a setup could point the value at a folder it
+  // writes elsewhere, such as `~/.claude/hooks/x`, and that folder would load unreviewed.
+  const here = await readFile(path.join(deps.baseDir, USER_SETTINGS)).catch(() => null);
+  const ownFolders = new Set(
+    splitPluginDirs((here === null ? null : pluginDirsValue(here)) ?? '', separator).map(folderOf),
+  );
   return {
     declined: declined.size > 0,
     withPluginDirs(files) {
-      if (toWrite.length === 0) return [...files];
       const from = toWrite[0]?.saved.separator ?? separator;
-      // A folder by its full path; Windows and macOS ignore case. Compared so, an entry still
-      // matches when pull kept this PC's own copy of a saved file (`/` and `\` in its path).
-      const folderOf = (entry: string) => {
-        const full = path.resolve(fromHome(entry, deps.homedir, deps.platform));
-        return deps.platform === 'linux' ? full : full.toLowerCase();
-      };
+      const dropped: string[] = [];
       const replace = (value: string) => {
         const entries = keepDriveLetters(splitPluginDirs(value, from));
         const writeOf = (entry: string) =>
           toWrite.find((each) => folderOf(each.saved.entry) === folderOf(entry));
-        // Already naming the folders pull writes (pulled onto the same places): as it is.
+        // Already naming the folders pull writes (pulled onto the same places) or this PC's
+        // own: as it is.
         const same = entries.every((entry) => {
           const write = writeOf(entry);
-          return (
-            write === undefined ||
-            (!declined.has(printableLine(write.dir)) && folderOf(entry) === folderOf(write.dir))
-          );
+          if (write === undefined) return ownFolders.has(folderOf(entry));
+          return !declined.has(printableLine(write.dir)) && folderOf(entry) === folderOf(write.dir);
         });
         if (same && from === separator) return value;
         return entries
           .flatMap((entry) => {
             const write = writeOf(entry);
-            if (write === undefined) return [entry];
-            return declined.has(printableLine(write.dir)) ? [] : [write.dir];
+            if (write !== undefined)
+              return declined.has(printableLine(write.dir)) ? [] : [write.dir];
+            if (ownFolders.has(folderOf(entry))) return [entry];
+            dropped.push(printableLine(entry));
+            return [];
           })
           .join(separator);
       };
-      return files.map((file) =>
+      const rewritten = files.map((file) =>
         file.path === USER_SETTINGS ? rewriteSettings(file, replace) : file,
       );
+      if (dropped.length > 0) {
+        context.reporter.warn(
+          `Left out of ${PLUGIN_DIRS_VARIABLE}: ${dropped.join(', ')}. The setup saved no plugin folder there and this PC's value does not name it, so it was not reviewed.`,
+        );
+      }
+      return rewritten;
     },
     restore: (onConflict) => writeFolders(kept, answers, onConflict, deps),
   };

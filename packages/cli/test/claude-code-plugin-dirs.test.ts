@@ -109,6 +109,18 @@ describe('the mods in saved plugin folders, for the version warning (T104)', () 
     ).toEqual([]);
   });
 
+  // SEC-01 (review 16): Windows and macOS open `Hooks/Hooks.json` as `hooks/hooks.json`.
+  it('names a folder with hooks/hooks.json in another case, by its manifest in another case', () => {
+    const files = savedFiles([
+      collectedJson('.Claude-Plugin/Plugin.json', { name: 'cased-mod' }),
+      collectedJson('Hooks/Hooks.json', { modules: ['./register.ts'] }),
+      collected('Hooks/register.ts', MOD_MODULE),
+    ]);
+    expect(savedPluginDirMods([savedPluginDir(OTHER_SEPARATOR, { files })])).toEqual([
+      'cased-mod@inline',
+    ]);
+  });
+
   it('leaves out a saved plugin folder it cannot read', () => {
     expect(savedPluginDirMods([collected(SAVED_PATH, 'not json')])).toEqual([]);
   });
@@ -211,7 +223,8 @@ const savedMod = (overrides: object = {}, n = 0) => savedPluginDir(OTHER_SEPARAT
 
 /**
  * Pull's plan for `files`, then its restore: `git` re-clones, `answers` answer the review's
- * questions, `conflict` each file that differs; `--allow-commands` unless `flags` say else.
+ * questions, `conflict` each file that differs; `--allow-commands` unless `flags` say else;
+ * `own` is the value in this PC's `settings.json`, which has none unless said.
  */
 async function pull(
   files: CollectedFile[],
@@ -222,8 +235,13 @@ async function pull(
     flags?: { assumeYes: boolean; allowCommands: boolean };
     /** Claude Code's base folder, `~/.claude` unless said. */
     baseDir?: string;
+    own?: string;
   } = {},
 ) {
+  if (options.own !== undefined) {
+    const own = settingsWith(options.own);
+    await writeTestFile(join(options.baseDir ?? base, own.path), own.content);
+  }
   const { validator } = await validatorFor(validatePassWithWarning);
   const script = scriptedPrompter(options.answers ?? []);
   const { reporter, lines } = recordingReporter({ levels: false });
@@ -324,7 +342,7 @@ describe('pull writes a saved plugin folder (T99)', () => {
   });
 
   it('points the value at the folder it wrote, with this PC’s separator', async () => {
-    const { plan } = await pull([savedMod()]);
+    const { plan } = await pull([savedMod()], { own: '/not/saved' });
     const value = `${SAVED_PLUGIN_DIR_ENTRY}${OTHER_SEPARATOR}/not/saved`;
     expect(valueIn(plan.withPluginDirs([settingsWith(value)]))).toBe(
       `${modFolder()}${delimiter}/not/saved`,
@@ -333,10 +351,38 @@ describe('pull writes a saved plugin folder (T99)', () => {
 
   it('keeps a drive letter the home path brought into a value saved with : (T104)', async () => {
     const entry = `C:/pc/home/dev/${MOD_NAME}`;
-    const { plan } = await pull([savedMod({ entry, separator: ':' })]);
+    const { plan } = await pull([savedMod({ entry, separator: ':' })], { own: '/not/saved' });
     const value = `${entry}:/not/saved`;
     expect(valueIn(plan.withPluginDirs([settingsWith(value)]))).toBe(
       `${modFolder()}${delimiter}/not/saved`,
+    );
+  });
+
+  it('keeps a folder that is not saved when this PC’s own value names it', async () => {
+    const { plan } = await pull([savedMod({ entry: modFolder(), separator: delimiter })], {
+      own: '/not/saved',
+    });
+    const settings = settingsWith(`${modFolder()}${delimiter}/not/saved`);
+    expect(plan.withPluginDirs([settings])).toEqual([settings]);
+  });
+
+  // SEC-04 (review 16): the value points at a folder the setup writes as part of `hooks/`.
+  it('takes a folder that is neither saved nor in this PC’s value out of it under --yes, and says so', async () => {
+    const files = [
+      settingsWith('~/.claude/hooks/x'),
+      collectedJson('hooks/x/.claude-plugin/plugin.json', { name: 'x' }),
+      collectedJson('hooks/x/hooks/hooks.json', {
+        hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] },
+      }),
+    ];
+    const { plan, lines } = await pull(files, {
+      flags: { assumeYes: true, allowCommands: false },
+      own: '/not/saved',
+    });
+    const pulled = plan.withPluginDirs(files);
+    expect([valueIn(pulled), pulled.slice(1)]).toEqual(['', files.slice(1)]);
+    expect(lines).toContain(
+      `Left out of ${VARIABLE}: ~/.claude/hooks/x. The setup saved no plugin folder there and this PC's value does not name it, so it was not reviewed.`,
     );
   });
 
@@ -364,8 +410,13 @@ describe('pull writes a saved plugin folder (T99)', () => {
   it('re-clones the folder at the saved commit, then writes the saved files', async () => {
     const clone = `clone --no-checkout --quiet -- ${REMOTE} ${modFolder()}`;
     const { git, calls } = scriptedGit({ [clone]: {}, [`reset --quiet ${COMMIT}`]: {} });
-    await pull([savedMod({ git: { remote: REMOTE, commit: COMMIT } })], { git });
+    const { report } = await pull([savedMod({ git: { remote: REMOTE, commit: COMMIT } })], {
+      git,
+    });
     expect(calls.map((call) => call.args)).toEqual([clone, `reset --quiet ${COMMIT}`]);
+    expect(await exists(join(modFolder(), '.git'))).toBe(true);
+    expect(await readText(join(modFolder(), ...MODULE))).toBe(MOD_MODULE);
+    expect(report.warnings).toEqual([]);
   });
 
   it('asks about a file that is here and differs, by its saved name', async () => {
@@ -393,6 +444,7 @@ describe('pull writes a saved plugin folder (T99)', () => {
   it('takes a declined folder out of the value', async () => {
     const { plan } = await pull([savedMod()], {
       flags: { assumeYes: true, allowCommands: false },
+      own: '/not/saved',
     });
     const value = `${SAVED_PLUGIN_DIR_ENTRY}${OTHER_SEPARATOR}/not/saved`;
     expect(valueIn(plan.withPluginDirs([settingsWith(value)]))).toBe('/not/saved');

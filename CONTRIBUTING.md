@@ -166,9 +166,9 @@ open, such as a chat or an option letter from a discussion.
     `syncedDirectorySkill`) and `syncedAccount`, which also writes each skill's folder (T105), and
     `syncedAccountPlugins`, which writes each plugin's folder (T101: `syncedPluginFiles`, entries as
     `SyncedPluginEntry`); and a mod in `skills/` (T97: `MOD_NAME`, `MOD_MODULE`, `modFiles`), a
-    validate report with other `$` calls (`validatePassCalling`) or for a plugin without hooks
-    (`validatePassNoHooks`, T101) and the validator of a PC whose `claude` answers validate with a
-    report (`validatorFor`); a
+    validate report with other `$` calls and hooks (`validatePassCalling`) or for a plugin
+    without hooks (`validatePassNoHooks`, T101) and the validator of a PC whose `claude` answers
+    validate with a report (`validatorFor`); a
     marketplace added from a local folder (T98: `writeLocalMarketplace`, its catalog `localCatalog`,
     `addedFromFolders`, `localModId`), its saved entry (`savedLocalMarketplace`, T104) and a
     scripted `git` (`scriptedGit` with `GitAnswer`); the mod as a plugin folder of its own
@@ -176,8 +176,10 @@ open, such as a chat or an option letter from a discussion.
     entry (T99: `savedPluginDir`, `SAVED_PLUGIN_DIR_ENTRY`); files as a saved folder lists them
     (`savedFiles`, T104); a plugin's data folder and store file (T102: `writePluginData`,
     `writePluginStore`); the names of the mod API a module reaches as `$.<name>`, read from the
-    Claude Code in `MOD_CALLS_VERSION` (`MOD_CALLS`, SEC-04 of review 15), which a newer Claude
-    Code's list replaces, with the new version.
+    Claude Code in `MOD_CALLS_VERSION` (`MOD_CALLS`, SEC-04 of review 15), and the events it
+    hooks with `on("<name>")`, read from the Claude Code in `MOD_HOOKS_VERSION` (`MOD_HOOKS`,
+    SEC-08 of review 16), each of which a newer Claude Code's list replaces, with the new
+    version.
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about other
     parts (`stubRestorer`).
   - `packages/cli/test/readme.ts`: the repository README as the tests that keep it and the CLI's

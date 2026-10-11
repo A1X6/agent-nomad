@@ -10,8 +10,9 @@
  *   push takes (T109);
  * - what a fresh Claude Code creates in an empty config folder (run in CI);
  * - the changelog entries of versions newer than the one the data file was reviewed against,
- *   including any that name a settings key or variable the pull review watches (T55), or a
- *   plugin part Claude Code starts programs from (SEC-02 of review 15).
+ *   including any that name a settings key or variable the pull review watches (T55), a
+ *   plugin part Claude Code starts programs from (SEC-02 of review 15), or plugins at all: a
+ *   new plugin part is in no list yet (ARCH-01 of review 16).
  */
 import {
   CLAUDE_CODE_PATHS,
@@ -144,6 +145,9 @@ const WATCHED = new RegExp(
   `(?<![\\w.])(${WATCHED_NAMES.map((key) => key.replaceAll('.', '\\.')).join('|')})(?!\\w)`,
 );
 
+/** Plugins and mods, which can gain a part that starts programs under a name not yet watched. */
+const PLUGINS = /\b(plugins?|mods?)\b/i;
+
 /** Relevant entries of every version newer than `afterVersion`, newest first. */
 export function changelogSince(markdown: string, afterVersion: string): ChangelogSection[] {
   const sections: ChangelogSection[] = [];
@@ -152,7 +156,7 @@ export function changelogSince(markdown: string, afterVersion: string): Changelo
     const version = /^\d+\.\d+\.\d+/.exec(heading.trim())?.[0];
     if (version === undefined || compareVersions(version, afterVersion) <= 0) continue;
     const lines = body.filter(
-      (line) => KIND.test(line) && (WHERE.test(line) || WATCHED.test(line)),
+      (line) => KIND.test(line) && (WHERE.test(line) || WATCHED.test(line) || PLUGINS.test(line)),
     );
     if (lines.length > 0) sections.push({ version, lines });
   }
@@ -252,6 +256,7 @@ export function reportMarkdown(report: DriftReport): string {
         '- [ ] Sort each unknown name into `neverSynced`, `knownState` or a synced list (never sync credentials, history, caches or machine state).',
         '- [ ] Add each unknown Global config key to `claudeJsonPreferenceKeys` (or remove one the reference dropped) once it is a preference, not account or machine state.',
         '- [ ] Read the changelog entries; add anything that is part of a user setup. For a setting that redirects Claude Code, loosens its permissions or runs a command, update `packages/cli/src/agents/claude-code/reviewed-settings.ts` and the pull review.',
+        '- [ ] A new plugin part that starts programs: add it to `plugins.runsCode` in the paths data file and to the plugin review (`packages/cli/src/agents/claude-code/plugin-review.ts`).',
         `- [ ] Set \`reviewedVersion\` to \`${report.latestVersion}\`, run \`pnpm check\`, and close this issue.`,
       ].join('\n'),
     );

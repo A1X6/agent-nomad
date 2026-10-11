@@ -294,9 +294,18 @@ export const modFiles = (prefix = `skills/${MOD_NAME}/`): CollectedFile[] => [
   collected(`${prefix}hooks/register.ts`, MOD_MODULE),
 ];
 
-/** `validatePassWithWarning` with these `$` calls on the module's `calls:` line (T97). */
-export function validatePassCalling(calls: readonly string[]): ValidateRun {
-  const notes = ['./register.ts hooks: session.start', `./register.ts calls: ${calls.join(', ')}`];
+/**
+ * `validatePassWithWarning` with these `$` calls on the module's `calls:` line (T97), and these
+ * events on its `hooks:` line (SEC-08 of review 16).
+ */
+export function validatePassCalling(
+  calls: readonly string[],
+  hooks: readonly string[] = ['session.start'],
+): ValidateRun {
+  const notes = [
+    `./register.ts hooks: ${hooks.join(', ')}`,
+    `./register.ts calls: ${calls.join(', ')}`,
+  ];
   const json = structuredClone(validatePassWithWarning.json);
   json['contents'] = [{ ...hooksContents[0], notes }];
   return { ...validatePassWithWarning, json };
@@ -306,10 +315,10 @@ export function validatePassCalling(calls: readonly string[]): ValidateRun {
 export const MOD_CALLS_VERSION = '2.1.296';
 
 /**
- * The names of the mod API of Claude Code `MOD_CALLS_VERSION` that a module reaches as `$.<name>`
- * or hooks with `on("<name>")`: the program's own list, without its `classic.*` hook names. A
- * newer Claude Code's list replaces it, with the new version; the review sorts each new name
- * into the flagged calls or not.
+ * The names of the mod API of Claude Code `MOD_CALLS_VERSION` that a module reaches as
+ * `$.<name>`: the program's own list, without its `classic.*` hook names. A newer Claude Code's
+ * list replaces it, with the new version; the review sorts each new name into the flagged
+ * calls or not.
  */
 export const MOD_CALLS = [
   'tool.call',
@@ -421,6 +430,54 @@ export const MOD_CALLS = [
   'settings.read',
   'env.get',
   'env.set',
+];
+
+/** The Claude Code whose mod events `MOD_HOOKS` is read from (SEC-08 of review 16). */
+export const MOD_HOOKS_VERSION = '2.1.296';
+
+/**
+ * The events of Claude Code `MOD_HOOKS_VERSION` that a module hooks with `on("<name>")`: the
+ * program's own list, which `on()` is checked against, its `classic.*` names (the classic hook
+ * events) first, as the program lists them. A newer Claude Code's list replaces it, with the
+ * new version; the review sorts each new event into the flagged hooks or not.
+ */
+export const MOD_HOOKS = [
+  ...[
+    'PreToolUse',
+    'PostToolUse',
+    'PostToolUseFailure',
+    'PostToolBatch',
+    'Notification',
+    'UserPromptSubmit',
+    'UserPromptExpansion',
+    'SessionStart',
+    'SessionEnd',
+    'Stop',
+    'StopFailure',
+    'SubagentStart',
+    'SubagentStop',
+    'PreCompact',
+    'PostCompact',
+    'PreModelSwitch',
+    'PostModelSwitch',
+    'PermissionRequest',
+    'PermissionDenied',
+    'Setup',
+    'TeammateIdle',
+    'TaskCreated',
+    'TaskCompleted',
+    'Elicitation',
+    'ElicitationResult',
+    'ConfigChange',
+    'WorktreeCreate',
+    'WorktreeRemove',
+    'InstructionsLoaded',
+    'CwdChanged',
+    'FileChanged',
+    'DirectoryAdded',
+    'MessageDisplay',
+  ].map((name) => `classic.${name}`),
+  ...MOD_CALLS,
 ];
 
 /**

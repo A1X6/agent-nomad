@@ -13,7 +13,7 @@ import type { ExecutableLookupSystem } from '../shared/detector-system.ts';
 import { describeServer } from './command-review.ts';
 import { findClaudeExecutable } from './detector.ts';
 import { createProgramCli, type ProgramCli } from './plugin-sync.ts';
-import { riskOfCall } from './reviewed-settings.ts';
+import { riskOfCall, riskOfHook } from './reviewed-settings.ts';
 import { commandText, hookItems } from './settings-commands.ts';
 import {
   hasManifest,
@@ -27,9 +27,9 @@ import {
 /*
  * The pull review of a plugin or mod folder (T97, T44 rule), shared by every place pull writes
  * one (T98, T99, T101): `claude plugin validate --json` on a copy pull makes itself, its
- * `hooks:`, `calls:` and `writes:` lines, the risky calls, classic command hooks, and the
- * servers and monitors Claude Code starts from the folder (SEC-02), which validate does not
- * list. A folder with code needs a yes, or --allow-commands; --yes alone never accepts it.
+ * `hooks:`, `calls:` and `writes:` lines, the risky hooks and calls, classic command hooks,
+ * and the servers and monitors Claude Code starts from the folder (SEC-02), which validate
+ * does not list. A folder with code needs a yes, or --allow-commands; --yes alone never accepts it.
  */
 
 /** A plugin folder pull is about to write. */
@@ -176,7 +176,10 @@ interface ModuleReview {
   readonly module: string;
   readonly hooks: readonly string[];
   readonly calls: readonly string[];
-  /** The risky calls with what they do, e.g. `$.process.spawn (runs programs)`. */
+  /**
+   * The risky hooks and calls with what they do, e.g. `$.process.spawn (runs programs)` or
+   * `tool.check hook (decides tool permissions, can allow Bash)` (SEC-08 of review 16).
+   */
   readonly risky: readonly string[];
   /** The environment variables and state it writes, e.g. `env writes: FOO` (SEC-04). */
   readonly writes: readonly string[];
@@ -259,10 +262,16 @@ function modulesOf(notes: readonly string[]): ModuleReview[] {
   return [...modules].map(([module, found]) => ({
     module,
     ...found,
-    risky: found.calls.flatMap((call) => {
-      const does = riskOfCall(call);
-      return does === null ? [] : [`${call} (${does})`];
-    }),
+    risky: [
+      ...found.hooks.flatMap((hook) => {
+        const does = riskOfHook(hook);
+        return does === null ? [] : [`${hook} hook (${does})`];
+      }),
+      ...found.calls.flatMap((call) => {
+        const does = riskOfCall(call);
+        return does === null ? [] : [`${call} (${does})`];
+      }),
+    ],
   }));
 }
 
@@ -472,7 +481,7 @@ export interface PluginGateContext {
   readonly allowCommands: boolean;
 }
 
-/** The module files whose risky calls the user may read before answering. */
+/** The module files whose risky hooks or calls the user may read before answering. */
 const riskyModuleFiles = (review: PluginReview, folder: PluginFolderToReview) =>
   review.modules
     .filter((module) => module.risky.length > 0)

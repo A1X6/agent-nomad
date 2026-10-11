@@ -455,8 +455,6 @@ export function createPullPlanner(deps: PullDeps) {
         const answers = await answerConflicts(ready, conflicts.ask);
         const envFile = ready.files.find((file) => file.path === ENV_BUNDLE_PATH);
         const section = envFile ? parseEnvSection(envFile.content) : null;
-        // Saved without values (or unreadable): a name given to --env-values is not added.
-        if (section === null) warnNotSaved(reporter, options.envValues, []);
         const env = section
           ? {
               section,
@@ -487,6 +485,12 @@ export function createPullPlanner(deps: PullDeps) {
           conflicts: answers,
           env,
         });
+      }
+      // Once for the whole pull: a name given to --env-values that no setup saved a value for
+      // (or saved without values) is not added (UX-02 of review 16).
+      if (answered.length > 0) {
+        const saved = answered.flatMap(({ env }) => Object.keys(env?.section.variables ?? {}));
+        warnNotSaved(reporter, options.envValues, saved);
       }
       // Then each agent's own questions, still before anything is written (T61).
       const restores: PlannedRestore[] = [];

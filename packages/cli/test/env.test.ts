@@ -36,6 +36,7 @@ import {
   scanEnvReferences,
   shellProfileFor,
   upsertBlock,
+  warnNotSaved,
   writeEnvValues,
   type AgentAdapter,
   type Choice,
@@ -695,19 +696,11 @@ describe('restoring values on pull', () => {
       expect(written).toEqual([{ GITHUB_TOKEN: 'ghp_secret' }]);
     });
 
-    it('names a variable the saved setup does not hold', async () => {
-      const { writer } = recordingWriter();
+    // Pull says it once for all its setups (UX-02 of review 16), so the plan of one says nothing.
+    it('names a variable the saved setup does not hold', () => {
       const { reporter, lines } = quiet();
-      await restoreEnvValues({
-        isRedirectVariable,
-        section,
-        env: {},
-        writer,
-        prompter: neverAsks,
-        reporter,
-        choice: ['API_KEY', 'NOT_SAVED'],
-      });
-      expect(lines).toContain('Not in the saved setup, so not added: NOT_SAVED.');
+      warnNotSaved(reporter, ['API_KEY', 'NOT_SAVED'], Object.keys(section.variables));
+      expect(lines).toEqual(['Not in the saved setup, so not added: NOT_SAVED.']);
     });
 
     it('never passes the gate for one that runs code: --yes leaves it out (T44)', async () => {
@@ -769,6 +762,31 @@ describe('restoring values on pull', () => {
       expect(written).toEqual([{ API_KEY: 'key-1' }]);
       expect(result.added).toEqual(['API_KEY']);
       expect(lines.join('\n')).toContain('Not added: ld_preload, node_options.');
+    });
+
+    it('--yes never adds Git config given through the environment, in any case (SEC-05 of review 16)', async () => {
+      const { writer, written } = recordingWriter();
+      const { lines, reporter } = quiet();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section: {
+          variables: {
+            API_KEY: 'key-1',
+            GIT_CONFIG_PARAMETERS: "'core.fsmonitor'='echo x'",
+            git_config_parameters: "'alias.st'='!echo x'",
+          },
+        },
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.added).toEqual(['API_KEY']);
+      expect(lines.join('\n')).toContain(
+        'Not added: GIT_CONFIG_PARAMETERS, git_config_parameters.',
+      );
     });
 
     it('--allow-commands adds them too', async () => {

@@ -62,6 +62,29 @@ describe('reviewRunnable: everything the docs say runs (T44)', () => {
     ]);
   });
 
+  it('lists Git config given through the environment, in any case (SEC-05 of review 16)', () => {
+    const settings = collectedJson('settings.json', {
+      env: {
+        GIT_CONFIG_PARAMETERS: "'core.fsmonitor'='echo x'",
+        git_config_parameters: "'alias.st'='!echo x'",
+      },
+    });
+    expect(labels([settings])).toEqual([
+      'new setting env GIT_CONFIG_PARAMETERS',
+      'new setting env git_config_parameters',
+    ]);
+  });
+
+  it('lists the plugin folders Claude Code loads, in any case (SEC-04 of review 16)', () => {
+    const settings = collectedJson('settings.json', {
+      env: { CLAUDE_CODE_PLUGIN_DIRS: '~/.claude/hooks/x', claude_code_plugin_dirs: '/tmp/y' },
+    });
+    expect(labels([settings])).toEqual([
+      'new setting env CLAUDE_CODE_PLUGIN_DIRS',
+      'new setting env claude_code_plugin_dirs',
+    ]);
+  });
+
   it('lists http hooks and hooks with args', () => {
     const settings = collectedJson('settings.json', {
       hooks: {

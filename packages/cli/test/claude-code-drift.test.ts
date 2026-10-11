@@ -105,6 +105,7 @@ describe('drift check (T55): settings the pull review watches', () => {
       'HTTPS_PROXY',
       'NODE_EXTRA_CA_CERTS',
       'CLAUDE_CODE_SHELL_PREFIX',
+      'CLAUDE_CODE_PLUGIN_DIRS',
     ]) {
       expect(WATCHED_SETTINGS).toContain(key);
     }
@@ -153,6 +154,30 @@ describe('drift check (T55): settings the pull review watches', () => {
       },
     ]);
   });
+
+  // ARCH-01 (review 16): a new plugin part is in no watched list yet.
+  it('keeps changelog entries about plugins or mods that name no watched part', () => {
+    const changelog = [
+      '## 2.1.300',
+      '',
+      '- Added plugin workflows: a `workflows/` folder at the plugin root starts background jobs',
+      '- Added `channels` to plugin.json: plugins can now start channel servers',
+      '- Added Claude Mods: plugins may now modify deeper behavior',
+      '- Added a new theme',
+      '- Fixed a crash in the plugin list',
+      '',
+    ].join('\n');
+    expect(changelogSince(changelog, '2.1.299')).toEqual([
+      {
+        version: '2.1.300',
+        lines: [
+          '- Added plugin workflows: a `workflows/` folder at the plugin root starts background jobs',
+          '- Added `channels` to plugin.json: plugins can now start channel servers',
+          '- Added Claude Mods: plugins may now modify deeper behavior',
+        ],
+      },
+    ]);
+  });
 });
 
 describe('drift check (T41): comparing with the data file', () => {
@@ -186,6 +211,9 @@ describe('drift check (T41): comparing with the data file', () => {
     expect(markdown).toContain('- `new-state`');
     expect(markdown).toContain('### 2.1.290');
     expect(markdown).toContain('Set `reviewedVersion` to `2.1.290`');
+    expect(markdown).toContain(
+      '- [ ] A new plugin part that starts programs: add it to `plugins.runsCode` in the paths data file and to the plugin review',
+    );
   });
 
   it('writes the same report for the same input, with no link to the run (BUG-02)', async () => {

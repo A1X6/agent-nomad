@@ -15,11 +15,14 @@ on:
         type: boolean
         default: false
   # When the check itself changes, run it (report only, no issue) to prove it still works.
+  # The paths list every source module the check imports (BP-01 of review 16).
   push:
     paths:
       - '.github/workflows/drift-check.yml'
       - 'packages/cli/scripts/drift/**'
       - 'packages/cli/src/agents/claude-code/claude-code-paths.data.ts'
+      - 'packages/cli/src/agents/claude-code/reviewed-settings.ts'
+      - 'packages/cli/src/agents/notices.ts'
 
 permissions:
   contents: read

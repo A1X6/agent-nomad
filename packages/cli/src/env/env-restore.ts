@@ -2,7 +2,7 @@ import type { EnvValuesChoice } from '../cli/commands.ts';
 import { ENV_VALUES_ALL, ENV_VALUES_NONE, QUESTION_REASON } from '../cli/help-text.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import type { EnvSection } from './env-section.ts';
-import { LOADER_VARIABLE } from './loader-variables.ts';
+import { isLoaderVariable } from './loader-variables.ts';
 import type { EnvWriter } from './shell-profile.ts';
 
 export interface RestoreEnvDeps {
@@ -44,8 +44,8 @@ async function splitEnvValues(
 }
 
 /**
- * Names `--env-values` gives that the saved setup does not hold (`saved`): they are not added,
- * so pull says so, also for a setup saved without values (UX-05).
+ * Names `--env-values` gives that no setup of the pull saved a value for (`saved`): they are
+ * not added, so pull says so, once for the whole pull (UX-05; UX-02 of review 16).
  */
 export function warnNotSaved(
   reporter: Pick<Reporter, 'warn'>,
@@ -81,7 +81,6 @@ export async function planEnvRestore(
 ): Promise<EnvRestorePlan> {
   const names = Object.keys(deps.section.variables);
   const { choice } = deps;
-  warnNotSaved(deps.reporter, choice, names);
   const { alreadySet, missing: all } = await splitEnvValues(
     deps.section.variables,
     deps.env,
@@ -100,8 +99,7 @@ export async function planEnvRestore(
       deps.reporter.info('The saved environment variables are already set here.');
     return { toAdd: [], alreadySet, declined: false };
   }
-  // Upper case first, as `isRedirectVariable` does: on Windows `node_options` is `NODE_OPTIONS`.
-  const loaders = missing.filter((name) => LOADER_VARIABLE.test(name.toUpperCase()));
+  const loaders = missing.filter(isLoaderVariable);
   const redirects = missing.filter(
     (name) => !loaders.includes(name) && deps.isRedirectVariable(name),
   );
