@@ -250,7 +250,10 @@ loop) into a shared `agents/shared/` module rather than copying them.
   to write the setup (usually the restorer's `restore`) and a follow-up that runs after
   writing and gets no prompter. Respect `context.assumeYes` and `context.allowCommands`:
   without `allowCommands`, never install or run anything unasked. When its questions leave
-  part of the setup out, it returns `declined: true`, so a later push asks first.
+  part of the setup out, it returns `declined: true`, so a later push asks first. Fill
+  `summary` (`files`: how many files it writes; `chosen`: one line per choice, e.g.
+  `--<part> yes (names)`) so pull's summary before `Restore it now?` shows them (review 15
+  UX-01).
 
 ## Step 7 · Put the adapter together
 

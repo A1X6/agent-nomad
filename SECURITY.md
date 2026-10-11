@@ -45,11 +45,13 @@ already compromised PC, and denial of service by volume.
   and plugin folders, claude.ai plugins, and claude.ai skills that are plugins or mods) get a plugin
   review first: `claude plugin validate`, what each mod calls, and the servers and monitors the
   plugin starts; one with code needs a yes or `--allow-commands`. Outside the agent's folder pull
-  writes only scripts the setup's own hooks run, saved plugin and marketplace folders (after the
-  plugin review), Markdown files its memory files import, and auto memory in the folder
-  `autoMemoryDirectory` names, never into a Startup, autostart or shell-profile folder. `--yes`
-  alone never accepts new commands, installs, or environment values that make programs load code;
-  `--allow-commands` does.
+  writes only: scripts the setup's own hooks run and known tool settings; saved plugin and
+  marketplace folders (after the plugin review); Markdown files its memory files import; auto
+  memory in the folder `autoMemoryDirectory` names; a merge into `~/.claude.json`; and, for the
+  environment values you add, one marked block in your shell profile (or Windows user
+  variables). Apart from that block, it never writes into a Startup, autostart or shell-profile
+  folder. `--yes` alone never accepts new commands, installs, or environment values that make
+  programs load code; `--allow-commands` does.
 - **Local secrets in the OS keychain,** or in a file only your user can read where there is
   no keychain (on Windows with an access list for your user only).
 - **Limits on the server.** Each account keeps at most 100 setups and 50 MB, with limits on
