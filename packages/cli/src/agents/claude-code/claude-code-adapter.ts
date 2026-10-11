@@ -129,7 +129,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
    * The plugin folders in `skills/` that a global setup would add or change (T97), reviewed and
    * asked about; the files of the declined ones are left out. A folder whose name differs only
    * in case is one folder, and a part that runs code is reviewed with the manifest and parts
-   * this PC already has there (SEC-02 of review 16).
+   * this PC already has there (review 16 SEC-02).
    */
   async function reviewSkillsPlugins(
     files: readonly CollectedFile[],

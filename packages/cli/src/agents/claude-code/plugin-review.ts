@@ -279,9 +279,9 @@ interface Declared {
 
 /**
  * The folder's JSON files at `path` as a manifest names it (`./config/servers.json`), in any
- * case (SEC-01): Windows and macOS open `Hooks/hooks.json` as `hooks/hooks.json`. Each with its
- * value, `null` when it cannot be read; `from` is `path`, or the file's own spelling when that
- * differs. None when the folder has no such file.
+ * case (review 16 SEC-01): Windows and macOS open `Hooks/hooks.json` as `hooks/hooks.json`.
+ * Each with its value, `null` when it cannot be read; `from` is `path`, or the file's own
+ * spelling when that differs. None when the folder has no such file.
  */
 function jsonsAt(files: readonly CollectedFile[], path: string): Declared[] {
   const at = insideFolder(path.split('/'));
@@ -401,8 +401,8 @@ function commandHookLines(hooks: unknown): string[] {
 
 /**
  * Reviews one plugin folder: validate's report, its modules and its command hooks. Every
- * manifest in the folder is read, in any case (SEC-01), and a case variant of a part Claude
- * Code starts programs from counts as that part on every OS.
+ * manifest in the folder is read, in any case (review 16 SEC-01), and a case variant of a part
+ * Claude Code starts programs from counts as that part on every OS.
  */
 export async function reviewPluginFolder(
   folder: PluginFolderToReview,
@@ -559,7 +559,7 @@ export async function pluginFolderChange(
 
 /**
  * The folder with the manifest and the parts that start programs that it has in `dir`, where
- * pull writes it, and that its own files lack (SEC-02 of review 16): a lone `hooks/hooks.json`
+ * pull writes it, and that its own files lack (review 16 SEC-02): a lone `hooks/hooks.json`
  * adds command hooks to a plugin already there, and a lone manifest makes a plugin of hooks
  * already there. `null` when neither has a manifest: not a plugin, so Claude Code runs nothing
  * from it.

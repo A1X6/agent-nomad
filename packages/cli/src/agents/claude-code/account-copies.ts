@@ -17,7 +17,7 @@ export const NOT_FROM_YOU = 'it comes from your organization or claude.ai, not f
 export const MARKETPLACE_UNKNOWN =
   'agentnomad cannot tell which claude.ai marketplace it comes from';
 
-/** Names on this PC a saved claude.ai skill or plugin must not take, folded ({@link foldedName}). */
+/** Names on this PC a saved claude.ai skill or plugin must not take, as `foldedName` folds them. */
 export interface NamesHere {
   /** Plugins and skills this PC already gets from its own claude.ai sync. */
   readonly syncedNames: ReadonlySet<string>;
@@ -73,7 +73,7 @@ export interface SavedCopiesPlan {
  * own claude.ai sync, never over a local folder of the same name (`localReason` says what it
  * is), nor one `problem` refuses. Names are compared without case, as Windows and macOS write
  * `Evil/` and `evil/` into one folder: of two copies whose names differ only in case, the first
- * by name is added (SEC-02 of review 16).
+ * by name is added (review 16 SEC-02).
  */
 export function planSavedCopies(
   copies: readonly SavedCopy[],

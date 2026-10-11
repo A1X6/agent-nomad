@@ -430,7 +430,7 @@ async function cloneInto(
  * that was outside home or would land in a refused place (keys, autostart folders, Claude
  * Code's own folder). Each saved file is checked from home too, and a folder that holds Claude
  * Code's own folder goes to `fallback`, so no file lands in a refused place (SEC-01); compared
- * without case where the platform folds names (SEC-03 of review 16). The folder then stays in
+ * without case where the platform folds names (review 16 SEC-03). The folder then stays in
  * one piece.
  */
 export function homeFolderFor(
@@ -446,7 +446,7 @@ export function homeFolderFor(
   );
   if (refused) return fallback;
   const dir = path.join(deps.homedir, ...savedPath.split('/'));
-  // Without case where the file system folds names: `~/.Claude` is `~/.claude` on a Mac (SEC-03).
+  // Without case where names fold: `~/.Claude` is `~/.claude` on a Mac (review 16 SEC-03).
   const key = (folder: string) => (foldsNames(deps.platform) ? foldedName(folder) : folder);
   const holds = (folder: string, inner: string) => {
     const relative = path.relative(key(folder), key(inner));

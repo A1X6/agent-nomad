@@ -30,14 +30,15 @@ export const RUNS_CODE = DATA.plugins.runsCode;
 
 /**
  * Whether two paths in a plugin's folder name one file, compared without case on every OS
- * (SEC-01): Windows and macOS open `Hooks/hooks.json` as `hooks/hooks.json`, and treating a
- * case variant as the file is the safe side on Linux too.
+ * (review 16 SEC-01): Windows and macOS open `Hooks/hooks.json` as `hooks/hooks.json`, and
+ * treating a case variant as the file is the safe side on Linux too.
  */
 export const samePluginPath = (a: string, b: string): boolean => foldedName(a) === foldedName(b);
 
 /**
  * Whether a path from a plugin's folder is a part Claude Code starts programs from
- * (`hooks/hooks.json`, `.mcp.json`, `.lsp.json`, a file in `monitors/`), in any case (SEC-01).
+ * (`hooks/hooks.json`, `.mcp.json`, `.lsp.json`, a file in `monitors/`), in any case
+ * (review 16 SEC-01).
  */
 export function isRunsCodePath(pathInPlugin: string): boolean {
   const path = foldedName(pathInPlugin);
@@ -89,7 +90,7 @@ export interface SkillsPluginFolder {
 
 /**
  * The `skills/<name>/` folders among global bundle files (never `skills/synced/`), grouped
- * without case on every OS (SEC-02): Windows and macOS write `Evil/` and `evil/` into one
+ * without case on every OS (review 16 SEC-02): Windows and macOS write `Evil/` and `evil/` into one
  * folder, named as the first in path order, which the restorer writes first.
  */
 function skillsFolders(files: readonly CollectedFile[]): SkillsPluginFolder[] {
@@ -114,7 +115,7 @@ function skillsFolders(files: readonly CollectedFile[]): SkillsPluginFolder[] {
     }));
 }
 
-/** Whether a plugin folder's files hold its manifest, in any case (SEC-01). */
+/** Whether a plugin folder's files hold its manifest, in any case (review 16 SEC-01). */
 export const hasManifest = (files: readonly CollectedFile[]): boolean =>
   files.some((file) => samePluginPath(file.path, PLUGIN_MANIFEST));
 
@@ -124,8 +125,9 @@ export function skillsPluginFolders(files: readonly CollectedFile[]): SkillsPlug
 }
 
 /**
- * The folders pull's plugin review looks at (SEC-02): plugin folders, and folders with a part
- * Claude Code starts programs from, which are a plugin when this PC has their manifest.
+ * The folders pull's plugin review looks at (review 16 SEC-02): plugin folders, and folders
+ * with a part Claude Code starts programs from, which are a plugin when this PC has their
+ * manifest.
  */
 export function skillsFoldersToReview(files: readonly CollectedFile[]): SkillsPluginFolder[] {
   return skillsFolders(files).filter(
