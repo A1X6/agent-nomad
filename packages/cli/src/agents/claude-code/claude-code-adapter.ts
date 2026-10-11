@@ -13,11 +13,13 @@ import {
   askAccountPlugins,
   localSkillNames,
   namesHere,
+  planAccountPlugins,
   readSyncedPlugins,
 } from './account-plugins.ts';
 import {
   ACCOUNT_SKILLS_PART,
   askAccountSkills,
+  planAccountSkills,
   readSyncedSkills,
   reportAccountSkills,
 } from './account-skills.ts';
@@ -53,6 +55,7 @@ import {
 import { readKnownMarketplaces } from './plugins.ts';
 import { createProgramLocator } from './programs.ts';
 import { createClaudeCodeProjectCollector } from './project-collector.ts';
+import { isPullMetadata } from './restore-rules.ts';
 import { createClaudeCodeRestorer } from './restorer.ts';
 import {
   createClaudeRunningCheck,
@@ -125,21 +128,21 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
   async function reviewSkillsPlugins(
     files: readonly CollectedFile[],
     gate: PluginGateContext,
-  ): Promise<{ files: readonly CollectedFile[]; declined: boolean }> {
+  ): Promise<{ files: readonly CollectedFile[]; leftOut: readonly string[] }> {
     const path = pathsOf(options.platform);
     const toReview = [];
     for (const folder of skillsPluginFolders(files)) {
       const change = await pluginFolderChange(path.join(baseDir, 'skills', folder.name), folder);
       if (change !== null) toReview.push({ folder, change });
     }
-    if (toReview.length === 0) return { files, declined: false };
+    if (toReview.length === 0) return { files, leftOut: [] };
     const accepted = await askPluginFolders(toReview, await validator(), gate);
     const leftOut = toReview
       .map(({ folder }) => folder.folder)
       .filter((folder) => !accepted.has(folder));
     return {
       files: files.filter((file) => !leftOut.some((folder) => underFolder(file.path, folder))),
-      declined: leftOut.length > 0,
+      leftOut,
     };
   }
 
@@ -247,7 +250,18 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     const added = await askAccountPlugins(context, here);
     const localNames = await localSkillNames(path, baseDir, [...context.files, ...added]);
     const skills = await askAccountSkills(context, { ...here, localNames });
-    return { files: [...context.files, ...added, ...skills.files], added, skills: skills.names };
+    // The ones it offered, for pull's summary (UX-01).
+    const offered = planAccountPlugins(context.files, here).toAdd;
+    const skillsOffered = planAccountSkills(context.files, { ...here, localNames }).toAdd.map(
+      (skill) => skill.name,
+    );
+    return {
+      files: [...context.files, ...added, ...skills.files],
+      added,
+      offered,
+      skills: skills.names,
+      skillsOffered,
+    };
   }
 
   return {
@@ -335,10 +349,24 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       if (claudeJsonNote !== null) context.reporter.info(claudeJsonNote);
       const withSaved = global
         ? await withAccountCopies(context)
-        : { files: context.files, added: [], skills: [] };
+        : { files: context.files, added: [], offered: [], skills: [], skillsOffered: [] };
       const plugins = global
         ? await reviewSkillsPlugins(withSaved.files, context)
-        : { files: context.files, declined: false };
+        : { files: context.files, leftOut: [] };
+      // What the questions chose, for pull's summary (UX-01).
+      const chosen: string[] = [];
+      if (withSaved.offered.length > 0) {
+        chosen.push(
+          `--account-plugins ${withSaved.added.length > 0 ? 'yes' : 'no'} (${withSaved.offered.join(', ')})`,
+        );
+      }
+      if (withSaved.skillsOffered.length > 0) {
+        chosen.push(
+          `--account-skills ${withSaved.skills.length > 0 ? 'yes' : 'no'} (${withSaved.skillsOffered.join(', ')})`,
+        );
+      }
+      if (plugins.leftOut.length > 0)
+        chosen.push(`plugin folders left out: ${plugins.leftOut.join(', ')}`);
       const kept = skillsPluginFolders(withSaved.added).filter((folder) =>
         plugins.files.some((file) => underFolder(file.path, folder.folder)),
       );
@@ -363,9 +391,11 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       // The settings as written: `CLAUDE_CODE_PLUGIN_DIRS` names the folders pull writes (T99).
       const files = dirs.withPluginDirs(plugins.files);
       const settingsRewritten = files.some((file, index) => file !== plugins.files[index]);
-      const afterRestore = await followUp({ ...context, files }, local);
+      if (local.declined) chosen.push('plugin folders of saved local marketplaces left out');
+      if (dirs.declined) chosen.push('saved plugin folders (CLAUDE_CODE_PLUGIN_DIRS) left out');
+      const afterRestore = await followUp({ ...context, files }, local, chosen);
       const data = global
-        ? await planPluginData(context, { baseDir, platform: options.platform, restorer })
+        ? await planPluginData(context, { baseDir, platform: options.platform, restorer }, chosen)
         : null;
       // What the setup's restore wrote, for naming the saved claude.ai skills it added.
       let written: readonly string[] = [];
@@ -400,7 +430,9 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
           reportAccountSkills(withSaved.skills, written, afterContext.reporter);
           await data?.(afterContext);
         },
-        declined: plugins.declined || local.declined || dirs.declined,
+        declined: plugins.leftOut.length > 0 || local.declined || dirs.declined,
+        // Only what it writes: `plugins.json` and the like are read, never written.
+        summary: { files: files.filter((file) => !isPullMetadata(file.path)).length, chosen },
       };
     },
   };

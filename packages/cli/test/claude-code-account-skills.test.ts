@@ -321,6 +321,19 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     expect(t.lines.at(-1)).toContain('Added mine as local skills.');
   });
 
+  // UX-01 (review 15, T118): pull's summary names what the agent's questions chose.
+  it("names a yes in pull's summary", async () => {
+    const t = run([saved('mine', 'Plain.')], {}, [true]);
+    const { plan } = await t.done;
+    expect(plan.summary?.chosen).toContain('--account-skills yes (mine)');
+  });
+
+  it("names a no in pull's summary", async () => {
+    const t = run([saved('mine', 'Plain.')], {}, [false]);
+    const { plan } = await t.done;
+    expect(plan.summary?.chosen).toContain('--account-skills no (mine)');
+  });
+
   it('asks with yes as the default (T114)', async () => {
     const t = run([saved('mine', 'Plain.')], {}, [true]);
     await t.done;

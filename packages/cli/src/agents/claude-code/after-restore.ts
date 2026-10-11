@@ -73,7 +73,11 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
     return manifest;
   }
 
-  async function plugins(context: FollowUpPlanContext, local: LocalPlugins): Promise<FollowUp> {
+  async function plugins(
+    context: FollowUpPlanContext,
+    local: LocalPlugins,
+    summary: string[],
+  ): Promise<FollowUp> {
     const saved = savedPlugins(context);
     // The plugins of saved local marketplaces (T98), added from the folders pull writes.
     const manifest: PluginManifest = {
@@ -100,6 +104,10 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
       assumeYes: context.assumeYes,
       allowCommands: context.allowCommands,
     });
+    if (choice.plugins.length > 0)
+      summary.push(`plugins to reinstall: ${choice.plugins.map(({ id }) => id).join(', ')}`);
+    if (choice.declined.length > 0)
+      summary.push(`plugins not reinstalled: ${choice.declined.join(', ')}`);
     if (choice.plugins.length === 0) return nothingToDo;
     return async ({ reporter }) => {
       const managed = await deps.managedSettings();
@@ -142,7 +150,7 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
     return null;
   }
 
-  async function programs(context: FollowUpPlanContext): Promise<FollowUp> {
+  async function programs(context: FollowUpPlanContext, summary: string[]): Promise<FollowUp> {
     const file = context.files.find((entry) => entry.path === PROGRAMS_BUNDLE_PATH);
     if (!file) return nothingToDo;
     const saved = readSavedPrograms(file.content);
@@ -156,6 +164,7 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
       );
     }
     const installs: { readonly npmPath: string; readonly spec: string }[] = [];
+    const notInstalled: string[] = [];
     for (const program of saved.value.programs) {
       if ((await findExecutable(deps.system, program.command)) !== null) continue;
       if (program.npm === null) {
@@ -178,12 +187,19 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
           context.reporter.warn(
             `"${program.command}" is not installed here and was not installed: --yes never installs or runs new code; add --allow-commands, or run pull without --yes to choose. To install it yourself: npm install -g ${spec}`,
           );
+          notInstalled.push(spec);
           continue;
         }
-        if (!(await context.prompter.confirm(question, true))) continue;
+        if (!(await context.prompter.confirm(question, true))) {
+          notInstalled.push(spec);
+          continue;
+        }
       }
       installs.push({ npmPath, spec });
     }
+    if (installs.length > 0)
+      summary.push(`programs to install: ${installs.map(({ spec }) => spec).join(', ')}`);
+    if (notInstalled.length > 0) summary.push(`programs not installed: ${notInstalled.join(', ')}`);
     if (installs.length === 0) return nothingToDo;
     return async ({ reporter }) => {
       for (const { npmPath, spec } of installs) {
@@ -200,12 +216,14 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
   /**
    * Asks every question of the follow-up, in order, and returns what to do after writing.
    * `local`: the marketplaces and plugins of the saved local marketplaces pull writes (T98).
+   * `summary` gets a line for each choice, for pull's summary (UX-01).
    */
   return async (
     context: FollowUpPlanContext,
     local: LocalPlugins = { marketplaces: [], plugins: [] },
+    summary: string[] = [],
   ): Promise<FollowUp> => {
-    const steps = [await plugins(context, local), await programs(context)];
+    const steps = [await plugins(context, local, summary), await programs(context, summary)];
     return async (applyContext) => {
       for (const step of steps) await step(applyContext);
     };

@@ -120,7 +120,10 @@ function setup(
   } = {},
 ) {
   const server = options.server ?? fakeBundleServer();
-  const script = scriptedPrompter([...answers, options.upload ?? true]);
+  const script = scriptedPrompter(answers, {
+    question: UPLOAD_QUESTION,
+    answer: options.upload ?? true,
+  });
   const { reporter, lines } = recordingReporter();
   const state = localStateIn(dir, `${options.pc ?? 'this-pc'}.json`);
   // What apply gets: everything but the prompter.
@@ -146,6 +149,8 @@ const noFlags = { global: false, yes: false };
 
 /** Push's question after its summary, when it asked anything before (T115). */
 const UPLOAD_IT = 'Upload it now? Nothing is saved until you say yes.';
+/** That question, for one setup or several. */
+const UPLOAD_QUESTION = /^Upload .* now\? Nothing is saved until you say yes\.$/;
 
 /** A server holding the global setup, saved once from another PC: the laptop. */
 async function savedFromLaptop() {

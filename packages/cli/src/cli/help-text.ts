@@ -3,8 +3,8 @@ import type { AgentContents } from '../agents/adapter.ts';
 /**
  * The words the command line uses to say what each command does, what each flag saves or
  * restores, and why a question is asked (T115): one source for `--help`, the questions push
- * and pull ask, and the README, so they cannot drift apart. program.test.ts checks the README
- * Commands and "What is synced" tables against it.
+ * and pull ask, and the README, so they cannot drift apart. help-text.test.ts checks the README
+ * Commands table against it; program.test.ts checks the Flags table against the declared flags.
  */
 
 /** One plain line per command: what it does to the user's files. */

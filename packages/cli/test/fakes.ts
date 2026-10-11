@@ -278,9 +278,14 @@ export const missingAgent: DetectedAgent = { installed: false, baseDir: null, ve
  * Answers questions from a script, in order, and throws when it runs out. A validator's
  * complaint is recorded in `rejected` and the next answer used, like the real prompter
  * asking again; an Error answer is thrown, like a question the user cancels. Each yes/no
- * question's default answer is recorded in `confirmDefaults` (T114).
+ * question's default answer is recorded in `confirmDefaults` (T114). `last` answers push's and
+ * pull's question after their summary (T115) by its words, not from the script, so a run that
+ * does not ask it leaves no spare answer for a question added later (QA-03).
  */
-export function scriptedPrompter(answers: unknown[]) {
+export function scriptedPrompter(
+  answers: unknown[],
+  last?: { readonly question: RegExp; readonly answer: boolean },
+) {
   const asked: string[] = [];
   const rejected: string[] = [];
   const confirmDefaults: boolean[] = [];
@@ -326,6 +331,10 @@ export function scriptedPrompter(answers: unknown[]) {
     password: (message, options) => Promise.resolve(text(message, options?.validate)),
     confirm: (message, initial = false) => {
       confirmDefaults.push(initial);
+      if (last?.question.test(message)) {
+        asked.push(message);
+        return Promise.resolve(last.answer);
+      }
       const answer = next(message);
       if (typeof answer !== 'boolean') throw wrong(message, 'yes/no', answer);
       return Promise.resolve(answer);

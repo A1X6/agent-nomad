@@ -260,6 +260,12 @@ export interface AgentRestorePlan {
    * later push asks first, as after declined commands.
    */
   readonly declined?: boolean;
+  /**
+   * What pull's summary says of this plan before it asks to write (UX-01): how many files it
+   * writes, and one line per choice its questions made, e.g. `--account-plugins yes (notes)`
+   * or `plugin folders left out: skills/probe-mod`.
+   */
+  readonly summary?: { readonly files: number; readonly chosen: readonly string[] };
 }
 
 /**

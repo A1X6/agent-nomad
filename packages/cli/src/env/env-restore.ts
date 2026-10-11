@@ -43,6 +43,21 @@ async function splitEnvValues(
   return { alreadySet: names.filter((name) => !missing.includes(name)), missing };
 }
 
+/**
+ * Names `--env-values` gives that the saved setup does not hold (`saved`): they are not added,
+ * so pull says so, also for a setup saved without values (UX-05).
+ */
+export function warnNotSaved(
+  reporter: Pick<Reporter, 'warn'>,
+  choice: EnvValuesChoice | undefined,
+  saved: readonly string[],
+): void {
+  const named = choice === undefined || typeof choice === 'string' ? [] : choice;
+  const notSaved = named.filter((name) => !saved.includes(name));
+  if (notSaved.length > 0)
+    reporter.warn(`Not in the saved setup, so not added: ${notSaved.join(', ')}.`);
+}
+
 /** Which saved values pull will add, chosen before it writes anything (T59). */
 export interface EnvRestorePlan {
   readonly toAdd: readonly string[];
@@ -66,10 +81,7 @@ export async function planEnvRestore(
 ): Promise<EnvRestorePlan> {
   const names = Object.keys(deps.section.variables);
   const { choice } = deps;
-  const named = choice === undefined || typeof choice === 'string' ? [] : choice;
-  const notSaved = named.filter((name) => !names.includes(name));
-  if (notSaved.length > 0)
-    deps.reporter.warn(`Not in the saved setup, so not added: ${notSaved.join(', ')}.`);
+  warnNotSaved(deps.reporter, choice, names);
   const { alreadySet, missing: all } = await splitEnvValues(
     deps.section.variables,
     deps.env,
@@ -88,7 +100,8 @@ export async function planEnvRestore(
       deps.reporter.info('The saved environment variables are already set here.');
     return { toAdd: [], alreadySet, declined: false };
   }
-  const loaders = missing.filter((name) => LOADER_VARIABLE.test(name));
+  // Upper case first, as `isRedirectVariable` does: on Windows `node_options` is `NODE_OPTIONS`.
+  const loaders = missing.filter((name) => LOADER_VARIABLE.test(name.toUpperCase()));
   const redirects = missing.filter(
     (name) => !loaders.includes(name) && deps.isRedirectVariable(name),
   );

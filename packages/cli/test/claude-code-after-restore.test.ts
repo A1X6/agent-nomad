@@ -218,6 +218,25 @@ describe('after a Claude Code restore', () => {
     expect(t.asked).toHaveLength(3);
   });
 
+  it("names each choice for pull's summary (review 15 UX-01)", async () => {
+    const plugins = savedPlugins(
+      [],
+      [brag, { id: 'build@market', scope: 'user', commandSource: true }],
+    );
+    const t = context([plugins, programs], [true, false, false]);
+    const summary: string[] = [];
+    await createClaudeCodeAfterRestore({
+      system: system(['/usr/bin/claude', '/usr/bin/npm']),
+      cli: recordingCli().cli,
+      managedSettings: () => Promise.resolve(noPolicy),
+    })(t.ctx, undefined, summary);
+    expect(summary).toEqual([
+      'plugins to reinstall: brag@brag',
+      'plugins not reinstalled: build@market',
+      'programs not installed: ccstatusline@2.2.22',
+    ]);
+  });
+
   it('explains a plugin blocked by the injected managed settings, never this PC’s (SOLID-01)', async () => {
     const plugins = savedPlugins([], [brag]);
     const blocked = (path: string): ProgramCli => ({
