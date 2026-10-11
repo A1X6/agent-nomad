@@ -32,7 +32,7 @@ describe('unknown-file check (T32 done-when)', () => {
     ]);
   });
 
-  it('does not report hooks/, synced whole even when no setting runs its scripts (T112)', async () => {
+  it('does not report hooks/, synced whole even when no setting runs a script (T112)', async () => {
     await writeTestFile(join(base, 'hooks', 'unused.sh'));
     expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([]);
   });
