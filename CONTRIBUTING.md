@@ -167,6 +167,9 @@ open, such as a chat or an option letter from a discussion.
     (T102: `writePluginData`, `writePluginStore`).
   - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
     other parts (`stubRestorer`).
+  - `packages/cli/test/readme.ts`: the repository README as the tests that keep it and the
+    CLI's words the same read it (T115): the text under one heading (`readmeSection`) and a
+    table's rows as cells (`tableRows`).
   - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`
     or `createTestDatabase` and `migrationsFolder` in `database.ts`; `useTestApp` or
     `createTestApp`, `TEST_IP_HEADER` and `postJson` in `app.ts`). In `fixtures.ts`: values
