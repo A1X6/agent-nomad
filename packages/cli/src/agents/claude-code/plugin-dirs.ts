@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import * as z from 'zod';
 
 import { exists } from '../../system/files.ts';
@@ -43,7 +45,6 @@ import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
  * points the value at the folders it wrote. `--plugin-dir` and plugins an SDK passes are given
  * to one run only and are never seen, so they are not handled.
  */
-
 
 /** The user settings file, the only one that sets it: see `pluginDirFiles`. */
 const USER_SETTINGS = 'settings.json';
@@ -163,7 +164,8 @@ export interface PluginDirPlan {
   readonly declined: boolean;
   /**
    * `files` with the value in `settings.json` naming the folders pull writes, joined with this
-   * PC's separator; a declined folder is taken out of it. The rest as it is.
+   * PC's separator; a declined folder is taken out of it, and so is a folder that is neither
+   * saved nor in this PC's own value (said). The rest as it is.
    */
   withPluginDirs(files: readonly CollectedFile[]): CollectedFile[];
   /** Writes the folders, re-cloning first where it can; asks nothing. */
@@ -296,41 +298,55 @@ export async function planPluginDirs(
 
   const answers = await askFolderConflicts(kept, context, deps.platform);
   const separator = pluginDirsSeparator(deps.platform);
+  // A folder by its full path; Windows and macOS ignore case. Compared so, an entry still
+  // matches when pull kept this PC's own copy of a saved file (`/` and `\` in its path).
+  const folderOf = (entry: string) => {
+    const full = path.resolve(fromHome(entry, deps.homedir, deps.platform));
+    return deps.platform === 'linux' ? full : full.toLowerCase();
+  };
+  // The folders this PC's own value names. A pulled entry that names no folder pull writes is
+  // kept only when it is one of them: else a setup could point the value at a folder it
+  // writes elsewhere, such as `~/.claude/hooks/x`, and that folder would load unreviewed.
+  const here = await readFile(path.join(deps.baseDir, USER_SETTINGS)).catch(() => null);
+  const ownFolders = new Set(
+    splitPluginDirs((here === null ? null : pluginDirsValue(here)) ?? '', separator).map(folderOf),
+  );
   return {
     declined: declined.size > 0,
     withPluginDirs(files) {
-      if (toWrite.length === 0) return [...files];
       const from = toWrite[0]?.saved.separator ?? separator;
-      // A folder by its full path; Windows and macOS ignore case. Compared so, an entry still
-      // matches when pull kept this PC's own copy of a saved file (`/` and `\` in its path).
-      const folderOf = (entry: string) => {
-        const full = path.resolve(fromHome(entry, deps.homedir, deps.platform));
-        return deps.platform === 'linux' ? full : full.toLowerCase();
-      };
+      const dropped: string[] = [];
       const replace = (value: string) => {
         const entries = keepDriveLetters(splitPluginDirs(value, from));
         const writeOf = (entry: string) =>
           toWrite.find((each) => folderOf(each.saved.entry) === folderOf(entry));
-        // Already naming the folders pull writes (pulled onto the same places): as it is.
+        // Already naming the folders pull writes (pulled onto the same places) or this PC's
+        // own: as it is.
         const same = entries.every((entry) => {
           const write = writeOf(entry);
-          return (
-            write === undefined ||
-            (!declined.has(printableLine(write.dir)) && folderOf(entry) === folderOf(write.dir))
-          );
+          if (write === undefined) return ownFolders.has(folderOf(entry));
+          return !declined.has(printableLine(write.dir)) && folderOf(entry) === folderOf(write.dir);
         });
         if (same && from === separator) return value;
         return entries
           .flatMap((entry) => {
             const write = writeOf(entry);
-            if (write === undefined) return [entry];
-            return declined.has(printableLine(write.dir)) ? [] : [write.dir];
+            if (write !== undefined) return declined.has(printableLine(write.dir)) ? [] : [write.dir];
+            if (ownFolders.has(folderOf(entry))) return [entry];
+            dropped.push(printableLine(entry));
+            return [];
           })
           .join(separator);
       };
-      return files.map((file) =>
+      const rewritten = files.map((file) =>
         file.path === USER_SETTINGS ? rewriteSettings(file, replace) : file,
       );
+      if (dropped.length > 0) {
+        context.reporter.warn(
+          `Left out of ${PLUGIN_DIRS_VARIABLE}: ${dropped.join(', ')}. The setup saved no plugin folder there and this PC's value does not name it, so it was not reviewed.`,
+        );
+      }
+      return rewritten;
     },
     restore: (onConflict) => writeFolders(kept, answers, onConflict, deps),
   };

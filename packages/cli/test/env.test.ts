@@ -771,6 +771,31 @@ describe('restoring values on pull', () => {
       expect(lines.join('\n')).toContain('Not added: ld_preload, node_options.');
     });
 
+    it('--yes never adds Git config given through the environment, in any case (SEC-05 of review 16)', async () => {
+      const { writer, written } = recordingWriter();
+      const { lines, reporter } = quiet();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section: {
+          variables: {
+            API_KEY: 'key-1',
+            GIT_CONFIG_PARAMETERS: "'core.fsmonitor'='echo x'",
+            git_config_parameters: "'alias.st'='!echo x'",
+          },
+        },
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.added).toEqual(['API_KEY']);
+      expect(lines.join('\n')).toContain(
+        'Not added: GIT_CONFIG_PARAMETERS, git_config_parameters.',
+      );
+    });
+
     it('--allow-commands adds them too', async () => {
       const { writer, written } = recordingWriter();
       await restoreEnvValues({
