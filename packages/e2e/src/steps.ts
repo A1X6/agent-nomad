@@ -37,8 +37,6 @@ const ENV_VALUE = 'e2e-token-value-5b1d';
  */
 const PRESET_ENV: Readonly<Record<string, string>> =
   process.platform === 'win32' ? { [ENV_NAME]: ENV_VALUE } : {};
-/** Built by `tsc --build`, like the CLI: Node 22 cannot run the TypeScript source. */
-const PUSH_ENV_VALUE = fileURLToPath(new URL('../dist/src/push-env-value.js', import.meta.url));
 /**
  * A mod in `~/.claude/skills/` (T97): it loads as `probe-mod@skills-dir` and runs code inside
  * Claude Code. Claude Code 2.1.296's validate passes it; `types/` is what Claude Code
@@ -522,12 +520,10 @@ async function firstPc({ server, keychain }: StepContext): Promise<void> {
     expect(uploads.length).toBe(2);
     expect(uploads.every((request) => request.body.byteLength > 0)).toBe(true);
 
-    // The project again, now with its environment value saved (T56): revision 2.
+    // The project again, now with its environment value saved (T56), chosen by the flag
+    // that answers push's question (T115): revision 2.
     const withValue = ok(
-      await pc.runScript(PUSH_ENV_VALUE, [
-        ENV_NAME,
-        JSON.stringify({ project: 'demo', yes: false, memory: true }),
-      ]),
+      await pc.run(['push', '--project', 'demo', '--memory', '--env-values', ENV_NAME]),
     );
     expect(withValue.stdout).toContain('Saved the Claude Code project "demo"');
     expect(withValue.stdout).toContain('(revision 2)');
@@ -576,6 +572,9 @@ async function secondPc({ server, keychain }: StepContext): Promise<void> {
         '--allow-commands',
         '--account-skills',
         '--account-plugins',
+        // The saved value, by the flag that answers pull's question (T115).
+        '--env-values',
+        ENV_NAME,
       ]),
     );
     expect(pulled.stdout).toContain('Restored the Claude Code global setup');

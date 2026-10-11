@@ -4,6 +4,7 @@ import { AnswerNeededError } from '../ui/no-terminal-prompter.ts';
 import { PromptCancelledError, type Reporter } from '../ui/prompter.ts';
 import type { CommandHandlers } from './commands.ts';
 import { describeError } from './error-messages.ts';
+import type { AgentHelp } from './help-text.ts';
 import { createProgram, type PartFlags, type ProgramOutput } from './program.ts';
 
 /**
@@ -24,9 +25,9 @@ function answerFlags(parts: readonly PartFlags[]): Readonly<Record<string, strin
   return {
     register: 'Use --username, --password-stdin and --yes.',
     login: 'Use --username and --password-stdin (and --yes to replace a login already here).',
-    push: `Use --agent, --global or --project <name>, --memory or --no-memory, ${partFlags}and --yes.`,
-    pull: `Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, ${partFlags}and --yes.`,
-    delete: 'Use --global or --project <name>, and --yes.',
+    push: `Use --agent, --global or --project <name>, --memory or --no-memory, --env-values <names|all|none>, ${partFlags}and --yes.`,
+    pull: `Use --agent, --global or --project <name>, --merge, --overwrite or --skip-existing, --allow-commands, --env-values <names|all|none>, ${partFlags}and --yes.`,
+    delete: 'Use --agent, --global or --project <name>, and --yes.',
     'account delete': 'Use --username, --password-stdin and --yes.',
   };
 }
@@ -46,6 +47,8 @@ export interface RunDeps {
   readonly handlers: CommandHandlers;
   /** The registered agents' optional parts, for their flags (ARCH-02). */
   readonly optionalParts: readonly PartFlags[];
+  /** What each registered agent's setups hold, for push's and pull's `--help` (T115). */
+  readonly agents?: readonly AgentHelp[];
   readonly reporter: Pick<Reporter, 'error' | 'warn'>;
   readonly output?: ProgramOutput;
 }
@@ -58,6 +61,7 @@ export async function runCli(args: readonly string[], deps: RunDeps): Promise<nu
   const program = createProgram({
     handlers: deps.handlers,
     optionalParts: deps.optionalParts,
+    ...(deps.agents && { agents: deps.agents }),
     ...(deps.output && { output: deps.output }),
   });
   // Which command runs, e.g. `account delete`, for the "needs an answer" hint.

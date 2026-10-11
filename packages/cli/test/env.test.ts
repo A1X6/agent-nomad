@@ -159,6 +159,69 @@ describe('saving values on push (opt-in)', () => {
     expect(section).toBeNull();
   });
 
+  describe('--env-values answers instead of asking (T115)', () => {
+    const env = { GITHUB_TOKEN: 'ghp_secret', API_KEY: 'key-1' };
+    const neverAsks = { multiselect: () => Promise.reject(new Error('must not ask')) };
+
+    it('names: saves those the setup uses and this PC has', async () => {
+      const section = await chooseEnvValues({
+        scan,
+        env,
+        prompter: neverAsks,
+        choice: ['GITHUB_TOKEN', 'NOT_USED'],
+      });
+      expect(section).toEqual({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
+    });
+
+    it('all: saves every value the setup uses and this PC has', async () => {
+      const section = await chooseEnvValues({
+        scan,
+        env: { GITHUB_TOKEN: 'ghp_secret' },
+        prompter: neverAsks,
+        choice: 'all',
+      });
+      expect(section).toEqual({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
+    });
+
+    it('none: saves none', async () => {
+      const section = await chooseEnvValues({ scan, env, prompter: neverAsks, choice: 'none' });
+      expect(section).toBeNull();
+    });
+
+    it('--yes alone saves none, without asking', async () => {
+      const section = await chooseEnvValues({ scan, env, prompter: neverAsks, assumeYes: true });
+      expect(section).toBeNull();
+    });
+
+    it('a flag beats --yes', async () => {
+      const section = await chooseEnvValues({
+        scan,
+        env,
+        prompter: neverAsks,
+        assumeYes: true,
+        choice: ['API_KEY'],
+      });
+      expect(section).toEqual({ variables: { API_KEY: 'key-1' } });
+    });
+  });
+
+  it('asks with what the values are for and that none are saved unless ticked (T115)', async () => {
+    const asked: string[] = [];
+    await chooseEnvValues({
+      scan,
+      env: { GITHUB_TOKEN: 'x' },
+      prompter: {
+        multiselect: (message) => {
+          asked.push(message);
+          return Promise.resolve([]);
+        },
+      },
+    });
+    expect(asked).toEqual([
+      'Save these environment variable values with your setup? Your setup uses them (e.g. API keys); a saved value is encrypted and only you can read it. None are saved unless you tick them.',
+    ]);
+  });
+
   it('the env section round-trips and is never written by restore', () => {
     const entry = envSectionFile({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
     expect(parseEnvSection(entry.content)).toEqual({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
@@ -570,6 +633,101 @@ describe('restoring values on pull', () => {
     });
   });
 
+  describe('--env-values answers instead of asking (T115)', () => {
+    const quiet = () => recordingReporter({ levels: false });
+
+    it('names: adds only those, without asking', async () => {
+      const { writer, written } = recordingWriter();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        choice: ['API_KEY'],
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.declined).toBe(true);
+    });
+
+    it('all: adds every one missing here, without asking', async () => {
+      const { writer, written } = recordingWriter();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        choice: 'all',
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1', GITHUB_TOKEN: 'ghp_secret' }]);
+    });
+
+    it('none: adds none, which counts as declined', async () => {
+      const { writer, written } = recordingWriter();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        choice: 'none',
+      });
+      expect(written).toEqual([]);
+      expect(result).toEqual({ added: [], alreadySet: [], declined: true });
+    });
+
+    it('a flag beats --yes', async () => {
+      const { writer, written } = recordingWriter();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        assumeYes: true,
+        choice: ['GITHUB_TOKEN'],
+      });
+      expect(written).toEqual([{ GITHUB_TOKEN: 'ghp_secret' }]);
+    });
+
+    it('names a variable the saved setup does not hold', async () => {
+      const { writer } = recordingWriter();
+      const { reporter, lines } = quiet();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        choice: ['API_KEY', 'NOT_SAVED'],
+      });
+      expect(lines).toContain('Not in the saved setup, so not added: NOT_SAVED.');
+    });
+
+    it('never passes the gate for one that runs code: --yes leaves it out (T44)', async () => {
+      const { writer, written } = recordingWriter();
+      const { reporter, lines } = quiet();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section: { variables: { API_KEY: 'key-1', NODE_OPTIONS: '--require /tmp/x.js' } },
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+        choice: 'all',
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(lines.join('\n')).toContain('add --allow-commands to accept them');
+    });
+  });
+
   describe('variables that make programs run code (T44)', () => {
     const loaders = {
       variables: { API_KEY: 'key-1', NODE_OPTIONS: '--require /tmp/x.js', PROMPT_COMMAND: 'x' },
@@ -623,7 +781,7 @@ describe('restoring values on pull', () => {
         reporter: quiet().reporter,
       });
       expect(asked).toEqual([
-        ['Add 1 variable?', true],
+        ['Add 1 variable? The setup uses it, and it is not set on this PC yet.', true],
         ['NODE_OPTIONS, PROMPT_COMMAND make programs load or run code. Add them too?', false],
       ]);
       expect(written).toEqual([{ API_KEY: 'key-1' }]);

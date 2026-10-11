@@ -17,6 +17,7 @@ import { showNotices } from '../agents/notices.ts';
 import type { ApiClient } from '../api/api-client.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PullOptions } from '../cli/commands.ts';
+import { QUESTION_REASON } from '../cli/help-text.ts';
 import { checkProjectFolder, ProjectFolderError } from '../cli/project-folder.ts';
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { planEnvRestore, writeEnvValues } from '../env/env-restore.ts';
@@ -29,8 +30,10 @@ import {
 } from '../push/bundle-files.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
+import { countingPrompter } from '../ui/counting-prompter.ts';
 import { printableLine } from '../ui/printable.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
+import { pullSummary, restoreQuestion } from './pull-summary.ts';
 import { downloadSetup, listSavedSetups, type SavedSetup } from './saved-setups.ts';
 
 export interface PullDeps {
@@ -104,7 +107,14 @@ export interface PullPlan {
   readonly conflictAnswer: ConflictChoice | undefined;
 }
 
-type ConflictAnswer = ConflictChoice | 'merge-all' | 'overwrite-all';
+type ConflictAnswer = ConflictChoice | 'merge-all' | 'overwrite-all' | 'skip-all';
+
+/** "… all remaining files": the answer that then holds for every file (`--merge` and the rest). */
+const FOR_ALL: Readonly<Record<'merge-all' | 'overwrite-all' | 'skip-all', ConflictChoice>> = {
+  'merge-all': 'merge',
+  'overwrite-all': 'overwrite',
+  'skip-all': 'skip',
+};
 
 const describe = (adapter: AgentAdapter, setup: SavedSetup) =>
   setupLabel(adapter.displayName, setup.projectName);
@@ -144,7 +154,7 @@ export function createPullPlanner(deps: PullDeps) {
     }
     const count = (id: string) => saved.filter((setup) => setup.agent === id).length;
     const chosen = await prompter.multiselect(
-      'Which agents?',
+      `Which agents? ${QUESTION_REASON.agents}`,
       withSetups.map((entry) => ({
         value: entry.adapter.id,
         label: entry.adapter.displayName,
@@ -185,11 +195,14 @@ export function createPullPlanner(deps: PullDeps) {
       // --yes alone restores the global setup; a project is picked with --project.
       choice = 'global';
     } else {
-      choice = await prompter.select(`${adapter.displayName}: what to restore?`, [
-        { value: 'global', label: 'Global setup' },
-        { value: 'project', label: 'A project', hint: `into this folder: ${deps.cwd}` },
-        { value: 'both', label: 'Both' },
-      ]);
+      choice = await prompter.select(
+        `${adapter.displayName}: what to restore? ${QUESTION_REASON.scopePull}`,
+        [
+          { value: 'global', label: 'Global setup' },
+          { value: 'project', label: 'A project', hint: `into this folder: ${deps.cwd}` },
+          { value: 'both', label: 'Both' },
+        ],
+      );
     }
 
     const chosen: SavedSetup[] = [];
@@ -229,7 +242,8 @@ export function createPullPlanner(deps: PullDeps) {
   }
 
   /**
-   * Per file: merge, overwrite, skip; "… all remaining" answers the rest; flags answer all.
+   * Per file: merge, overwrite, skip; "… all remaining" answers the rest; `--merge`,
+   * `--overwrite` or `--skip-existing` answer all.
    * `fixed()` is the answer that holds for every file from now on, if there is one.
    */
   function conflictAsker(options: PullOptions) {
@@ -255,10 +269,11 @@ export function createPullPlanner(deps: PullDeps) {
           ...(question.overwriteAllowed
             ? [{ value: 'overwrite-all' as const, label: 'Overwrite all remaining files' }]
             : []),
+          { value: 'skip-all', label: 'Skip all remaining files' },
         ],
       );
-      if (chosen === 'merge-all' || chosen === 'overwrite-all') {
-        sticky = chosen === 'merge-all' ? 'merge' : 'overwrite';
+      if (chosen === 'merge-all' || chosen === 'overwrite-all' || chosen === 'skip-all') {
+        sticky = FOR_ALL[chosen];
         return sticky;
       }
       return chosen;
@@ -452,6 +467,7 @@ export function createPullPlanner(deps: PullDeps) {
                   reporter,
                   assumeYes: options.yes,
                   allowCommands: options.allowCommands === true,
+                  ...(options.envValues !== undefined && { choice: options.envValues }),
                   isRedirectVariable: (name) => ready.adapter.restorer.isRedirectVariable(name),
                 })
               ).toAdd,
@@ -567,22 +583,37 @@ export function createPullApplier(deps: PullApplyDeps) {
  * confirm what would run programs, restore with the user's merge / overwrite / skip
  * choices, then offer plugins, programs and environment variables. Plan, then apply (T59):
  * every question, the agent's own ones included (T61), comes before the first write, and
- * the apply step has no prompter. Exits with code 1 when a setup was not restored (BUG-03).
+ * the apply step has no prompter. When the plan asked anything, pull shows what it will write
+ * and asks once more first (T115). Exits with code 1 when a setup was not restored (BUG-03).
  */
 export function createPullCommand(deps: PullDeps): Pick<CommandHandlers, 'pull'> {
-  const planner = createPullPlanner(deps);
+  const questions = countingPrompter(deps.prompter);
+  const planner = createPullPlanner({ ...deps, prompter: questions.prompter });
   const applier = createPullApplier(deps);
+
+  /** The summary and its one question (T115); `false`: the user said no, nothing is written. */
+  async function confirmPlan(plan: PullPlan, options: PullOptions, asked: number) {
+    if (options.yes || plan.restores.length === 0 || questions.asked() === asked) return true;
+    deps.reporter.info(pullSummary(plan.restores));
+    return deps.prompter.confirm(restoreQuestion(plan.restores.length), true);
+  }
+
   return {
     async pull(options) {
       const secrets = await deps.secrets();
       const dataKey = await readDataKey(secrets);
       try {
+        const asked = questions.asked();
         const plan = await planner.plan(options, {
           secrets,
           crypto: await deps.crypto(),
           dataKey,
         });
         if (plan === null) return;
+        if (!(await confirmPlan(plan, options, asked))) {
+          deps.reporter.info('Nothing was written.');
+          return;
+        }
         const applied = await applier.apply(plan);
         finishSetups('pull', [...plan.outcomes, ...applied]);
       } finally {

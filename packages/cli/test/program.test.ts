@@ -3,31 +3,37 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
+import type { CommandUnknownOpts } from '@commander-js/extra-typings';
 import { describe, expect, it } from 'vitest';
 
 import { createAppRegistry } from '../src/app.ts';
 import type { CommandHandlers } from '../src/cli/commands.ts';
-import type { PartFlags } from '../src/cli/program.ts';
+import { createProgram, type PartFlags } from '../src/cli/program.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
 import { SetupsNotDoneError } from '../src/cli/setup-outcomes.ts';
 import { formatSize } from '../src/ui/format-size.ts';
 import { AnswerNeededError } from '../src/ui/no-terminal-prompter.ts';
 import { PromptCancelledError } from '../src/ui/prompter.ts';
 import { CLI_VERSION } from '../src/version.ts';
+import { readmeSection, tableRows } from './readme.ts';
 
 interface Call {
   readonly command: string;
   readonly options?: unknown;
 }
 
-/** The optional parts of the agents an installed CLI registers (Claude Code's claude.ai skills). */
-const REGISTERED_PARTS = createAppRegistry({
+/** The agents an installed CLI registers. */
+const REGISTERED = createAppRegistry({
   env: {},
   homedir: join(tmpdir(), 'agentnomad-program-home'),
   platform: process.platform,
-})
-  .list()
-  .flatMap((adapter) => adapter.optionalParts ?? []);
+}).list();
+/** Their optional parts (Claude Code's claude.ai skills). */
+const REGISTERED_PARTS = REGISTERED.flatMap((adapter) => adapter.optionalParts ?? []);
+/** What their setups hold, for push's and pull's help (T115). */
+const REGISTERED_AGENTS = REGISTERED.flatMap(({ displayName, contents }) =>
+  contents ? [{ displayName, contents }] : [],
+);
 
 /** Runs the CLI with handlers that record what they were called with. */
 async function run(
@@ -62,6 +68,7 @@ async function run(
   const code = await runCli(args, {
     handlers,
     optionalParts,
+    agents: REGISTERED_AGENTS,
     reporter: {
       error: (message) => messages.push(`error: ${message}`),
       warn: (message) => messages.push(`warn: ${message}`),
@@ -109,6 +116,27 @@ describe('help and version', () => {
     const { out } = await run(['push', '--help']);
     expect(out).toMatch(/--memory +save the agent's memory, what it learned/);
     expect(out).not.toContain('subagent');
+  });
+
+  it('push --help says what is saved: always, only when chosen with its flag, and never (T115)', async () => {
+    const { out } = await run(['push', '--help']);
+    expect(out).toContain('What is saved (Claude Code):\n  Always saved:\n');
+    expect(out).toContain('    global setup (~/.claude): settings.json, CLAUDE.md,');
+    expect(out).toContain(
+      '  Saved only when you choose (a question, or the flag):\n    --memory: ',
+    );
+    expect(out).toContain('    --env-values: save these environment variable values');
+    expect(out).toContain('    --account-skills: save a copy of your own claude.ai skills');
+    expect(out).toContain('  Never saved:\n    global setup (~/.claude): credentials,');
+  });
+
+  it('pull --help says what is restored, and what only after a yes or its flag (T115)', async () => {
+    const { out } = await run(['pull', '--help']);
+    expect(out).toContain('What is restored (Claude Code):\n  Always restored');
+    expect(out).toContain('    --env-values: add these saved environment variable values');
+    expect(out).toContain('    --allow-commands: accept new or changed hooks');
+    expect(out).toContain('    --plugin-data: put back saved plugin data');
+    expect(out).toContain('  Never in a saved setup:');
   });
 
   it.each([
@@ -197,6 +225,25 @@ describe('routing and flags', () => {
   ])('passes %s to push', async (flag, memory) => {
     const { calls } = await run(['push', '--global', flag]);
     expect(calls).toEqual([{ command: 'push', options: { global: true, yes: false, memory } }]);
+  });
+
+  it.each([
+    ['push', 'GITHUB_TOKEN, NPM_TOKEN,GITHUB_TOKEN', ['GITHUB_TOKEN', 'NPM_TOKEN']],
+    ['push', 'all', 'all'],
+    ['push', 'none', 'none'],
+    ['pull', 'GITHUB_TOKEN', ['GITHUB_TOKEN']],
+    ['pull', 'all', 'all'],
+    ['pull', 'none', 'none'],
+  ])('passes %s --env-values %s as the values to use (T115)', async (command, value, envValues) => {
+    const { calls } = await run([command, '--global', '--env-values', value]);
+    expect(calls).toEqual([{ command, options: { global: true, yes: false, envValues } }]);
+  });
+
+  it('passes --skip-existing to pull as the conflict choice (T115)', async () => {
+    const { calls } = await run(['pull', '--global', '--skip-existing']);
+    expect(calls).toEqual([
+      { command: 'pull', options: { global: true, yes: false, conflict: 'skip' } },
+    ]);
   });
 
   it('leaves out what was not given, so the command can ask', async () => {
@@ -382,6 +429,18 @@ describe('routing and flags', () => {
       "option '--project <name>' argument 'a\nb' is invalid. Project name must not contain control characters",
     ],
     ['--merge with --overwrite', ['pull', '--merge', '--overwrite'], 'cannot be used with'],
+    ['--merge with --skip-existing', ['pull', '--merge', '--skip-existing'], 'cannot be used with'],
+    [
+      '--overwrite with --skip-existing',
+      ['pull', '--overwrite', '--skip-existing'],
+      'cannot be used with',
+    ],
+    [
+      'an --env-values name that is not a variable name',
+      ['push', '--env-values', 'GITHUB_TOKEN,1BAD'],
+      '"1BAD" is not a variable name',
+    ],
+    ['an empty --env-values list', ['pull', '--env-values', ','], 'Give variable names'],
     ['an unknown flag', ['push', '--force'], "unknown option '--force'"],
     [
       'an invalid username',
@@ -430,11 +489,11 @@ describe('outcomes', () => {
   it.each([
     [
       ['push'],
-      'Use --agent, --global or --project <name>, --memory or --no-memory, --account-skills or --no-account-skills, --account-plugins or --no-account-plugins, --plugin-data or --no-plugin-data, and --yes. See `agentnomad push --help`.',
+      'Use --agent, --global or --project <name>, --memory or --no-memory, --env-values <names|all|none>, --account-skills or --no-account-skills, --account-plugins or --no-account-plugins, --plugin-data or --no-plugin-data, and --yes. See `agentnomad push --help`.',
     ],
     [
       ['pull', '--global'],
-      'Use --agent, --global or --project <name>, --merge or --overwrite, --allow-commands, --account-skills or --no-account-skills, --account-plugins or --no-account-plugins, --plugin-data or --no-plugin-data, and --yes. See `agentnomad pull --help`.',
+      'Use --agent, --global or --project <name>, --merge, --overwrite or --skip-existing, --allow-commands, --env-values <names|all|none>, --account-skills or --no-account-skills, --account-plugins or --no-account-plugins, --plugin-data or --no-plugin-data, and --yes. See `agentnomad pull --help`.',
     ],
     [
       ['account', 'delete'],
@@ -457,4 +516,85 @@ describe('outcomes', () => {
       ]);
     },
   );
+});
+
+/** Every long flag the program declares, with the command that has it (e.g. `account delete`). */
+function declaredFlags(): { command: string; flag: string }[] {
+  const never = () => Promise.reject(new Error('not run'));
+  const program = createProgram({
+    handlers: {
+      register: never,
+      login: never,
+      logout: never,
+      push: never,
+      pull: never,
+      list: never,
+      agents: never,
+      status: never,
+      delete: never,
+      accountDelete: never,
+      env: never,
+    },
+    optionalParts: REGISTERED_PARTS,
+  });
+  const walk = (command: CommandUnknownOpts, path: string[]): { command: string; flag: string }[] =>
+    command.commands.flatMap((sub) => {
+      const name = [...path, sub.name()];
+      return [
+        ...sub.options.flatMap((option) =>
+          option.long === undefined ? [] : [{ command: name.join(' '), flag: option.long }],
+        ),
+        ...walk(sub, name),
+      ];
+    });
+  return walk(program, []);
+}
+
+/** A cell or a sentence as single words: `--memory / --no-memory` → both flags. */
+const words = (text: string | undefined) => (text ?? '').split(/[\s,/.]+/);
+
+describe('every flag the program declares is documented (T115)', () => {
+  const flags = declaredFlags();
+  const partFlags = new Set(REGISTERED_PARTS.flatMap(({ id }) => [`--${id}`, `--no-${id}`]));
+
+  it('in the README Flags table, on a row naming each command that has it', () => {
+    const rows = tableRows(readmeSection('### Flags'));
+    const missing = flags.filter(
+      ({ command, flag }) =>
+        !rows.some(
+          ([cell, commands]) =>
+            words(cell).includes(flag) && (commands ?? '').split(', ').includes(command),
+        ),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('in the hint a command without a terminal gives, for each command that asks', async () => {
+    const asking = ['register', 'login', 'push', 'pull', 'delete', 'account delete'];
+    for (const command of asking) {
+      const fail = () => Promise.reject(new AnswerNeededError('Which?'));
+      const { messages } = await run(command.split(' '), {
+        register: fail,
+        login: fail,
+        push: fail,
+        pull: fail,
+        delete: fail,
+        accountDelete: fail,
+      });
+      const hint = messages.join('\n');
+      const unnamed = flags
+        .filter((entry) => entry.command === command && !words(hint).includes(entry.flag))
+        .map(({ flag }) => flag);
+      expect({ command, unnamed }).toEqual({ command, unnamed: [] });
+    }
+  });
+
+  it("in commands.ts, the option types' docs (the optional parts' flags come from the agents)", () => {
+    const source = readFileSync(new URL('../src/cli/commands.ts', import.meta.url), 'utf8');
+    const named = new Set(source.match(/--[a-z-]+/g));
+    const missing = flags
+      .filter(({ flag }) => !partFlags.has(flag) && !named.has(flag))
+      .map(({ flag }) => flag);
+    expect(missing).toEqual([]);
+  });
 });

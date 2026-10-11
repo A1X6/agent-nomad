@@ -17,6 +17,7 @@ import {
 import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
 import { sharedMemoryNote } from './auto-memory.ts';
+import { CLAUDE_CODE_CONTENTS } from './claude-code-contents.data.ts';
 import { claudeJsonProjectNote, isClaudeJsonPath } from './claude-json-merge.ts';
 import { claudeConfigDir, createClaudeCodeDetector } from './detector.ts';
 import { devModsNotice, readDevMods } from './dev-mods.ts';
@@ -246,6 +247,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     restorer,
     envReferences: CLAUDE_ENV_REFERENCES,
     optionalParts: [accountSkills, accountPlugins, pluginData],
+    contents: CLAUDE_CODE_CONTENTS,
     inspector: {
       unknownEntries: (target) =>
         findUnknownEntries(target, {

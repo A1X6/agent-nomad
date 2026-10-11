@@ -31,6 +31,7 @@ import type { ApiClient } from '../api/api-client.ts';
 import { ApiError } from '../api/api-errors.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PushOptions } from '../cli/commands.ts';
+import { ENV_VALUES_NONE, QUESTION_REASON } from '../cli/help-text.ts';
 import { checkProjectFolder } from '../cli/project-folder.ts';
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { scanEnvReferences } from '../env/env-references.ts';
@@ -38,10 +39,12 @@ import { chooseEnvValues, envSectionFile } from '../env/env-section.ts';
 import { listSavedRevisions } from '../pull/saved-setups.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
+import { countingPrompter } from '../ui/counting-prompter.ts';
 import { formatSize } from '../ui/format-size.ts';
 import { printableLine } from '../ui/printable.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import { localPathResolver, toBundleFiles } from './bundle-files.ts';
+import { pushSummary, uploadQuestion, type ChosenContent } from './push-summary.ts';
 
 export interface PushDeps {
   readonly prompter: Prompter;
@@ -102,6 +105,8 @@ export interface PlannedUpload {
   readonly expectedRevision: number;
   /** What the summary adds about the files, from the agent (T97: the plugins among them). */
   readonly notes: readonly string[];
+  /** What goes in only when the user chooses it, as the summary before upload names it (T115). */
+  readonly chosen: readonly ChosenContent[];
 }
 
 /** Every answer push needs, gathered before the first upload (T59). */
@@ -147,7 +152,7 @@ export function createPushPlanner(deps: PushDeps) {
       return installed.map(chosenAgent);
     }
     const chosen = await prompter.multiselect(
-      'Which agents?',
+      `Which agents? ${QUESTION_REASON.agents}`,
       installed.map((entry) => ({
         value: entry.adapter.id,
         label: entry.adapter.displayName,
@@ -167,7 +172,7 @@ export function createPushPlanner(deps: PushDeps) {
     if (options.global) return 'global';
     if (options.project !== undefined) return 'project';
     if (refusal !== null || options.yes) return 'global';
-    return prompter.select(`${adapter.displayName}: what to save?`, [
+    return prompter.select(`${adapter.displayName}: what to save? ${QUESTION_REASON.scopePush}`, [
       { value: 'global', label: 'Global setup', hint: 'your settings, skills, agents, commands…' },
       { value: 'project', label: 'This project', hint: deps.cwd },
       { value: 'both', label: 'Both' },
@@ -238,7 +243,7 @@ export function createPushPlanner(deps: PushDeps) {
       (options.yes
         ? false
         : await prompter.confirm(
-            `Include memory${described === '' ? '' : ` (${described})`}? It is what the agent learned about you and your projects, so it is left out unless you say yes.`,
+            `Include memory${described === '' ? '' : ` (${described})`}? ${QUESTION_REASON.memory}`,
             false,
           ));
 
@@ -279,7 +284,11 @@ export function createPushPlanner(deps: PushDeps) {
     item: PushItem,
     contents: Contents,
     options: PushOptions,
-  ): Promise<{ bundle: Omit<Bundle, 'revision'>; notes: readonly string[] } | null> {
+  ): Promise<{
+    bundle: Omit<Bundle, 'revision'>;
+    notes: readonly string[];
+    chosen: readonly ChosenContent[];
+  } | null> {
     const leftOut: string[] = [];
     const parts = new Set(
       (item.adapter.optionalParts ?? [])
@@ -307,13 +316,20 @@ export function createPushPlanner(deps: PushDeps) {
       return null;
     }
 
-    const envSection = options.yes
-      ? null
-      : await chooseEnvValues({
-          scan: scanEnvReferences(collected, item.adapter.envReferences),
-          env: deps.env,
-          prompter,
-        });
+    const envSection = await chooseEnvValues({
+      scan: scanEnvReferences(collected, item.adapter.envReferences),
+      env: deps.env,
+      prompter,
+      assumeYes: options.yes,
+      ...(options.envValues !== undefined && { choice: options.envValues }),
+    });
+    const named = typeof options.envValues === 'object' ? options.envValues : [];
+    const notSaved = named.filter((name) => envSection?.variables[name] === undefined);
+    if (notSaved.length > 0) {
+      reporter.warn(
+        `Not saved with the ${describe(item)}: ${notSaved.join(', ')} (the setup does not use ${notSaved.length === 1 ? 'it, or it is' : 'them, or they are'} not set on this PC).`,
+      );
+    }
     if (envSection) collected.push(envSectionFile(envSection));
 
     const resolver = localPathResolver(deps.platform, deps.homedir);
@@ -327,6 +343,16 @@ export function createPushPlanner(deps: PushDeps) {
         files: toBundleFiles(collected, resolver),
       },
       notes: item.adapter.inspector?.pushNotes?.(collected) ?? [],
+      chosen: [
+        { flag: '--memory', chosen: contents.includeMemory ? 'yes' : 'no' },
+        {
+          flag: '--env-values',
+          chosen: envSection ? Object.keys(envSection.variables).join(', ') : ENV_VALUES_NONE,
+        },
+        ...(item.adapter.optionalParts ?? [])
+          .filter((part) => part.scope === item.scope.kind)
+          .map((part) => ({ flag: `--${part.id}`, chosen: parts.has(part.id) ? 'yes' : 'no' })),
+      ],
     };
   }
 
@@ -398,6 +424,7 @@ export function createPushPlanner(deps: PushDeps) {
         item: PushItem;
         bundle: Omit<Bundle, 'revision'>;
         notes: readonly string[];
+        chosen: readonly ChosenContent[];
       }[] = [];
       for (const item of items) {
         const found = await collectItem(item, contents, options);
@@ -408,7 +435,7 @@ export function createPushPlanner(deps: PushDeps) {
 
       const saved = await withSession(keys.secrets, () => listSavedRevisions(deps.api()));
       const uploads: PlannedUpload[] = [];
-      for (const { item, bundle, notes } of collected) {
+      for (const { item, bundle, notes, chosen } of collected) {
         const scopeKey = scopeKeyFor(keys.crypto, keys.dataKey, item.scope);
         const decision = await decide(item, scopeKey, saved, options);
         if ('result' in decision) outcomes.push(decision);
@@ -421,6 +448,7 @@ export function createPushPlanner(deps: PushDeps) {
             bundle,
             expectedRevision: decision.expectedRevision,
             notes,
+            chosen,
           });
       }
       return { uploads, outcomes };
@@ -530,12 +558,22 @@ export function createPushApplier(deps: PushApplyDeps) {
 /**
  * `agentnomad push` (T33): choose agents and scopes, collect, make paths portable, stamp,
  * compress, encrypt on this PC and upload. The server only ever receives ciphertext and a
- * keyed hash of each project name. Plan, then apply (T59); exits with code 1 when a setup
- * was not saved (BUG-03).
+ * keyed hash of each project name. Plan, then apply (T59); when the plan asked anything, push
+ * shows what it will save and asks once more first (T115). Exits with code 1 when a setup was
+ * not saved (BUG-03).
  */
 export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'> {
-  const planner = createPushPlanner(deps);
+  const questions = countingPrompter(deps.prompter);
+  const planner = createPushPlanner({ ...deps, prompter: questions.prompter });
   const applier = createPushApplier(deps);
+
+  /** The summary and its one question; `false`: the user said no, nothing is uploaded. */
+  async function confirmPlan(plan: PushPlan, options: PushOptions, asked: number) {
+    if (options.yes || plan.uploads.length === 0 || questions.asked() === asked) return true;
+    deps.reporter.info(pushSummary(plan.uploads));
+    return deps.prompter.confirm(uploadQuestion(plan.uploads.length), true);
+  }
+
   return {
     async push(options) {
       const secrets = await deps.secrets();
@@ -543,7 +581,12 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
       // Wiped on every path from here on, also when a question is cancelled (BP-01).
       try {
         const keys: PushKeys = { secrets, crypto: await deps.crypto(), dataKey };
+        const asked = questions.asked();
         const plan = await planner.plan(options, keys);
+        if (!(await confirmPlan(plan, options, asked))) {
+          deps.reporter.info('Nothing was saved.');
+          return;
+        }
         const applied = await applier.apply(plan, keys);
         finishSetups('push', [...plan.outcomes, ...applied]);
       } finally {
