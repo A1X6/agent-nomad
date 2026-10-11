@@ -209,6 +209,8 @@ async function pull(
     conflict?: ConflictChoice;
     flags?: { assumeYes: boolean; allowCommands: boolean };
     known?: LocalMarketplaceRestoreDeps['known'];
+    /** Claude Code's base folder, `~/.claude` unless said. */
+    baseDir?: string;
   } = {},
 ) {
   const fake = validateCli(validatePassWithWarning);
@@ -243,7 +245,7 @@ async function pull(
     },
     {
       homedir: home,
-      baseDir: base,
+      baseDir: options.baseDir ?? base,
       platform: process.platform,
       known: options.known ?? {},
       validator: () => Promise.resolve(validator),
@@ -329,6 +331,36 @@ describe('pull writes a saved local marketplace (T98)', () => {
     expect(plan.marketplaces).toEqual([
       { name: TOOLS, add: join(home, '.agentnomad', 'marketplaces', TOOLS) },
     ]);
+  });
+
+  // SEC-01 (review 15): each saved file is checked from home, not only the saved folder.
+  it('never writes a file into an autostart folder inside the saved one: ~/.agentnomad/marketplaces instead', async () => {
+    const files = savedFiles([...toolsFiles(), collected('fish/config.fish', 'echo hi')]);
+    const { plan } = await pull([savedTools({ path: '.config', files })]);
+    const dir = join(home, '.agentnomad', 'marketplaces', TOOLS);
+    expect(plan.marketplaces).toEqual([{ name: TOOLS, add: dir }]);
+    expect(await exists(join(home, '.config', 'fish', 'config.fish'))).toBe(false);
+    expect(await readText(join(dir, 'fish', 'config.fish'))).toBe('echo hi');
+  });
+
+  it('never writes a LaunchAgent inside the saved folder: ~/.agentnomad/marketplaces instead', async () => {
+    const files = savedFiles([...toolsFiles(), collected('LaunchAgents/x.plist', '<plist/>')]);
+    const { plan } = await pull([savedTools({ path: 'Library', files })]);
+    expect(plan.marketplaces).toEqual([
+      { name: TOOLS, add: join(home, '.agentnomad', 'marketplaces', TOOLS) },
+    ]);
+    expect(await exists(join(home, 'Library', 'LaunchAgents', 'x.plist'))).toBe(false);
+  });
+
+  it("never writes a folder that holds Claude Code's own folder: ~/.agentnomad/marketplaces instead", async () => {
+    const files = savedFiles([...toolsFiles(), collectedJson('claude/settings.json', {})]);
+    const { plan } = await pull([savedTools({ path: '.config', files })], {
+      baseDir: join(home, '.config', 'claude'),
+    });
+    expect(plan.marketplaces).toEqual([
+      { name: TOOLS, add: join(home, '.agentnomad', 'marketplaces', TOOLS) },
+    ]);
+    expect(await exists(join(home, '.config', 'claude', 'settings.json'))).toBe(false);
   });
 
   it('writes into the folder this PC already adds the marketplace from, and adds nothing', async () => {

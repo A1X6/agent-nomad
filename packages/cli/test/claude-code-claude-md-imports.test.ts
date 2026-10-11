@@ -118,6 +118,12 @@ describe('claude-md imports: what is skipped', () => {
     expect(importedPaths('@docs/a.md\n```\n@docs/b.md')).toEqual(['docs/a.md']);
   });
 
+  // BUG-01 (review 15): CLAUDE.md files on Windows often end their lines in CRLF.
+  it('skips a fenced code block with a blank line in a CRLF file', () => {
+    const text = 'Intro\n\n```sh\necho hi\n\n@notes.md\n```\n\nAfter @real.md\n';
+    expect(importedPaths(text.replace(/\n/g, '\r\n'))).toEqual(['real.md']);
+  });
+
   it('opens no fence indented four spaces', () => {
     expect(importedPaths('    ```\n@docs/a.md')).toEqual(['docs/a.md']);
   });

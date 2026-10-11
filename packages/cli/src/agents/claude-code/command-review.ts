@@ -2,7 +2,7 @@ import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
 import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
-import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, strings, valueOrNull } from '../../system/json.ts';
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
 import {
@@ -91,8 +91,11 @@ const entry = (file: string, label: string, command: string, identity = slashes(
 const unreadable = (file: string, label: string, value: unknown) =>
   entry(file, `${label} (unreadable)`, stable(value), stable(value));
 
-/** An MCP server as shown: what runs or where it connects, plus what else it carries. */
-function describeServer(server: Record<string, unknown>): string {
+/**
+ * An MCP server as shown: what runs or where it connects, plus what else it carries. Also an
+ * LSP server or monitor of a plugin (SEC-02), which have a `command` and `args` too.
+ */
+export function describeServer(server: Record<string, unknown>): string {
   const text = (value: unknown) => (typeof value === 'string' ? value : '');
   const args = Array.isArray(server['args']) ? server['args'].map(text) : [];
   const main =
@@ -180,8 +183,6 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
   }
   // Rules that approve tools and folders Claude may use without asking, from any settings
   // file (a project's after the folder is trusted): one entry each, so only new ones show.
-  const strings = (value: unknown) =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
   for (const key of ['allow', 'additionalDirectories']) {
     for (const rule of strings(permissions.success ? permissions.data[key] : undefined)) {
       entries.push(entry(file.path, `setting permissions.${key}`, rule));

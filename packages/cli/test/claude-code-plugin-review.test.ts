@@ -4,12 +4,15 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  MOD_CALLS,
+  MOD_CALLS_VERSION,
   MOD_MODULE,
   MOD_NAME,
   modFiles,
   validateBrokenManifest,
   validateCli,
   validatePassCalling,
+  validatePassNoHooks,
   validatePassWithWarning,
   type ValidateRun,
 } from './claude-code-plugin-fixtures.ts';
@@ -25,9 +28,12 @@ import {
 } from './fakes.ts';
 import {
   askPluginFolders,
+  CLAUDE_CODE_PATHS,
   findPluginValidator,
   pluginFolderChange,
   reviewPluginFolder,
+  riskOfCall,
+  type CollectedFile,
   type PluginFolderToReview,
 } from '../src/index.ts';
 
@@ -54,16 +60,20 @@ async function validatorFor(run: ValidateRun | null) {
   return { validator: await findPluginValidator(system, fake.cli), calls: fake.calls };
 }
 
-/** Asks about the mod with `run` as validate's report and the given flags and answers. */
+/**
+ * Asks about the mod (or `folder`) with `run` as validate's report and the given flags and
+ * answers.
+ */
 async function gate(
   run: ValidateRun | null,
   flags: { assumeYes?: boolean; allowCommands?: boolean } = {},
   answers: boolean[] = [],
+  folder = mod(),
 ) {
   const { validator } = await validatorFor(run);
   const script = scriptedPrompter(answers);
   const { reporter, lines } = recordingReporter({ levels: false });
-  const accepted = await askPluginFolders([{ folder: mod(), change: 'new' }], validator, {
+  const accepted = await askPluginFolders([{ folder, change: 'new' }], validator, {
     prompter: script.prompter,
     reporter,
     assumeYes: flags.assumeYes ?? false,
@@ -169,6 +179,7 @@ describe('the review of a plugin folder (T97)', () => {
         hooks: ['session.start'],
         calls: ['$.store.get', '$.store.set', '$.ui.status'],
         risky: [],
+        writes: [],
       },
     ]);
   });
@@ -232,6 +243,163 @@ describe('the review of a plugin folder (T97)', () => {
     };
     const { validator } = await validatorFor(run);
     expect((await reviewPluginFolder(mod(files), validator)).runsCode).toBe(false);
+  });
+
+  // SEC-04 (review 15): the calls that run tools, commands and MCP servers are flagged too.
+  it('flags calls that run tools, commands, subagents or MCP servers, change settings or send prompts', async () => {
+    const run = validatePassCalling([
+      '$.tool.call',
+      '$.command.run',
+      '$.agent.spawn',
+      '$.mcp.connect',
+      '$.mcp.call',
+      '$.config.set',
+      '$.env.set',
+      '$.session.send',
+      '$.prompt.submit',
+    ]);
+    const { validator } = await validatorFor(run);
+    expect((await reviewPluginFolder(mod(), validator)).modules[0]?.risky).toEqual([
+      '$.tool.call (runs tools, Bash included)',
+      '$.command.run (runs commands)',
+      '$.agent.spawn (runs subagents)',
+      '$.mcp.connect (starts or calls MCP servers)',
+      '$.mcp.call (starts or calls MCP servers)',
+      '$.config.set (changes settings)',
+      '$.env.set (sets environment variables)',
+      '$.session.send (sends prompts)',
+      '$.prompt.submit (sends prompts)',
+    ]);
+  });
+
+  it('flags a call made through a helper, as validate names it', async () => {
+    const run = validatePassCalling(['$.store.get', '$.tool.call (via run, again)']);
+    const { validator } = await validatorFor(run);
+    const review = await reviewPluginFolder(mod(), validator);
+    expect(review.modules[0]?.calls).toEqual(['$.store.get', '$.tool.call (via run, again)']);
+    expect(review.modules[0]?.risky).toEqual([
+      '$.tool.call (via run, again) (runs tools, Bash included)',
+    ]);
+  });
+
+  it('pins the mod calls of the Claude Code the paths data was reviewed against', () => {
+    expect(MOD_CALLS_VERSION).toBe(CLAUDE_CODE_PATHS.reviewedVersion);
+  });
+
+  it("flags exactly these of the program's mod calls", () => {
+    const flagged = MOD_CALLS.flatMap((name) => {
+      const does = riskOfCall(`$.${name}`);
+      return does === null ? [] : [`${name}: ${does}`];
+    });
+    expect(flagged).toEqual([
+      'tool.call: runs tools, Bash included',
+      'agent.spawn: runs subagents',
+      'prompt.submit: sends prompts',
+      'command.run: runs commands',
+      'config.set: changes settings',
+      'session.send: sends prompts',
+      'model.complete: calls the model',
+      'model.classify: calls the model',
+      'model.fork: calls the model',
+      'mcp.call: starts or calls MCP servers',
+      'mcp.connect: starts or calls MCP servers',
+      'fs.write: writes files',
+      'http.fetch: uses the network',
+      'process.run: runs programs',
+      'process.spawn: runs programs',
+      'env.set: sets environment variables',
+    ]);
+  });
+
+  it('shows the environment variables and state a module writes', async () => {
+    const run = validatePassCalling(['$.env.set']);
+    const json = structuredClone(run.json) as { contents: { notes: string[] }[] };
+    json.contents[0]?.notes.push(
+      './register.ts env writes: FOO, BAR',
+      './register.ts env reads: nothing',
+      './register.ts state writes: seen',
+    );
+    const t = await gate({ ...run, json }, {}, [false, false]);
+    expect(t.lines[0]).toContain('      ./register.ts env writes: FOO, BAR');
+    expect(t.lines[0]).toContain('      ./register.ts state writes: seen');
+    expect(t.lines[0]).not.toContain('env reads');
+  });
+});
+
+/** A plugin without hooks or modules, with `files` and its manifest `{ name, ...manifest }`. */
+const pluginWith = (files: CollectedFile[], manifest: object = {}): PluginFolderToReview =>
+  mod([collectedJson('.claude-plugin/plugin.json', { name: MOD_NAME, ...manifest }), ...files]);
+
+const MCP_SERVER = { command: 'node', args: ['srv.js'] };
+const LSP_SERVER = { command: 'gopls', args: ['serve'], extensionToLanguage: { '.go': 'go' } };
+const MONITOR = { name: 'watch', command: 'bash watch.sh', description: 'Watches the build' };
+const STOP_HOOK = { Stop: [{ hooks: [{ type: 'command', command: 'bash stop.sh' }] }] };
+
+// SEC-02 (review 15): Claude Code starts these by itself, so the folder needs a yes.
+describe('plugin parts Claude Code starts programs from (SEC-02)', () => {
+  it.each([
+    ['monitors/monitors.json', pluginWith([collectedJson('monitors/monitors.json', [MONITOR])])],
+    ['.lsp.json', pluginWith([collectedJson('.lsp.json', { go: LSP_SERVER })])],
+    ['.mcp.json', pluginWith([collectedJson('.mcp.json', { mcpServers: { db: MCP_SERVER } })])],
+    ['hooks in plugin.json', pluginWith([], { hooks: STOP_HOOK })],
+    ['mcpServers in plugin.json', pluginWith([], { mcpServers: { inline: MCP_SERVER } })],
+    ['lspServers in plugin.json', pluginWith([], { lspServers: { go: LSP_SERVER } })],
+    ['monitors in plugin.json', pluginWith([], { monitors: [MONITOR] })],
+  ])('--yes never accepts a plugin with %s', async (_part, folder) => {
+    const t = await gate(validatePassNoHooks, { assumeYes: true }, [], folder);
+    expect(t.accepted).toEqual([]);
+  });
+
+  it('lists the MCP and LSP servers and monitors it starts', async () => {
+    const folder = pluginWith(
+      [
+        collectedJson('.mcp.json', { mcpServers: { db: MCP_SERVER } }),
+        collectedJson('.lsp.json', { go: LSP_SERVER }),
+        collectedJson('monitors/monitors.json', [MONITOR]),
+      ],
+      { mcpServers: { inline: MCP_SERVER } },
+    );
+    const { validator } = await validatorFor(validatePassNoHooks);
+    expect((await reviewPluginFolder(folder, validator)).starts).toEqual([
+      'MCP server inline: node srv.js',
+      'MCP server db: node srv.js',
+      'LSP server go: gopls serve',
+      'monitor watch: bash watch.sh',
+    ]);
+  });
+
+  it('reads the files plugin.json names instead of the default ones', async () => {
+    const folder = pluginWith(
+      [
+        collectedJson('config/servers.json', { mcpServers: { db: MCP_SERVER } }),
+        collectedJson('config/lsp.json', { go: LSP_SERVER }),
+        collectedJson('config/watch.json', [MONITOR]),
+      ],
+      {
+        mcpServers: './config/servers.json',
+        lspServers: ['./config/lsp.json'],
+        monitors: './config/watch.json',
+      },
+    );
+    const { validator } = await validatorFor(validatePassNoHooks);
+    expect((await reviewPluginFolder(folder, validator)).starts).toEqual([
+      'MCP server db: node srv.js',
+      'LSP server go: gopls serve',
+      'monitor watch: bash watch.sh',
+    ]);
+  });
+
+  it('lists command hooks written in plugin.json', async () => {
+    const { validator } = await validatorFor(validatePassNoHooks);
+    const review = await reviewPluginFolder(pluginWith([], { hooks: STOP_HOOK }), validator);
+    expect(review.commandHooks).toEqual(['hook Stop: bash stop.sh']);
+  });
+
+  it('shows what it starts before asking', async () => {
+    const folder = pluginWith([collectedJson('monitors/monitors.json', [MONITOR])]);
+    const t = await gate(validatePassNoHooks, {}, [false], folder);
+    expect(t.lines[0]).toContain('      monitor watch: bash watch.sh');
+    expect(t.asked).toEqual(['Write probe-mod@skills-dir? It runs code inside Claude Code.']);
   });
 });
 

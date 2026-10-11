@@ -3,9 +3,11 @@ import { readFile, stat } from 'node:fs/promises';
 import { BACKUP_MARKER, backupStamp } from '@agentnomad/core';
 import * as z from 'zod';
 
-import { JsonObjectSchema } from '../../system/json.ts';
+import { isJsonObject, JsonObjectSchema, strings } from '../../system/json.ts';
+import { printableLine } from '../../ui/printable.ts';
 import type { CollectedFile, ConflictQuestion, ConflictResolver, ScopeTarget } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
+import { repositoryRoot } from './auto-memory.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
@@ -108,12 +110,6 @@ export interface ClaudeJsonMerge {
   ): Promise<void>;
 }
 
-const isJsonObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const strings = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-
 /**
  * `~/.claude.json` at `file`, parsed, or `null` when it is missing. Push reads it for the
  * global and the project setup alike (T109).
@@ -139,7 +135,8 @@ export async function readClaudeJsonFile(file: string): Promise<Record<string, u
 /**
  * The key of `projectDir` in `projects`, as Claude Code 2.1.296 writes it (T109): the folder
  * as given, with `/` for `\` on Windows and no change of case. On Windows, which ignores case,
- * an entry already there under another case of the same path is the one used.
+ * an entry already there under another case of the same path is the one used. Claude Code
+ * gives it the main repository's root (`repositoryRoot`), so callers pass that (BUG-02).
  */
 export function projectKeyOf(
   projects: Record<string, unknown>,
@@ -188,19 +185,18 @@ function projectPartItems(file: CollectedFile): string[] {
     return [];
   }
   if (!isJsonObject(saved)) return [];
+  // Names from a pulled bundle, each shown on one line (SEC-06).
+  const names = (list: string[]) => list.map(printableLine).join(', ');
   const servers = isJsonObject(saved[CLAUDE_JSON_MCP_KEY])
     ? Object.keys(saved[CLAUDE_JSON_MCP_KEY])
     : [];
-  const parts = [
-    ...(servers.length > 0 ? [`MCP servers ${servers.join(', ')}`] : []),
-    ...(strings(saved['enabledMcpjsonServers']).length > 0
-      ? [`.mcp.json servers approved: ${strings(saved['enabledMcpjsonServers']).join(', ')}`]
-      : []),
-    ...(strings(saved['disabledMcpjsonServers']).length > 0
-      ? [`.mcp.json servers rejected: ${strings(saved['disabledMcpjsonServers']).join(', ')}`]
-      : []),
+  const approved = strings(saved['enabledMcpjsonServers']);
+  const rejected = strings(saved['disabledMcpjsonServers']);
+  return [
+    ...(servers.length > 0 ? [`MCP servers ${names(servers)}`] : []),
+    ...(approved.length > 0 ? [`.mcp.json servers approved: ${names(approved)}`] : []),
+    ...(rejected.length > 0 ? [`.mcp.json servers rejected: ${names(rejected)}`] : []),
   ];
-  return parts;
 }
 
 /**
@@ -333,10 +329,13 @@ function claudeJsonKeys(file: CollectedFile, part: ClaudeJsonPart) {
 export function createClaudeJsonMerge(options: ClaudeJsonMergeOptions): ClaudeJsonMerge {
   const { claudeJsonFile } = options;
 
-  /** Where `file` goes: a project's part into the entry of the target's folder. */
-  const partOf = (file: CollectedFile, target: ScopeTarget = { kind: 'global' }) =>
+  /**
+   * Where `file` goes: a project's part into the entry of the target's repository, which
+   * Claude Code reads for every folder in it (BUG-02).
+   */
+  const partOf = async (file: CollectedFile, target: ScopeTarget = { kind: 'global' }) =>
     file.path === CLAUDE_JSON_PROJECT_BUNDLE_PATH && target.kind === 'project'
-      ? projectPart(target.projectDir, options.platform)
+      ? projectPart(await repositoryRoot(target.projectDir, options.platform), options.platform)
       : TOP_LEVEL;
 
   /** `~/.claude.json` as it is now, parsed: `existing` is `null` when missing. */
@@ -356,7 +355,7 @@ export function createClaudeJsonMerge(options: ClaudeJsonMergeOptions): ClaudeJs
   return {
     async change(file, target) {
       try {
-        const part = partOf(file, target);
+        const part = await partOf(file, target);
         const keys = claudeJsonKeys(file, part).incoming;
         if (Object.keys(keys).length === 0) return 'none';
         const { existing, current } = await readClaudeJson();
@@ -370,7 +369,7 @@ export function createClaudeJsonMerge(options: ClaudeJsonMergeOptions): ClaudeJs
     },
 
     async merge(file, onConflict, report, leave, target) {
-      const part = partOf(file, target);
+      const part = await partOf(file, target);
       const { incoming, ignored } = claudeJsonKeys(file, part);
       if (ignored.length > 0) {
         report.warnings.push(

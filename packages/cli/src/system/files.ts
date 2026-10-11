@@ -10,6 +10,13 @@ export const isMissing = (error: unknown) =>
 export const isFile = async (path: string) =>
   (await stat(path).catch(() => null))?.isFile() ?? false;
 
+/** A folder is at `path` (a link to one counts); `false` for a file, nothing or an error. */
+export const isDirectory = async (path: string) =>
+  (await stat(path).catch(() => null))?.isDirectory() ?? false;
+
+/** Something is at `path`: a file, a folder or a link to one (DUP-02). */
+export const exists = async (path: string) => (await stat(path).catch(() => null)) !== null;
+
 /**
  * Where to write `path`: a file linked from a dotfiles folder (stow, chezmoi) is written where
  * it really is, so the link stays (T46). Only a link is followed: a plain or missing file

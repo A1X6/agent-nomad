@@ -5,22 +5,25 @@ import { dirname, join } from 'node:path';
 import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
-import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { isJsonObject, parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { printable, printableLine } from '../../ui/printable.ts';
 import type { Prompter, Reporter } from '../../ui/prompter.ts';
 import type { CollectedFile } from '../adapter.ts';
 import type { ExecutableLookupSystem } from '../shared/detector-system.ts';
+import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
+import { describeServer } from './command-review.ts';
 import { findClaudeExecutable } from './detector.ts';
 import { createProgramCli, type ProgramCli } from './plugin-sync.ts';
 import { riskOfCall } from './reviewed-settings.ts';
 import { commandText, hookItems } from './settings-commands.ts';
-import { PLUGIN_HOOKS } from './skills-dir-plugins.ts';
+import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
 
 /*
  * The pull review of a plugin or mod folder (T97, T44 rule), shared by every place pull writes
  * one (T98, T99, T101): `claude plugin validate --json` on a copy pull makes itself, its
- * `hooks:` and `calls:` lines, the risky calls, and classic command hooks (which validate does
- * not list). A folder with code needs a yes, or --allow-commands; --yes alone never accepts it.
+ * `hooks:`, `calls:` and `writes:` lines, the risky calls, classic command hooks, and the
+ * servers and monitors Claude Code starts from the folder (SEC-02), which validate does not
+ * list. A folder with code needs a yes, or --allow-commands; --yes alone never accepts it.
  */
 
 /** A plugin folder pull is about to write. */
@@ -169,6 +172,8 @@ interface ModuleReview {
   readonly calls: readonly string[];
   /** The risky calls with what they do, e.g. `$.process.spawn (runs programs)`. */
   readonly risky: readonly string[];
+  /** The environment variables and state it writes, e.g. `env writes: FOO` (SEC-04). */
+  readonly writes: readonly string[];
 }
 
 /** What the review found in one plugin folder. */
@@ -177,26 +182,37 @@ export interface PluginReview {
   readonly folder: string;
   readonly validation: PluginValidation;
   readonly modules: readonly ModuleReview[];
-  /** Classic command hooks in `hooks/hooks.json`, e.g. `hook Stop: bash notify.sh`. */
+  /**
+   * Classic command hooks in `hooks/hooks.json` and `plugin.json`, e.g.
+   * `hook Stop: bash notify.sh`.
+   */
   readonly commandHooks: readonly string[];
+  /**
+   * What Claude Code starts from the folder by itself (SEC-02): MCP and LSP servers and
+   * monitors, e.g. `monitor watch: bash watch.sh`.
+   */
+  readonly starts: readonly string[];
   /** It runs code inside Claude Code, or could not be checked: it needs a yes. */
   readonly runsCode: boolean;
 }
 
-const NOTE = /^(.+?) (hooks|calls): (.*)$/;
+const NOTE = /^(.+?) (hooks|calls|env writes|state writes): (.*)$/;
 
 /** What validate writes on a `calls:` line when a module calls no `$` method. */
 const NO_CALLS = 'nothing on $';
 
-/** A note's list, split on commas outside `{…}` (`tool.call{tool=Bash}`). */
+/**
+ * A note's list, split on commas outside `{…}` and `(…)` (`tool.call{tool=Bash}`,
+ * `$.tool.call (via run, again)`).
+ */
 function listed(text: string): string[] {
   if (text.trim() === NO_CALLS) return [];
   const parts: string[] = [];
   let depth = 0;
   let part = '';
   for (const char of text) {
-    if (char === '{') depth += 1;
-    if (char === '}') depth = Math.max(0, depth - 1);
+    if (char === '{' || char === '(') depth += 1;
+    if (char === '}' || char === ')') depth = Math.max(0, depth - 1);
     if (char === ',' && depth === 0) {
       parts.push(part);
       part = '';
@@ -206,13 +222,10 @@ function listed(text: string): string[] {
   return parts.map((item) => item.trim()).filter((item) => item !== '');
 }
 
-/**
- * A module's file in the folder: validate names modules as `hooks/hooks.json` does, from the
- * `hooks/` folder (`./register.ts` is `hooks/register.ts`); `null` when it leaves the folder.
- */
-function moduleFile(module: string): string | null {
+/** A path of the folder from these parts (`..` goes up); `null` when it leaves the folder. */
+function insideFolder(path: readonly string[]): string | null {
   const parts: string[] = [];
-  for (const part of ['hooks', ...module.split('/')]) {
+  for (const part of path) {
     if (part === '' || part === '.') continue;
     if (part !== '..') parts.push(part);
     else if (parts.pop() === undefined) return null;
@@ -220,14 +233,21 @@ function moduleFile(module: string): string | null {
   return parts.join('/');
 }
 
+/**
+ * A module's file in the folder: validate names modules as `hooks/hooks.json` does, from the
+ * `hooks/` folder (`./register.ts` is `hooks/register.ts`); `null` when it leaves the folder.
+ */
+const moduleFile = (module: string) => insideFolder(['hooks', ...module.split('/')]);
+
 /** The modules in validate's notes, in the order it lists them. */
 function modulesOf(notes: readonly string[]): ModuleReview[] {
-  const modules = new Map<string, { hooks: string[]; calls: string[] }>();
+  const modules = new Map<string, { hooks: string[]; calls: string[]; writes: string[] }>();
   for (const note of notes) {
     const match = NOTE.exec(note);
-    if (match?.[1] === undefined || match[3] === undefined) continue;
-    const found = modules.get(match[1]) ?? { hooks: [], calls: [] };
-    found[match[2] === 'hooks' ? 'hooks' : 'calls'].push(...listed(match[3]));
+    if (match?.[1] === undefined || match[2] === undefined || match[3] === undefined) continue;
+    const found = modules.get(match[1]) ?? { hooks: [], calls: [], writes: [] };
+    if (match[2] === 'hooks' || match[2] === 'calls') found[match[2]].push(...listed(match[3]));
+    else if (match[3].trim() !== 'nothing') found.writes.push(`${match[2]}: ${match[3]}`);
     modules.set(match[1], found);
   }
   return [...modules].map(([module, found]) => ({
@@ -240,13 +260,124 @@ function modulesOf(notes: readonly string[]): ModuleReview[] {
   }));
 }
 
-/** Classic command hooks in the folder's `hooks/hooks.json`, read as settings hooks are (T44). */
-function commandHooksOf(files: readonly CollectedFile[]): string[] {
-  const file = files.find((entry) => entry.path === PLUGIN_HOOKS);
-  if (!file) return [];
-  const json = valueOrNull(parseJsonWith(JsonObjectSchema, file.content));
-  if (json === null) return [`${PLUGIN_HOOKS} (unreadable)`];
-  return hookItems(json['hooks']).flatMap((item) => {
+/** The parts of a plugin Claude Code starts programs from (SEC-02). */
+const RUNS_CODE = DATA.plugins.runsCode;
+
+/** The MCP servers, LSP servers and monitors a plugin has without naming them in its manifest. */
+const MCP_FILE = '.mcp.json';
+const LSP_FILE = '.lsp.json';
+const MONITORS_FILE = 'monitors/monitors.json';
+
+/**
+ * The folder's JSON file at `path` as a manifest names it (`./config/servers.json`):
+ * `undefined` when it is not in the folder, `null` when it cannot be read.
+ */
+function jsonAt(files: readonly CollectedFile[], path: string): unknown {
+  const at = insideFolder(path.split('/'));
+  const file = at === null ? undefined : files.find((entry) => entry.path === at);
+  return file === undefined ? undefined : valueOrNull(parseJsonWith(z.unknown(), file.content));
+}
+
+/** A part a manifest key declares: inline (`from` names the key) or from a file. */
+interface Declared {
+  readonly from: string;
+  readonly value: unknown;
+}
+
+/**
+ * What the manifest's `key` declares, then the `file` Claude Code reads with it (`beside`) or
+ * only without it: each inline value, and each file named by a path (a list when `list`).
+ */
+function declared(
+  files: readonly CollectedFile[],
+  manifest: Record<string, unknown> | null,
+  key: string,
+  file: { readonly path: string; readonly beside: boolean; readonly list: boolean },
+): Declared[] {
+  const value = manifest?.[key];
+  const items: unknown[] =
+    value === undefined ? [] : file.list && Array.isArray(value) ? value : [value];
+  const parts = items.map((item) =>
+    typeof item === 'string'
+      ? { from: item, value: jsonAt(files, item) }
+      : { from: `${PLUGIN_MANIFEST} ${key}`, value: item },
+  );
+  const fromFile = jsonAt(files, file.path);
+  if (fromFile !== undefined && (value === undefined || file.beside)) {
+    parts.push({ from: file.path, value: fromFile });
+  }
+  return parts;
+}
+
+/**
+ * The MCP and LSP servers and monitors Claude Code starts from the folder (SEC-02), each with
+ * its command; a file the manifest names that is not in the folder (an MCPB file or a URL) is
+ * shown by its path.
+ */
+function startsOf(files: readonly CollectedFile[], manifest: Record<string, unknown> | null) {
+  const lines: string[] = [];
+  const servers = (label: string, part: Declared, wrapper: string | null) => {
+    if (part.value === undefined) return lines.push(`${label}s from ${part.from}`);
+    const inner = wrapper === null || !isJsonObject(part.value) ? undefined : part.value[wrapper];
+    const all = isJsonObject(inner) ? inner : part.value;
+    if (!isJsonObject(all)) return lines.push(`${label}s in ${part.from} (unreadable)`);
+    for (const [name, server] of Object.entries(all)) {
+      lines.push(
+        isJsonObject(server)
+          ? `${label} ${name}: ${describeServer(server)}`
+          : `${label} ${name} (unreadable)`,
+      );
+    }
+    return lines.length;
+  };
+  const mcp = { path: MCP_FILE, beside: true, list: true };
+  for (const part of declared(files, manifest, 'mcpServers', mcp)) {
+    servers('MCP server', part, 'mcpServers');
+  }
+  const lsp = { path: LSP_FILE, beside: true, list: true };
+  for (const part of declared(files, manifest, 'lspServers', lsp)) {
+    servers('LSP server', part, null);
+  }
+  const monitorsFile = { path: MONITORS_FILE, beside: false, list: false };
+  for (const part of declared(files, manifest, 'monitors', monitorsFile)) {
+    if (part.value === undefined) lines.push(`monitors from ${part.from}`);
+    else if (!Array.isArray(part.value)) lines.push(`monitors in ${part.from} (unreadable)`);
+    else {
+      for (const monitor of part.value) {
+        const name = isJsonObject(monitor) ? monitor['name'] : undefined;
+        lines.push(
+          isJsonObject(monitor) && typeof name === 'string'
+            ? `monitor ${name}: ${describeServer(monitor)}`
+            : 'monitor (unreadable)',
+        );
+      }
+    }
+  }
+  return lines;
+}
+
+/**
+ * Classic command hooks in the folder's `hooks/hooks.json` and those its manifest declares
+ * (SEC-02), read as settings hooks are (T44).
+ */
+function commandHooksOf(
+  files: readonly CollectedFile[],
+  manifest: Record<string, unknown> | null,
+): string[] {
+  const hooksFile = { path: PLUGIN_HOOKS, beside: true, list: true };
+  return declared(files, manifest, 'hooks', hooksFile).flatMap((part) => {
+    if (part.value === undefined) return [`hooks from ${part.from}`];
+    if (!isJsonObject(part.value)) return [`${part.from} (unreadable)`];
+    // A hooks file holds `hooks` (and a mod's `modules`); the manifest may hold the events.
+    const inline =
+      part.from !== PLUGIN_HOOKS && !('hooks' in part.value || 'modules' in part.value);
+    return commandHookLines(inline ? part.value : part.value['hooks']);
+  });
+}
+
+/** The command and HTTP hooks of a `hooks` block, as the review shows them. */
+function commandHookLines(hooks: unknown): string[] {
+  return hookItems(hooks).flatMap((item) => {
     if (!('hook' in item)) {
       return [item.event === null ? 'hooks (unreadable)' : `hook ${item.event} (unreadable)`];
     }
@@ -267,14 +398,31 @@ export async function reviewPluginFolder(
 ): Promise<PluginReview> {
   const validation = await validator.validate(folder);
   const modules = validation.kind === 'checked' ? modulesOf(validation.notes) : [];
-  const commandHooks = commandHooksOf(folder.files);
+  const json = jsonAt(folder.files, PLUGIN_MANIFEST);
+  const manifest = isJsonObject(json) ? json : null;
+  const commandHooks = commandHooksOf(folder.files, manifest);
+  const starts = startsOf(folder.files, manifest);
   const runsCode =
     validation.kind === 'unavailable' ||
     !validation.passed ||
     modules.length > 0 ||
     commandHooks.length > 0 ||
-    folder.files.some((file) => file.path === PLUGIN_HOOKS || file.path === '.mcp.json');
-  return { id: folder.id, folder: folder.folder, validation, modules, commandHooks, runsCode };
+    starts.length > 0 ||
+    folder.files.some(
+      (file) =>
+        RUNS_CODE.files.includes(file.path) ||
+        RUNS_CODE.folders.some((part) => file.path.startsWith(`${part}/`)),
+    ) ||
+    RUNS_CODE.manifestKeys.some((key) => manifest?.[key] !== undefined);
+  return {
+    id: folder.id,
+    folder: folder.folder,
+    validation,
+    modules,
+    commandHooks,
+    starts,
+    runsCode,
+  };
 }
 
 /** The review as pull shows it: one block for the folder, each line printable. */
@@ -293,9 +441,11 @@ function pluginReviewLines(review: PluginReview, change: 'new' | 'changed'): str
     ...review.modules.flatMap((module) => [
       `      ${module.module} hooks: ${module.hooks.join(', ')}`,
       `      ${module.module} calls: ${module.calls.join(', ')}`,
+      ...module.writes.map((writes) => `      ${module.module} ${writes}`),
       ...(module.risky.length > 0 ? [`      ⚠ ${module.module}: ${module.risky.join(', ')}`] : []),
     ]),
     ...review.commandHooks.map((hook) => `      ${hook}`),
+    ...review.starts.map((started) => `      ${started}`),
   ].map(printableLine);
 }
 

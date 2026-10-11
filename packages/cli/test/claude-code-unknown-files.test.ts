@@ -132,6 +132,30 @@ describe('unknown-file check (T32 done-when)', () => {
     ]);
   });
 
+  // UX-04 (review 15): push saves these by their own route, as for the global setup.
+  it('does not report a project’s .claude folder whose script a project hook runs', async () => {
+    await writeTestFile(join(project, '.claude', 'scripts', 'check.sh'));
+    await writeTestFile(join(project, '.claude', 'tools', 'unused.sh'));
+    await writeFile(
+      join(project, '.claude', 'settings.json'),
+      JSON.stringify(stopHook('bash "$CLAUDE_PROJECT_DIR/.claude/scripts/check.sh"')),
+    );
+    const target = { kind: 'project', projectDir: project } as const;
+    expect(await findUnknownEntries(target, { ...input(), homedir: root })).toEqual([
+      '.claude/tools/',
+    ]);
+  });
+
+  it('does not report a project’s .claude folder holding a file its CLAUDE.md imports', async () => {
+    await writeTestFile(join(project, 'CLAUDE.md'), '@.claude/docs/style.md\n');
+    await writeTestFile(join(project, '.claude', 'docs', 'style.md'));
+    await writeTestFile(join(project, '.claude', 'notes', 'other.md'));
+    const target = { kind: 'project', projectDir: project } as const;
+    expect(await findUnknownEntries(target, { ...input(), homedir: root })).toEqual([
+      '.claude/notes/',
+    ]);
+  });
+
   it('does not report a project’s .claude/loop.md, which is synced (T113)', async () => {
     await writeTestFile(join(project, '.claude', 'loop.md'));
     expect(await findUnknownEntries({ kind: 'project', projectDir: project }, input())).toEqual([]);

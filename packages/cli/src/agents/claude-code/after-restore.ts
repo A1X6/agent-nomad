@@ -1,15 +1,7 @@
-import type {
-  AfterRestoreContext,
-  CollectedFile,
-  RestorePlanContext,
-  Restorer,
-} from '../adapter.ts';
-import { findExecutable, pathsOf, type ExecutableLookupSystem } from '../shared/detector-system.ts';
-import { localSkillNames } from './account-plugins.ts';
-import { ACCOUNT_SKILLS_PART, planAccountSkills, readSyncedSkills } from './account-skills.ts';
+import type { AfterRestoreContext, RestorePlanContext } from '../adapter.ts';
+import { findExecutable, type ExecutableLookupSystem } from '../shared/detector-system.ts';
 import { claudeConfigDir, findClaudeExecutable } from './detector.ts';
 import {
-  ACCOUNT_SKILLS_PREFIX,
   PLUGIN_VERSIONS_BUNDLE_PATH,
   PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
@@ -35,8 +27,6 @@ export interface AfterRestoreDeps {
   readonly system: ExecutableLookupSystem;
   /** Runs a found program (`claude`, `npm`); injected for tests. */
   readonly cli?: (path: string) => ProgramCli;
-  /** Writes saved claude.ai skills as local skills (T42), with the restorer's safety rules. */
-  readonly restorer?: Restorer;
   /** Organization-managed settings on this PC (T31), read through the adapter (SOLID-01). */
   readonly managedSettings: () => Promise<ManagedSettings>;
 }
@@ -57,9 +47,9 @@ type LocalPlugins = Pick<PluginManifest, 'marketplaces' | 'plugins'>;
 
 /**
  * What pull does after writing a Claude Code setup (T34): reinstall its plugins (T29), offer
- * to install programs its hooks or status line need (T25), and offer saved claude.ai skills
- * (T42). Every question is asked in the plan step, before anything is written (T61); the
- * follow-up it returns only installs what was agreed to.
+ * to install programs its hooks or status line need (T25). Every question is asked in the plan
+ * step, before anything is written (T61); the follow-up it returns only installs what was
+ * agreed to. Saved claude.ai skills are planned with the adapter's plan step (SEC-03).
  */
 export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
   const cli = deps.cli ?? ((path: string) => createProgramCli(path, deps.system));
@@ -224,101 +214,6 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
   }
 
   /**
-   * Which saved account skills can be added here: not one this PC gets from its own
-   * claude.ai sync, never over a local skill. `incoming`: local skills the restore is about
-   * to write, which count as local too.
-   */
-  async function accountSkillsHere(
-    files: readonly CollectedFile[],
-    incoming: readonly CollectedFile[],
-  ) {
-    const baseDir = claudeConfigDir(deps.system);
-    const path = pathsOf(deps.system.platform);
-    const localNames = await localSkillNames(path, baseDir, incoming);
-    const synced = await readSyncedSkills(path, baseDir);
-    return planAccountSkills(files, { syncedNames: synced.allNames, localNames });
-  }
-
-  /**
-   * Saved claude.ai skills (T42): added as local skills on a PC that does not already get
-   * them from its own claude.ai sync, unless the user says no (T114). A skill with
-   * `` !`command` `` lines runs those as a local skill (a synced one does not), so it is
-   * marked, and a flag or --yes (no question asked) adds it only with --allow-commands too.
-   */
-  async function accountSkills(context: FollowUpPlanContext): Promise<FollowUp> {
-    const { restorer } = deps;
-    if (context.target.kind !== 'global' || !restorer) return nothingToDo;
-    if (!context.files.some((file) => file.path.startsWith(ACCOUNT_SKILLS_PREFIX))) {
-      return nothingToDo;
-    }
-    const plan = await accountSkillsHere(context.files, context.files);
-    if (plan.toAdd.length === 0 && plan.skipped.length === 0) return nothingToDo;
-
-    context.reporter.info(
-      [
-        'Skills from your claude.ai account on the other PC:',
-        ...plan.toAdd.map(
-          (skill) =>
-            `  + ${skill.name}${skill.runsCommands ? '  ⚠ runs commands as a local skill (! lines, ```! blocks or hooks)' : ''}`,
-        ),
-        ...plan.skipped.map((skill) => `  - ${skill.name}: skipped, ${skill.reason}`),
-      ].join('\n'),
-    );
-    if (plan.toAdd.length === 0) return nothingToDo;
-
-    const flag = context.parts.get(ACCOUNT_SKILLS_PART);
-    const add =
-      flag ??
-      (context.assumeYes ||
-        (await context.prompter.confirm(
-          'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
-          true,
-        )));
-    if (!add) {
-      context.reporter.info(
-        'Not added. To add them later: agentnomad pull --global --account-skills',
-      );
-      return nothingToDo;
-    }
-    // Answered by a flag or --yes, not a person: commands only run with --allow-commands too.
-    const blocked = new Set(
-      (flag !== undefined || context.assumeYes) && !context.allowCommands
-        ? plan.toAdd.filter((skill) => skill.runsCommands).map((skill) => skill.name)
-        : [],
-    );
-    for (const name of blocked) {
-      context.reporter.warn(
-        `Skipped ${name}: it runs commands as a local skill. Add --allow-commands to add it anyway.`,
-      );
-    }
-    const approved = new Set(
-      plan.toAdd.filter((skill) => !blocked.has(skill.name)).map((skill) => skill.name),
-    );
-    if (approved.size === 0) return nothingToDo;
-
-    return async ({ reporter }) => {
-      // Checked again now that the setup is written: never over a local skill.
-      const now = await accountSkillsHere(context.files, []);
-      const added = now.toAdd.map((skill) => skill.name).filter((name) => approved.has(name));
-      if (added.length === 0) return;
-      const files = now.files.filter((file) => added.includes(file.path.split('/')[1] ?? ''));
-      const report = await restorer.restore({ kind: 'global' }, files, () =>
-        Promise.resolve('skip'),
-      );
-      for (const warning of report.warnings) reporter.warn(warning);
-      // Named from what was written (UX-01): the restorer may refuse or skip a skill's files.
-      const written = new Set(report.written.map((path) => path.split('/')[1] ?? ''));
-      const missing = added.filter((name) => !written.has(name));
-      if (missing.length > 0) reporter.warn(`Not added: ${missing.join(', ')}.`);
-      const done = added.filter((name) => written.has(name));
-      if (done.length === 0) return;
-      reporter.success(
-        `Added ${done.join(', ')} as local skills. If this PC later signs in to the claude.ai account they came from, they sync there too, and your local copy keeps the short name.`,
-      );
-    };
-  }
-
-  /**
    * Asks every question of the follow-up, in order, and returns what to do after writing.
    * `local`: the marketplaces and plugins of the saved local marketplaces pull writes (T98).
    * `summary` gets a line for each choice, for pull's summary (UX-01).
@@ -328,11 +223,7 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
     local: LocalPlugins = { marketplaces: [], plugins: [] },
     summary: string[] = [],
   ): Promise<FollowUp> => {
-    const steps = [
-      await plugins(context, local, summary),
-      await programs(context, summary),
-      await accountSkills(context),
-    ];
+    const steps = [await plugins(context, local, summary), await programs(context, summary)];
     return async (applyContext) => {
       for (const step of steps) await step(applyContext);
     };

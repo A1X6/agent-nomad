@@ -10,9 +10,13 @@
  *   push takes (T109);
  * - what a fresh Claude Code creates in an empty config folder (run in CI);
  * - the changelog entries of versions newer than the one the data file was reviewed against,
- *   including any that name a settings key or variable the pull review watches (T55).
+ *   including any that name a settings key or variable the pull review watches (T55), or a
+ *   plugin part Claude Code starts programs from (SEC-02 of review 15).
  */
-import type { ClaudeCodePathsData } from '../../src/agents/claude-code/claude-code-paths.data.ts';
+import {
+  CLAUDE_CODE_PATHS,
+  type ClaudeCodePathsData,
+} from '../../src/agents/claude-code/claude-code-paths.data.ts';
 import { WATCHED_SETTINGS } from '../../src/agents/claude-code/reviewed-settings.ts';
 import { compareVersions } from '../../src/agents/notices.ts';
 
@@ -125,11 +129,19 @@ const WHERE =
   /~\/\.claude\b|\.claude\/|\.claude\.json|CLAUDE_CONFIG_DIR|\b(stored|saved|written|moved|kept|lives?) (in|to|under|at)\b|\bnew (file|folder|directory)\b|AGENTS\.md|CLAUDE(\.local)?\.md|\.mcp\.json|keybindings\.json|\.worktreeinclude/i;
 
 /**
- * The settings keys and `env` names the pull review lists (T55): an entry that adds or changes
- * one may need a change in `command-review.ts`.
+ * The settings keys and `env` names the pull review lists (T55), and the plugin parts it asks
+ * about (SEC-02 of review 15): an entry that adds or changes one may need a change in
+ * `command-review.ts` or `plugin-review.ts`.
  */
+const { runsCode } = CLAUDE_CODE_PATHS.plugins;
+const WATCHED_NAMES = [
+  ...WATCHED_SETTINGS,
+  ...runsCode.files,
+  ...runsCode.folders,
+  ...runsCode.manifestKeys,
+];
 const WATCHED = new RegExp(
-  `(?<![\\w.])(${WATCHED_SETTINGS.map((key) => key.replaceAll('.', '\\.')).join('|')})(?!\\w)`,
+  `(?<![\\w.])(${WATCHED_NAMES.map((key) => key.replaceAll('.', '\\.')).join('|')})(?!\\w)`,
 );
 
 /** Relevant entries of every version newer than `afterVersion`, newest first. */

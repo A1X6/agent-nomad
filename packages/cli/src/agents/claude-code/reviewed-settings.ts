@@ -83,10 +83,20 @@ export const WATCHED_SETTINGS: readonly string[] = [
 /**
  * `$` methods a mod's module calls (the `calls:` line of `claude plugin validate`, T96) that
  * the pull review flags (T97): what each group does on this PC. `calls` names only the method,
- * never the program, path or prompt, so the review offers the module's source.
+ * never the program, path or prompt, so the review offers the module's source. Checked against
+ * the 2.1.296 program's own list of methods (SEC-04 of review 15): `$.tool.call` runs any tool
+ * of the session by name, Bash included.
  */
 const RISKY_MOD_CALLS: readonly { readonly prefix: string; readonly does: string }[] = [
   { prefix: '$.process', does: 'runs programs' },
+  { prefix: '$.tool.call', does: 'runs tools, Bash included' },
+  { prefix: '$.command.run', does: 'runs commands' },
+  { prefix: '$.agent.spawn', does: 'runs subagents' },
+  { prefix: '$.mcp', does: 'starts or calls MCP servers' },
+  { prefix: '$.config.set', does: 'changes settings' },
+  { prefix: '$.env.set', does: 'sets environment variables' },
+  { prefix: '$.session.send', does: 'sends prompts' },
+  { prefix: '$.prompt.submit', does: 'sends prompts' },
   { prefix: '$.model', does: 'calls the model' },
   { prefix: '$.net', does: 'uses the network' },
   { prefix: '$.http', does: 'uses the network' },
@@ -106,11 +116,16 @@ const READING_FS_CALLS: readonly string[] = [
   '$.fs.exists',
   '$.fs.stat',
   '$.fs.glob',
+  '$.fs.ancestors',
 ];
 
-/** What a `$` call does that the review flags, or `null` (`$.store.get`, `$.ui.status`). */
+/**
+ * What a `$` call does that the review flags, or `null` (`$.store.get`, `$.ui.status`). A call
+ * made through a helper is named `$.tool.call (via run)` by validate.
+ */
 export function riskOfCall(call: string): string | null {
-  const under = (prefix: string) => call === prefix || call.startsWith(`${prefix}.`);
-  if (under('$.fs')) return READING_FS_CALLS.includes(call) ? null : 'writes files';
+  const method = /^[^\s{]*/.exec(call)?.[0] ?? call;
+  const under = (prefix: string) => method === prefix || method.startsWith(`${prefix}.`);
+  if (under('$.fs')) return READING_FS_CALLS.includes(method) ? null : 'writes files';
   return RISKY_MOD_CALLS.find((risky) => under(risky.prefix))?.does ?? null;
 }

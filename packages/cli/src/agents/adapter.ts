@@ -270,7 +270,8 @@ export interface AgentRestorePlan {
 
 /**
  * What a setup holds, in the plain words `push --help`, `pull --help` and the README "What is
- * synced" table use (T115). The four lists are the README table's cells, item for item.
+ * synced" table use (T115). The lists are the README "What is synced" cells, item for item:
+ * the `…Also` lists come from the rows other than Global and Project (READ-02).
  */
 export interface AgentContents {
   /** How help names the global setup, e.g. `global setup (~/.claude)`. */

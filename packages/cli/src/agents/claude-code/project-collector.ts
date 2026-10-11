@@ -8,7 +8,7 @@ import {
   jsonFile,
   uniqueByPath,
 } from '../shared/file-gathering.ts';
-import { findAutoMemory } from './auto-memory.ts';
+import { findAutoMemory, repositoryRoot } from './auto-memory.ts';
 import { claudeJsonFileOf, projectClaudeJson, readClaudeJsonFile } from './claude-json-merge.ts';
 import {
   followImports,
@@ -152,13 +152,15 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
 
   /**
    * The project's local MCP servers and `.mcp.json` choices from its entry in
-   * `~/.claude.json` (T109), keyed by the folder as Claude Code writes it; nothing else there.
+   * `~/.claude.json` (T109), keyed by the folder as Claude Code writes it, its main
+   * repository's root (BUG-02); nothing else there.
    */
   async function claudeJson(projectDir: string): Promise<CollectedFile | null> {
     const all = await readClaudeJsonFile(
       claudeJsonFileOf({ ...options, customConfigDir: options.customConfigDir ?? false }),
     );
-    const selected = all === null ? null : projectClaudeJson(all, projectDir, options.platform);
+    const root = await repositoryRoot(projectDir, options.platform);
+    const selected = all === null ? null : projectClaudeJson(all, root, options.platform);
     return selected === null ? null : jsonFile(CLAUDE_JSON_PROJECT_BUNDLE_PATH, selected);
   }
 

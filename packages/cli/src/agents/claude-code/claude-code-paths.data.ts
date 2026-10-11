@@ -191,6 +191,18 @@ const RAW = {
      */
     generatedInPlugin: ['.claude-plugin/types'],
     /**
+     * The parts of a plugin from which Claude Code starts programs by itself (SEC-02, read from
+     * the 2.1.296 program): `files` and `folders` at the plugin root, and the
+     * `.claude-plugin/plugin.json` keys that declare the same inline or name another file.
+     * Monitors are "unsandboxed, same trust tier as hooks"; a plugin in `skills/` is enabled
+     * and its MCP servers start. Pull asks before writing a plugin with any of them.
+     */
+    runsCode: {
+      files: ['hooks/hooks.json', '.mcp.json', '.lsp.json'],
+      folders: ['monitors'],
+      manifestKeys: ['hooks', 'mcpServers', 'lspServers', 'monitors'],
+    },
+    /**
      * The first Claude Code that loads mods: its changelog for 2.1.287 says "Added Claude Mods:
      * plugins may now modify deeper behavior" (T103). Pull warns when this PC's is older.
      */
@@ -376,6 +388,7 @@ const PathsDataSchema = z.strictObject({
   }),
   plugins: z.strictObject({
     generatedInPlugin: names,
+    runsCode: z.strictObject({ files: names, folders: names, manifestKeys: names }),
     modsSince: z.string().regex(/^\d+\.\d+\.\d+$/),
     devMods: z.string().min(1),
     data: z.strictObject({ folder: z.string().min(1), unsafe: Pattern, replaceWith: z.string() }),
