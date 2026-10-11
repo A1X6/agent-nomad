@@ -16,7 +16,12 @@ import type {
 } from '../adapter.ts';
 import { bundlePathInside, createFileGatherer, jsonFile } from '../shared/file-gathering.ts';
 import { findExecutable, pathsOf, type ExecutableLookupSystem } from '../shared/detector-system.ts';
-import { homePathProblem, LOCAL_MARKETPLACES_PREFIX, SKIPPED_NAMES } from './global-paths.ts';
+import {
+  hasSkippedName,
+  homePathProblem,
+  LOCAL_MARKETPLACES_PREFIX,
+  SKIPPED_NAMES,
+} from './global-paths.ts';
 import {
   askPluginFolders,
   pluginFolderChange,
@@ -119,10 +124,6 @@ export interface LocalMarketplaceCollect {
 /** `https://user:token@host/x` → `https://host/x`: a login never goes into the bundle. */
 const withoutLogin = (remote: string) => remote.replace(/^(https?:\/\/)[^/@]*@/i, '$1');
 
-/** Whether a path from the folder is inside a `.git` folder or a name push never takes. */
-const leftOut = (path: string) =>
-  path.split('/').some((part) => part.toLowerCase() === '.git' || SKIPPED_NAMES.has(part));
-
 /**
  * Where a saved folder can be cloned from: the commit it is at, and the remote of a branch
  * that holds it. `null` when that commit is on no remote branch (not pushed yet).
@@ -199,11 +200,11 @@ export async function saveFolder(
   const files: CollectedFile[] = [];
   if (listed === null) {
     const prefix = named.name;
-    for (const file of await gatherer.walk(folder, prefix, leftOut)) {
+    for (const file of await gatherer.walk(folder, prefix, hasSkippedName)) {
       files.push({ ...file, path: file.path.slice(prefix.length + 1) });
     }
   } else {
-    for (const relative of listed.filter((file) => !leftOut(file))) {
+    for (const relative of listed.filter((file) => !hasSkippedName(file))) {
       if (!BundlePathSchema.safeParse(relative).success) continue;
       const file = await gatherer.readIfFile(path.join(folder, ...relative.split('/')), relative);
       if (file) files.push(file);

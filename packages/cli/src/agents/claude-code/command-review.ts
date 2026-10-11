@@ -6,6 +6,7 @@ import { JsonObjectSchema, parseJsonWith, strings, valueOrNull } from '../../sys
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
 import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
 import {
+  canRun,
   GLOBAL_SETTINGS_FILES,
   HOME_SCRIPTS_PREFIX,
   isScript,
@@ -266,11 +267,7 @@ const folderOf = (path: string) => path.slice(0, path.lastIndexOf('/') + 1);
  * extension at all (`bin/run`), the executable bit, or a `#!` first line. A data file that a
  * command only reads (`jq … config.json`) is not one.
  */
-const isProgram = (file: CollectedFile) =>
-  isScript(file.path) ||
-  !/\.[^./]+$/.test(file.path) ||
-  file.executable ||
-  (file.content[0] === 0x23 && file.content[1] === 0x21);
+const isProgram = (file: CollectedFile) => canRun(file) || !/\.[^./]+$/.test(file.path);
 
 /**
  * Incoming script files that a command runs, matched by path: the command names the

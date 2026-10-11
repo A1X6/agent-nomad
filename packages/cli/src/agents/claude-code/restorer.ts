@@ -41,7 +41,7 @@ import {
   type ImportPlace,
 } from './claude-md-imports.ts';
 import { reviewRunnable } from './command-review.ts';
-import { extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
+import { extensionOf, GLOBAL_SETTINGS_FILES, startsWithShebang } from './global-paths.ts';
 import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { PROJECT_SETTINGS_FILES, SHARED_AUTO_MEMORY } from './project-paths.ts';
 import {
@@ -242,8 +242,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   /** Permissions: a replaced file keeps its own; new scripts may run on macOS and Linux. */
   function modeFor(file: CollectedFile, content: Uint8Array, existingMode: number | null) {
     if (options.platform === 'win32') return null;
-    const runnable =
-      file.executable || (content[0] === 0x23 && content[1] === 0x21); /* starts with "#!" */
+    const runnable = file.executable || startsWithShebang(content);
     if (existingMode !== null) return runnable ? existingMode | 0o111 : existingMode;
     return runnable ? 0o755 : null;
   }
