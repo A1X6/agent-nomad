@@ -1,4 +1,14 @@
-import { chmod, lstat, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -507,6 +517,24 @@ describe("restorer: the project's part of ~/.claude.json (T109)", () => {
       },
     });
     expect(report.written).toEqual([CLAUDE_JSON_PROJECT_BUNDLE_PATH]);
+  });
+
+  // BUG-02 (review 15): Claude Code 2.1.296 reads the entry of the repository's root.
+  it("writes the repository's entry when pulled into a subfolder of it", async () => {
+    await mkdir(join(project, '.git'), { recursive: true });
+    const sub = join(project, 'packages', 'api');
+    await mkdir(sub, { recursive: true });
+    await restorer().restore(
+      { kind: 'project', projectDir: sub },
+      [incoming],
+      answer('merge').resolve,
+    );
+    expect((await readJson(join(home, '.claude.json')))['projects']).toEqual({
+      [claudeJsonKey()]: {
+        mcpServers: { local: LOCAL_MCP_SERVER },
+        enabledMcpjsonServers: ['shared'],
+      },
+    });
   });
 
   it("keeps the entry's other keys and merges servers and choices by name", async () => {

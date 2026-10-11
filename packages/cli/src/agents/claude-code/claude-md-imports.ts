@@ -49,8 +49,8 @@ const IMPORT_DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set([
 export const isGlobalMemoryFile = (bundlePath: string): boolean =>
   bundlePath === 'CLAUDE.md' || (bundlePath.startsWith('rules/') && bundlePath.endsWith('.md'));
 
-/** The same for a project setup. */
-const PROJECT_MEMORY_FILES: readonly string[] = [
+/** The same for a project setup, besides its rules. */
+export const PROJECT_MEMORY_FILES: readonly string[] = [
   'CLAUDE.md',
   'CLAUDE.local.md',
   'AGENTS.md',
@@ -89,7 +89,8 @@ function withoutFences(text: string): string {
   let open: string | null = null;
   for (const [index, line] of lines.entries()) {
     if (open === null) {
-      const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      // A CRLF line ends in `\r`, which `.` does not match (BUG-01).
+      const fence = /^ {0,3}(`{3,}|~{3,})([^\r]*)\r?$/.exec(line);
       const marks = fence?.[1];
       if (marks === undefined || (marks.startsWith('`') && fence?.[2]?.includes('`'))) continue;
       open = marks;

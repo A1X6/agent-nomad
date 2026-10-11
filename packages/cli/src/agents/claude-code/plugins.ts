@@ -38,13 +38,13 @@ export interface PluginManifest {
   readonly skipped: readonly { readonly what: string; readonly reason: string }[];
 }
 
+/** A marketplace name as Claude Code gives one; also a file name for T98's saved folders. */
+export const MarketplaceNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+
 /**
  * One saved marketplace and one saved plugin, as pull accepts them. Push checks each entry
  * with the same schema before saving it (BUG-01), so pull never refuses what push saved.
  */
-/** A marketplace name as Claude Code gives one; also a file name for T98's saved folders. */
-export const MarketplaceNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
-
 const MarketplaceEntrySchema = z.strictObject({
   name: MarketplaceNameSchema,
   // Passed to `claude plugin marketplace add`: only the forms push writes (a GitHub

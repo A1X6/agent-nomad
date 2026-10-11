@@ -5,7 +5,14 @@ import { BACKUP_MARKER, INCOMING_MARKER } from '@agentnomad/core';
 import { TEMP_MARKER } from '../../system/files.ts';
 import { RESERVED_DIR, type ScopeTarget } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
-import { followImports, globalImportPlace, isGlobalMemoryFile } from './claude-md-imports.ts';
+import {
+  followImports,
+  globalImportPlace,
+  isGlobalMemoryFile,
+  isProjectMemoryFile,
+  PROJECT_MEMORY_FILES,
+  projectImportPlace,
+} from './claude-md-imports.ts';
 import {
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
@@ -15,13 +22,14 @@ import {
   IGNORED_COPY_PATTERNS,
   NEVER_SYNCED,
 } from './global-paths.ts';
-import { hookScripts } from './hook-scripts.ts';
+import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import {
   PROJECT_CLAUDE_FILES,
   PROJECT_CLAUDE_FOLDERS,
   PROJECT_KNOWN_STATE,
   PROJECT_MEMORY_FOLDERS,
   PROJECT_NEVER_SYNCED,
+  PROJECT_SETTINGS_FILES,
 } from './project-paths.ts';
 
 export interface UnknownFilesInput {
@@ -93,6 +101,58 @@ async function importedNames(input: UnknownFilesInput): Promise<string[]> {
     .map(topLevel);
 }
 
+/**
+ * Names in a project's `.claude/` that hold a script its hooks or status line run (T26) or a
+ * file its memory files import (T111): push saves those by that route, so such a folder is
+ * not unknown, as for the global setup (UX-04).
+ */
+async function projectSavedNames(projectDir: string, input: UnknownFilesInput) {
+  const path = pathsOf(input.platform);
+  const context = { projectDir, platform: input.platform };
+  const read = (bundlePath: string) =>
+    readFile(path.join(projectDir, ...bundlePath.split('/')), 'utf8').catch(() => null);
+  const saved: string[] = [];
+  for (const file of PROJECT_SETTINGS_FILES) {
+    const settings = await read(file);
+    if (settings !== null) {
+      saved.push(...projectHookScripts(settings, context).map((script) => script.bundlePath));
+    }
+  }
+  const { homedir } = input;
+  if (homedir !== undefined) {
+    const rules = await readdir(path.join(projectDir, '.claude', 'rules'), {
+      recursive: true,
+    }).catch(() => []);
+    const memoryFiles = [];
+    for (const name of [
+      ...PROJECT_MEMORY_FILES,
+      ...rules.map((rule) => `.claude/rules/${rule.split(path.sep).join('/')}`),
+    ]) {
+      const text = isProjectMemoryFile(name) ? await read(name) : null;
+      if (text !== null) {
+        memoryFiles.push({
+          nativePath: path.join(projectDir, ...name.split('/')),
+          bundlePath: name,
+          text,
+        });
+      }
+    }
+    const { files } = await followImports(
+      memoryFiles,
+      {
+        place: (nativePath) => projectImportPlace(nativePath, context),
+        read: (nativePath) => readFile(nativePath, 'utf8').catch(() => null),
+        isFile: () => Promise.resolve(false),
+      },
+      { homedir, platform: input.platform },
+    );
+    saved.push(...files.map((file) => file.bundlePath));
+  }
+  return saved
+    .filter((bundlePath) => bundlePath.startsWith('.claude/'))
+    .map((bundlePath) => topLevel(bundlePath.slice('.claude/'.length)));
+}
+
 /** The first part of a list entry: `skills/synced` → `skills`. */
 const topLevel = (entry: string) => entry.split('/')[0] ?? entry;
 
@@ -151,6 +211,8 @@ export async function findUnknownEntries(
     knownNames.add('.claude.json');
     for (const name of await hookScriptNames(input)) knownNames.add(name);
     for (const name of await importedNames(input)) knownNames.add(name);
+  } else {
+    for (const name of await projectSavedNames(target.projectDir, input)) knownNames.add(name);
   }
 
   const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);

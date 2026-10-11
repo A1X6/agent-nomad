@@ -259,6 +259,30 @@ describe("project collector: the folder's entry in ~/.claude.json (T109)", () =>
     expect(await collect()).toEqual([]);
   });
 
+  // BUG-02 (review 15): Claude Code 2.1.296 keys the entry by the main repository's root.
+  it("takes the repository's entry when pushed from a subfolder of it", async () => {
+    await mkdir(join(project, '.git'));
+    const sub = join(project, 'packages', 'api');
+    await mkdir(sub, { recursive: true });
+    await writeClaudeJsonProject(CHOICES);
+    expect(
+      JSON.parse(text(await collect(false, {}, sub), CLAUDE_JSON_PROJECT_BUNDLE_PATH)),
+    ).toEqual(CHOICES);
+  });
+
+  it("takes the main repository's entry when pushed from a git worktree", async () => {
+    await mkdir(join(project, '.git', 'worktrees', 'feature'), { recursive: true });
+    await writeTestFile(join(project, '.git', 'worktrees', 'feature', 'commondir'), '../..\n');
+    const worktree = join(root, 'work', 'my-app-feature');
+    await writeTestFile(
+      join(worktree, '.git'),
+      `gitdir: ${join(project, '.git', 'worktrees', 'feature')}\n`,
+    );
+    await writeClaudeJsonProject(CHOICES);
+    const files = await collect(false, {}, worktree);
+    expect(JSON.parse(text(files, CLAUDE_JSON_PROJECT_BUNDLE_PATH))).toEqual(CHOICES);
+  });
+
   it('takes the .mcp.json choices alone when the entry has no servers', async () => {
     await writeClaudeJsonProject({ mcpServers: {}, ...CHOICES });
     expect(JSON.parse(text(await collect(), CLAUDE_JSON_PROJECT_BUNDLE_PATH))).toEqual(CHOICES);

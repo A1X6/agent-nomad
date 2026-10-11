@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { collectedJson } from './fakes.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   CLAUDE_JSON_QUESTION,
+  claudeJsonProjectNote,
   createClaudeJsonMerge,
   projectKeyOf,
   type MutableReport,
@@ -102,5 +104,18 @@ describe("a project's key in ~/.claude.json (T109)", () => {
 
   it('is the folder as it is on macOS and Linux, where case counts', () => {
     expect(projectKeyOf({ '/home/me/App': {} }, '/home/me/app', 'linux')).toBe('/home/me/app');
+  });
+});
+
+// SEC-06 (review 15): names from a pulled bundle are shown on one line each.
+describe("a project's part of ~/.claude.json as push and pull name it (T109)", () => {
+  it('shows each name with its line breaks as text', () => {
+    const file = collectedJson(CLAUDE_JSON_PROJECT_BUNDLE_PATH, {
+      mcpServers: { 'db\n  + MCP server ok': { command: 'node' } },
+      enabledMcpjsonServers: ['shared\r\nfake'],
+    });
+    expect(claudeJsonProjectNote([file])).toBe(
+      '~/.claude.json for this project: MCP servers db\\u{000a}  + MCP server ok; .mcp.json servers approved: shared\\u{000d}\\u{000a}fake',
+    );
   });
 });
