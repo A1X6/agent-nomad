@@ -15,7 +15,12 @@ import {
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
 import { paths, text, writeTestFile } from './fakes.ts';
-import { findAutoMemory, projectDirName, repositoryRoot } from '../src/index.ts';
+import {
+  findAutoMemory,
+  findSharedAutoMemory,
+  projectDirName,
+  repositoryRoot,
+} from '../src/index.ts';
 
 useProjectFolders('agentnomad-auto-memory-');
 
@@ -114,6 +119,38 @@ describe('auto memory location', () => {
     expect(await findAutoMemory({ ...options(), projectDir: long })).toEqual({
       kind: 'folder',
       dir: join(base, 'projects', `${cut}-a1b2c3`, 'memory'),
+    });
+  });
+});
+
+describe('shared auto memory folder (T110)', () => {
+  /** User settings text naming `dir` as the folder for every project's auto memory. */
+  const pulledSettings = (dir: string) => JSON.stringify({ autoMemoryDirectory: dir });
+
+  it('uses the one user settings here name before the pulled ones', async () => {
+    await setMemoryDirectory(join(base, 'settings.json'), '~/here-memory');
+    expect(await findSharedAutoMemory(options(), pulledSettings('~/pulled-memory'))).toEqual({
+      kind: 'folder',
+      dir: join(home, 'here-memory'),
+    });
+  });
+
+  it('uses the pulled user settings when none here name one', async () => {
+    expect(await findSharedAutoMemory(options(), pulledSettings('~/pulled-memory'))).toEqual({
+      kind: 'folder',
+      dir: join(home, 'pulled-memory'),
+    });
+  });
+
+  it('finds none when no user settings name one', async () => {
+    expect(await findSharedAutoMemory(options())).toEqual({ kind: 'none' });
+  });
+
+  it('refuses a folder for keys, as for a folder project settings choose (T43)', async () => {
+    expect(await findSharedAutoMemory(options(), pulledSettings('~/.ssh'))).toEqual({
+      kind: 'refused',
+      dir: join(home, '.ssh'),
+      reason: 'it is a folder for keys and logins',
     });
   });
 });

@@ -16,6 +16,7 @@ import {
 } from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
 import { createClaudeCodeAfterRestore } from './after-restore.ts';
+import { sharedMemoryNote } from './auto-memory.ts';
 import { claudeConfigDir, createClaudeCodeDetector } from './detector.ts';
 import { devModsNotice, readDevMods } from './dev-mods.ts';
 import { CLAUDE_ENV_REFERENCES } from './env-files.ts';
@@ -232,7 +233,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
   return {
     id: 'claude-code',
     displayName: 'Claude Code',
-    memoryDescription: 'what Claude learned: subagent and auto memory',
+    memoryDescription:
+      'what Claude learned: subagent memory and auto memory, of every project for the global setup',
     detector: createClaudeCodeDetector(system),
     collector,
     restorer,
@@ -265,8 +267,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
         return notes.length === 0 ? null : notes.join('\n');
       },
       pushNotes(files) {
-        const note = skillsPluginsNote(files);
-        return note === null ? [] : [note];
+        return [skillsPluginsNote(files), sharedMemoryNote(files)].filter((note) => note !== null);
       },
     },
 

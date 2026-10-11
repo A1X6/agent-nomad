@@ -10,6 +10,7 @@ import {
   home,
   memoryDir,
   project,
+  projectMemory,
   root,
   setMemoryDirectory,
   stopHook,
@@ -22,6 +23,7 @@ import {
   LOCAL_MARKETPLACES_PREFIX,
   hooksForOtherOs,
   lineEndingsFor,
+  projectDirName,
   sameForRestore,
   type ClaudeCodeRestorer,
   type CollectedFile,
@@ -966,5 +968,94 @@ describe('restorer: hooks for another OS, by what they run (review 6 UX-02)', ()
     expect(hooksForOtherOs(statusLine('node "C:/hooks/x.ps1"'), 'linux')).toEqual([
       'node "C:/hooks/x.ps1"',
     ]);
+  });
+});
+
+describe('restorer: auto memory of every project (T110)', () => {
+  const NOTE = '.agentnomad/auto-memory/C--work-app/MEMORY.md';
+  const SHARED_NOTE = '.agentnomad/auto-memory/_shared/MEMORY.md';
+  /** The test project's note as a global bundle holds it. */
+  const globalNote = () => `.agentnomad/auto-memory/${projectDirName(project)}/MEMORY.md`;
+
+  it("writes each project's notes to its folder in the base folder's projects/", async () => {
+    const report = await restoreGlobal([collected(NOTE, 'remember')], 'skip');
+    expect(await readText(projectMemory('C--work-app', 'MEMORY.md'))).toBe('remember');
+    expect(report.written).toEqual([NOTE]);
+  });
+
+  it('asks about a note that differs here, and backs it up before overwriting', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'), 'mine');
+    const report = await restoreGlobal([collected(NOTE, 'theirs')], 'overwrite');
+    expect(await readText(projectMemory('C--work-app', 'MEMORY.md'))).toBe('theirs');
+    expect(report.backups).toEqual([`${NOTE}.agentnomad-backup-${STAMP}`]);
+  });
+
+  it('lists a note that differs here among the conflicts', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'), 'mine');
+    const current = await globalCollector().collect({ kind: 'global' }, { includeMemory: true });
+    expect(restorer().conflicts([collected(NOTE, 'theirs')], current)).toEqual([
+      { path: NOTE, question: { overwriteAllowed: true } },
+    ]);
+  });
+
+  it('writes shared notes to the folder the pulled user settings name', async () => {
+    const settings = collected('settings.json', JSON.stringify({ autoMemoryDirectory: '~/all' }));
+    await restoreGlobal([settings, collected(SHARED_NOTE, 'shared')], 'skip');
+    expect(await readText(join(home, 'all', 'MEMORY.md'))).toBe('shared');
+  });
+
+  it('skips shared notes with a warning when no user settings name a folder', async () => {
+    const report = await restoreGlobal([collected(SHARED_NOTE, 'shared')], 'skip');
+    expect(report.skipped).toEqual([SHARED_NOTE]);
+    expect(report.warnings).toEqual([
+      'Shared auto memory was not restored: autoMemoryDirectory is not set in your user settings.',
+    ]);
+  });
+
+  it('refuses shared notes for a folder for keys (T43)', async () => {
+    await setMemoryDirectory(join(base, 'settings.json'), '~/.ssh');
+    const report = await restoreGlobal([collected(SHARED_NOTE, 'shared')], 'skip');
+    expect(report.warnings).toEqual([
+      `Shared auto memory was not restored to ${join(home, '.ssh')}, the folder autoMemoryDirectory names: it is a folder for keys and logins.`,
+    ]);
+    await expect(stat(join(home, '.ssh', 'MEMORY.md'))).rejects.toThrow();
+  });
+
+  it("the project's copy wins over the global one in one pull, without a question", async () => {
+    const both = restorer();
+    await both.restore(
+      { kind: 'global' },
+      [collected(globalNote(), 'global')],
+      answer('skip').resolve,
+    );
+    const asked = answer('skip');
+    const report = await both.restore(
+      { kind: 'project', projectDir: project },
+      [collected('.agentnomad/auto-memory/MEMORY.md', 'project')],
+      asked.resolve,
+    );
+    expect(await readText(join(memoryDir(), 'MEMORY.md'))).toBe('project');
+    expect(asked.questions).toEqual([]);
+    expect(report.written).toEqual(['.agentnomad/auto-memory/MEMORY.md']);
+  });
+
+  it('the project copy is still asked about when the global one left the note as it was', async () => {
+    await writeTestFile(join(memoryDir(), 'MEMORY.md'), 'mine');
+    const both = restorer();
+    await both.restore(
+      { kind: 'global' },
+      [collected(globalNote(), 'global')],
+      answer('skip').resolve,
+    );
+    const asked = answer('skip');
+    await both.restore(
+      { kind: 'project', projectDir: project },
+      [collected('.agentnomad/auto-memory/MEMORY.md', 'project')],
+      asked.resolve,
+    );
+    expect(asked.questions).toEqual([
+      ['.agentnomad/auto-memory/MEMORY.md', { overwriteAllowed: true }],
+    ]);
+    expect(await readText(join(memoryDir(), 'MEMORY.md'))).toBe('mine');
   });
 });

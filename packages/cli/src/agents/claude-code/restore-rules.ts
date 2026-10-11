@@ -50,6 +50,11 @@ export type RestoreDestination =
   | { readonly kind: 'claude-json' }
   /** A file in the project's auto memory folder. */
   | { readonly kind: 'auto-memory'; readonly path: string }
+  /**
+   * A file of a global bundle's auto memory (T110): of the project whose folder in
+   * `<base>/projects/` is `folder`, or of the shared folder when it is `_shared`.
+   */
+  | { readonly kind: 'global-auto-memory'; readonly folder: string; readonly path: string }
   /** Read by pull, never written (`programs.json`). */
   | { readonly kind: 'metadata' }
   | { readonly kind: 'refused'; readonly reason: string };
@@ -59,6 +64,9 @@ const underAnyCase = (path: string, folder: string) =>
   underFolder(path, folder, { ignoreCase: true });
 
 const refused = (reason: string): RestoreDestination => ({ kind: 'refused', reason });
+
+/** Auto memory is Markdown notes (T43): nothing else, so no script or startup file. */
+const ONLY_MARKDOWN = 'auto memory holds only Markdown files';
 
 /** Reserved files of a project bundle that pull reads and never writes. */
 const PROJECT_METADATA: ReadonlySet<string> = new Set([
@@ -138,6 +146,13 @@ export function globalDestination(
   if (path.startsWith(HOME_SCRIPTS_PREFIX)) {
     return homeDestination(path.slice(HOME_SCRIPTS_PREFIX.length), allowedScripts);
   }
+  // The auto memory of every project (T110): `<prefix>/<project folder name>/<file>`.
+  if (path.startsWith(`${AUTO_MEMORY_BUNDLE_PREFIX}/`)) {
+    if (extensionOf(path) !== '.md') return refused(ONLY_MARKDOWN);
+    const [folder = '', ...rest] = path.slice(AUTO_MEMORY_BUNDLE_PREFIX.length + 1).split('/');
+    if (rest.length === 0) return refused('auto memory of the global setup belongs to a project');
+    return { kind: 'global-auto-memory', folder, path: rest.join('/') };
+  }
   if (underAnyCase(path, RESERVED_DIR)) return refused('unknown agentnomad entry');
   if (GLOBAL_REFUSED.some((entry) => underAnyCase(path, entry))) return refused('never synced');
   // Claude Code writes it when it reloads a mod (T97), so push never takes it.
@@ -166,8 +181,7 @@ export function projectDestination(
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
   if (PROJECT_METADATA.has(path) || isLocalMarketplace(path)) return { kind: 'metadata' };
   if (path.startsWith(`${AUTO_MEMORY_BUNDLE_PREFIX}/`)) {
-    // Auto memory is Markdown notes (T43): nothing else, so no script or startup file.
-    if (extensionOf(path) !== '.md') return refused('auto memory holds only Markdown files');
+    if (extensionOf(path) !== '.md') return refused(ONLY_MARKDOWN);
     return { kind: 'auto-memory', path: path.slice(AUTO_MEMORY_BUNDLE_PREFIX.length + 1) };
   }
   if (underAnyCase(path, RESERVED_DIR)) return refused('unknown agentnomad entry');

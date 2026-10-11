@@ -28,6 +28,33 @@ export interface ProjectCollectorOptions {
   readonly findGit?: () => Promise<ProgramCli | null>;
 }
 
+/** What gathering an auto memory folder needs: this PC, and who hears of a file left out. */
+interface MemoryGathering {
+  readonly homedir: string;
+  readonly platform: NodeJS.Platform;
+  readonly onSkipped?: CollectOptions['onSkipped'] | undefined;
+}
+
+/**
+ * The Markdown files of one auto memory folder as `bundlePrefix/...`: auto memory is notes
+ * (T43), and pull restores nothing else there. Links must stay inside the folder. Shared with
+ * the global collector, which takes every project's (T110).
+ */
+export async function collectMemoryFolder(
+  dir: string,
+  bundlePrefix: string,
+  gathering: MemoryGathering,
+): Promise<CollectedFile[]> {
+  const files = createFileGatherer(gathering.platform, {
+    skippedNames: SKIPPED_NAMES,
+    homedir: gathering.homedir,
+    within: dir,
+    ...(gathering.onSkipped && { onSkipped: gathering.onSkipped }),
+  });
+  const found = await files.walk(dir, bundlePrefix, () => false);
+  return found.filter((file) => file.path.toLowerCase().endsWith('.md'));
+}
+
 /** True when `bundlePath` is a never-synced project entry or inside one. */
 const isNeverSynced = underAnyFolder(PROJECT_NEVER_SYNCED);
 
@@ -62,15 +89,7 @@ export function createClaudeCodeProjectCollector(options: ProjectCollectorOption
     const location = await findAutoMemory({ ...options, projectDir });
     // A shared, unknown or refused folder is not this project's to take.
     if (location.kind !== 'folder') return [];
-    const files = createFileGatherer(options.platform, {
-      skippedNames: SKIPPED_NAMES,
-      homedir: options.homedir,
-      within: location.dir,
-      ...(onSkipped && { onSkipped }),
-    });
-    // Auto memory is Markdown notes (T43); pull restores nothing else there.
-    const found = await files.walk(location.dir, AUTO_MEMORY_BUNDLE_PREFIX, () => false);
-    return found.filter((file) => file.path.toLowerCase().endsWith('.md'));
+    return collectMemoryFolder(location.dir, AUTO_MEMORY_BUNDLE_PREFIX, { ...options, onSkipped });
   }
 
   return {

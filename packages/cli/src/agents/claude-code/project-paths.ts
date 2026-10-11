@@ -31,5 +31,12 @@ export const PROJECT_KNOWN_STATE: readonly string[] = DATA.project.knownState;
 /** Opt-in auto memory of the project, stored under this bundle folder. */
 export const AUTO_MEMORY_BUNDLE_PREFIX = `${RESERVED_DIR}/auto-memory`;
 
+/**
+ * In a global bundle (T110), auto memory sits under `<prefix>/<project folder name>/`, or under
+ * this name when `autoMemoryDirectory` in user settings is one folder for every project. A
+ * project folder name never has `_` (every non-letter or digit becomes `-`).
+ */
+export const SHARED_AUTO_MEMORY = '_shared';
+
 /** Claude Code shortens longer project folder names and adds a hash. */
 export const MAX_PROJECT_DIR_NAME = 200;
