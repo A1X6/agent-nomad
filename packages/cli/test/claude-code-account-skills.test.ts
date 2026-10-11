@@ -311,7 +311,7 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
 
   it('asks with yes as the default (T114)', async () => {
     const t = run([saved('mine', 'Plain.')], {}, [true]);
-    await t.planned;
+    await t.done;
     expect(t.defaults).toEqual([true]);
   });
 
