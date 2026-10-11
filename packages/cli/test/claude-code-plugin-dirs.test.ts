@@ -109,6 +109,18 @@ describe('the mods in saved plugin folders, for the version warning (T104)', () 
     ).toEqual([]);
   });
 
+  // SEC-01 (review 16): Windows and macOS open `Hooks/Hooks.json` as `hooks/hooks.json`.
+  it('names a folder with hooks/hooks.json in another case, by its manifest in another case', () => {
+    const files = savedFiles([
+      collectedJson('.Claude-Plugin/Plugin.json', { name: 'cased-mod' }),
+      collectedJson('Hooks/Hooks.json', { modules: ['./register.ts'] }),
+      collected('Hooks/register.ts', MOD_MODULE),
+    ]);
+    expect(savedPluginDirMods([savedPluginDir(OTHER_SEPARATOR, { files })])).toEqual([
+      'cased-mod@inline',
+    ]);
+  });
+
   it('leaves out a saved plugin folder it cannot read', () => {
     expect(savedPluginDirMods([collected(SAVED_PATH, 'not json')])).toEqual([]);
   });

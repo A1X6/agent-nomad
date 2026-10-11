@@ -12,6 +12,7 @@ import {
 import { printableLine } from '../../ui/printable.ts';
 import type { CollectedFile, ConflictResolver, RestoreReport } from '../adapter.ts';
 import { jsonFile } from '../shared/file-gathering.ts';
+import { foldedName, foldsNames } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 import { PLUGIN_DIRS_PREFIX } from './global-paths.ts';
 import {
@@ -36,7 +37,7 @@ import {
 import type { ProgramCli } from './plugin-sync.ts';
 import { MarketplaceNameSchema } from './plugins.ts';
 import { PLUGIN_DIRS_VARIABLE } from './reviewed-settings.ts';
-import { PLUGIN_HOOKS, PLUGIN_MANIFEST } from './skills-dir-plugins.ts';
+import { PLUGIN_HOOKS, PLUGIN_MANIFEST, samePluginPath } from './skills-dir-plugins.ts';
 
 /*
  * Plugin folders that `env.CLAUDE_CODE_PLUGIN_DIRS` in the user's settings loads every session
@@ -187,9 +188,12 @@ const keepDriveLetters = (entries: readonly string[]): string[] =>
     return joined;
   }, []);
 
-/** How Claude Code names a folder it loads this way: its manifest's name, `@inline`. */
+/**
+ * How Claude Code names a folder it loads this way: its manifest's name, `@inline`. The
+ * manifest in any case, as the plugin review finds it (SEC-01 of review 16).
+ */
 function inlineId(files: readonly CollectedFile[], name: string): string {
-  const manifest = files.find((file) => file.path === PLUGIN_MANIFEST);
+  const manifest = files.find((file) => samePluginPath(file.path, PLUGIN_MANIFEST));
   const named = manifest
     ? valueOrNull(parseJsonWith(z.looseObject({ name: z.string() }), manifest.content))?.name
     : undefined;
@@ -197,7 +201,8 @@ function inlineId(files: readonly CollectedFile[], name: string): string {
 }
 
 /**
- * The mods among the saved plugin folders in `files` (T104): those with `hooks/hooks.json`, by
+ * The mods among the saved plugin folders in `files` (T104): those with `hooks/hooks.json` in
+ * any case (SEC-01 of review 16), by
  * the id Claude Code gives them, e.g. `pd-mod@inline`. For pull's notice when this PC's Claude
  * Code is too old to load mods (T103); a saved file it cannot read is left to `planPluginDirs`.
  */
@@ -208,7 +213,7 @@ export function savedPluginDirMods(files: readonly CollectedFile[]): string[] {
       const saved = valueOrNull(readSavedPluginDir(file.content));
       if (saved === null) return [];
       const inside = savedFolderFiles(saved);
-      return inside.some((entry) => entry.path === PLUGIN_HOOKS)
+      return inside.some((entry) => samePluginPath(entry.path, PLUGIN_HOOKS))
         ? [inlineId(inside, saved.name)]
         : [];
     });
@@ -298,11 +303,12 @@ export async function planPluginDirs(
 
   const answers = await askFolderConflicts(kept, context, deps.platform);
   const separator = pluginDirsSeparator(deps.platform);
-  // A folder by its full path; Windows and macOS ignore case. Compared so, an entry still
-  // matches when pull kept this PC's own copy of a saved file (`/` and `\` in its path).
+  // A folder by its full path, folded where Windows and macOS ignore case (`foldsNames`).
+  // Compared so, an entry still matches when pull kept this PC's own copy of a saved file (`/`
+  // and `\` in its path).
   const folderOf = (entry: string) => {
     const full = path.resolve(fromHome(entry, deps.homedir, deps.platform));
-    return deps.platform === 'linux' ? full : full.toLowerCase();
+    return foldsNames(deps.platform) ? foldedName(full) : full;
   };
   // The folders this PC's own value names. A pulled entry that names no folder pull writes is
   // kept only when it is one of them: else a setup could point the value at a folder it
