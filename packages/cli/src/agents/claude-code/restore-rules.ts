@@ -32,6 +32,7 @@ import {
 } from './global-paths.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   PROJECT_CLAUDE_FILES,
   PROJECT_CLAUDE_FOLDERS,
   PROJECT_MEMORY_FOLDERS,
@@ -46,7 +47,7 @@ export type RestoreDestination =
   | { readonly kind: 'target'; readonly path: string }
   /** A path inside the home folder (`.agentnomad/home/...`). */
   | { readonly kind: 'home'; readonly path: string }
-  /** The selected `~/.claude.json` keys, merged into that file. */
+  /** The selected `~/.claude.json` keys (or a project's, T109), merged into that file. */
   | { readonly kind: 'claude-json' }
   /** A file in the project's auto memory folder. */
   | { readonly kind: 'auto-memory'; readonly path: string }
@@ -164,6 +165,8 @@ export function projectDestination(
 ): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
   if (PROJECT_METADATA.has(path) || isLocalMarketplace(path)) return { kind: 'metadata' };
+  // The project's local MCP servers and `.mcp.json` choices (T109), merged into its entry.
+  if (path === CLAUDE_JSON_PROJECT_BUNDLE_PATH) return { kind: 'claude-json' };
   if (path.startsWith(`${AUTO_MEMORY_BUNDLE_PREFIX}/`)) {
     // Auto memory is Markdown notes (T43): nothing else, so no script or startup file.
     if (extensionOf(path) !== '.md') return refused('auto memory holds only Markdown files');

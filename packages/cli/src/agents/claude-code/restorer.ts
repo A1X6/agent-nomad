@@ -26,8 +26,10 @@ import type {
 import { pathsOf } from '../shared/detector-system.ts';
 import { findAutoMemory } from './auto-memory.ts';
 import {
-  CLAUDE_JSON_QUESTION,
+  claudeJsonFileOf,
+  claudeJsonQuestion,
   createClaudeJsonMerge,
+  isClaudeJsonPath,
   type MutableReport,
 } from './claude-json-merge.ts';
 import {
@@ -39,7 +41,7 @@ import {
   type ImportPlace,
 } from './claude-md-imports.ts';
 import { reviewRunnable } from './command-review.ts';
-import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
+import { extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
 import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
 import {
@@ -71,9 +73,13 @@ export interface ClaudeCodeRestorer extends Restorer {
   ): Promise<RestoreReport>;
   /**
    * What restoring `files` would do to `~/.claude.json` here as it is now: nothing, create
-   * it, or merge into it (only after the answer to its conflict question).
+   * it, or merge into it (only after the answer to its conflict question). A project's part
+   * goes into the entry of `target`'s folder (T109).
    */
-  claudeJsonChange(files: readonly CollectedFile[]): Promise<'none' | 'new' | 'merge'>;
+  claudeJsonChange(
+    files: readonly CollectedFile[],
+    target?: ScopeTarget,
+  ): Promise<'none' | 'new' | 'merge'>;
   /**
    * Writes `files` (paths from `dir`) into the folder `dir` as `restore` writes a setup's
    * files: the same conflict answers, backups, line endings and permissions (T98: a local
@@ -177,9 +183,6 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     fallback: strategies.textSideBySide,
     overwrite: strategies.overwrite,
   };
-  const claudeJsonFile = options.customConfigDir
-    ? path.join(options.baseDir, '.claude.json')
-    : path.join(options.homedir, '.claude.json');
 
   /** The file at `nativePath` with its permissions, `'folder'` for anything else, or `null`. */
   async function readExistingFile(
@@ -210,7 +213,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   }
 
   const claudeJson = createClaudeJsonMerge({
-    claudeJsonFile,
+    claudeJsonFile: claudeJsonFileOf(options),
+    platform: options.platform,
     isClaudeRunning: options.isClaudeRunning,
     readExisting,
     writeAtomically,
@@ -519,7 +523,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         // to ask about, even when this PC would save another one.
         if (isPullMetadata(file.path)) continue;
         const here = byPath.get(file.path);
-        const claudeJson = file.path === CLAUDE_JSON_BUNDLE_PATH;
+        const claudeJson = isClaudeJsonPath(file.path);
         if (here === undefined && !claudeJson) continue;
         if (
           here !== undefined &&
@@ -528,15 +532,15 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           continue;
         found.push({
           path: file.path,
-          question: claudeJson ? CLAUDE_JSON_QUESTION : { overwriteAllowed: true },
+          question: claudeJson ? claudeJsonQuestion(file) : { overwriteAllowed: true },
         });
       }
       return found;
     },
 
-    async claudeJsonChange(incoming) {
-      const file = incoming.find((entry) => entry.path === CLAUDE_JSON_BUNDLE_PATH);
-      return file === undefined ? 'none' : claudeJson.change(file);
+    async claudeJsonChange(incoming, target) {
+      const file = incoming.find((entry) => isClaudeJsonPath(entry.path));
+      return file === undefined ? 'none' : claudeJson.change(file, target);
     },
 
     async restore(target, incoming, onConflict, context: ClaudeRestoreContext = {}) {
@@ -553,7 +557,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         }
         if (destination.kind === 'metadata') return;
         if (destination.kind === 'claude-json') {
-          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true);
+          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true, target);
           return;
         }
 
