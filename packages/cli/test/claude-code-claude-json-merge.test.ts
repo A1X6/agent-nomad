@@ -21,6 +21,7 @@ describe('the ~/.claude.json merge stands alone (SOLID-05)', () => {
     const writes: { path: string; text: string; mode: number | null }[] = [];
     const merger = createClaudeJsonMerge({
       claudeJsonFile: '/home/a/.claude.json',
+      platform: 'linux',
       isClaudeRunning: () => Promise.resolve(options.running),
       readExisting: () => Promise.resolve(options.existing),
       writeAtomically: (path, content, mode) => {

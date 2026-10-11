@@ -222,16 +222,33 @@ const RAW = {
   ignoredCopyPatterns: ['\\.bak$', '\\.orig$', '\\.old$', '~$', '\\.swp$'],
 
   /**
-   * `~/.claude.json` keys that are preferences: the "Global config" keys in Claude Code's
-   * settings reference. Everything else there is account, machine or project state.
+   * `~/.claude.json` keys that are preferences: every key with the scope "Global config" in
+   * Claude Code's settings reference (https://code.claude.com/docs/en/settings-reference,
+   * 2.1.296; the drift check compares them, T109). Everything else there is account, machine
+   * or project state. `permissionExplainerEnabled` and `teammateDefaultModel` are listed
+   * there as removed (2.1.257, 2.1.234) and still taken, so an older Claude Code keeps them.
    */
   claudeJsonPreferenceKeys: [
     'autoConnectIde',
     'autoInstallIdeExtension',
+    'claudeInChromeDefaultEnabled',
+    'copyFullResponse',
     'copyOnSelect',
+    'defaultToAgentsView',
     'diffTool',
     'externalEditorContext',
+    'leftArrowOpensAgents',
+    'permissionExplainerEnabled',
+    'prStatusFooterEnabled',
+    'teammateDefaultModel',
   ],
+
+  /**
+   * Keys of a project's entry in `~/.claude.json` (`projects[<path>]`) that are its setup
+   * (T109): local-scope MCP servers (the default of `claude mcp add`) and the choices made for
+   * the project's `.mcp.json` servers. Trust, history and allowed tools are never taken.
+   */
+  claudeJsonProjectKeys: ['mcpServers', 'enabledMcpjsonServers', 'disabledMcpjsonServers'],
 
   /** A hook argument is only taken as a script with one of these extensions. */
   scriptExtensions: [
@@ -356,6 +373,7 @@ const PathsDataSchema = z.strictObject({
   skippedNames: names,
   ignoredCopyPatterns: z.array(Pattern),
   claudeJsonPreferenceKeys: names,
+  claudeJsonProjectKeys: names,
   scriptExtensions: z.array(z.string().regex(/^\.[a-z0-9]+$/)),
   autostartHomeDirs: names,
   toolConfigFiles: z.record(z.string(), names),
