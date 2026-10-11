@@ -136,10 +136,11 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     };
   }
 
-  /** A copy of the user's own claude.ai skills (T42), saved only after a yes. */
+  /** A copy of the user's own claude.ai skills (T42), saved unless the user says no (T114). */
   const accountSkills: OptionalPart = {
     id: ACCOUNT_SKILLS_PART,
     scope: 'global',
+    defaultYes: true,
     async available() {
       const synced = await readSyncedSkills(pathsOf(options.platform), baseDir);
       return {
@@ -149,26 +150,28 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       };
     },
     question: (names) =>
-      `Also save a copy of your ${String(names.length)} claude.ai skill${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account.`,
+      `Also save a copy of your ${String(names.length)} claude.ai skill${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account. Saved unless you say no.`,
     unreadable: (problem) => `${problem} Your claude.ai skills were not saved.`,
     noneFound: 'No claude.ai skills of your own were found on this PC.',
     flagHelp: {
       push: {
-        include: 'save a copy of your own claude.ai skills (normally synced by your account)',
-        leaveOut: 'leave claude.ai skills out',
+        include:
+          'save a copy of your own claude.ai skills, for PCs without that claude.ai account (saved unless you say no)',
+        leaveOut: 'do not save a copy of your claude.ai skills',
       },
       pull: {
         include:
-          'add saved claude.ai skills as local skills (for a PC without that claude.ai account)',
+          'add saved claude.ai skills as local skills, for a PC without that claude.ai account (added unless you say no)',
         leaveOut: 'do not add saved claude.ai skills',
       },
     },
   };
 
-  /** A copy of the user's own claude.ai plugins (T101), saved only after a yes. */
+  /** A copy of the user's own claude.ai plugins (T101), saved unless the user says no (T114). */
   const accountPlugins: OptionalPart = {
     id: ACCOUNT_PLUGINS_PART,
     scope: 'global',
+    defaultYes: true,
     async available() {
       const synced = await readSyncedPlugins(pathsOf(options.platform), baseDir);
       return {
@@ -178,17 +181,18 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
       };
     },
     question: (names) =>
-      `Also save a copy of your ${String(names.length)} claude.ai plugin${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account.`,
+      `Also save a copy of your ${String(names.length)} claude.ai plugin${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account. Saved unless you say no.`,
     unreadable: (problem) => `${problem} Your claude.ai plugins were not saved.`,
     noneFound: 'No claude.ai plugins of your own were found on this PC.',
     flagHelp: {
       push: {
-        include: 'save a copy of your own claude.ai plugins (normally synced by your account)',
-        leaveOut: 'leave claude.ai plugins out',
+        include:
+          'save a copy of your own claude.ai plugins, for PCs without that claude.ai account (saved unless you say no)',
+        leaveOut: 'do not save a copy of your claude.ai plugins',
       },
       pull: {
         include:
-          'add saved claude.ai plugins as local plugins (for a PC without that claude.ai account)',
+          'add saved claude.ai plugins as local plugins, for a PC without that claude.ai account (added unless you say no)',
         leaveOut: 'do not add saved claude.ai plugins',
       },
     },
@@ -198,6 +202,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
   const pluginData: OptionalPart = {
     id: PLUGIN_DATA_PART,
     scope: 'global',
+    defaultYes: false,
     async available() {
       const ids = await restoredPluginIds(shared, { accountPlugins: true });
       return {

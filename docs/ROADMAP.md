@@ -86,7 +86,7 @@ connectors. Saving a copy lets a PC with another claude.ai account, or none, hav
 
 | Item                               | Status                    | Notes                                                                                                                                               |
 | ---------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Skills you made on claude.ai**   | Done (`--account-skills`) | Only your own; restored as local skills where claude.ai does not already sync them.                                                                 |
+| **Skills you made on claude.ai**   | Done (`--account-skills`) | Only your own; saved unless you say no, and restored as local skills where claude.ai does not already sync them.                                    |
 | **Plugins turned on in claude.ai** | Planned                   | No marketplace to reinstall from: their files would be restored as a local plugin, without organization plugins.                                    |
 | **Connectors**                     | Research                  | They are not files (Claude Code fetches them and their logins from claude.ai); at most the list could be offered as MCP servers to log in to again. |
 

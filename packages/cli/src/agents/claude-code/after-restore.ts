@@ -224,10 +224,10 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
   }
 
   /**
-   * Saved claude.ai skills (T42): offered as local skills on a PC that does not already get
-   * them from its own claude.ai sync, only after a yes. A skill with `` !`command` `` lines
-   * runs those as a local skill (a synced one does not), so it is marked, and a flag alone
-   * (no question asked) adds it only with --allow-commands too.
+   * Saved claude.ai skills (T42): added as local skills on a PC that does not already get
+   * them from its own claude.ai sync, unless the user says no (T114). A skill with
+   * `` !`command` `` lines runs those as a local skill (a synced one does not), so it is
+   * marked, and a flag or --yes (no question asked) adds it only with --allow-commands too.
    */
   async function accountSkills(context: FollowUpPlanContext): Promise<FollowUp> {
     const { restorer } = deps;
@@ -253,10 +253,10 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
     const flag = context.parts.get(ACCOUNT_SKILLS_PART);
     const add =
       flag ??
-      (!context.assumeYes &&
+      (context.assumeYes ||
         (await context.prompter.confirm(
-          'Add them as local skills? Only needed if this PC uses another claude.ai account, or none.',
-          false,
+          'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
+          true,
         )));
     if (!add) {
       context.reporter.info(
@@ -264,9 +264,9 @@ export function createClaudeCodeAfterRestore(deps: AfterRestoreDeps) {
       );
       return nothingToDo;
     }
-    // Answered by a flag, not a person: commands only run with --allow-commands as well.
+    // Answered by a flag or --yes, not a person: commands only run with --allow-commands too.
     const blocked = new Set(
-      flag !== undefined && !context.allowCommands
+      (flag !== undefined || context.assumeYes) && !context.allowCommands
         ? plan.toAdd.filter((skill) => skill.runsCommands).map((skill) => skill.name)
         : [],
     );
