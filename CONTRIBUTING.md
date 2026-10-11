@@ -134,9 +134,10 @@ open, such as a chat or an option letter from a discussion.
     project folder nobody looks in (`CWD`).
   - `packages/cli/test/claude-code-project-fixtures.ts`: the Claude Code tests' temporary
     home and project (`useProjectFolders`, then `root`, `home`, `base` and `project`), the
-    collectors (`options`, `globalCollector`, `collect`, `collectSkipped`), the real adapter
-    (`claudeCodeAdapter`), settings with one Stop hook (`stopHook`), an auto memory folder
-    (`setMemoryDirectory`, `memoryDir`) and a claude.ai synced skills folder (`synced`,
+    collectors (`options`, `globalCollector`, `collect`, `collectSkipped`, with or without
+    memory), the real adapter (`claudeCodeAdapter`), settings with one Stop hook (`stopHook`), an
+    auto memory folder (`setMemoryDirectory`, `memoryDir`, and any project's by its folder name,
+    `projectMemory`, T110) and a claude.ai synced skills folder (`synced`,
     `syncedSetup`).
   - `packages/cli/test/claude-code-state-names.ts`: the state names the Claude Code program
     lists for its own folder, read from the version in `STATE_NAMES_VERSION` (T108):
