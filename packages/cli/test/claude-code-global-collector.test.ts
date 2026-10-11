@@ -203,6 +203,28 @@ describe('global collector: ~/.claude.json', () => {
     expect(text(files, '.agentnomad/claude.json')).not.toContain('SECRET');
   });
 
+  it('keeps every "Global config" key of the settings reference (T109)', async () => {
+    const preferences = {
+      claudeInChromeDefaultEnabled: true,
+      copyFullResponse: true,
+      defaultToAgentsView: true,
+      leftArrowOpensAgents: false,
+      permissionExplainerEnabled: false,
+      prStatusFooterEnabled: false,
+      teammateDefaultModel: 'sonnet',
+    };
+    await writeTestFile(
+      join(home, '.claude.json'),
+      JSON.stringify({ ...claudeJson, ...preferences }),
+    );
+    expect(JSON.parse(text(await collect(), '.agentnomad/claude.json'))).toEqual({
+      mcpServers: claudeJson.mcpServers,
+      diffTool: 'terminal',
+      autoConnectIde: true,
+      ...preferences,
+    });
+  });
+
   it('adds nothing when there are no servers or preferences', async () => {
     await writeTestFile(
       join(home, '.claude.json'),
@@ -580,5 +602,42 @@ describe('global collector: auto memory of every project (T110)', () => {
     expect(skipped).toEqual([
       '.agentnomad/auto-memory/_shared: agentnomad keeps that name for a shared memory folder',
     ]);
+  });
+});
+
+describe('global collector: files CLAUDE.md and the rules import (T111)', () => {
+  it('takes a file elsewhere in home under .agentnomad/home/', async () => {
+    await writeTestFile(join(base, 'CLAUDE.md'), '@~/notes/style.md\n');
+    await writeTestFile(join(home, 'notes', 'style.md'), 'Use tabs.\n');
+    expect(text(await collect(), '.agentnomad/home/notes/style.md')).toBe('Use tabs.\n');
+  });
+
+  it('takes a file in the base folder by its path there', async () => {
+    await writeTestFile(join(base, 'rules', 'team.md'), '@../shared/team.md\n');
+    await writeTestFile(join(base, 'shared', 'team.md'), 'Team rules.\n');
+    expect(text(await collect(), 'shared/team.md')).toBe('Team rules.\n');
+  });
+
+  it('takes what an imported file imports', async () => {
+    await writeTestFile(join(base, 'CLAUDE.md'), '@~/notes/a.md\n');
+    await writeTestFile(join(home, 'notes', 'a.md'), '@b.md\n');
+    await writeTestFile(join(home, 'notes', 'b.md'), 'B\n');
+    expect(paths(await collect())).toContain('.agentnomad/home/notes/b.md');
+  });
+
+  it('names a file it cannot take, who imports it and how', async () => {
+    await writeTestFile(join(base, 'CLAUDE.md'), '# Me\n@~/.ssh/notes.md\n');
+    await writeTestFile(join(home, '.ssh', 'notes.md'), 'secret\n');
+    const { found, skipped } = await collectSkipped(collector(), { kind: 'global' });
+    expect(paths(found)).not.toContain('.agentnomad/home/.ssh/notes.md');
+    expect(skipped).toEqual([
+      '~/.ssh/notes.md: ~/.claude/CLAUDE.md imports it on line 2 (@~/.ssh/notes.md), but it is in a folder for keys and logins',
+    ]);
+  });
+
+  it('says nothing about an import of a missing file', async () => {
+    await writeTestFile(join(base, 'CLAUDE.md'), '@~/.ssh/missing.md\n');
+    const { skipped } = await collectSkipped(collector(), { kind: 'global' });
+    expect(skipped).toEqual([]);
   });
 });

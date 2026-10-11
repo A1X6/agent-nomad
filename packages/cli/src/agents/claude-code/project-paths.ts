@@ -37,6 +37,14 @@ export const AUTO_MEMORY_BUNDLE_PREFIX = `${RESERVED_DIR}/auto-memory`;
  * project folder name never has `_` (every non-letter or digit becomes `-`).
  */
 export const SHARED_AUTO_MEMORY = '_shared';
+/** The keys of the project's entry in `~/.claude.json` that are its setup (T109). */
+export const CLAUDE_JSON_PROJECT_KEYS: readonly string[] = DATA.claudeJsonProjectKeys;
+
+/**
+ * Those keys as saved (T109): the project's local-scope MCP servers and its `.mcp.json`
+ * choices, merged into this PC's entry for the folder on pull.
+ */
+export const CLAUDE_JSON_PROJECT_BUNDLE_PATH = `${RESERVED_DIR}/claude-json-project.json`;
 
 /** Claude Code shortens longer project folder names and adds a hash. */
 export const MAX_PROJECT_DIR_NAME = 200;

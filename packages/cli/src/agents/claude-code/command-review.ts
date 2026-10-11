@@ -11,6 +11,7 @@ import {
   isScript,
   TOOL_SETTINGS_BUNDLE_PATHS,
 } from './global-paths.ts';
+import { CLAUDE_JSON_PROJECT_BUNDLE_PATH } from './project-paths.ts';
 import {
   COMMAND_SETTINGS,
   isRedirectVariable,
@@ -53,7 +54,8 @@ const LOOSENING_MODES: Readonly<
  * Labels that many entries share (each hook, allow rule or directory is one entry): a new
  * one beside others is new, never a change of the others.
  */
-const LIST_LABELS = /^(hook |setting permissions\.(allow|additionalDirectories)$)/;
+const LIST_LABELS =
+  /^(hook |setting permissions\.(allow|additionalDirectories)$|approved \.mcp\.json server$)/;
 
 /** Folders whose Markdown files are skills, custom commands or subagents. */
 const MARKDOWN_FOLDERS = /^(\.claude\/)?(skills|commands|agents)\//;
@@ -243,6 +245,15 @@ function runnableEntries(files: readonly CollectedFile[]): RunnableEntry[] {
     if (json === null) continue;
     if (SETTINGS_FILES.has(file.path)) entries.push(...settingsEntries(file, json));
     entries.push(...serverEntries(file, json['mcpServers']));
+    // A project's approvals in ~/.claude.json (T109): each starts that .mcp.json server
+    // without asking, as enableAllProjectMcpServers does for all of them.
+    const approved =
+      file.path === CLAUDE_JSON_PROJECT_BUNDLE_PATH ? json['enabledMcpjsonServers'] : [];
+    for (const name of Array.isArray(approved) ? approved : []) {
+      if (typeof name === 'string') {
+        entries.push(entry(file.path, 'approved .mcp.json server', name));
+      }
+    }
   }
   return entries;
 }

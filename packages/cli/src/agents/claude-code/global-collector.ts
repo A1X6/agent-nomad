@@ -1,6 +1,4 @@
-import { readFile } from 'node:fs/promises';
-
-import { JsonObjectSchema } from '../../system/json.ts';
+import { isFile } from '../../system/files.ts';
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
 import { underAnyFolder } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
@@ -17,7 +15,14 @@ import {
 } from './account-plugins.ts';
 import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
 import { allAutoMemoryFolders } from './auto-memory.ts';
-import { ClaudeJsonError } from './claude-json-merge.ts';
+import { claudeJsonFileOf, readClaudeJsonFile } from './claude-json-merge.ts';
+import {
+  followImports,
+  globalImportPlace,
+  isGlobalMemoryFile,
+  shownImportPath,
+  skippedImportReason,
+} from './claude-md-imports.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
@@ -94,6 +99,43 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
   }
 
   /**
+   * The files `CLAUDE.md` and the rules import (T111) that are not synced already: in the base
+   * folder or elsewhere in the home. Each one push cannot take is named, never left out silently.
+   */
+  async function importedFiles(
+    files: FileGatherer,
+    found: readonly CollectedFile[],
+    onSkipped: CollectOptions['onSkipped'],
+  ): Promise<CollectedFile[]> {
+    const memoryFiles = found
+      .filter((file) => isGlobalMemoryFile(file.path))
+      .map((file) => ({
+        nativePath: path.join(baseDir, ...file.path.split('/')),
+        bundlePath: file.path,
+        text: new TextDecoder().decode(file.content),
+      }));
+    const imported: CollectedFile[] = [];
+    const { skipped } = await followImports(
+      memoryFiles,
+      {
+        place: (nativePath) => globalImportPlace(nativePath, options),
+        isFile,
+        async read(nativePath, bundlePath) {
+          const file = await files.readIfFile(nativePath, bundlePath);
+          if (file === null) return null;
+          imported.push(file);
+          return new TextDecoder().decode(file.content);
+        },
+      },
+      options,
+    );
+    for (const entry of skipped) {
+      onSkipped?.(shownImportPath(entry.nativePath, options), skippedImportReason(entry, options));
+    }
+    return imported;
+  }
+
+  /**
    * For each program the commands of all settings files run: its known settings file (e.g.
    * ccstatusline's) and, unless it runs through npx, what it is and how it was installed, so
    * pull can check it. All in one `programs.json` (T86): one per settings file kept only the last.
@@ -136,31 +178,16 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
 
   /** MCP servers and preference keys from `~/.claude.json`; nothing else in it. */
   async function claudeJson(): Promise<CollectedFile | null> {
-    const file = options.customConfigDir
-      ? path.join(baseDir, '.claude.json')
-      : path.join(homedir, '.claude.json');
-    let text: string;
-    try {
-      text = await readFile(file, 'utf8');
-    } catch {
-      return null;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch (error) {
-      throw new ClaudeJsonError(file, { cause: error });
-    }
-    const all = JsonObjectSchema.safeParse(parsed);
-    if (!all.success) throw new ClaudeJsonError(file, { cause: all.error });
+    const all = await readClaudeJsonFile(claudeJsonFileOf(options));
+    if (all === null) return null;
 
     const selected: Record<string, unknown> = {};
-    const mcpServers = all.data[CLAUDE_JSON_MCP_KEY];
+    const mcpServers = all[CLAUDE_JSON_MCP_KEY];
     if (mcpServers && typeof mcpServers === 'object' && Object.keys(mcpServers).length > 0) {
       selected[CLAUDE_JSON_MCP_KEY] = mcpServers;
     }
     for (const key of CLAUDE_JSON_PREFERENCE_KEYS) {
-      if (all.data[key] !== undefined) selected[key] = all.data[key];
+      if (all[key] !== undefined) selected[key] = all[key];
     }
     return Object.keys(selected).length === 0 ? null : jsonFile(CLAUDE_JSON_BUNDLE_PATH, selected);
   }
@@ -209,6 +236,7 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         found.push(...(await hookScriptFiles(files, text, skippedScript)));
       }
       found.push(...(await programs(files, settingsJsons, collectOptions.onSkipped)));
+      found.push(...(await importedFiles(files, found, collectOptions.onSkipped)));
 
       const selected = await claudeJson();
       if (selected) found.push(selected);

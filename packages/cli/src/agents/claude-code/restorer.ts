@@ -26,12 +26,22 @@ import type {
 import { pathsOf } from '../shared/detector-system.ts';
 import { findAutoMemory, findSharedAutoMemory } from './auto-memory.ts';
 import {
-  CLAUDE_JSON_QUESTION,
+  claudeJsonFileOf,
+  claudeJsonQuestion,
   createClaudeJsonMerge,
+  isClaudeJsonPath,
   type MutableReport,
 } from './claude-json-merge.ts';
+import {
+  followImports,
+  globalImportPlace,
+  isGlobalMemoryFile,
+  isProjectMemoryFile,
+  projectImportPlace,
+  type ImportPlace,
+} from './claude-md-imports.ts';
 import { reviewRunnable } from './command-review.ts';
-import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
+import { extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
 import { hookScripts, projectHookScripts } from './hook-scripts.ts';
 import { PROJECT_SETTINGS_FILES, SHARED_AUTO_MEMORY } from './project-paths.ts';
 import {
@@ -63,9 +73,13 @@ export interface ClaudeCodeRestorer extends Restorer {
   ): Promise<RestoreReport>;
   /**
    * What restoring `files` would do to `~/.claude.json` here as it is now: nothing, create
-   * it, or merge into it (only after the answer to its conflict question).
+   * it, or merge into it (only after the answer to its conflict question). A project's part
+   * goes into the entry of `target`'s folder (T109).
    */
-  claudeJsonChange(files: readonly CollectedFile[]): Promise<'none' | 'new' | 'merge'>;
+  claudeJsonChange(
+    files: readonly CollectedFile[],
+    target?: ScopeTarget,
+  ): Promise<'none' | 'new' | 'merge'>;
   /**
    * Writes `files` (paths from `dir`) into the folder `dir` as `restore` writes a setup's
    * files: the same conflict answers, backups, line endings and permissions (T98: a local
@@ -177,9 +191,6 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     fallback: strategies.textSideBySide,
     overwrite: strategies.overwrite,
   };
-  const claudeJsonFile = options.customConfigDir
-    ? path.join(options.baseDir, '.claude.json')
-    : path.join(options.homedir, '.claude.json');
   // Windows and macOS ignore case and Unicode form: two names may be one file there (T43).
   const foldsNames = options.platform === 'win32' || options.platform === 'darwin';
   const sameFileKey = (name: string) => (foldsNames ? name.normalize('NFC').toLowerCase() : name);
@@ -219,7 +230,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   }
 
   const claudeJson = createClaudeJsonMerge({
-    claudeJsonFile,
+    claudeJsonFile: claudeJsonFileOf(options),
+    platform: options.platform,
     isClaudeRunning: options.isClaudeRunning,
     readExisting,
     writeAtomically,
@@ -267,8 +279,44 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     }
   }
 
-  /** Where each entry of `incoming` belongs, given the scripts its own hooks run. */
-  function destinations(target: ScopeTarget, incoming: readonly CollectedFile[]) {
+  /**
+   * The bundle paths of the files the bundle's own memory files import (T111), found in the
+   * bundle as push placed them for this PC: pull writes those and no other file there.
+   */
+  async function importedIn(
+    incoming: readonly CollectedFile[],
+    folder: string,
+    isMemoryFile: (bundlePath: string) => boolean,
+    place: (nativePath: string) => ImportPlace,
+  ): Promise<string[]> {
+    const byPath = new Map(incoming.map((entry) => [entry.path, entry]));
+    const memoryFiles = incoming
+      .filter((entry) => isMemoryFile(entry.path))
+      .map((entry) => ({
+        nativePath: path.join(folder, ...entry.path.split('/')),
+        bundlePath: entry.path,
+        text: new TextDecoder().decode(entry.content),
+      }));
+    const { files } = await followImports(
+      memoryFiles,
+      {
+        place,
+        isFile: () => Promise.resolve(false),
+        read(_nativePath, bundlePath) {
+          const entry = byPath.get(bundlePath);
+          return Promise.resolve(entry ? new TextDecoder().decode(entry.content) : null);
+        },
+      },
+      options,
+    );
+    return files.map((file) => file.bundlePath);
+  }
+
+  /**
+   * Where each entry of `incoming` belongs, given the scripts its own hooks run and the files
+   * its memory files import.
+   */
+  async function destinations(target: ScopeTarget, incoming: readonly CollectedFile[]) {
     const scriptsIn = (settingsFiles: readonly string[], scriptsOf: (json: string) => string[]) =>
       new Set(
         incoming
@@ -278,6 +326,12 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     const globalScripts = scriptsIn(GLOBAL_SETTINGS_FILES, (json) =>
       hookScripts(json, options).map((script) => script.bundlePath),
     );
+    if (target.kind === 'global') {
+      const imported = await importedIn(incoming, options.baseDir, isGlobalMemoryFile, (file) =>
+        globalImportPlace(file, options),
+      );
+      for (const bundlePath of imported) globalScripts.add(bundlePath);
+    }
     const projectScripts =
       target.kind === 'project'
         ? scriptsIn(PROJECT_SETTINGS_FILES, (json) =>
@@ -287,6 +341,13 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
             }).map((script) => script.bundlePath),
           )
         : new Set<string>();
+    if (target.kind === 'project') {
+      const { projectDir } = target;
+      const imported = await importedIn(incoming, projectDir, isProjectMemoryFile, (file) =>
+        projectImportPlace(file, { projectDir, platform: options.platform }),
+      );
+      for (const bundlePath of imported) projectScripts.add(bundlePath);
+    }
     return (bundlePath: string): RestoreDestination => {
       const windowsProblem = options.platform === 'win32' ? windowsNameProblem(bundlePath) : null;
       if (windowsProblem !== null) return { kind: 'refused', reason: windowsProblem };
@@ -521,7 +582,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         // to ask about, even when this PC would save another one.
         if (isPullMetadata(file.path)) continue;
         const here = byPath.get(file.path);
-        const claudeJson = file.path === CLAUDE_JSON_BUNDLE_PATH;
+        const claudeJson = isClaudeJsonPath(file.path);
         if (here === undefined && !claudeJson) continue;
         if (
           here !== undefined &&
@@ -530,20 +591,20 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           continue;
         found.push({
           path: file.path,
-          question: claudeJson ? CLAUDE_JSON_QUESTION : { overwriteAllowed: true },
+          question: claudeJson ? claudeJsonQuestion(file) : { overwriteAllowed: true },
         });
       }
       return found;
     },
 
-    async claudeJsonChange(incoming) {
-      const file = incoming.find((entry) => entry.path === CLAUDE_JSON_BUNDLE_PATH);
-      return file === undefined ? 'none' : claudeJson.change(file);
+    async claudeJsonChange(incoming, target) {
+      const file = incoming.find((entry) => isClaudeJsonPath(entry.path));
+      return file === undefined ? 'none' : claudeJson.change(file, target);
     },
 
     async restore(target, incoming, onConflict, context: ClaudeRestoreContext = {}) {
       const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
-      const destinationOf = destinations(target, incoming);
+      const destinationOf = await destinations(target, incoming);
       const memory: MemoryFolders = {
         project: autoMemoryFolder(target, report),
         shared: sharedMemoryFolder(incoming, report),
@@ -558,7 +619,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
         }
         if (destination.kind === 'metadata') return;
         if (destination.kind === 'claude-json') {
-          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true);
+          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true, target);
           return;
         }
 

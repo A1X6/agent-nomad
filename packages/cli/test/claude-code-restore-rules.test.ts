@@ -7,6 +7,7 @@ import {
   ACCOUNT_PLUGINS_PREFIX,
   ACCOUNT_SKILLS_PREFIX,
   CLAUDE_JSON_BUNDLE_PATH,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   globalDestination,
   hookScripts,
   isPullMetadata,
@@ -65,6 +66,8 @@ describe('restore rules: refuses what a collector never produces', () => {
     ['.agentnomad/home/Library/LaunchAgents/x.sh', 'a folder whose files run by themselves'],
     ['.agentnomad/home/.SSH/id_ed25519', 'a folder for keys and logins'],
     ['.agentnomad/other.json', 'unknown agentnomad entry'],
+    // A project's part of ~/.claude.json (T109) only belongs to a project setup.
+    [CLAUDE_JSON_PROJECT_BUNDLE_PATH, 'unknown agentnomad entry'],
     // A saved local marketplace is one file (T98): never a folder of loose files.
     [`${LOCAL_MARKETPLACES_PREFIX}tools/run.sh`, 'unknown agentnomad entry'],
     // A saved plugin folder is one file too (T99).
@@ -208,6 +211,8 @@ describe('restore rules: places what a collector produces', () => {
       { kind: 'target', path: '.claude/agent-memory/reviewer/MEMORY.md' },
     ],
     ['.agentnomad/auto-memory/MEMORY.md', { kind: 'auto-memory', path: 'MEMORY.md' }],
+    // Merged into the folder's entry in ~/.claude.json (T109).
+    [CLAUDE_JSON_PROJECT_BUNDLE_PATH, { kind: 'claude-json' }],
     // Read by pull to name changed plugin versions (T100), never written.
     [PLUGIN_VERSIONS_BUNDLE_PATH, { kind: 'metadata' }],
     [`${LOCAL_MARKETPLACES_PREFIX}tools.json`, { kind: 'metadata' }],
@@ -253,5 +258,29 @@ describe('claude.ai plugins (T101)', () => {
     expect(
       globalDestination(`${ACCOUNT_PLUGINS_PREFIX}my-upload/.claude-plugin/plugin.json`, new Set()),
     ).toEqual({ kind: 'metadata' });
+  });
+});
+
+describe('restore rules: files the memory files import (T111)', () => {
+  it('global: a file outside the synced folders only when the setup imports it', () => {
+    expect(globalDestination('shared/team.md', new Set(['shared/team.md']))).toEqual({
+      kind: 'target',
+      path: 'shared/team.md',
+    });
+    expect(globalDestination('shared/team.md', new Set())).toEqual({
+      kind: 'refused',
+      reason: 'not part of a Claude Code setup',
+    });
+  });
+
+  it('project: a file outside .claude/ only when the setup imports it', () => {
+    expect(projectDestination('docs/guide.md', new Set(['docs/guide.md']))).toEqual({
+      kind: 'target',
+      path: 'docs/guide.md',
+    });
+    expect(projectDestination('docs/guide.md')).toEqual({
+      kind: 'refused',
+      reason: 'not part of a Claude Code setup',
+    });
   });
 });

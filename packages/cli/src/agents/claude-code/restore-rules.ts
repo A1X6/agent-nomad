@@ -32,6 +32,7 @@ import {
 } from './global-paths.ts';
 import {
   AUTO_MEMORY_BUNDLE_PREFIX,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   PROJECT_CLAUDE_FILES,
   PROJECT_CLAUDE_FOLDERS,
   PROJECT_MEMORY_FOLDERS,
@@ -46,7 +47,7 @@ export type RestoreDestination =
   | { readonly kind: 'target'; readonly path: string }
   /** A path inside the home folder (`.agentnomad/home/...`). */
   | { readonly kind: 'home'; readonly path: string }
-  /** The selected `~/.claude.json` keys, merged into that file. */
+  /** The selected `~/.claude.json` keys (or a project's, T109), merged into that file. */
   | { readonly kind: 'claude-json' }
   /** A file in the project's auto memory folder. */
   | { readonly kind: 'auto-memory'; readonly path: string }
@@ -101,10 +102,11 @@ const PROJECT_FOLDER_PREFIXES: readonly string[] = [
 ].map((folder) => `.claude/${folder}/`);
 
 /**
- * Home files a bundle may restore: known tool settings, or scripts that the setup's own hooks
- * or status line run (`allowedScripts`, T38). Any other file could be one that runs by itself
- * (a Startup folder, a shell or PowerShell profile) without ever being shown for review; those
- * places are refused even when a hook names them (T43).
+ * Home files a bundle may restore: known tool settings, scripts that the setup's own hooks or
+ * status line run (`allowedScripts`, T38) and documents its memory files import (T111). Any
+ * other file could be one that runs by itself (a Startup folder, a shell or PowerShell profile)
+ * without ever being shown for review; those places are refused even when a hook names them
+ * (T43).
  */
 function homeDestination(
   relative: string,
@@ -121,7 +123,8 @@ function homeDestination(
 
 /**
  * Where a global bundle entry goes. `allowedScripts`: bundle paths of the scripts the setup's
- * own hooks and status line run (from its `settings.json`). As in the home folder, a script
+ * own hooks and status line run (from its `settings.json`) and of the files its `CLAUDE.md` and
+ * rules import (T111). As in the home folder, a script
  * outside the synced folders is restored only when one of those runs it, and never in Claude
  * Code's own state (T55), so a bundle cannot replace a launcher such as
  * `chrome/chrome-native-host.bat` without it being shown for review.
@@ -160,19 +163,16 @@ export function globalDestination(
 
   const allowed =
     GLOBAL_FILES.includes(path) || GLOBAL_FOLDER_PREFIXES.some((prefix) => path.startsWith(prefix));
-  if (allowed) return { kind: 'target', path };
-  if (isScript(path)) {
-    return allowedScripts.has(path)
-      ? { kind: 'target', path }
-      : refused('no hook or status line in this setup runs it');
-  }
+  if (allowed || allowedScripts.has(path)) return { kind: 'target', path };
+  if (isScript(path)) return refused('no hook or status line in this setup runs it');
   return refused('not part of a Claude Code setup');
 }
 
 /**
  * Where a project bundle entry goes. A script outside `.claude/` is only restored when the
  * bundle's own hooks run it (`allowedScripts`, from `projectHookScripts`), so a bundle
- * cannot drop code anywhere in the project.
+ * cannot drop code anywhere in the project; another file only when the bundle's own memory
+ * files import it (T111), and imports never take code.
  */
 export function projectDestination(
   path: string,
@@ -180,6 +180,8 @@ export function projectDestination(
 ): RestoreDestination {
   if (!BundlePathSchema.safeParse(path).success) return refused('not a safe path');
   if (PROJECT_METADATA.has(path) || isLocalMarketplace(path)) return { kind: 'metadata' };
+  // The project's local MCP servers and `.mcp.json` choices (T109), merged into its entry.
+  if (path === CLAUDE_JSON_PROJECT_BUNDLE_PATH) return { kind: 'claude-json' };
   if (path.startsWith(`${AUTO_MEMORY_BUNDLE_PREFIX}/`)) {
     if (extensionOf(path) !== '.md') return refused(ONLY_MARKDOWN);
     return { kind: 'auto-memory', path: path.slice(AUTO_MEMORY_BUNDLE_PREFIX.length + 1) };
@@ -193,7 +195,8 @@ export function projectDestination(
     PROJECT_ROOT_FILES.includes(path) ||
     PROJECT_CLAUDE_PATHS.includes(path) ||
     PROJECT_FOLDER_PREFIXES.some((prefix) => path.startsWith(prefix)) ||
-    (isScript(path) && (path.startsWith('.claude/') || allowedScripts.has(path)));
+    allowedScripts.has(path) ||
+    (isScript(path) && path.startsWith('.claude/'));
   return allowed ? { kind: 'target', path } : refused('not part of a Claude Code setup');
 }
 

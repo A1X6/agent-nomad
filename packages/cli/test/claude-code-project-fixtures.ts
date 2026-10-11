@@ -111,6 +111,28 @@ export async function collectSkipped(
 export const projectMemory = (name: string, ...parts: string[]) =>
   join(base, 'projects', name, 'memory', ...parts);
 
+/**
+ * `dir` as Claude Code 2.1.296 writes it as a key of `projects` in `~/.claude.json` (T109):
+ * `/` for `\` on Windows, case as it is.
+ */
+export const claudeJsonKey = (dir = project) =>
+  process.platform === 'win32' ? dir.replaceAll('\\', '/') : dir;
+
+/** A local-scope MCP server as `claude mcp add` writes it, with a `${VAR}` in its env. */
+export const LOCAL_MCP_SERVER = {
+  type: 'stdio',
+  command: 'node',
+  args: ['server.js'],
+  env: { TOKEN: '${LOCAL_TOKEN}' },
+};
+
+/** Writes the test home's `~/.claude.json`: `top` keys and `entry` as the project's entry. */
+export const writeClaudeJsonProject = (entry: unknown, top: Record<string, unknown> = {}) =>
+  writeTestFile(
+    join(home, '.claude.json'),
+    JSON.stringify({ ...top, projects: { [claudeJsonKey()]: entry } }),
+  );
+
 /** The folder Claude Code keeps this project's auto memory in. */
 export const memoryDir = (repo = project) => projectMemory(projectDirName(repo));
 

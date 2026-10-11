@@ -5,6 +5,7 @@ import { BACKUP_MARKER, INCOMING_MARKER } from '@agentnomad/core';
 import { TEMP_MARKER } from '../../system/files.ts';
 import { RESERVED_DIR, type ScopeTarget } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
+import { followImports, globalImportPlace, isGlobalMemoryFile } from './claude-md-imports.ts';
 import {
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
@@ -55,6 +56,41 @@ async function hookScriptNames(input: UnknownFilesInput): Promise<string[]> {
     );
   }
   return names;
+}
+
+/**
+ * Top-level names in the base folder that hold a file `CLAUDE.md` or the rules import (T111):
+ * push saves those files by that route, so such a folder is not unknown either.
+ */
+async function importedNames(input: UnknownFilesInput): Promise<string[]> {
+  const { homedir } = input;
+  if (homedir === undefined) return [];
+  const path = pathsOf(input.platform);
+  const rules = await readdir(path.join(input.baseDir, 'rules'), { recursive: true }).catch(
+    () => [],
+  );
+  const memoryFiles = [];
+  for (const bundlePath of ['CLAUDE.md', ...rules.map((name) => `rules/${name}`)]) {
+    const portable = bundlePath.split(path.sep).join('/');
+    if (!isGlobalMemoryFile(portable)) continue;
+    const nativePath = path.join(input.baseDir, ...portable.split('/'));
+    const text = await readFile(nativePath, 'utf8').catch(() => null);
+    if (text !== null) memoryFiles.push({ nativePath, bundlePath: portable, text });
+  }
+  const context = { homedir, baseDir: input.baseDir, platform: input.platform };
+  const { files } = await followImports(
+    memoryFiles,
+    {
+      place: (nativePath) => globalImportPlace(nativePath, context),
+      read: (nativePath) => readFile(nativePath, 'utf8').catch(() => null),
+      isFile: () => Promise.resolve(false),
+    },
+    context,
+  );
+  return files
+    .map((file) => file.bundlePath)
+    .filter((bundlePath) => !bundlePath.startsWith(`${RESERVED_DIR}/`))
+    .map(topLevel);
 }
 
 /** The first part of a list entry: `skills/synced` → `skills`. */
@@ -114,6 +150,7 @@ export async function findUnknownEntries(
     // `.claude.json` sits in the base folder when CLAUDE_CONFIG_DIR is set; handled apart.
     knownNames.add('.claude.json');
     for (const name of await hookScriptNames(input)) knownNames.add(name);
+    for (const name of await importedNames(input)) knownNames.add(name);
   }
 
   const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);

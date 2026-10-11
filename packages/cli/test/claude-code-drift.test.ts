@@ -3,7 +3,12 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {
+  GLOBAL_CONFIG_KEYS_2026_10_11,
+  SETTINGS_REFERENCE_2026_10_11,
+} from './claude-code-settings-reference.ts';
+import {
   changelogSince,
+  docsGlobalConfigKeys,
   docsTopLevelNames,
   driftReport,
   knownTopLevelNames,
@@ -138,6 +143,7 @@ describe('drift check (T41): comparing with the data file', () => {
   const driftInput = {
     paths: { ...CLAUDE_CODE_PATHS, reviewedVersion: '2.1.283' },
     directoryDocs: 'Settings in `~/.claude/settings.json`, prompts in `~/.claude/prompts/`.',
+    settingsReference: SETTINGS_REFERENCE_2026_10_11,
     changelog: CHANGELOG,
     latestVersion: '2.1.290',
     freshEntries: ['.claude.json', 'backups', 'projects', 'sessions', 'new-state'],
@@ -181,12 +187,68 @@ describe('drift check (T41): comparing with the data file', () => {
     const report = driftReport({
       paths: CLAUDE_CODE_PATHS,
       directoryDocs: DOCS_NAMES_2026_09_26.map((name) => `~/.claude/${name}`).join('\n'),
+      settingsReference: SETTINGS_REFERENCE_2026_10_11,
       changelog: CHANGELOG.replace('2.1.290', CLAUDE_CODE_PATHS.reviewedVersion),
       latestVersion: CLAUDE_CODE_PATHS.reviewedVersion,
       freshEntries: ['.claude.json', 'backups', 'projects', 'sessions'],
     });
     expect(report.hasFindings).toBe(false);
     expect(reportMarkdown(report)).toContain('No drift found.');
+  });
+});
+
+describe('drift check (T109): the ~/.claude.json preference keys', () => {
+  /** The saved page with one more Global config row: a key Claude Code added. */
+  const withNewKey = `${SETTINGS_REFERENCE_2026_10_11}\n| [\`newPreference\`](#newpreference) | Something new | Global config settings | Global config |`;
+
+  /** A drift input that only the settings reference and `paths` can find anything in. */
+  const keysInput = (settingsReference: string, paths = CLAUDE_CODE_PATHS) => ({
+    paths,
+    directoryDocs: '',
+    settingsReference,
+    changelog: '',
+    latestVersion: paths.reviewedVersion,
+    freshEntries: null,
+  });
+
+  it('reads every key the settings index gives the scope "Global config"', () => {
+    expect(docsGlobalConfigKeys(SETTINGS_REFERENCE_2026_10_11)).toEqual(
+      GLOBAL_CONFIG_KEYS_2026_10_11,
+    );
+  });
+
+  it('finds no keys when the page no longer has the settings index', () => {
+    expect(docsGlobalConfigKeys('# All settings\n\nThe keys moved elsewhere.')).toBeNull();
+  });
+
+  it('the data file lists every Global config key the reference had on 2026-10-11', () => {
+    expect([...CLAUDE_CODE_PATHS.claudeJsonPreferenceKeys].sort()).toEqual(
+      GLOBAL_CONFIG_KEYS_2026_10_11,
+    );
+  });
+
+  it('reports a Global config key the data file does not list', () => {
+    const report = driftReport(keysInput(withNewKey));
+    expect(report).toMatchObject({
+      globalConfigMissing: ['newPreference'],
+      globalConfigExtra: [],
+      hasFindings: true,
+    });
+    expect(reportMarkdown(report)).toContain('## Global config keys unknown to the data file');
+  });
+
+  it('reports a key the data file lists that the reference no longer has', () => {
+    const paths = {
+      ...CLAUDE_CODE_PATHS,
+      claudeJsonPreferenceKeys: [...CLAUDE_CODE_PATHS.claudeJsonPreferenceKeys, 'oldPreference'],
+    };
+    const report = driftReport(keysInput(SETTINGS_REFERENCE_2026_10_11, paths));
+    expect(report).toMatchObject({
+      globalConfigMissing: [],
+      globalConfigExtra: ['oldPreference'],
+      hasFindings: true,
+    });
+    expect(reportMarkdown(report)).toContain('- `oldPreference`');
   });
 });
 
