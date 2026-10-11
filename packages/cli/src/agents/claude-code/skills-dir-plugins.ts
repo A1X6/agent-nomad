@@ -7,7 +7,7 @@
  */
 import type { CollectedFile } from '../adapter.ts';
 import { compareVersions } from '../notices.ts';
-import { foldedName } from '../shared/bundle-paths.ts';
+import { foldedName, underFolder } from '../shared/bundle-paths.ts';
 import { CLAUDE_CODE_PATHS as DATA } from './claude-code-paths.data.ts';
 
 /** The marketplace Claude Code names for a plugin found in `skills/<name>/`. */
@@ -68,11 +68,9 @@ export function isGeneratedInSkillsPlugin(path: string): boolean {
  * Claude Code generates there; also for saved claude.ai plugins (T101). Without case.
  */
 export function isGeneratedInPlugin(pathInPlugin: string): boolean {
-  const rest = pathInPlugin.toLowerCase();
-  return GENERATED_IN_PLUGIN.some((folder) => {
-    const lower = folder.toLowerCase();
-    return rest === lower || rest.startsWith(`${lower}/`);
-  });
+  return GENERATED_IN_PLUGIN.some((folder) =>
+    underFolder(pathInPlugin, folder, { ignoreCase: true }),
+  );
 }
 
 /** One plugin folder in `skills/`, as the bundle or this PC has it. */

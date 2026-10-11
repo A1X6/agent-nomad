@@ -272,6 +272,13 @@ describe('claude.ai plugins (T101): what pull may add', () => {
     ]);
   });
 
+  // SEC-02 (review 16): Windows and macOS write `Evil/` and `evil/` into one folder.
+  it('adds only the first of two saved plugins whose names differ only in case', () => {
+    const plan = planAccountPlugins([...savedPlugin('Evil'), ...savedPlugin('evil')], noNames);
+    expect(plan.toAdd).toEqual(['evil']);
+    expect(plan.skipped).toEqual([{ name: 'Evil', reason: 'another saved copy has this name' }]);
+  });
+
   it('skips a saved plugin without its manifest', () => {
     const plan = planAccountPlugins(
       [collected(`${ACCOUNT_PLUGINS_PREFIX}bare/skills/bare/SKILL.md`, 'x')],
