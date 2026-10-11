@@ -227,9 +227,9 @@ describe('restorer: existing files', () => {
     await writeTestFile(join(project, '.claude', 'loop.md'), 'mine');
     const report = await restoreProject([collected('.claude/loop.md', 'theirs')], 'merge');
     expect(await readText(join(project, '.claude', 'loop.md'))).toBe('mine');
-    expect(
-      await readText(join(project, '.claude', `loop.md.agentnomad-incoming-${STAMP}`)),
-    ).toBe('theirs');
+    expect(await readText(join(project, '.claude', `loop.md.agentnomad-incoming-${STAMP}`))).toBe(
+      'theirs',
+    );
     expect(report.written).toEqual([`.claude/loop.md.agentnomad-incoming-${STAMP}`]);
   });
 
