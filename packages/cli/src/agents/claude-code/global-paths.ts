@@ -2,7 +2,7 @@
  * What the Claude Code global collector takes from `~/.claude` (T25). The lists come from
  * the paths data file (T32); this module only gives them names and fast lookups.
  */
-import { RESERVED_DIR } from '../adapter.ts';
+import { RESERVED_DIR, type CollectedFile } from '../adapter.ts';
 import { inHomeFolder, isSensitiveHomePath } from '../shared/bundle-paths.ts';
 import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 
@@ -38,6 +38,17 @@ export const GLOBAL_REFUSED: readonly string[] = [...NEVER_SYNCED, ...GLOBAL_KNO
 /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
 export const SKIPPED_NAMES: ReadonlySet<string> = new Set(DATA.skippedNames);
 
+const SKIPPED_NAMES_FOLDED: ReadonlySet<string> = new Set(
+  DATA.skippedNames.map((name) => name.toLowerCase()),
+);
+
+/**
+ * Whether a bundle path has a part push never takes (`node_modules`, `.git`, ...), in any
+ * case: Windows and macOS open `Node_Modules` as `node_modules`.
+ */
+export const hasSkippedName = (path: string): boolean =>
+  path.split('/').some((part) => SKIPPED_NAMES_FOLDED.has(part.toLowerCase()));
+
 /** The user's own copies (`settings.json.bak`), never reported as unknown. */
 export const IGNORED_COPY_PATTERNS: readonly RegExp[] = DATA.ignoredCopyPatterns.map(
   (pattern) => new RegExp(pattern),
@@ -69,6 +80,14 @@ export const extensionOf = (path: string) => /(\.[^./]+)$/.exec(path)?.[1]?.toLo
 
 /** Has one of the script extensions above. */
 export const isScript = (path: string) => SCRIPT_EXTENSIONS.has(extensionOf(path));
+
+/** Content that starts with `#!`, which a shell runs as a program with the executable bit. */
+export const startsWithShebang = (content: Uint8Array): boolean =>
+  content[0] === 0x23 && content[1] === 0x21;
+
+/** A file that can run: a script extension, the executable bit or a `#!` first line. */
+export const canRun = (file: CollectedFile): boolean =>
+  isScript(file.path) || file.executable || startsWithShebang(file.content);
 
 /** Home folders the OS or a shell runs files from by itself (T43). */
 const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;

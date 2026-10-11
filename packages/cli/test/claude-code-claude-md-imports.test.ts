@@ -2,11 +2,16 @@ import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { collected } from './fakes.ts';
+
 import {
   followImports,
+  GLOBAL_MEMORY_FILES,
   globalImportPlace,
   importsIn,
+  importsOf,
   MAX_IMPORT_HOPS,
+  PROJECT_MEMORY_FILES,
   projectImportPlace,
   resolveImport,
   type ImportSource,
@@ -339,5 +344,46 @@ describe('claude-md imports: following them', () => {
       context,
     );
     expect(found.files).toEqual([]);
+  });
+});
+
+describe('claude-md imports: the memory files of a setup (DUP-03)', () => {
+  it("follows the imports of a project's memory files and rules at any depth, no other file", async () => {
+    const found = await importsOf(
+      project,
+      PROJECT_MEMORY_FILES,
+      [
+        collected('AGENTS.md', '@a.md'),
+        collected('.claude/rules/deep/style.md', '@b.md'),
+        collected('.claude/rules/notes.txt', '@c.md'),
+        collected('README.md', '@d.md'),
+      ],
+      projectSource({ 'a.md': 'A', '.claude/rules/deep/b.md': 'B', 'c.md': 'C', 'd.md': 'D' }),
+      context,
+    );
+    expect(found.files.map((file) => file.bundlePath)).toEqual(['a.md', '.claude/rules/deep/b.md']);
+  });
+
+  it("follows the imports of the global CLAUDE.md and rules, not a project's AGENTS.md", async () => {
+    const files = { 'a.md': 'A', 'rules/b.md': 'B', 'c.md': 'C' };
+    const byNative = new Map(
+      Object.entries(files).map(([relative, text]) => [join(base, relative), text]),
+    );
+    const found = await importsOf(
+      base,
+      GLOBAL_MEMORY_FILES,
+      [
+        collected('CLAUDE.md', '@a.md'),
+        collected('rules/style.md', '@b.md'),
+        collected('AGENTS.md', '@c.md'),
+      ],
+      {
+        place: (nativePath) => globalImportPlace(nativePath, globalContext),
+        read: (nativePath) => Promise.resolve(byNative.get(nativePath) ?? null),
+        isFile: () => Promise.resolve(false),
+      },
+      context,
+    );
+    expect(found.files.map((file) => file.bundlePath)).toEqual(['a.md', 'rules/b.md']);
   });
 });
