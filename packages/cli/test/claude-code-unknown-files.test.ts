@@ -24,12 +24,17 @@ describe('unknown-file check (T32 done-when)', () => {
   it('reports an unlisted file or folder, never skipping it silently', async () => {
     await writeTestFile(join(base, 'settings.json'));
     await writeTestFile(join(base, 'skills', 'mine', 'SKILL.md'));
-    await writeTestFile(join(base, 'hooks', 'a.sh'));
+    await writeTestFile(join(base, 'tools', 'a.sh'));
     await writeTestFile(join(base, 'new-feature.json'));
     expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([
-      'hooks/',
       'new-feature.json',
+      'tools/',
     ]);
+  });
+
+  it('does not report hooks/, synced whole even when no setting runs its scripts (T112)', async () => {
+    await writeTestFile(join(base, 'hooks', 'unused.sh'));
+    expect(await findUnknownEntries({ kind: 'global' }, input())).toEqual([]);
   });
 
   it('does not report a folder whose script a hook or the status line runs (T49)', async () => {
