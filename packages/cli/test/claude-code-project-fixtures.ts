@@ -87,7 +87,7 @@ export const claudeCodeAdapter = (
  * The context of a global plan step asking `prompter` and telling `reporter`: no files, no
  * conflicts, no flags and no parts named, unless `overrides` say otherwise.
  */
-export const planContext = (
+const planContext = (
   prompter: Prompter,
   reporter: Reporter,
   overrides: Partial<RestorePlanContext> = {},
@@ -104,27 +104,37 @@ export const planContext = (
   ...overrides,
 });
 
+/** A Linux PC without organization-managed settings, for the adapter to read them from. */
+export const noManagedSystem = fakeManagedSystem({ platform: 'linux' });
+
 /**
- * The real adapter's plan step in `homedir` (`home` unless said), with no managed settings,
- * on a PC whose `claude` answers validate with `validate`, given `answers` and the context of
- * {@link planContext} with `overrides`. Returns the plan, what was asked (and each yes/no
- * default), the lines shown and the validate calls.
+ * The real adapter's plan step in `homedir` (`home` unless said), with no managed settings
+ * and the adapter options in `adapter`, on a PC whose `claude` answers validate with
+ * `validate` (`null`: no `claude` here), given `answers` and the context of
+ * {@link planContext} with `overrides`. Returns the plan, the reporter, what was asked (and
+ * each yes/no default), the lines shown and the validate calls.
  */
 export async function planStepWith(
-  validate: ValidateRun,
-  answers: unknown[],
-  overrides: Partial<RestorePlanContext> = {},
-  homedir = home,
+  validate: ValidateRun | null,
+  options: {
+    answers?: unknown[];
+    overrides?: Partial<RestorePlanContext>;
+    homedir?: string;
+    adapter?: Partial<ClaudeCodeAdapterOptions>;
+  } = {},
 ) {
-  const script = scriptedPrompter(answers);
+  const script = scriptedPrompter(options.answers ?? []);
   const { reporter, lines } = recordingReporter({ levels: false });
   const { validator, calls } = await validatorFor(validate);
-  const adapter = claudeCodeAdapter(homedir, {
-    managedSystem: fakeManagedSystem({ platform: 'linux' }),
+  const adapter = claudeCodeAdapter(options.homedir ?? home, {
+    managedSystem: noManagedSystem,
     pluginValidator: validator,
+    ...options.adapter,
   });
   if (!adapter.planRestore) throw new Error('no plan step');
-  const planned = await adapter.planRestore(planContext(script.prompter, reporter, overrides));
+  const planned = await adapter.planRestore(
+    planContext(script.prompter, reporter, options.overrides),
+  );
   return {
     planned,
     reporter,

@@ -8,13 +8,10 @@ import {
   paths,
   readJson,
   readText,
-  recordingReporter,
-  scriptedPrompter,
   useTempDir,
   writeTestFile,
 } from './fakes.ts';
 import {
-  fakeManagedSystem,
   modFiles,
   validatePassWithWarning,
   writeModFolder,
@@ -27,7 +24,7 @@ import {
   claudeCodeAdapter,
   claudeJsonKey,
   LOCAL_MCP_SERVER,
-  planContext,
+  noManagedSystem,
   planStepWith,
 } from './claude-code-project-fixtures.ts';
 import {
@@ -36,7 +33,6 @@ import {
   CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   createNoTerminalPrompter,
   type ConflictChoice,
-  type Prompter,
   type RestorePlanContext,
 } from '../src/index.ts';
 
@@ -50,46 +46,43 @@ const answer = (choice: ConflictChoice) => () => Promise.resolve(choice);
 
 describe('Claude Code plan step: closing Claude Code before ~/.claude.json changes (T61)', () => {
   const incoming = collected(CLAUDE_JSON_BUNDLE_PATH, '{"diffTool":"terminal"}');
-  const noManagedSettings = fakeManagedSystem({ platform: 'linux' });
   const QUESTION =
     'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.';
 
-  function planStep(running: boolean[], answers: string[], prompter?: Prompter) {
-    const script = scriptedPrompter(answers);
-    const { reporter } = recordingReporter({ levels: false });
-    const adapter = claudeCodeAdapter(home, {
-      isClaudeRunning: () => Promise.resolve(running.shift() ?? false),
-      managedSystem: noManagedSettings,
+  /**
+   * The plan step merging `incoming`, with these answers and `overrides`, while each check
+   * whether Claude Code runs answers the next of `running` (then no).
+   */
+  const planStep = (
+    running: boolean[],
+    answers: string[],
+    overrides: Partial<RestorePlanContext> = {},
+  ) =>
+    planStepWith(null, {
+      answers,
+      overrides: {
+        files: [incoming],
+        conflicts: new Map([[CLAUDE_JSON_BUNDLE_PATH, 'merge']]),
+        ...overrides,
+      },
+      homedir: home,
+      adapter: { isClaudeRunning: () => Promise.resolve(running.shift() ?? false) },
     });
-    const plan = (overrides: Partial<RestorePlanContext> = {}) => {
-      if (!adapter.planRestore) throw new Error('no plan step');
-      return adapter.planRestore(
-        planContext(prompter ?? script.prompter, reporter, {
-          files: [incoming],
-          conflicts: new Map([[CLAUDE_JSON_BUNDLE_PATH, 'merge']]),
-          ...overrides,
-        }),
-      );
-    };
-    return { plan, asked: script.asked };
-  }
 
   it('"I closed it, continue" checks again, then the restore merges it', async () => {
     await writeTestFile(join(home, '.claude.json'), '{}');
-    const t = planStep([true, true, false, false], ['retry', 'retry']);
-    const planned = await t.plan();
+    const t = await planStep([true, true, false, false], ['retry', 'retry']);
     expect(t.asked).toEqual([QUESTION, QUESTION]);
-    const report = await planned.restore(answer('merge'), {});
+    const report = await t.planned.restore(answer('merge'), {});
     expect(report.written).toEqual(['.agentnomad/claude.json']);
     expect((await readJson(join(home, '.claude.json')))['diffTool']).toBe('terminal');
   });
 
   it('"Skip" leaves it as it is with the warning, and nothing is asked while writing', async () => {
     await writeTestFile(join(home, '.claude.json'), '{}');
-    const t = planStep([true], ['skip']);
-    const planned = await t.plan();
+    const t = await planStep([true], ['skip']);
     expect(t.asked).toEqual([QUESTION]);
-    const report = await planned.restore(answer('merge'), {});
+    const report = await t.planned.restore(answer('merge'), {});
     expect(await readText(join(home, '.claude.json'))).toBe('{}');
     expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
     expect(t.asked).toHaveLength(1);
@@ -97,32 +90,31 @@ describe('Claude Code plan step: closing Claude Code before ~/.claude.json chang
 
   it('--yes never asks: the file is left with the warning while Claude Code runs', async () => {
     await writeTestFile(join(home, '.claude.json'), '{}');
-    const t = planStep([true, true], []);
-    const planned = await t.plan({ assumeYes: true });
+    const t = await planStep([true, true], [], { assumeYes: true });
     expect(t.asked).toEqual([]);
-    const report = await planned.restore(answer('merge'), {});
+    const report = await t.planned.restore(answer('merge'), {});
     expect(await readText(join(home, '.claude.json'))).toBe('{}');
     expect(report.warnings[0]).toContain('Claude Code or the Claude app was running');
   });
 
   it('is not asked when the file would not change', async () => {
     await writeTestFile(join(home, '.claude.json'), '{"diffTool":"terminal"}');
-    const t = planStep([true], []);
-    await t.plan();
+    const t = await planStep([true], []);
     expect(t.asked).toEqual([]);
   });
 
   it('is not asked when its merge was declined', async () => {
     await writeTestFile(join(home, '.claude.json'), '{}');
-    const declined = planStep([true], []);
-    await declined.plan({ conflicts: new Map([[CLAUDE_JSON_BUNDLE_PATH, 'skip']]) });
+    const declined = await planStep([true], [], {
+      conflicts: new Map([[CLAUDE_JSON_BUNDLE_PATH, 'skip']]),
+    });
     expect(declined.asked).toEqual([]);
   });
 
   it('without a terminal, the open question stops the plan', async () => {
     await writeTestFile(join(home, '.claude.json'), '{}');
-    const t = planStep([true], [], createNoTerminalPrompter());
-    await expect(t.plan()).rejects.toBeInstanceOf(AnswerNeededError);
+    const plan = planStep([true], [], { prompter: createNoTerminalPrompter() });
+    await expect(plan).rejects.toBeInstanceOf(AnswerNeededError);
     expect(await readText(join(home, '.claude.json'))).toBe('{}');
   });
 });
@@ -142,23 +134,19 @@ describe("Claude Code plan step: the project's part of ~/.claude.json (T109)", (
   it('names it before pull writes, and has Claude Code closed first, as for the global part', async () => {
     await writeTestFile(join(home, '.claude.json'), '{}');
     const running = [true, false, false];
-    const script = scriptedPrompter(['retry']);
-    const { reporter, lines } = recordingReporter({ levels: false });
-    const adapter = claudeCodeAdapter(home, {
-      isClaudeRunning: () => Promise.resolve(running.shift() ?? false),
-      managedSystem: fakeManagedSystem({ platform: 'linux' }),
-    });
-    if (!adapter.planRestore) throw new Error('no plan step');
     const project = join(home, 'app');
-    const planned = await adapter.planRestore(
-      planContext(script.prompter, reporter, {
+    const { planned, lines, asked } = await planStepWith(null, {
+      answers: ['retry'],
+      overrides: {
         target: { kind: 'project', projectDir: project },
         files: [incoming],
         conflicts: new Map([[CLAUDE_JSON_PROJECT_BUNDLE_PATH, 'merge']]),
-      }),
-    );
+      },
+      homedir: home,
+      adapter: { isClaudeRunning: () => Promise.resolve(running.shift() ?? false) },
+    });
     expect(lines).toContain(NOTE);
-    expect(script.asked).toEqual([
+    expect(asked).toEqual([
       'Claude Code (or the Claude app) is running and rewrites ~/.claude.json while open.',
     ]);
     const report = await planned.restore(answer('merge'), {});
@@ -239,7 +227,11 @@ describe('Claude Code adapter', () => {
  * validate with a passing report, and these answers.
  */
 const planStep = (answers: boolean[], overrides: Partial<RestorePlanContext> = {}) =>
-  planStepWith(validatePassWithWarning, answers, { files: modFiles(), ...overrides }, home);
+  planStepWith(validatePassWithWarning, {
+    answers,
+    overrides: { files: modFiles(), ...overrides },
+    homedir: home,
+  });
 
 describe('Claude Code plan step: plugin folders in skills/ (T97)', () => {
   const base = () => join(home, '.claude');
@@ -316,7 +308,7 @@ describe('Claude Code push notice on mods in development (T103)', () => {
     writeTestFile(join(home, '.claude', 'dev-mods', session, mod, '.claude-plugin', 'plugin.json'));
   const notices = (command: 'push' | 'pull') =>
     claudeCodeAdapter(home, {
-      managedSystem: fakeManagedSystem({ platform: 'linux' }),
+      managedSystem: noManagedSystem,
     }).inspector?.notices(command);
 
   it('names the mods in development on push', async () => {

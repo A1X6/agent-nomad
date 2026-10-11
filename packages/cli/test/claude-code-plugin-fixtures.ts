@@ -11,7 +11,11 @@ import {
   type ProgramCli,
 } from '../src/index.ts';
 
-/** Plugin files shared by the plugin and plugin sync tests (review 7 READ-01). */
+/*
+ * The plugin fixtures of the Claude Code tests: what Claude Code 2.1.295 and 2.1.296 keep and
+ * answer for plugins, mods, managed settings and claude.ai synced files. CONTRIBUTING's Tests
+ * section lists every helper.
+ */
 
 /** Claude Code's list of installed plugins in the base folder `base`. */
 export const installedPluginsFile = (base: string) =>

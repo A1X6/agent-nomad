@@ -295,7 +295,10 @@ describe("claude.ai plugins (T101): pull's plan step", () => {
     answers: boolean[],
     overrides: Partial<RestorePlanContext> = {},
   ) {
-    const t = await planStepWith(validatePassNoHooks, answers, { files, ...overrides });
+    const t = await planStepWith(validatePassNoHooks, {
+      answers,
+      overrides: { files, ...overrides },
+    });
     const report = await t.planned.restore(() => Promise.resolve('skip'), {});
     return { ...t, report };
   }

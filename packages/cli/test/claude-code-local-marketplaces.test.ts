@@ -321,6 +321,7 @@ describe('pull writes a saved local marketplace (T98)', () => {
     expect(plan.marketplaces).toEqual([
       { name: TOOLS, add: join(home, '.agentnomad', 'marketplaces', TOOLS) },
     ]);
+    expect(await exists(join(base, TOOLS))).toBe(false);
   });
 
   // SEC-01 (review 15): each saved file is checked from home, not only the saved folder.
