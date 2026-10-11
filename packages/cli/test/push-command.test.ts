@@ -270,22 +270,22 @@ describe('agentnomad push', () => {
   });
 
   describe('claude.ai skills (T42)', () => {
-    // Claude Code's own optional part (its texts), with what this fake PC has.
-    const claudePart = claudeCodeAdapter(HOME).optionalParts?.[0];
-
-    function withAccountSkills(
+    // Claude Code's own optional part (its texts and default), with what this fake PC has.
+    function withClaudePart(
       names: string[],
       problem: string | null = null,
       notice: string | null = null,
+      id = 'account-skills',
     ) {
       const seen: boolean[] = [];
       const base = collectingAdapter();
-      if (claudePart === undefined) throw new Error('no account skills part');
+      const claudePart = claudeCodeAdapter(HOME).optionalParts?.find((part) => part.id === id);
+      if (claudePart === undefined) throw new Error(`no ${id} part`);
       const adapter: AgentAdapter = {
         ...base,
         collector: {
           collect: (target, options) => {
-            seen.push(options.include?.has('account-skills') === true);
+            seen.push(options.include?.has(id) === true);
             return base.collector.collect(target, options);
           },
         },
@@ -297,7 +297,7 @@ describe('agentnomad push', () => {
     }
 
     it('says what was left out, and why, before asking (T105)', async () => {
-      const some = withAccountSkills(['my-skill'], null, 'Not saved from claude.ai account a: x.');
+      const some = withClaudePart(['my-skill'], null, 'Not saved from claude.ai account a: x.');
       const t = setup([false], { adapter: some.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
       expect(t.lines).toContain('warn: Not saved from claude.ai account a: x.');
@@ -305,7 +305,7 @@ describe('agentnomad push', () => {
     });
 
     it('says when they cannot be read, and that they were not saved', async () => {
-      const broken = withAccountSkills([], 'The synced skills folder could not be read.');
+      const broken = withClaudePart([], 'The synced skills folder could not be read.');
       const t = setup([], { adapter: broken.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
       expect(t.lines).toContain(
@@ -315,7 +315,7 @@ describe('agentnomad push', () => {
     });
 
     it('--account-skills with none here says so', async () => {
-      const none = withAccountSkills([]);
+      const none = withClaudePart([]);
       const t = setup([], { adapter: none.adapter });
       await t.command.push({
         global: true,
@@ -325,25 +325,33 @@ describe('agentnomad push', () => {
       expect(t.lines).toContain('info: No claude.ai skills of your own were found on this PC.');
     });
 
-    it('asks about them when there are some; no by default', async () => {
-      const some = withAccountSkills(['my-skill']);
-      const t = setup([false], { adapter: some.adapter });
+    it('asks about them when there are some; yes by default (T114)', async () => {
+      const some = withClaudePart(['my-skill']);
+      const t = setup([true], { adapter: some.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
       expect(t.script.asked).toEqual([
-        'Also save a copy of your 1 claude.ai skill (my-skill)? Your claude.ai account already syncs them; the copy is for PCs without that account.',
+        'Also save a copy of your 1 claude.ai skill (my-skill)? Your claude.ai account already syncs them; the copy is for PCs without that account. Saved unless you say no.',
       ]);
+      expect(t.script.confirmDefaults).toEqual([true]);
+      expect(some.seen).toEqual([true]);
+    });
+
+    it('a no to the question leaves them out', async () => {
+      const some = withClaudePart(['my-skill']);
+      const t = setup([false], { adapter: some.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
       expect(some.seen).toEqual([false]);
     });
 
     it('does not ask about them when there are none', async () => {
-      const none = withAccountSkills([]);
+      const none = withClaudePart([]);
       const quiet = setup([], { adapter: none.adapter, pc: 'no-account-skills' });
       await quiet.command.push({ global: true, yes: false, memory: false });
       expect(quiet.script.asked).toEqual([]);
     });
 
     it('--account-skills includes them without asking, for the global setup only', async () => {
-      const some = withAccountSkills(['my-skill']);
+      const some = withClaudePart(['my-skill']);
       const t = setup(['my-app'], { adapter: some.adapter });
       await t.command.push({
         global: true,
@@ -356,12 +364,67 @@ describe('agentnomad push', () => {
       expect(some.seen).toEqual([true, false]);
     });
 
-    it('--yes alone leaves them out without asking', async () => {
-      const some = withAccountSkills(['my-skill']);
+    it('--yes alone includes them without asking (T114)', async () => {
+      const some = withClaudePart(['my-skill']);
       const t = setup([], { adapter: some.adapter });
       await t.command.push({ global: true, yes: true });
       expect(t.script.asked).toEqual([]);
+      expect(some.seen).toEqual([true]);
+    });
+
+    it('--no-account-skills leaves them out without asking, even with --yes', async () => {
+      const some = withClaudePart(['my-skill']);
+      const t = setup([], { adapter: some.adapter });
+      await t.command.push({
+        global: true,
+        yes: true,
+        parts: new Map([['account-skills', false]]),
+      });
+      expect(t.script.asked).toEqual([]);
       expect(some.seen).toEqual([false]);
+    });
+
+    it('asks about claude.ai plugins with yes as the default (T114)', async () => {
+      const plugins = withClaudePart(['my-upload'], null, null, 'account-plugins');
+      const t = setup([true], { adapter: plugins.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
+      expect(t.script.confirmDefaults).toEqual([true]);
+      expect(plugins.seen).toEqual([true]);
+    });
+
+    it('--yes alone includes claude.ai plugins without asking (T114)', async () => {
+      const plugins = withClaudePart(['my-upload'], null, null, 'account-plugins');
+      const t = setup([], { adapter: plugins.adapter });
+      await t.command.push({ global: true, yes: true });
+      expect(t.script.asked).toEqual([]);
+      expect(plugins.seen).toEqual([true]);
+    });
+
+    it('--no-account-plugins leaves them out without asking, even with --yes', async () => {
+      const plugins = withClaudePart(['my-upload'], null, null, 'account-plugins');
+      const t = setup([], { adapter: plugins.adapter });
+      await t.command.push({
+        global: true,
+        yes: true,
+        parts: new Map([['account-plugins', false]]),
+      });
+      expect(t.script.asked).toEqual([]);
+      expect(plugins.seen).toEqual([false]);
+    });
+
+    it('--yes alone still leaves plugin data out (its default stays no)', async () => {
+      const data = withClaudePart(['probe-mod@skills-dir'], null, null, 'plugin-data');
+      const t = setup([], { adapter: data.adapter });
+      await t.command.push({ global: true, yes: true });
+      expect(t.script.asked).toEqual([]);
+      expect(data.seen).toEqual([false]);
+    });
+
+    it('asks about plugin data with no as the default', async () => {
+      const data = withClaudePart(['probe-mod@skills-dir'], null, null, 'plugin-data');
+      const t = setup([false], { adapter: data.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
+      expect(t.script.confirmDefaults).toEqual([false]);
     });
   });
 

@@ -271,9 +271,9 @@ export type AccountPluginsContext = Pick<
 >;
 
 /**
- * Saved claude.ai plugins (T101): listed, and offered as plugins in `skills/<name>/` only
- * after a yes or `--account-plugins` (`--yes` alone never adds them). Returns the files to
- * add, as `skills/<name>/...`; the plugin review (T97) then checks them like any plugin folder.
+ * Saved claude.ai plugins (T101): listed, and added as plugins in `skills/<name>/` unless the
+ * user says no or `--no-account-plugins` (`--yes` adds them, T114). Returns the files to add,
+ * as `skills/<name>/...`; the plugin review (T97) then checks them like any plugin folder.
  */
 export async function askAccountPlugins(
   context: AccountPluginsContext,
@@ -291,10 +291,10 @@ export async function askAccountPlugins(
   if (plan.toAdd.length === 0) return [];
   const add =
     context.parts.get(ACCOUNT_PLUGINS_PART) ??
-    (!context.assumeYes &&
+    (context.assumeYes ||
       (await context.prompter.confirm(
-        'Add them as local plugins in ~/.claude/skills/? Only needed if this PC uses another claude.ai account, or none.',
-        false,
+        'Add them as local plugins in ~/.claude/skills/? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
+        true,
       )));
   if (!add) {
     context.reporter.info(

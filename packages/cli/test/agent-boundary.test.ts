@@ -103,6 +103,7 @@ function exampleAdapter(home: string, seen: Seen): AgentAdapter {
       {
         id: 'prompts',
         scope: 'global',
+        defaultYes: false,
         available: () => Promise.resolve({ names: ['review'], problem: null }),
         question: (names) => `Also save your prompts library (${names.join(', ')})?`,
         unreadable: (problem) => problem,

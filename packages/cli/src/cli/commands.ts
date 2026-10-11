@@ -17,8 +17,8 @@ export interface PushOptions extends ScopeFlags {
   readonly memory?: boolean;
   /**
    * An agent's optional parts answered by flags, by part id (T61), e.g. `--account-skills` /
-   * `--no-account-skills` → `account-skills`: save it or not instead of asking (default with
-   * --yes: no).
+   * `--no-account-skills` → `account-skills`: save it or not instead of asking (with --yes:
+   * the part's `defaultYes`, T114: claude.ai skills and plugins yes, plugin data no).
    */
   readonly parts?: ReadonlyMap<string, boolean>;
 }
@@ -35,7 +35,7 @@ export interface PullOptions extends ScopeFlags {
   /**
    * An agent's optional parts answered by flags, by part id (T61), e.g. `--account-skills` /
    * `--no-account-skills` → `account-skills`: add saved claude.ai skills as local skills or
-   * not, instead of asking (default with --yes: no).
+   * not, instead of asking (with --yes, T114: claude.ai skills and plugins yes, plugin data no).
    */
   readonly parts?: ReadonlyMap<string, boolean>;
 }
