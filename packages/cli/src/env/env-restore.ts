@@ -1,6 +1,8 @@
+import type { EnvValuesChoice } from '../cli/commands.ts';
+import { ENV_VALUES_ALL, ENV_VALUES_NONE, QUESTION_REASON } from '../cli/help-text.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
 import type { EnvSection } from './env-section.ts';
-import { LOADER_VARIABLE } from './loader-variables.ts';
+import { isLoaderVariable } from './loader-variables.ts';
 import type { EnvWriter } from './shell-profile.ts';
 
 export interface RestoreEnvDeps {
@@ -14,6 +16,11 @@ export interface RestoreEnvDeps {
   readonly assumeYes?: boolean;
   /** `--allow-commands`: add those too without asking (T44, T56). */
   readonly allowCommands?: boolean;
+  /**
+   * `--env-values`: which missing values to add instead of asking (T115). One that loads code
+   * or redirects requests still needs `--allow-commands` or a yes.
+   */
+  readonly choice?: EnvValuesChoice;
   /** Names that send programs' requests elsewhere, from the agent's restorer (T61). */
   readonly isRedirectVariable: (name: string) => boolean;
 }
@@ -36,6 +43,21 @@ async function splitEnvValues(
   return { alreadySet: names.filter((name) => !missing.includes(name)), missing };
 }
 
+/**
+ * Names `--env-values` gives that no setup of the pull saved a value for (`saved`): they are
+ * not added, so pull says so, once for the whole pull (UX-05; UX-02 of review 16).
+ */
+export function warnNotSaved(
+  reporter: Pick<Reporter, 'warn'>,
+  choice: EnvValuesChoice | undefined,
+  saved: readonly string[],
+): void {
+  const named = choice === undefined || typeof choice === 'string' ? [] : choice;
+  const notSaved = named.filter((name) => !saved.includes(name));
+  if (notSaved.length > 0)
+    reporter.warn(`Not in the saved setup, so not added: ${notSaved.join(', ')}.`);
+}
+
 /** Which saved values pull will add, chosen before it writes anything (T59). */
 export interface EnvRestorePlan {
   readonly toAdd: readonly string[];
@@ -49,7 +71,8 @@ export interface EnvRestorePlan {
  * are never shown. Variables that make a shell or runtime load code (`NODE_OPTIONS`,
  * `PROMPT_COMMAND`, …) or send programs' requests elsewhere (`HTTPS_PROXY`,
  * `ANTHROPIC_BASE_URL`, …) get their own question with "no" as the default, and `--yes`
- * alone never adds them (T44, T56).
+ * alone never adds them (T44, T56). `--env-values` answers which to add instead of asking
+ * (T115); it never passes that gate on its own.
  */
 export async function planEnvRestore(
   deps: Omit<RestoreEnvDeps, 'writer'> & {
@@ -57,17 +80,26 @@ export async function planEnvRestore(
   },
 ): Promise<EnvRestorePlan> {
   const names = Object.keys(deps.section.variables);
-  const { alreadySet, missing } = await splitEnvValues(
+  const { choice } = deps;
+  const { alreadySet, missing: all } = await splitEnvValues(
     deps.section.variables,
     deps.env,
     deps.writer,
   );
+  // `--env-values` narrows what is offered; the rest counts as declined.
+  const missing = all.filter(
+    (name) =>
+      choice === undefined ||
+      choice === ENV_VALUES_ALL ||
+      (choice !== ENV_VALUES_NONE && choice.includes(name)),
+  );
+  if (missing.length === 0 && all.length > 0) return { toAdd: [], alreadySet, declined: true };
   if (missing.length === 0) {
     if (names.length > 0)
       deps.reporter.info('The saved environment variables are already set here.');
     return { toAdd: [], alreadySet, declined: false };
   }
-  const loaders = missing.filter((name) => LOADER_VARIABLE.test(name));
+  const loaders = missing.filter(isLoaderVariable);
   const redirects = missing.filter(
     (name) => !loaders.includes(name) && deps.isRedirectVariable(name),
   );
@@ -86,9 +118,16 @@ export async function planEnvRestore(
   const count = (list: readonly string[]) =>
     `${String(list.length)} variable${list.length === 1 ? '' : 's'}`;
   const toAdd: string[] = [];
-  let declined = false;
+  let declined = missing.length < all.length;
   if (plain.length > 0) {
-    if (deps.assumeYes || (await deps.prompter.confirm(`Add ${count(plain)}?`, true))) {
+    if (
+      deps.assumeYes ||
+      choice !== undefined ||
+      (await deps.prompter.confirm(
+        `Add ${count(plain)}? ${QUESTION_REASON.envValuesPull(plain.length === 1)}`,
+        true,
+      ))
+    ) {
       toAdd.push(...plain);
     } else declined = true;
   }

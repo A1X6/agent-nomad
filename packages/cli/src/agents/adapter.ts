@@ -50,7 +50,7 @@ export interface Collector {
 }
 
 /**
- * Something an agent saves only when the user opts in (T61), e.g. Claude Code's copy of the
+ * Something an agent saves only when the user agrees (T61), e.g. Claude Code's copy of the
  * user's claude.ai skills (T42). Push asks about each one; `--<id>` / `--no-<id>` answer it.
  */
 export interface OptionalPart {
@@ -58,8 +58,20 @@ export interface OptionalPart {
   readonly id: string;
   /** The setup it belongs to. */
   readonly scope: ScopeTarget['kind'];
-  /** What there is to save on this PC, or why it cannot be read. */
-  available(): Promise<{ readonly names: readonly string[]; readonly problem: string | null }>;
+  /**
+   * The question's default answer, and what `--yes` does (T114): saved unless the user says
+   * no (`true`), or left out unless the user says yes (`false`).
+   */
+  readonly defaultYes: boolean;
+  /**
+   * What there is to save on this PC, or why it cannot be read, and what to say before asking
+   * (`notice`, e.g. what was left out and why).
+   */
+  available(): Promise<{
+    readonly names: readonly string[];
+    readonly problem: string | null;
+    readonly notice?: string | null;
+  }>;
   /** Push's question, e.g. `Also save a copy of your 2 claude.ai skills (a, b)? …`. */
   question(names: readonly string[]): string;
   /** Said when it cannot be read, given `available()`'s problem. */
@@ -191,8 +203,17 @@ export interface AgentInspector {
   unknownEntries(target: ScopeTarget): Promise<readonly string[]>;
   /** Things to point out before push, pull or `agents`, e.g. organization-managed settings. */
   notices(command: 'push' | 'pull' | 'agents'): Promise<readonly string[]>;
-  /** What pull says about the version a setup was saved with; `null`: nothing to say. */
-  versionNotice?(savedWith: string | null, here: string | null): string | null;
+  /**
+   * What pull says about the version a setup was saved with, and about what in its `files`
+   * this PC's version cannot run (T103: mods); `null`: nothing to say.
+   */
+  versionNotice?(
+    savedWith: string | null,
+    here: string | null,
+    files: readonly CollectedFile[],
+  ): string | null;
+  /** Lines push's summary adds about collected files, e.g. the plugins among them (T97). */
+  pushNotes?(files: readonly CollectedFile[]): readonly string[];
 }
 
 /** What an agent's part of pull's plan step gets for one setup (T61). Nothing is written yet. */
@@ -204,6 +225,12 @@ export interface RestorePlanContext {
   readonly conflicts: ReadonlyMap<string, ConflictChoice>;
   /** The answer for every other file (flags or "… all remaining files"), if one was given. */
   readonly conflictAnswer: ConflictChoice | undefined;
+  /**
+   * Asks about one more file that is here and differs, as pull asks about the setup's files
+   * (T98: a file the agent writes outside its folders); the same "… all remaining files"
+   * answer holds. Without it, such a file gets `conflictAnswer`, or is left as it is.
+   */
+  readonly askConflict?: ConflictResolver;
   readonly prompter: Prompter;
   readonly reporter: Reporter;
   /** `--yes`: accept without asking where that is safe. */
@@ -228,6 +255,41 @@ export interface AgentRestorePlan {
   restore(onConflict: ConflictResolver, context: RestoreContext): Promise<RestoreReport>;
   /** Runs after every planned setup was written, e.g. plugin reinstalls (T34). */
   afterRestore(context: AfterRestoreContext): Promise<void>;
+  /**
+   * The agent's questions left part of the setup out (T97: a declined plugin folder), so a
+   * later push asks first, as after declined commands.
+   */
+  readonly declined?: boolean;
+  /**
+   * What pull's summary says of this plan before it asks to write (UX-01): how many files it
+   * writes, and one line per choice its questions made, e.g. `--account-plugins yes (notes)`
+   * or `plugin folders left out: skills/probe-mod`.
+   */
+  readonly summary?: { readonly files: number; readonly chosen: readonly string[] };
+}
+
+/**
+ * What a setup holds, in the plain words `push --help`, `pull --help` and the README "What is
+ * synced" table use (T115). The lists are the README "What is synced" cells, item for item:
+ * the `…Also` lists come from the rows other than Global and Project (READ-02).
+ */
+export interface AgentContents {
+  /** How help names the global setup, e.g. `global setup (~/.claude)`. */
+  readonly globalLabel: string;
+  /** Always saved with the global setup. */
+  readonly global: readonly string[];
+  /** Also always saved with it, from outside its folder (other README rows). */
+  readonly globalAlso: readonly string[];
+  /** Always saved with a project. */
+  readonly project: readonly string[];
+  /** Also always saved with it, from outside its folder (other README rows). */
+  readonly projectAlso: readonly string[];
+  /** Never saved from the global setup. */
+  readonly globalNever: readonly string[];
+  /** Never saved from outside its folder either (other README rows). */
+  readonly globalNeverAlso: readonly string[];
+  /** Never saved from a project. */
+  readonly projectNever: readonly string[];
 }
 
 /**
@@ -248,6 +310,8 @@ export interface AgentAdapter {
   readonly envReferences?: EnvReferenceFiles;
   /** What push saves only after a yes (T61). */
   readonly optionalParts?: readonly OptionalPart[];
+  /** What a setup always holds and never holds, for `--help` (T115). */
+  readonly contents?: AgentContents;
   /**
    * The agent's own questions for one pulled setup, asked in pull's plan step before
    * anything is written (T61): e.g. an open app that rewrites a file, plugins to reinstall.

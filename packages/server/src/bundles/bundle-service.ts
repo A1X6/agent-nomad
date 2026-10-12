@@ -90,19 +90,22 @@ export interface BundleServiceDeps {
   /** Reports cleanup failures; the request itself still succeeds. */
   readonly logError: (message: string, error: unknown) => void;
   /**
-   * Whether this save also sweeps files no setup points to (T47); about one save in 50 by
-   * default, so the work is spread thin. Injectable for tests.
+   * Whether this save also sweeps files no setup points to (T47); `SWEEP_CHANCE` in
+   * production, so the work is spread thin. The save answers without waiting for it (DB-01).
    */
-  readonly shouldSweep?: () => boolean;
+  readonly shouldSweep: () => boolean;
 }
 
 /** Files left unused for this long are swept: far longer than any upload takes. */
 const ORPHAN_AGE_SECONDS = 60 * 60;
 
-export function createBundleService(deps: BundleServiceDeps): BundleService {
-  const { bundles, blobs, logError } = deps;
-  const shouldSweep = deps.shouldSweep ?? (() => Math.random() < 0.02);
+/** Reads of a setup per download while saves keep replacing its file under it. */
+const DOWNLOAD_TRIES = 3;
 
+export function createBundleService(deps: BundleServiceDeps): BundleService {
+  const { bundles, blobs, logError, shouldSweep } = deps;
+
+  /** Never rejects, so a save can start it and answer without waiting. */
   async function sweepQuietly(): Promise<void> {
     try {
       await blobs.deleteOrphans?.(ORPHAN_AGE_SECONDS);
@@ -137,12 +140,20 @@ export function createBundleService(deps: BundleServiceDeps): BundleService {
     list: (userId, page) => bundles.list(userId, page),
 
     async download(key) {
-      const meta = await bundles.get(key);
-      if (!meta) throw new BundleNotFoundError();
-      const ciphertext = await blobs.get({ userId: key.userId, blobId: meta.blobId });
-      // The foreign key keeps the current file alive, so this means the database is broken.
-      if (!ciphertext) throw new Error(`Current file ${meta.blobId} of a saved setup is missing`);
-      return { meta, ciphertext };
+      let missing: string | undefined;
+      // A save or delete can land between the two reads and remove the file just read from
+      // the setup (BUG-03): read the setup again and follow it, a few times at most.
+      for (let tries = 0; tries < DOWNLOAD_TRIES; tries++) {
+        const meta = await bundles.get(key);
+        if (!meta) throw new BundleNotFoundError();
+        // The foreign key keeps the current file alive, so the same file missing twice
+        // means the database is broken.
+        if (meta.blobId === missing) break;
+        const ciphertext = await blobs.get({ userId: key.userId, blobId: meta.blobId });
+        if (ciphertext) return { meta, ciphertext };
+        missing = meta.blobId;
+      }
+      throw new Error(`Current file ${String(missing)} of a saved setup is missing`);
     },
 
     async upload(input) {
@@ -183,7 +194,8 @@ export function createBundleService(deps: BundleServiceDeps): BundleService {
       switch (result.outcome) {
         case 'saved':
           if (result.replacedBlobId) await deleteQuietly(userId, result.replacedBlobId);
-          if (shouldSweep()) await sweepQuietly();
+          // The sweep reads every user's files (DB-01): the save answers without waiting.
+          if (shouldSweep()) void sweepQuietly();
           return { outcome: 'stored', meta: result.meta };
         case 'unchanged':
           await deleteQuietly(userId, uploaded.blobId);

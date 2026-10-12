@@ -1,35 +1,38 @@
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import {
   base,
-  home,
   synced,
   syncedSetup,
   useProjectFolders,
+  planStepWith,
 } from './claude-code-project-fixtures.ts';
 import {
-  collected,
-  paths,
-  readText,
-  recordingReporter,
-  scriptedPrompter,
-  writeTestFile,
-} from './fakes.ts';
+  MOD_NAME,
+  modFiles,
+  olderSyncedSkillsManifest,
+  SYNCED_ACCOUNT,
+  syncedAccount,
+  syncedDirectorySkill,
+  syncedOrganizationSkill,
+  syncedSkillsManifest,
+  type SyncedSkillEntry,
+} from './claude-code-plugin-fixtures.ts';
+import { collected, paths, readText, writeTestFile } from './fakes.ts';
 
 import {
+  ACCOUNT_PLUGINS_PREFIX,
   ACCOUNT_SKILLS_PREFIX,
   collectAccountSkills,
-  createClaudeCodeAfterRestore,
-  createClaudeCodeRestorer,
   createFileGatherer,
   pathsOf,
   planAccountSkills,
   readSyncedSkills,
   SKIPPED_NAMES,
   type CollectedFile,
-  type ExecutableLookupSystem,
 } from '../src/index.ts';
 
 useProjectFolders('agentnomad-account-skills-');
@@ -53,7 +56,7 @@ describe('claude.ai skills (T42): reading and saving', () => {
     ]);
   });
 
-  it('an entry without creatorType (as on a newly synced skill) is skipped, not the whole list', async () => {
+  it('an entry with neither creatorType nor source is left out and named, not the whole list', async () => {
     await writeTestFile(
       synced('manifest.json'),
       JSON.stringify({
@@ -66,6 +69,9 @@ describe('claude.ai skills (T42): reading and saving', () => {
     expect(found.problem).toBeNull();
     expect(found.own.map((skill) => skill.name)).toEqual(['my-skill']);
     expect([...found.allNames].sort()).toEqual(['brand-new', 'my-skill']);
+    expect(found.notice).toContain(
+      'brand-new (Claude Code does not say where it comes from in a way agentnomad knows).',
+    );
   });
 
   it('a missing or unknown manifest saves nothing and says why', async () => {
@@ -74,6 +80,156 @@ describe('claude.ai skills (T42): reading and saving', () => {
     const found = await readSyncedSkills(pathsOf(process.platform), base);
     expect(found.own).toEqual([]);
     expect(found.problem).toContain('in a format agentnomad does not know');
+  });
+
+  it('names every account whose manifest cannot be read, not only the last', async () => {
+    await writeTestFile(synced('manifest.json'), '{"version": 2, "entries": []}');
+    await writeTestFile(join(base, 'skills', 'synced', 'other-account', 'manifest.json'), 'x');
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
+    expect(found.problem?.match(/Claude Code's list of synced skills/g)).toHaveLength(2);
+    expect(found.problem).toContain('(skills/synced/other-account/manifest.json)');
+  });
+});
+
+/** One entry of the 2.1.295 skills manifest (the 2.1.296 shape too), by name. */
+function syncedSkill(name: string): SyncedSkillEntry {
+  const skill = syncedSkillsManifest.skills.find((entry) => entry.name === name);
+  if (skill === undefined) throw new Error(`no synced skill ${name} in the fixture`);
+  return skill;
+}
+
+/** What push finds after Claude Code 2.1.295 or 2.1.296 synced `skills` (see `syncedAccount`). */
+async function syncedWith(skills: readonly SyncedSkillEntry[], marketplaces = true) {
+  await syncedAccount(base, { skills, marketplaces });
+  const found = await readSyncedSkills(pathsOf(process.platform), base);
+  return { ...found, ownNames: found.own.map((skill) => skill.name) };
+}
+
+const notSavedFrom = `Not saved from claude.ai account ${SYNCED_ACCOUNT}:`;
+const fromOthers = 'it comes from your organization or claude.ai, not from you';
+const cannotTell = 'agentnomad cannot tell which claude.ai marketplace it comes from';
+const unknownSource = 'Claude Code does not say where it comes from in a way agentnomad knows';
+
+describe('claude.ai skills on Claude Code 2.1.295, without creatorType (T105)', () => {
+  it('saves a plugin skill from your own uploads', async () => {
+    const found = await syncedWith([syncedSkill('my-upload')]);
+    expect(found.ownNames).toEqual(['my-upload']);
+    expect(found.notice).toBeNull();
+  });
+
+  it('saves a custom skill (no source from the server)', async () => {
+    const found = await syncedWith([syncedSkill('my-custom')]);
+    expect(found.ownNames).toEqual(['my-custom']);
+    expect(found.notice).toBeNull();
+  });
+
+  it.each([
+    ['anthropic', 'pdf'],
+    ['anthropic-example', 'example-skill'],
+    ['session-refs', 'session-skill'],
+  ])('never saves a skill with source %s, and says nothing about it', async (_source, name) => {
+    const found = await syncedWith([syncedSkill(name)]);
+    expect(found.ownNames).toEqual([]);
+    expect(found.notice).toBeNull();
+  });
+
+  it('from the whole manifest saves only the plugin and custom skills', async () => {
+    const found = await syncedWith(syncedSkillsManifest.skills);
+    expect(found.problem).toBeNull();
+    expect(found.ownNames).toEqual(['my-custom', 'my-upload']);
+    expect([...found.allNames].sort()).toEqual([
+      'example-skill',
+      'my-custom',
+      'my-upload',
+      'pdf',
+      'session-skill',
+    ]);
+  });
+
+  it("leaves out an organization's plugin skill and names it", async () => {
+    const found = await syncedWith([syncedSkill('my-upload'), syncedOrganizationSkill]);
+    expect(found.ownNames).toEqual(['my-upload']);
+    expect(found.notice).toBe(`${notSavedFrom} team-skill (${fromOthers}).`);
+  });
+
+  it("leaves out a plugin skill from claude.ai's directory and names it", async () => {
+    const found = await syncedWith([syncedDirectorySkill]);
+    expect(found.ownNames).toEqual([]);
+    expect(found.notice).toBe(`${notSavedFrom} directory-skill (${fromOthers}).`);
+  });
+
+  it('without the marketplaces list saves plugin skills and says organization skills cannot be told apart', async () => {
+    const found = await syncedWith([syncedSkill('my-upload'), syncedOrganizationSkill], false);
+    expect(found.ownNames).toEqual(['my-upload', 'team-skill']);
+    expect(found.notice).toBe(
+      `Claude Code keeps no list of claude.ai marketplaces for account ${SYNCED_ACCOUNT} (plugins/synced/${SYNCED_ACCOUNT}/.marketplaces.json), so your organization's skills cannot be told apart from your own: check the names before you save them.`,
+    );
+  });
+
+  it('without the marketplaces list a custom skill needs no notice', async () => {
+    const found = await syncedWith([syncedSkill('my-custom')], false);
+    expect(found.ownNames).toEqual(['my-custom']);
+    expect(found.notice).toBeNull();
+  });
+
+  it('leaves out a plugin skill whose plugin is not among the synced plugins', async () => {
+    const gone = { ...syncedSkill('my-upload'), backingPluginId: 'plugin_99gone' };
+    const found = await syncedWith([gone]);
+    expect(found.ownNames).toEqual([]);
+    expect(found.notice).toBe(`${notSavedFrom} my-upload (${cannotTell}).`);
+  });
+
+  it('leaves out every plugin skill when the marketplaces list cannot be read', async () => {
+    await syncedAccount(base, { skills: [syncedSkill('my-upload'), syncedSkill('my-custom')] });
+    await writeTestFile(join(base, 'plugins', 'synced', SYNCED_ACCOUNT, '.marketplaces.json'), 'x');
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
+    expect(found.own.map((skill) => skill.name)).toEqual(['my-custom']);
+    expect(found.notice).toBe(`${notSavedFrom} my-upload (${cannotTell}).`);
+  });
+
+  it('leaves out a skill with a source agentnomad does not know and names it', async () => {
+    const found = await syncedWith([{ name: 'odd', description: 'd', source: 'marketplace-v3' }]);
+    expect(found.ownNames).toEqual([]);
+    expect(found.notice).toBe(`${notSavedFrom} odd (${unknownSource}).`);
+  });
+
+  it('still follows creatorType on an older Claude Code', async () => {
+    const found = await syncedWith(olderSyncedSkillsManifest.skills);
+    expect(found.ownNames).toEqual(['older-skill']);
+    expect(found.notice).toBeNull();
+  });
+
+  it('never saves an entry whose creatorType is not user, whatever its source', async () => {
+    const found = await syncedWith([{ ...syncedSkill('my-custom'), creatorType: 'organization' }]);
+    expect(found.ownNames).toEqual([]);
+    expect(found.notice).toBeNull();
+  });
+
+  it('an unreadable manifest saves nothing and names the account', async () => {
+    await syncedAccount(base);
+    await writeTestFile(join(base, 'skills', 'synced', SYNCED_ACCOUNT, 'manifest.json'), '{');
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
+    expect(found.own).toEqual([]);
+    expect(found.problem).toBe(
+      `Claude Code's list of synced skills (skills/synced/${SYNCED_ACCOUNT}/manifest.json) is missing or in a format agentnomad does not know.`,
+    );
+  });
+
+  // UX-03 (review 15): push names every skill of the user's it leaves out, as for plugins.
+  it('names an own skill whose folder is not on this PC', async () => {
+    await syncedAccount(base, { skills: [syncedSkill('my-custom')] });
+    await rm(join(base, 'skills', 'synced', SYNCED_ACCOUNT, 'my-custom'), { recursive: true });
+    const found = await readSyncedSkills(pathsOf(process.platform), base);
+    expect(found.own).toEqual([]);
+    expect(found.notice).toBe(`${notSavedFrom} my-custom (its folder here is missing).`);
+  });
+
+  it('names an own skill whose name cannot be a folder in ~/.claude/skills', async () => {
+    const found = await syncedWith([{ ...syncedSkill('my-custom'), name: 'my custom' }]);
+    expect(found.ownNames).toEqual([]);
+    expect(found.notice).toBe(
+      `${notSavedFrom} my custom (its name cannot be a folder in ~/.claude/skills).`,
+    );
   });
 });
 
@@ -110,91 +266,135 @@ describe('claude.ai skills (T42): what pull may add', () => {
 });
 
 describe('claude.ai skills (T42): pull adds them as local skills', () => {
-  function run(
+  /** The plan step for `files` with these flags and answers; no `claude` on this PC. */
+  const planStep = (
     files: CollectedFile[],
     options: { assumeYes?: boolean; allowCommands?: boolean; accountSkills?: boolean } = {},
     answers: boolean[] = [],
-  ) {
-    const script = scriptedPrompter(answers);
-    const { reporter, lines } = recordingReporter({ levels: false });
-    const system: ExecutableLookupSystem = {
-      platform: process.platform,
-      homedir: home,
-      env: { PATH: '' },
-      isExecutable: () => Promise.resolve(false),
-    };
-    const restorer = createClaudeCodeRestorer({
-      baseDir: base,
-      homedir: home,
-      platform: process.platform,
-      env: {},
-      customConfigDir: false,
-      isClaudeRunning: () => Promise.resolve(false),
+  ) =>
+    planStepWith(null, {
+      answers,
+      overrides: {
+        files,
+        assumeYes: options.assumeYes ?? false,
+        allowCommands: options.allowCommands ?? false,
+        parts: new Map(
+          options.accountSkills === undefined ? [] : [['account-skills', options.accountSkills]],
+        ),
+      },
     });
-    // The plan step asks; the follow-up it returns writes, with no prompter (T61).
-    const planned = createClaudeCodeAfterRestore({
-      system,
-      restorer,
-      managedSettings: () => Promise.reject(new Error('not read for skills')),
-    })({
-      target: { kind: 'global' },
-      files,
-      assumeYes: options.assumeYes ?? false,
-      allowCommands: options.allowCommands ?? false,
-      parts: new Map(
-        options.accountSkills === undefined ? [] : [['account-skills', options.accountSkills]],
-      ),
-      prompter: script.prompter,
-      reporter,
-    });
-    const done = planned.then((followUp) => followUp({ reporter }));
-    return { planned, done, asked: script.asked, lines };
+
+  /**
+   * The restore and its follow-up of what `step` planned, as pull runs them: the plan step asks
+   * (SEC-03: with the saved plugins), writing asks nothing (T61), and pull shows the restore's
+   * warnings.
+   */
+  async function restoreAll(step: Awaited<ReturnType<typeof planStep>>) {
+    const report = await step.planned.restore(() => Promise.resolve('skip'), {});
+    for (const warning of report.warnings) step.reporter.warn(warning);
+    await step.planned.afterRestore({ reporter: step.reporter });
+    return { ...step, plan: step.planned, report };
   }
+
+  /** {@link planStep}, then {@link restoreAll}. */
+  const run = async (...args: Parameters<typeof planStep>) => restoreAll(await planStep(...args));
   const skillFile = (name: string) => readText(join(base, 'skills', name, 'SKILL.md'));
 
   it('asks, and a yes writes them into ~/.claude/skills/<name>/', async () => {
-    const t = run([saved('mine', 'Plain.')], {}, [true]);
-    await t.planned;
+    const planned = await planStep([saved('mine', 'Plain.')], {}, [true]);
     // Asked in the plan step.
-    expect(t.asked).toHaveLength(1);
-    await t.done;
+    expect(planned.asked).toHaveLength(1);
+    const t = await restoreAll(planned);
     expect(t.asked).toEqual([
-      'Add them as local skills? Only needed if this PC uses another claude.ai account, or none.',
+      'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
     ]);
     expect(await skillFile('mine')).toContain('Plain.');
     expect(t.lines.at(-1)).toContain('Added mine as local skills.');
   });
 
-  it('no by default; --yes alone never adds them and never asks', async () => {
-    const no = run([saved('mine', 'Plain.')], {}, [false]);
-    await no.done;
+  // UX-01 (review 15, T118): pull's summary names what the agent's questions chose.
+  it("names a yes in pull's summary", async () => {
+    const { plan } = await run([saved('mine', 'Plain.')], {}, [true]);
+    expect(plan.summary?.chosen).toContain('--account-skills yes (mine)');
+  });
+
+  it("names a no in pull's summary", async () => {
+    const { plan } = await run([saved('mine', 'Plain.')], {}, [false]);
+    expect(plan.summary?.chosen).toContain('--account-skills no (mine)');
+  });
+
+  // UX-01 (review 16): the line names what --yes added and what it left out.
+  it("names the skills --yes leaves out for want of --allow-commands in pull's summary", async () => {
+    const files = [saved('mine', 'Plain.'), saved('runner', 'Run !`git status`')];
+    const { plan } = await run(files, { assumeYes: true });
+    expect(plan.summary?.chosen).toContain(
+      '--account-skills yes (mine); runner needs --allow-commands',
+    );
+  });
+
+  it("says yes, not no, in pull's summary when --yes leaves out every skill", async () => {
+    const { plan } = await run([saved('runner', 'Run !`git status`')], { assumeYes: true });
+    expect(plan.summary?.chosen).toContain('--account-skills yes; runner needs --allow-commands');
+  });
+
+  it('asks with yes as the default (T114)', async () => {
+    const t = await run([saved('mine', 'Plain.')], {}, [true]);
+    expect(t.defaults).toEqual([true]);
+  });
+
+  it('a no adds none', async () => {
+    await run([saved('mine', 'Plain.')], {}, [false]);
     await expect(skillFile('mine')).rejects.toThrow();
-    const yes = run([saved('mine', 'Plain.')], { assumeYes: true });
-    await yes.done;
+  });
+
+  it('--yes adds them without asking (T114)', async () => {
+    const yes = await run([saved('mine', 'Plain.')], { assumeYes: true });
     expect(yes.asked).toEqual([]);
+    expect(await skillFile('mine')).toContain('Plain.');
+  });
+
+  it('--yes never adds one that runs commands without --allow-commands', async () => {
+    const files = [saved('mine', 'Plain.'), saved('runner', 'Run !`git status`')];
+    const yes = await run(files, { assumeYes: true });
+    expect(await skillFile('mine')).toContain('Plain.');
+    await expect(skillFile('runner')).rejects.toThrow();
+    expect(yes.lines.join('\n')).toContain('Skipped runner: it runs commands as a local skill.');
+  });
+
+  it('--yes with --allow-commands adds one that runs commands', async () => {
+    const files = [saved('runner', 'Run !`git status`')];
+    await run(files, { assumeYes: true, allowCommands: true });
+    expect(await skillFile('runner')).toContain('git status');
+  });
+
+  it('--no-account-skills adds none without asking, even with --yes', async () => {
+    const no = await run([saved('mine', 'Plain.')], { assumeYes: true, accountSkills: false });
+    expect(no.asked).toEqual([]);
     await expect(skillFile('mine')).rejects.toThrow();
+    expect(no.lines).toContain(
+      'Not added. To add them later: agentnomad pull --global --account-skills',
+    );
   });
 
   it('--account-skills adds them without asking, but not one that runs commands unless --allow-commands', async () => {
     const files = [saved('mine', 'Plain.'), saved('runner', 'Run !`git status`')];
-    const flag = run(files, { accountSkills: true });
-    await flag.done;
+    const flag = await run(files, { accountSkills: true });
     expect(flag.asked).toEqual([]);
     expect(await skillFile('mine')).toContain('Plain.');
     await expect(skillFile('runner')).rejects.toThrow();
     expect(flag.lines.join('\n')).toContain('runner  ⚠ runs commands');
     expect(flag.lines.join('\n')).toContain('Skipped runner: it runs commands as a local skill.');
 
-    const allowed = run(files, { accountSkills: true, allowCommands: true });
-    await allowed.done;
+    await run(files, { accountSkills: true, allowCommands: true });
     expect(await skillFile('runner')).toContain('git status');
   });
 
   it('names only the skills it wrote as added (UX-01)', async () => {
     // A file where the skill's folder would go: none of its files can be written.
     await writeTestFile(join(base, 'skills', 'broken'), 'not a folder');
-    const t = run([saved('mine', 'Plain.'), saved('broken', 'Plain.')], { accountSkills: true });
-    await t.done;
+    const t = await run([saved('mine', 'Plain.'), saved('broken', 'Plain.')], {
+      accountSkills: true,
+    });
     expect(await skillFile('mine')).toContain('Plain.');
     const shown = t.lines.join('\n');
     expect(shown).toContain('Skipped "skills/broken/SKILL.md"');
@@ -202,18 +402,69 @@ describe('claude.ai skills (T42): pull adds them as local skills', () => {
     expect(t.lines.at(-1)).toContain('Added mine as local skills.');
   });
 
-  it('skips a skill this PC already gets from claude.ai, and never touches a local one', async () => {
+  it('skips a skill this PC already gets from claude.ai', async () => {
     await syncedSetup();
-    await writeTestFile(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
-    const t = run([saved('my-skill', 'From the other PC.'), saved('local-one', 'Theirs.')], {
-      accountSkills: true,
-    });
-    await t.done;
-    expect(await skillFile('local-one')).toBe('My own local version.');
+    const t = await run([saved('my-skill', 'From the other PC.')], { accountSkills: true });
     await expect(skillFile('my-skill')).rejects.toThrow();
     expect(t.lines.join('\n')).toContain(
       'my-skill: skipped, this PC already gets it from claude.ai',
     );
+  });
+
+  it('never touches a local skill of the same name', async () => {
+    await writeTestFile(join(base, 'skills', 'local-one', 'SKILL.md'), 'My own local version.');
+    await run([saved('local-one', 'Theirs.')], { accountSkills: true });
+    expect(await skillFile('local-one')).toBe('My own local version.');
+  });
+
+  // SEC-03 (review 15): a saved skill folder that is a plugin gets the plugin review (T97).
+  it('--yes never adds a saved skill that is a plugin with code', async () => {
+    const t = await run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), { assumeYes: true });
+    expect(t.report.written).toEqual([]);
+    expect(t.plan.declined).toBe(true);
+    expect(t.lines.join('\n')).toContain(
+      `Skipped skills/${MOD_NAME}: ${MOD_NAME}@skills-dir runs code inside Claude Code.`,
+    );
+    expect(t.lines.join('\n')).toContain(`Not added: ${MOD_NAME}.`);
+  });
+
+  it('asks before writing a saved skill that is a plugin with code', async () => {
+    const t = await run(modFiles(`${ACCOUNT_SKILLS_PREFIX}${MOD_NAME}/`), {}, [true, false]);
+    expect(t.asked).toEqual([
+      'Add them as local skills? Only needed if this PC uses another claude.ai account, or none. Added unless you say no.',
+      `Write ${MOD_NAME}@skills-dir? It runs code inside Claude Code.`,
+    ]);
+    expect(t.report.written).toEqual([]);
+  });
+
+  it('never adds a saved skill in the folder of a saved plugin added in the same pull', async () => {
+    const plugin = collected(
+      `${ACCOUNT_PLUGINS_PREFIX}shared/.claude-plugin/plugin.json`,
+      JSON.stringify({ name: 'shared' }),
+    );
+    const t = await run([plugin, saved('shared', 'Plain.')], {
+      assumeYes: true,
+      allowCommands: true,
+    });
+    expect(t.lines.join('\n')).toContain(
+      'shared: skipped, you already have a local skill with this name',
+    );
+    await expect(skillFile('shared')).rejects.toThrow();
+  });
+});
+
+// SEC-02 (review 16): Windows and macOS write `Evil/` and `evil/` into one folder.
+describe('claude.ai skills whose names differ only in case (SEC-02 of review 16)', () => {
+  it('adds only the first by name, so two saved skills never make one plugin with hooks', () => {
+    const files = [
+      ...modFiles(`${ACCOUNT_SKILLS_PREFIX}Evil/`).filter((file) => !file.path.includes('/hooks/')),
+      collected(`${ACCOUNT_SKILLS_PREFIX}evil/hooks/hooks.json`, '{"hooks":{}}'),
+      saved('evil', 'Plain.'),
+    ];
+    const plan = planAccountSkills(files, { syncedNames: new Set(), localNames: new Set() });
+    expect(plan.toAdd.map((skill) => skill.name)).toEqual(['evil']);
+    expect(plan.skipped).toEqual([{ name: 'Evil', reason: 'another saved copy has this name' }]);
+    expect(paths(plan.files)).toEqual(['skills/evil/hooks/hooks.json', 'skills/evil/SKILL.md']);
   });
 });
 

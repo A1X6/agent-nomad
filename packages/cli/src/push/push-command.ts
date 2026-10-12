@@ -3,6 +3,7 @@ import { basename } from 'node:path';
 import {
   BUNDLE_FORMAT_VERSION,
   MAX_BUNDLE_BYTES,
+  MAX_BUNDLE_FILES,
   ProjectNameSchema,
   type Bundle,
   toBase64,
@@ -10,7 +11,6 @@ import {
   type BundleScope,
 } from '@agentnomad/contracts';
 import {
-  createPathResolver,
   encryptProjectName,
   scopeKeyFor,
   sealBundle,
@@ -32,16 +32,20 @@ import type { ApiClient } from '../api/api-client.ts';
 import { ApiError } from '../api/api-errors.ts';
 import { readDataKey, withSession } from '../auth/local-session.ts';
 import type { CommandHandlers, PushOptions } from '../cli/commands.ts';
-import { ProjectFolderError, projectFolderRefusal } from '../cli/project-folder.ts';
+import { ENV_VALUES_NONE, QUESTION_REASON } from '../cli/help-text.ts';
+import { checkProjectFolder } from '../cli/project-folder.ts';
 import { finishSetups, setupLabel, type SetupOutcome } from '../cli/setup-outcomes.ts';
 import { scanEnvReferences } from '../env/env-references.ts';
 import { chooseEnvValues, envSectionFile } from '../env/env-section.ts';
+import { listSavedRevisions } from '../pull/saved-setups.ts';
 import type { SecretStore } from '../secrets/secret-store.ts';
 import type { LocalState } from '../state/local-state.ts';
-import { listSavedRevisions } from '../pull/saved-setups.ts';
-import { formatSize } from '../ui/format-size.ts';
+import { countingPrompter } from '../ui/counting-prompter.ts';
+import { formatSize, formatSizeOver } from '../ui/format-size.ts';
+import { printableLine } from '../ui/printable.ts';
 import type { Prompter, Reporter } from '../ui/prompter.ts';
-import { toBundleFiles } from './bundle-files.ts';
+import { localPathResolver, toBundleFiles } from './bundle-files.ts';
+import { pushSummary, uploadQuestion, type ChosenContent } from './push-summary.ts';
 
 export interface PushDeps {
   readonly prompter: Prompter;
@@ -100,6 +104,10 @@ export interface PlannedUpload {
   readonly scopeKey: string;
   readonly bundle: Omit<Bundle, 'revision'>;
   readonly expectedRevision: number;
+  /** What the summary adds about the files, from the agent (T97: the plugins among them). */
+  readonly notes: readonly string[];
+  /** What goes in only when the user chooses it, as the summary before upload names it (T115). */
+  readonly chosen: readonly ChosenContent[];
 }
 
 /** Every answer push needs, gathered before the first upload (T59). */
@@ -145,7 +153,7 @@ export function createPushPlanner(deps: PushDeps) {
       return installed.map(chosenAgent);
     }
     const chosen = await prompter.multiselect(
-      'Which agents?',
+      `Which agents? ${QUESTION_REASON.agents}`,
       installed.map((entry) => ({
         value: entry.adapter.id,
         label: entry.adapter.displayName,
@@ -160,20 +168,12 @@ export function createPushPlanner(deps: PushDeps) {
     const { adapter } = agent;
     // The home folder and the agent's own folder are never a project: their `.claude/` is the
     // global setup (BUG-05).
-    const refusal = projectFolderRefusal(deps.cwd, {
-      homedir: deps.homedir,
-      baseDir: agent.baseDir,
-      agentName: adapter.displayName,
-      platform: deps.platform,
-    });
-    if (options.project !== undefined && refusal !== null) {
-      throw new ProjectFolderError(deps.cwd, refusal);
-    }
+    const refusal = checkProjectFolder(deps.cwd, agent, deps, options.project !== undefined);
     if (options.global && options.project !== undefined) return 'both';
     if (options.global) return 'global';
     if (options.project !== undefined) return 'project';
     if (refusal !== null || options.yes) return 'global';
-    return prompter.select(`${adapter.displayName}: what to save?`, [
+    return prompter.select(`${adapter.displayName}: what to save? ${QUESTION_REASON.scopePush}`, [
       { value: 'global', label: 'Global setup', hint: 'your settings, skills, agents, commands…' },
       { value: 'project', label: 'This project', hint: deps.cwd },
       { value: 'both', label: 'Both' },
@@ -244,7 +244,7 @@ export function createPushPlanner(deps: PushDeps) {
       (options.yes
         ? false
         : await prompter.confirm(
-            `Include memory${described === '' ? '' : ` (${described})`}?`,
+            `Include memory${described === '' ? '' : ` (${described})`}? ${QUESTION_REASON.memory}`,
             false,
           ));
 
@@ -261,9 +261,13 @@ export function createPushPlanner(deps: PushDeps) {
         if (!saving || flag === false) continue;
         const found = await part.available();
         if (found.problem) reporter.warn(part.unreadable(found.problem));
+        if (found.notice) reporter.warn(found.notice);
         if (found.names.length > 0) {
           const yes =
-            flag ?? (!options.yes && (await prompter.confirm(part.question(found.names), false)));
+            flag ??
+            (options.yes
+              ? part.defaultYes
+              : await prompter.confirm(part.question(found.names), part.defaultYes));
           if (yes) chosen.add(part.id);
         } else if (flag === true) {
           reporter.info(part.noneFound);
@@ -273,12 +277,19 @@ export function createPushPlanner(deps: PushDeps) {
     return { includeMemory, include };
   }
 
-  /** Collects one setup and asks which environment values go with it; `null`: nothing to save. */
+  /**
+   * Collects one setup and asks which environment values go with it, with what the summary
+   * says about its files; `null`: nothing to save.
+   */
   async function collectItem(
     item: PushItem,
     contents: Contents,
     options: PushOptions,
-  ): Promise<Omit<Bundle, 'revision'> | null> {
+  ): Promise<{
+    bundle: Omit<Bundle, 'revision'>;
+    notes: readonly string[];
+    chosen: readonly ChosenContent[];
+  } | null> {
     const leftOut: string[] = [];
     const parts = new Set(
       (item.adapter.optionalParts ?? [])
@@ -306,31 +317,51 @@ export function createPushPlanner(deps: PushDeps) {
       return null;
     }
 
-    const envSection = options.yes
-      ? null
-      : await chooseEnvValues({
-          scan: scanEnvReferences(collected, item.adapter.envReferences),
-          env: deps.env,
-          prompter,
-        });
+    const envSection = await chooseEnvValues({
+      scan: scanEnvReferences(collected, item.adapter.envReferences),
+      env: deps.env,
+      prompter,
+      assumeYes: options.yes,
+      ...(options.envValues !== undefined && { choice: options.envValues }),
+    });
+    const named = typeof options.envValues === 'object' ? options.envValues : [];
+    const notSaved = named.filter((name) => envSection?.variables[name] === undefined);
+    if (notSaved.length > 0) {
+      reporter.warn(
+        `Not saved with the ${describe(item)}: ${notSaved.join(', ')} (the setup does not use ${notSaved.length === 1 ? 'it, or it is' : 'them, or they are'} not set on this PC).`,
+      );
+    }
     if (envSection) collected.push(envSectionFile(envSection));
 
-    const resolver = createPathResolver({ os: sourceOsOf(deps.platform), homeDir: deps.homedir });
+    const resolver = localPathResolver(deps.platform, deps.homedir);
     return {
-      formatVersion: BUNDLE_FORMAT_VERSION,
-      agent: item.adapter.id,
-      scope: item.scope,
-      sourceOs: sourceOsOf(deps.platform),
-      agentVersion: item.version,
-      files: toBundleFiles(collected, resolver),
+      bundle: {
+        formatVersion: BUNDLE_FORMAT_VERSION,
+        agent: item.adapter.id,
+        scope: item.scope,
+        sourceOs: sourceOsOf(deps.platform),
+        agentVersion: item.version,
+        files: toBundleFiles(collected, resolver),
+      },
+      notes: item.adapter.inspector?.pushNotes?.(collected) ?? [],
+      chosen: [
+        { flag: '--memory', chosen: contents.includeMemory ? 'yes' : 'no' },
+        {
+          flag: '--env-values',
+          chosen: envSection ? Object.keys(envSection.variables).join(', ') : ENV_VALUES_NONE,
+        },
+        ...(item.adapter.optionalParts ?? [])
+          .filter((part) => part.scope === item.scope.kind)
+          .map((part) => ({ flag: `--${part.id}`, chosen: parts.has(part.id) ? 'yes' : 'no' })),
+      ],
     };
   }
 
   /**
    * Whether to upload one collected setup, and over which revision. Asks before pushing a
    * setup whose last pull did not restore everything (T46, BUG-05) and before replacing a
-   * copy the server has in another revision than this PC knows (T38); a no from the user is their choice, a skip by
-   * `--yes` is not done.
+   * copy the server has in another revision than this PC knows (T38); a no from the user is
+   * their choice, a skip by `--yes` is not done.
    */
   async function decide(
     item: PushItem,
@@ -374,6 +405,16 @@ export function createPushPlanner(deps: PushDeps) {
     return { expectedRevision: onServer ?? 0 };
   }
 
+  /** A setup over the bundle's file limit is not done, before anything is encoded (BUG-01). */
+  function tooManyFiles(setup: string, count: number): SetupOutcome {
+    const files = `${count.toLocaleString('en-US')} files`;
+    const limit = MAX_BUNDLE_FILES.toLocaleString('en-US');
+    reporter.error(
+      `The ${setup} has ${files}; the limit is ${limit}. Leave some out (e.g. old memory or unused skills) and try again.`,
+    );
+    return { setup, result: 'not-done', reason: `${files}, over the ${limit} limit` };
+  }
+
   return {
     async plan(options: PushOptions, keys: PushKeys): Promise<PushPlan> {
       const agents = await chooseAgents(options);
@@ -390,17 +431,24 @@ export function createPushPlanner(deps: PushDeps) {
       );
 
       const outcomes: SetupOutcome[] = [];
-      const collected: { item: PushItem; bundle: Omit<Bundle, 'revision'> }[] = [];
+      const collected: {
+        item: PushItem;
+        bundle: Omit<Bundle, 'revision'>;
+        notes: readonly string[];
+        chosen: readonly ChosenContent[];
+      }[] = [];
       for (const item of items) {
-        const bundle = await collectItem(item, contents, options);
-        if (bundle === null) outcomes.push({ setup: describe(item), result: 'done' });
-        else collected.push({ item, bundle });
+        const found = await collectItem(item, contents, options);
+        if (found === null) outcomes.push({ setup: describe(item), result: 'done' });
+        else if (found.bundle.files.length > MAX_BUNDLE_FILES)
+          outcomes.push(tooManyFiles(describe(item), found.bundle.files.length));
+        else collected.push({ item, ...found });
       }
       if (collected.length === 0) return { uploads: [], outcomes };
 
       const saved = await withSession(keys.secrets, () => listSavedRevisions(deps.api()));
       const uploads: PlannedUpload[] = [];
-      for (const { item, bundle } of collected) {
+      for (const { item, bundle, notes, chosen } of collected) {
         const scopeKey = scopeKeyFor(keys.crypto, keys.dataKey, item.scope);
         const decision = await decide(item, scopeKey, saved, options);
         if ('result' in decision) outcomes.push(decision);
@@ -412,6 +460,8 @@ export function createPushPlanner(deps: PushDeps) {
             scopeKey,
             bundle,
             expectedRevision: decision.expectedRevision,
+            notes,
+            chosen,
           });
       }
       return { uploads, outcomes };
@@ -485,12 +535,12 @@ export function createPushApplier(deps: PushApplyDeps) {
 
     if (result.kind === 'too-large') {
       reporter.error(
-        `The ${setup} is ${formatSize(result.size)} after compression and encryption; the limit is ${formatSize(MAX_BUNDLE_BYTES)}. Remove large files (e.g. images in skills) and try again.`,
+        `The ${setup} is ${formatSizeOver(result.size, MAX_BUNDLE_BYTES)} after compression and encryption; the limit is ${formatSize(MAX_BUNDLE_BYTES)}. Remove large files (e.g. images in skills) and try again.`,
       );
       return {
         setup,
         result: 'not-done',
-        reason: `${formatSize(result.size)}, over the ${formatSize(MAX_BUNDLE_BYTES)} limit`,
+        reason: `${formatSizeOver(result.size, MAX_BUNDLE_BYTES)}, over the ${formatSize(MAX_BUNDLE_BYTES)} limit`,
       };
     }
     if (result.kind === 'conflict') {
@@ -501,7 +551,10 @@ export function createPushApplier(deps: PushApplyDeps) {
     }
     const count = bundle.files.length;
     reporter.success(
-      `Saved the ${setup}: ${String(count)} file${count === 1 ? '' : 's'}, ${formatSize(result.size)} (revision ${String(result.revision)}).`,
+      [
+        `Saved the ${setup}: ${String(count)} file${count === 1 ? '' : 's'}, ${formatSize(result.size)} (revision ${String(result.revision)}).`,
+        ...planned.notes.map((note) => `  ${printableLine(note)}`),
+      ].join('\n'),
     );
     return { setup, result: 'done' };
   }
@@ -518,12 +571,22 @@ export function createPushApplier(deps: PushApplyDeps) {
 /**
  * `agentnomad push` (T33): choose agents and scopes, collect, make paths portable, stamp,
  * compress, encrypt on this PC and upload. The server only ever receives ciphertext and a
- * keyed hash of each project name. Plan, then apply (T59); exits with code 1 when a setup
- * was not saved (BUG-03).
+ * keyed hash of each project name. Plan, then apply (T59); when the plan asked anything, push
+ * shows what it will save and asks once more first (T115). Exits with code 1 when a setup was
+ * not saved (BUG-03).
  */
 export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'> {
-  const planner = createPushPlanner(deps);
+  const questions = countingPrompter(deps.prompter);
+  const planner = createPushPlanner({ ...deps, prompter: questions.prompter });
   const applier = createPushApplier(deps);
+
+  /** The summary and its one question; `false`: the user said no, nothing is uploaded. */
+  async function confirmPlan(plan: PushPlan, options: PushOptions, asked: number) {
+    if (options.yes || plan.uploads.length === 0 || questions.asked() === asked) return true;
+    deps.reporter.info(pushSummary(plan.uploads));
+    return deps.prompter.confirm(uploadQuestion(plan.uploads.length), true);
+  }
+
   return {
     async push(options) {
       const secrets = await deps.secrets();
@@ -531,7 +594,12 @@ export function createPushCommand(deps: PushDeps): Pick<CommandHandlers, 'push'>
       // Wiped on every path from here on, also when a question is cancelled (BP-01).
       try {
         const keys: PushKeys = { secrets, crypto: await deps.crypto(), dataKey };
+        const asked = questions.asked();
         const plan = await planner.plan(options, keys);
+        if (!(await confirmPlan(plan, options, asked))) {
+          deps.reporter.info('Nothing was saved.');
+          return;
+        }
         const applied = await applier.apply(plan, keys);
         finishSetups('push', [...plan.outcomes, ...applied]);
       } finally {

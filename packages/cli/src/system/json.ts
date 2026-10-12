@@ -1,4 +1,15 @@
-import type * as z from 'zod';
+import * as z from 'zod';
+
+/** Any JSON object, its values unchecked: the first check of a settings or state file. */
+export const JsonObjectSchema = z.record(z.string(), z.unknown());
+
+/** A JSON object: not an array, not `null`. */
+export const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** The strings of a JSON array, or none when `value` is not one. */
+export const strings = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 
 /** JSON read with a schema: the value, or why it could not be read (DUP-04). */
 export type JsonResult<T> = { readonly value: T } | { readonly problem: string };

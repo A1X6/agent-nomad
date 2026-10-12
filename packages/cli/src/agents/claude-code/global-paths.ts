@@ -2,15 +2,19 @@
  * What the Claude Code global collector takes from `~/.claude` (T25). The lists come from
  * the paths data file (T32); this module only gives them names and fast lookups.
  */
-import { RESERVED_DIR } from '../adapter.ts';
-import { inHomeFolder, isSensitiveHomePath } from '../shared/file-gathering.ts';
+import { RESERVED_DIR, type CollectedFile } from '../adapter.ts';
+import { inHomeFolder, isSensitiveHomePath } from '../shared/bundle-paths.ts';
 import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 
 /** Single files in the base folder. */
 export const GLOBAL_FILES: readonly string[] = DATA.global.files;
 
-/** The settings files among the single files (DUP-01): hooks and the status line live there. */
-export const GLOBAL_SETTINGS_FILES: readonly string[] = settingsFilesIn(GLOBAL_FILES);
+/** The settings files among `files` (DUP-01): hooks and the status line live there. */
+export const globalSettingsFiles = (files: readonly string[]): readonly string[] =>
+  settingsFilesIn(files);
+
+/** The settings files among the single files. */
+export const GLOBAL_SETTINGS_FILES: readonly string[] = globalSettingsFiles(GLOBAL_FILES);
 
 /** Folders in the base folder, taken whole (minus the skips below). */
 export const GLOBAL_FOLDERS: readonly string[] = DATA.global.folders;
@@ -34,6 +38,17 @@ export const GLOBAL_REFUSED: readonly string[] = [...NEVER_SYNCED, ...GLOBAL_KNO
 /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
 export const SKIPPED_NAMES: ReadonlySet<string> = new Set(DATA.skippedNames);
 
+const SKIPPED_NAMES_FOLDED: ReadonlySet<string> = new Set(
+  DATA.skippedNames.map((name) => name.toLowerCase()),
+);
+
+/**
+ * Whether a bundle path has a part push never takes (`node_modules`, `.git`, ...), in any
+ * case: Windows and macOS open `Node_Modules` as `node_modules`.
+ */
+export const hasSkippedName = (path: string): boolean =>
+  path.split('/').some((part) => SKIPPED_NAMES_FOLDED.has(part.toLowerCase()));
+
 /** The user's own copies (`settings.json.bak`), never reported as unknown. */
 export const IGNORED_COPY_PATTERNS: readonly RegExp[] = DATA.ignoredCopyPatterns.map(
   (pattern) => new RegExp(pattern),
@@ -50,6 +65,10 @@ export const CLAUDE_JSON_MCP_KEY = 'mcpServers';
 
 /** The selected `~/.claude.json` keys. */
 export const CLAUDE_JSON_BUNDLE_PATH = `${RESERVED_DIR}/claude.json`;
+/** The user's own claude.ai skills, saved on request (T42). */
+export const ACCOUNT_SKILLS_PREFIX = `${RESERVED_DIR}/account-skills/`;
+/** The user's own claude.ai plugins, saved on request (T101). */
+export const ACCOUNT_PLUGINS_PREFIX = `${RESERVED_DIR}/account-plugins/`;
 /** Hook and status line scripts elsewhere in the home folder, by path from home. */
 export const HOME_SCRIPTS_PREFIX = `${RESERVED_DIR}/home/`;
 
@@ -61,6 +80,14 @@ export const extensionOf = (path: string) => /(\.[^./]+)$/.exec(path)?.[1]?.toLo
 
 /** Has one of the script extensions above. */
 export const isScript = (path: string) => SCRIPT_EXTENSIONS.has(extensionOf(path));
+
+/** Content that starts with `#!`, which a shell runs as a program with the executable bit. */
+export const startsWithShebang = (content: Uint8Array): boolean =>
+  content[0] === 0x23 && content[1] === 0x21;
+
+/** A file that can run: a script extension, the executable bit or a `#!` first line. */
+export const canRun = (file: CollectedFile): boolean =>
+  isScript(file.path) || file.executable || startsWithShebang(file.content);
 
 /** Home folders the OS or a shell runs files from by itself (T43). */
 const AUTOSTART_HOME_DIRS: readonly string[] = DATA.autostartHomeDirs;
@@ -81,6 +108,31 @@ export function homePathProblem(relative: string): string | null {
 /** Marketplaces and plugins to reinstall on pull (T29). */
 export const PLUGINS_BUNDLE_PATH = `${RESERVED_DIR}/plugins.json`;
 
+/** The installed version of each of those plugins (T100), read by pull, never written. */
+export const PLUGIN_VERSIONS_BUNDLE_PATH = `${RESERVED_DIR}/plugin-versions.json`;
+
+/**
+ * The files of marketplaces added from a local folder (T98), one `<name>.json` each, read by
+ * pull, never written as they are. One file per marketplace, so an older CLI, which refuses
+ * an unknown reserved entry with a warning, warns once per marketplace, not once per file.
+ */
+export const LOCAL_MARKETPLACES_PREFIX = `${RESERVED_DIR}/local-marketplaces/`;
+
+/**
+ * The plugin folders `env.CLAUDE_CODE_PLUGIN_DIRS` names in the user's settings (T99), one
+ * `<n>.json` each (`n`: its place in the value), read by pull, never written as they are; one
+ * file per folder for the same reason as the local marketplaces.
+ */
+export const PLUGIN_DIRS_PREFIX = `${RESERVED_DIR}/plugin-dirs/`;
+
+/**
+ * Saved plugin data (T102, opt-in): `plugin-data/<folder>/...` holds a plugin's
+ * `plugins/data/<folder>/` and `plugin-store/<file>.json` a mod's `plugins/store/<file>.json`,
+ * by the names Claude Code gives them. Read by pull, written only for plugins installed here.
+ */
+export const PLUGIN_DATA_PREFIX = `${RESERVED_DIR}/plugin-data/`;
+export const PLUGIN_STORE_PREFIX = `${RESERVED_DIR}/plugin-store/`;
+
 /** Programs a hook or the status line needs, with install details (`.agentnomad/programs.json`). */
 export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
 
@@ -89,6 +141,13 @@ export const PROGRAMS_BUNDLE_PATH = `${RESERVED_DIR}/programs.json`;
  * command runs the tool, directly or through `npx` / `bunx`.
  */
 export const TOOL_CONFIG_FILES: Readonly<Record<string, readonly string[]>> = DATA.toolConfigFiles;
+
+/** The bundle paths of those tool settings files (`.agentnomad/home/...`). */
+export const TOOL_SETTINGS_BUNDLE_PATHS: ReadonlySet<string> = new Set(
+  Object.values(TOOL_CONFIG_FILES)
+    .flat()
+    .map((relative) => HOME_SCRIPTS_PREFIX + relative),
+);
 
 /** Shells and runtimes: present wherever agentnomad runs, so not recorded as programs. */
 export const RUNTIME_COMMANDS: ReadonlySet<string> = new Set(DATA.runtimeCommands);

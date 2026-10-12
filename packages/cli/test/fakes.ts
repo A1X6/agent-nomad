@@ -4,7 +4,7 @@ import {
   type BundleSummary,
 } from '@agentnomad/contracts';
 import { createSodiumCryptoService, DATA_KEY_BYTES, type CryptoService } from '@agentnomad/core';
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeAll, beforeEach } from 'vitest';
@@ -12,12 +12,14 @@ import { afterEach, beforeAll, beforeEach } from 'vitest';
 // Module paths, not the package index: the agent boundary test uses these fakes and must
 // not load any agent's adapter.
 import type { AgentAdapter, CollectedFile, DetectedAgent } from '../src/agents/adapter.ts';
+import type { ExecutableLookupSystem } from '../src/agents/shared/detector-system.ts';
 import type { ApiClient, BundleUpload } from '../src/api/api-client.ts';
 import { ApiError } from '../src/api/api-errors.ts';
 import { loadZxcvbnChecker, type PasswordChecker } from '../src/auth/password-policy.ts';
 import type { EnvWriter } from '../src/env/shell-profile.ts';
 import { SECRET_NAMES, type SecretName, type SecretStore } from '../src/secrets/secret-store.ts';
 import { createLocalState, STATE_FILE, type LocalState } from '../src/state/local-state.ts';
+import { isJsonObject } from '../src/system/json.ts';
 import type { Choice, Prompter, Reporter } from '../src/ui/prompter.ts';
 
 import { stubRestorer } from './stub-restorer.ts';
@@ -123,9 +125,6 @@ export const linkFolder = (target: string, path: string): Promise<void> =>
 /** A file's text (UTF-8). */
 export const readText = (path: string): Promise<string> => readFile(path, 'utf8');
 
-const isJsonObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 /** A JSON file that must hold an object; anything else fails the test here. */
 export async function readJson(path: string): Promise<Record<string, unknown>> {
   const value: unknown = JSON.parse(await readText(path));
@@ -133,12 +132,8 @@ export async function readJson(path: string): Promise<Record<string, unknown>> {
   return value;
 }
 
-/** Whether anything (a file or a folder) is at `path`. */
-export const exists = (path: string): Promise<boolean> =>
-  stat(path).then(
-    () => true,
-    () => false,
-  );
+/** Whether anything (a file or a folder) is at `path`: the CLI's own check (DUP-05). */
+export { exists } from '../src/system/files.ts';
 
 /**
  * An EnvWriter that touches no profile: `written` records the variables of each write.
@@ -212,11 +207,31 @@ export function memorySecretStore(
   };
 }
 
+/**
+ * A SecretStore logged in with `key` (by default the data key from {@link useDataKey}), with
+ * `saved` as the map behind it when a test looks at what is stored.
+ */
+export const loggedInStore = (key: Uint8Array = dataKey, saved?: Map<SecretName, string>) =>
+  memorySecretStore({ loggedIn: key, ...(saved && { saved }) });
+
 /** A memory SecretStore and the map behind it. */
 export function memorySecrets(backend: SecretStore['backend'] = 'keychain') {
   const saved = new Map<SecretName, string>();
   return { store: memorySecretStore({ backend, saved }), saved };
 }
+
+/** A PC for code that searches PATH: only the `executables` (full paths) can run. */
+export const executableLookup = (pc: {
+  readonly platform: NodeJS.Platform;
+  readonly homedir: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly executables?: readonly string[];
+}): ExecutableLookupSystem => ({
+  platform: pc.platform,
+  homedir: pc.homedir,
+  env: pc.env,
+  isExecutable: (path) => Promise.resolve((pc.executables ?? []).includes(path)),
+});
 
 /** A password the real password policy accepts. */
 export const STRONG = 'plum-garage-violin-47';
@@ -256,11 +271,18 @@ export const missingAgent: DetectedAgent = { installed: false, baseDir: null, ve
 /**
  * Answers questions from a script, in order, and throws when it runs out. A validator's
  * complaint is recorded in `rejected` and the next answer used, like the real prompter
- * asking again; an Error answer is thrown, like a question the user cancels.
+ * asking again; an Error answer is thrown, like a question the user cancels. Each yes/no
+ * question's default answer is recorded in `confirmDefaults` (T114). `last` answers push's and
+ * pull's question after their summary (T115) by its words, not from the script, so a run that
+ * does not ask it leaves no spare answer for a question added later (QA-03).
  */
-export function scriptedPrompter(answers: unknown[]) {
+export function scriptedPrompter(
+  answers: unknown[],
+  last?: { readonly question: RegExp; readonly answer: boolean },
+) {
   const asked: string[] = [];
   const rejected: string[] = [];
+  const confirmDefaults: boolean[] = [];
   const next = (message: string, validate?: (value: string) => string | undefined): unknown => {
     for (;;) {
       asked.push(message);
@@ -301,13 +323,18 @@ export function scriptedPrompter(answers: unknown[]) {
     },
     text: (message, options) => Promise.resolve(text(message, options?.validate)),
     password: (message, options) => Promise.resolve(text(message, options?.validate)),
-    confirm: (message) => {
+    confirm: (message, initial = false) => {
+      confirmDefaults.push(initial);
+      if (last?.question.test(message)) {
+        asked.push(message);
+        return Promise.resolve(last.answer);
+      }
       const answer = next(message);
       if (typeof answer !== 'boolean') throw wrong(message, 'yes/no', answer);
       return Promise.resolve(answer);
     },
   };
-  return { prompter, asked, rejected, left: answers };
+  return { prompter, asked, rejected, left: answers, confirmDefaults };
 }
 
 /**

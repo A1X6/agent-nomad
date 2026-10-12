@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { configDir, createFileStore, createKeychainStore, SECRETS_FILE } from '@agentnomad/cli';
@@ -45,8 +45,6 @@ export interface Pc {
   readonly project: string;
   /** Runs `agentnomad <args>` here with no terminal; `input` is piped to stdin. */
   run(args: readonly string[], input?: string): Promise<RunResult>;
-  /** Runs another Node.js script as this PC: same environment, keychain rule and folder. */
-  runScript(file: string, args: readonly string[]): Promise<RunResult>;
   /** A secret the CLI keeps on this PC after login, as it stores it (T48: leak check). */
   secret(name: 'session-token' | 'data-key'): Promise<string | null>;
   remove(): Promise<void>;
@@ -63,6 +61,8 @@ export async function newPc(
     keychain: boolean;
     /** Variables already set in this PC's environment. */
     env?: Readonly<Record<string, string>>;
+    /** A `claude` command first on the PATH that runs this built script (T100). */
+    claude?: string;
   },
 ): Promise<Pc> {
   const root = await realpath(await mkdtemp(join(tmpdir(), `agentnomad-e2e-${name}-`)));
@@ -86,12 +86,19 @@ export async function newPc(
     AGENTNOMAD_API_URL: options.apiUrl,
     ...options.env,
   });
+  if (options.claude !== undefined) {
+    const bin = join(root, 'bin');
+    await addClaudeLauncher(bin, options.claude);
+    // Windows keeps the name as `Path`; the CLI reads it whatever its case.
+    const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
+    env[key] = [bin, env[key]].filter(Boolean).join(delimiter);
+  }
 
-  const start = (entry: string, args: readonly string[], input: string) =>
+  const start = (args: readonly string[], input: string) =>
     new Promise<RunResult>((resolve, reject) => {
       const child = spawn(
         process.execPath,
-        [...(options.keychain ? [] : ['--import', NO_KEYCHAIN]), entry, ...args],
+        [...(options.keychain ? [] : ['--import', NO_KEYCHAIN]), BIN, ...args],
         { cwd: project, env, stdio: ['pipe', 'pipe', 'pipe'] },
       );
       let stdout = '';
@@ -109,8 +116,7 @@ export async function newPc(
     name,
     home,
     project,
-    run: (args, input = '') => start(BIN, args, input),
-    runScript: (file, args) => start(file, args, ''),
+    run: (args, input = '') => start(args, input),
     // Read-only: never createSecretStore, which may move a login between the file and the
     // keychain (T46), and the CLI's process may not reach the keychain the test's can.
     secret: async (name) => {
@@ -135,6 +141,19 @@ export async function newPc(
     },
     remove: () => rm(root, { recursive: true, force: true }),
   };
+}
+
+/** `claude` in `bin`: a `.cmd` launcher on Windows, a shell script elsewhere, as npm makes. */
+async function addClaudeLauncher(bin: string, script: string): Promise<void> {
+  if (process.platform === 'win32') {
+    await write(join(bin, 'claude.cmd'), `@"${process.execPath}" "${script}" %*\r\n`);
+  } else {
+    await write(
+      join(bin, 'claude'),
+      `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`,
+      true,
+    );
+  }
 }
 
 export async function write(path: string, content: string, executable = false): Promise<void> {

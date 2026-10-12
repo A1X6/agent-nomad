@@ -4,7 +4,10 @@ import * as z from 'zod';
 
 import { parseJsonWith, valueOrNull, type JsonResult } from '../../system/json.ts';
 import { samePath } from '../../system/paths.ts';
+import type { CollectedFile } from '../adapter.ts';
 import { pathsOf } from '../shared/detector-system.ts';
+import { jsonFile } from '../shared/file-gathering.ts';
+import { PLUGIN_VERSIONS_BUNDLE_PATH, PLUGINS_BUNDLE_PATH } from './global-paths.ts';
 
 /**
  * Plugins are reinstalled, never copied (T29): push saves which marketplaces and plugins
@@ -35,12 +38,15 @@ export interface PluginManifest {
   readonly skipped: readonly { readonly what: string; readonly reason: string }[];
 }
 
+/** A marketplace name as Claude Code gives one; also a file name for T98's saved folders. */
+export const MarketplaceNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+
 /**
  * One saved marketplace and one saved plugin, as pull accepts them. Push checks each entry
  * with the same schema before saving it (BUG-01), so pull never refuses what push saved.
  */
 const MarketplaceEntrySchema = z.strictObject({
-  name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  name: MarketplaceNameSchema,
   // Passed to `claude plugin marketplace add`: only the forms push writes (a GitHub
   // `owner/repo`, an https or git@ URL, each with an optional `#ref`), so never an
   // option, a local path or plain http (T44).
@@ -50,7 +56,7 @@ const MarketplaceEntrySchema = z.strictObject({
       /^([A-Za-z0-9][\w.-]*\/[\w.-]+|https:\/\/[^\s"'`&|<>^%;]+|git@[^\s"'`&|<>^%;]+)(#[^\s"'`&|<>^%;]+)?$/,
     ),
 });
-const PluginEntrySchema = z.strictObject({
+export const PluginEntrySchema = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*$/),
   scope: z.enum(['user', 'project', 'local']),
   commandSource: z.boolean(),
@@ -62,6 +68,39 @@ export const PluginManifestSchema = z.strictObject({
   plugins: z.array(PluginEntrySchema),
   skipped: z.array(SkippedSchema),
 });
+
+/** The version of one saved plugin install, as `installed_plugins.json` gives it (T100). */
+interface PluginVersionEntry {
+  /** `plugin@marketplace`. */
+  readonly id: string;
+  readonly scope: PluginScope;
+  readonly version: string;
+}
+
+/**
+ * What `.agentnomad/plugin-versions.json` holds (T100). A file of its own, as `plugins.json`
+ * is read strictly by older CLIs; they refuse this unknown file with a warning and go on.
+ */
+export interface PluginVersions {
+  readonly plugins: readonly PluginVersionEntry[];
+}
+
+/** A version as Claude Code writes one: `1.2.0`, a 12-digit commit or `1.2.0-<hash>`. */
+const PluginVersionSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/);
+
+const PluginVersionsSchema = z.strictObject({
+  plugins: z.array(
+    z.strictObject({
+      id: PluginEntrySchema.shape.id,
+      scope: PluginEntrySchema.shape.scope,
+      version: PluginVersionSchema,
+    }),
+  ),
+});
+
+/** A saved `plugin-versions.json` as pull reads it; never throws (T100). */
+export const readSavedPluginVersions = (content: Uint8Array): JsonResult<PluginVersions> =>
+  parseJsonWith(PluginVersionsSchema, content);
 
 /** A saved `plugins.json` as pull reads it: the entries it accepts, and the ones it refused. */
 export interface SavedPlugins {
@@ -108,6 +147,8 @@ const SourceSchema = z.looseObject({
   repo: z.string().optional(),
   url: z.string().optional(),
   ref: z.string().optional(),
+  /** A `directory` source's folder (T98). */
+  path: z.string().optional(),
 });
 const KnownMarketplacesSchema = z.record(
   z.string(),
@@ -116,6 +157,8 @@ const KnownMarketplacesSchema = z.record(
 const PluginInstallSchema = z.looseObject({
   scope: z.enum(['user', 'project', 'local', 'managed']).or(z.string()),
   projectPath: z.string().optional(),
+  // Checked where it is used (T100): an odd version never makes the whole file unreadable.
+  version: z.unknown().optional(),
 });
 const InstalledPluginsSchema = z.looseObject({
   plugins: z.record(z.string(), z.array(PluginInstallSchema)),
@@ -185,23 +228,150 @@ export interface PluginManifestInput {
     { readonly kind: 'global' } | { readonly kind: 'project'; readonly projectDir: string };
 }
 
+/** Whether an install is one of `input`'s: user scope, or installed for that project. */
+const inScope = (install: PluginInstall, input: PluginManifestInput): boolean =>
+  input.scope.kind === 'global'
+    ? install.scope === 'user'
+    : (install.scope === 'project' || install.scope === 'local') &&
+      installedIn(install, input.scope.projectDir, input.platform);
+
+/**
+ * The installed version of each of `plugins` in `input`'s scope (T100): push saves them, and
+ * pull reads them again after installing. Left out: a version Claude Code could not tell
+ * (`unknown`, e.g. an npm source) or one in an unexpected form. `null` when none is known.
+ */
+export async function readPluginVersions(
+  input: PluginManifestInput,
+  plugins: readonly PluginEntry[],
+): Promise<PluginVersions | null> {
+  const installed = await readInstalledPlugins(input.baseDir, input.platform);
+  const versions = plugins.flatMap(({ id, scope }) => {
+    const version = PluginVersionSchema.safeParse(
+      installed?.[id]?.find((install) => install.scope === scope && inScope(install, input))
+        ?.version,
+    );
+    return version.success && version.data !== 'unknown'
+      ? [{ id, scope, version: version.data }]
+      : [];
+  });
+  return versions.length === 0 ? null : { plugins: versions };
+}
+
+/**
+ * What push saves about plugins, for both collectors: `plugins.json` and, when a version is
+ * known, `plugin-versions.json` (T100). Nothing when there are no plugins to save.
+ */
+export async function pluginFiles(input: PluginManifestInput): Promise<CollectedFile[]> {
+  const manifest = await readPluginManifest(input);
+  if (manifest === null) return [];
+  const versions = await readPluginVersions(input, manifest.plugins);
+  return [
+    jsonFile(PLUGINS_BUNDLE_PATH, manifest),
+    ...(versions === null ? [] : [jsonFile(PLUGIN_VERSIONS_BUNDLE_PATH, versions)]),
+  ];
+}
+
+/** This PC's `plugins/known_marketplaces.json`, by name; empty when missing or unreadable. */
+export async function readKnownMarketplaces(
+  baseDir: string,
+  platform: NodeJS.Platform,
+): Promise<z.infer<typeof KnownMarketplacesSchema>> {
+  const path = pathsOf(platform);
+  return (
+    (await readJson(
+      path.join(baseDir, 'plugins', 'known_marketplaces.json'),
+      KnownMarketplacesSchema,
+    )) ?? {}
+  );
+}
+
+/** An install's scope, or `null` for one push never saves (`managed`, or unknown). */
+const scopeOf = (install: PluginInstall): PluginScope | null =>
+  install.scope === 'user' || install.scope === 'project' || install.scope === 'local'
+    ? install.scope
+    : null;
+
+/**
+ * Whether plugin `id` has a `command` source in the catalog of the marketplace in `folder`:
+ * it builds the plugin by running a command, so it is flagged for an extra yes.
+ */
+async function isCommandSource(
+  folder: string | undefined,
+  id: string,
+  platform: NodeJS.Platform,
+): Promise<boolean> {
+  if (folder === undefined) return false;
+  const path = pathsOf(platform);
+  const catalog = await readJson(
+    path.join(folder, '.claude-plugin', 'marketplace.json'),
+    MarketplaceJsonSchema,
+  );
+  const pluginName = id.split('@')[0];
+  const source = catalog?.plugins?.find((entry) => entry.name === pluginName)?.source;
+  return (
+    typeof source === 'object' &&
+    source !== null &&
+    'source' in source &&
+    source.source === 'command'
+  );
+}
+
+/** A marketplace added from a folder on this PC (T98), with its plugins installed in scope. */
+export interface LocalMarketplace {
+  readonly name: string;
+  /** The folder, as `known_marketplaces.json` gives it. */
+  readonly folder: string;
+  readonly plugins: readonly PluginEntry[];
+}
+
+/**
+ * The marketplaces added from a folder (`directory` source) that have a plugin installed in
+ * `input`'s scope (T98), sorted by name. `plugins.json` still lists those plugins as skipped,
+ * so older CLIs read it as before; push saves the folders on their own.
+ */
+export async function readLocalMarketplaces(
+  input: PluginManifestInput,
+): Promise<LocalMarketplace[]> {
+  const installed = await readInstalledPlugins(input.baseDir, input.platform);
+  if (installed === null) return [];
+  const known = await readKnownMarketplaces(input.baseDir, input.platform);
+  const found = new Map<string, { folder: string; plugins: PluginEntry[] }>();
+  for (const [id, installs] of Object.entries(installed)) {
+    const name = id.split('@')[1] ?? '';
+    const folder = known[name]?.source.source === 'directory' ? known[name].source.path : undefined;
+    if (
+      folder === undefined ||
+      !PluginEntrySchema.shape.id.safeParse(id).success ||
+      !MarketplaceNameSchema.safeParse(name).success
+    )
+      continue;
+    for (const install of installs.filter((entry) => inScope(entry, input))) {
+      const scope = scopeOf(install);
+      if (scope === null) continue;
+      const marketplace = found.get(name) ?? { folder, plugins: [] };
+      const commandSource = await isCommandSource(folder, id, input.platform);
+      marketplace.plugins.push({ id, scope, commandSource });
+      found.set(name, marketplace);
+    }
+  }
+  return [...found]
+    .map(([name, { folder, plugins }]) => ({
+      name,
+      folder,
+      plugins: plugins.sort((a, b) => a.id.localeCompare(b.id)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 /** Reads the installed plugins and their marketplaces; `null` when there are none to save. */
 export async function readPluginManifest(
   input: PluginManifestInput,
 ): Promise<PluginManifest | null> {
-  const path = pathsOf(input.platform);
-  const pluginsDir = path.join(input.baseDir, 'plugins');
   const installed = await readInstalledPlugins(input.baseDir, input.platform);
   if (installed === null) return null;
-  const known =
-    (await readJson(path.join(pluginsDir, 'known_marketplaces.json'), KnownMarketplacesSchema)) ??
-    {};
+  const known = await readKnownMarketplaces(input.baseDir, input.platform);
 
-  const wanted = (entry: PluginInstall) =>
-    input.scope.kind === 'global'
-      ? entry.scope === 'user'
-      : (entry.scope === 'project' || entry.scope === 'local') &&
-        installedIn(entry, input.scope.projectDir, input.platform);
+  const wanted = (entry: PluginInstall) => inScope(entry, input);
 
   const marketplaces = new Map<string, MarketplaceEntry>();
   const plugins: PluginEntry[] = [];
@@ -236,25 +406,15 @@ export async function readPluginManifest(
       }
       marketplaces.set(marketplaceName, { name: marketplaceName, add });
 
-      // A `command` source builds the plugin by running a command: flag it for an extra yes.
-      const catalog = marketplace.installLocation
-        ? await readJson(
-            path.join(marketplace.installLocation, '.claude-plugin', 'marketplace.json'),
-            MarketplaceJsonSchema,
-          )
-        : null;
-      const pluginName = id.split('@')[0];
-      const source = catalog?.plugins?.find((entry) => entry.name === pluginName)?.source;
-      const commandSource =
-        typeof source === 'object' &&
-        source !== null &&
-        'source' in source &&
-        source.source === 'command';
-      const scope: PluginScope | null =
-        install.scope === 'user' || install.scope === 'project' || install.scope === 'local'
-          ? install.scope
-          : null;
-      if (scope !== null) plugins.push({ id, scope, commandSource });
+      const scope = scopeOf(install);
+      if (scope !== null) {
+        const commandSource = await isCommandSource(
+          marketplace.installLocation,
+          id,
+          input.platform,
+        );
+        plugins.push({ id, scope, commandSource });
+      }
     }
   }
 

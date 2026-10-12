@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 
-import { sameBytes } from '@agentnomad/contracts';
+import { BundlePathSchema, sameBytes } from '@agentnomad/contracts';
 import {
   BACKUP_MARKER,
   createMergeStrategies,
@@ -12,6 +12,8 @@ import {
   type PlannedWrite,
 } from '@agentnomad/core';
 
+import { freeSuffix, writeFileAtomically } from '../../system/files.ts';
+import { printableLine } from '../../ui/printable.ts';
 import type {
   CollectedFile,
   ConflictResolver,
@@ -21,23 +23,38 @@ import type {
   Restorer,
   ScopeTarget,
 } from '../adapter.ts';
-import { freeSuffix, writeFileAtomically } from '../../system/files.ts';
-import { printableLine } from '../../ui/printable.ts';
+import { foldedName, foldsNames } from '../shared/bundle-paths.ts';
 import { pathsOf } from '../shared/detector-system.ts';
-import { hookScripts, projectHookScripts } from './hook-scripts.ts';
-import { findAutoMemory } from './auto-memory.ts';
-import { reviewRunnable } from './command-review.ts';
+import { findAutoMemory, findSharedAutoMemory } from './auto-memory.ts';
 import {
-  CLAUDE_JSON_QUESTION,
+  claudeJsonFileOf,
+  claudeJsonQuestion,
   createClaudeJsonMerge,
+  isClaudeJsonPath,
   type MutableReport,
 } from './claude-json-merge.ts';
-import { pathWords, settingsCommands } from './settings-commands.ts';
-import { CLAUDE_JSON_BUNDLE_PATH, extensionOf, GLOBAL_SETTINGS_FILES } from './global-paths.ts';
-import { PROJECT_SETTINGS_FILES } from './project-paths.ts';
-import { globalDestination, projectDestination, type RestoreDestination } from './restore-rules.ts';
+import {
+  GLOBAL_MEMORY_FILES,
+  globalImportPlace,
+  importsOf,
+  PROJECT_MEMORY_FILES,
+  projectImportPlace,
+  type ImportPlace,
+  type MemoryFileNames,
+} from './claude-md-imports.ts';
+import { reviewRunnable } from './command-review.ts';
+import { extensionOf, GLOBAL_SETTINGS_FILES, startsWithShebang } from './global-paths.ts';
+import { hookScripts, projectHookScripts } from './hook-scripts.ts';
+import { PROJECT_SETTINGS_FILES, SHARED_AUTO_MEMORY } from './project-paths.ts';
+import {
+  globalDestination,
+  isPullMetadata,
+  projectDestination,
+  type RestoreDestination,
+} from './restore-rules.ts';
 import { isRedirectVariable } from './reviewed-settings.ts';
 import type { ClaudeRunningCheck } from './running-claude.ts';
+import { pathWords, settingsCommands } from './settings-commands.ts';
 
 /** What pull's plan step decided for this restore (T61). */
 interface ClaudeRestoreContext extends RestoreContext {
@@ -58,9 +75,23 @@ export interface ClaudeCodeRestorer extends Restorer {
   ): Promise<RestoreReport>;
   /**
    * What restoring `files` would do to `~/.claude.json` here as it is now: nothing, create
-   * it, or merge into it (only after the answer to its conflict question).
+   * it, or merge into it (only after the answer to its conflict question). A project's part
+   * goes into the entry of `target`'s folder (T109).
    */
-  claudeJsonChange(files: readonly CollectedFile[]): Promise<'none' | 'new' | 'merge'>;
+  claudeJsonChange(
+    files: readonly CollectedFile[],
+    target?: ScopeTarget,
+  ): Promise<'none' | 'new' | 'merge'>;
+  /**
+   * Writes `files` (paths from `dir`) into the folder `dir` as `restore` writes a setup's
+   * files: the same conflict answers, backups, line endings and permissions (T98: a local
+   * marketplace). Never writes into a `.git` folder.
+   */
+  restoreFolder(
+    dir: string,
+    files: readonly CollectedFile[],
+    onConflict: ConflictResolver,
+  ): Promise<RestoreReport>;
 }
 
 export interface RestorerOptions {
@@ -80,6 +111,14 @@ export interface RestorerOptions {
 /** Scripts that must use LF (a CR breaks the shell) and ones Windows runs with CRLF. */
 const LF_SCRIPTS = new Set(['.sh', '.bash', '.zsh', '.fish', '.py', '.rb', '.pl', '.lua']);
 const CRLF_SCRIPTS = new Set(['.bat', '.cmd']);
+
+/** Where auto memory goes, each looked up once and only when an entry needs it. */
+interface MemoryFolders {
+  /** The pulled project's own folder. */
+  readonly project: () => Promise<string | null>;
+  /** The folder `autoMemoryDirectory` in user settings names for every project (T110). */
+  readonly shared: () => Promise<string | null>;
+}
 
 /** Commands that only run on one side: their program, or a script they run. */
 const ONLY_ON = {
@@ -154,15 +193,30 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
     fallback: strategies.textSideBySide,
     overwrite: strategies.overwrite,
   };
-  const claudeJsonFile = options.customConfigDir
-    ? path.join(options.baseDir, '.claude.json')
-    : path.join(options.homedir, '.claude.json');
+  // Windows and macOS ignore case and Unicode form: two names may be one file there (T43).
+  const foldsHere = foldsNames(options.platform);
+  const sameFileKey = (name: string) => (foldsHere ? foldedName(name) : name);
+  /**
+   * Auto memory files written in this run, by OS path (T110). A global and a project setup
+   * pulled together can hold the same note; pull writes the global setup first, and the
+   * project's copy then replaces what it wrote without another question: the project wins.
+   */
+  const memoryWritten = new Map<string, Uint8Array>();
 
-  async function readExisting(nativePath: string): Promise<Uint8Array | 'folder' | null> {
+  /** The file at `nativePath` with its permissions, `'folder'` for anything else, or `null`. */
+  async function readExistingFile(
+    nativePath: string,
+  ): Promise<{ readonly content: Uint8Array; readonly mode: number } | 'folder' | null> {
+    // One stat decides and gives the permissions (T95).
     const info = await stat(nativePath).catch(() => null);
     if (info === null) return null;
     if (!info.isFile()) return 'folder';
-    return new Uint8Array(await readFile(nativePath));
+    return { content: new Uint8Array(await readFile(nativePath)), mode: info.mode & 0o777 };
+  }
+
+  async function readExisting(nativePath: string): Promise<Uint8Array | 'folder' | null> {
+    const existing = await readExistingFile(nativePath);
+    return existing === null || existing === 'folder' ? existing : existing.content;
   }
 
   /**
@@ -178,7 +232,8 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   }
 
   const claudeJson = createClaudeJsonMerge({
-    claudeJsonFile,
+    claudeJsonFile: claudeJsonFileOf(options),
+    platform: options.platform,
     isClaudeRunning: options.isClaudeRunning,
     readExisting,
     writeAtomically,
@@ -189,8 +244,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   /** Permissions: a replaced file keeps its own; new scripts may run on macOS and Linux. */
   function modeFor(file: CollectedFile, content: Uint8Array, existingMode: number | null) {
     if (options.platform === 'win32') return null;
-    const runnable =
-      file.executable || (content[0] === 0x23 && content[1] === 0x21); /* starts with "#!" */
+    const runnable = file.executable || startsWithShebang(content);
     if (existingMode !== null) return runnable ? existingMode | 0o111 : existingMode;
     return runnable ? 0o755 : null;
   }
@@ -199,7 +253,7 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
   async function nativePathOf(
     target: ScopeTarget,
     destination: RestoreDestination,
-    memoryDir: () => Promise<string | null>,
+    memory: MemoryFolders,
   ): Promise<string | null> {
     switch (destination.kind) {
       case 'target':
@@ -210,11 +264,299 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       case 'home':
         return resolver.toNativePath(options.homedir, destination.path);
       case 'auto-memory': {
-        const dir = await memoryDir();
+        const dir = await memory.project();
+        return dir === null ? null : resolver.toNativePath(dir, destination.path);
+      }
+      case 'global-auto-memory': {
+        if (destination.folder !== SHARED_AUTO_MEMORY) {
+          const note = `projects/${destination.folder}/memory/${destination.path}`;
+          return resolver.toNativePath(options.baseDir, note);
+        }
+        const dir = await memory.shared();
         return dir === null ? null : resolver.toNativePath(dir, destination.path);
       }
       default:
         return null;
+    }
+  }
+
+  /**
+   * The bundle paths of the files the bundle's own memory files import (T111), found in the
+   * bundle as push placed them for this PC: pull writes those and no other file there.
+   */
+  async function importedIn(
+    incoming: readonly CollectedFile[],
+    folder: string,
+    names: MemoryFileNames,
+    place: (nativePath: string) => ImportPlace,
+  ): Promise<string[]> {
+    const byPath = new Map(incoming.map((entry) => [entry.path, entry]));
+    const { files } = await importsOf(
+      folder,
+      names,
+      incoming,
+      {
+        place,
+        isFile: () => Promise.resolve(false),
+        read(_nativePath, bundlePath) {
+          const entry = byPath.get(bundlePath);
+          return Promise.resolve(entry ? new TextDecoder().decode(entry.content) : null);
+        },
+      },
+      options,
+    );
+    return files.map((file) => file.bundlePath);
+  }
+
+  /**
+   * Where each entry of `incoming` belongs, given the scripts its own hooks run and the files
+   * its memory files import.
+   */
+  async function destinations(target: ScopeTarget, incoming: readonly CollectedFile[]) {
+    const scriptsIn = (settingsFiles: readonly string[], scriptsOf: (json: string) => string[]) =>
+      new Set(
+        incoming
+          .filter((entry) => settingsFiles.includes(entry.path))
+          .flatMap((entry) => scriptsOf(new TextDecoder().decode(entry.content))),
+      );
+    const globalScripts = scriptsIn(GLOBAL_SETTINGS_FILES, (json) =>
+      hookScripts(json, options).map((script) => script.bundlePath),
+    );
+    if (target.kind === 'global') {
+      const imported = await importedIn(incoming, options.baseDir, GLOBAL_MEMORY_FILES, (file) =>
+        globalImportPlace(file, options),
+      );
+      for (const bundlePath of imported) globalScripts.add(bundlePath);
+    }
+    const projectScripts =
+      target.kind === 'project'
+        ? scriptsIn(PROJECT_SETTINGS_FILES, (json) =>
+            projectHookScripts(json, {
+              projectDir: target.projectDir,
+              platform: options.platform,
+            }).map((script) => script.bundlePath),
+          )
+        : new Set<string>();
+    if (target.kind === 'project') {
+      const { projectDir } = target;
+      const imported = await importedIn(incoming, projectDir, PROJECT_MEMORY_FILES, (file) =>
+        projectImportPlace(file, { projectDir, platform: options.platform }),
+      );
+      for (const bundlePath of imported) projectScripts.add(bundlePath);
+    }
+    return (bundlePath: string): RestoreDestination => {
+      const windowsProblem = options.platform === 'win32' ? windowsNameProblem(bundlePath) : null;
+      if (windowsProblem !== null) return { kind: 'refused', reason: windowsProblem };
+      return target.kind === 'global'
+        ? globalDestination(bundlePath, globalScripts)
+        : projectDestination(bundlePath, projectScripts);
+    };
+  }
+
+  /** The project's auto memory folder, looked up once and only when an entry needs it. */
+  function autoMemoryFolder(target: ScopeTarget, report: MutableReport) {
+    let memory: Promise<string | null> | undefined;
+    return () =>
+      (memory ??= (async () => {
+        if (target.kind !== 'project') return null;
+        const location = await findAutoMemory({ ...options, projectDir: target.projectDir });
+        if (location.kind === 'folder') return location.dir;
+        report.warnings.push(
+          location.kind === 'shared'
+            ? 'Auto memory was not restored: autoMemoryDirectory in your user settings is shared by every project.'
+            : location.kind === 'refused'
+              ? `Auto memory was not restored to ${printableLine(location.dir)}, the folder autoMemoryDirectory names: ${location.reason}.`
+              : 'Auto memory was not restored: this project path is too long to find its memory folder.',
+        );
+        return null;
+      })());
+  }
+
+  /**
+   * The shared auto memory folder for a global bundle's `_shared` notes (T110), looked up once
+   * and only when an entry needs it: from user settings here, else from the pulled ones.
+   */
+  function sharedMemoryFolder(incoming: readonly CollectedFile[], report: MutableReport) {
+    let memory: Promise<string | null> | undefined;
+    return () =>
+      (memory ??= (async () => {
+        const settings = incoming.find((entry) => entry.path === 'settings.json');
+        const location = await findSharedAutoMemory(
+          options,
+          settings === undefined ? null : new TextDecoder().decode(settings.content),
+        );
+        if (location.kind === 'folder') return location.dir;
+        report.warnings.push(
+          location.kind === 'none'
+            ? 'Shared auto memory was not restored: autoMemoryDirectory is not set in your user settings.'
+            : `Shared auto memory was not restored to ${printableLine(location.dir)}, the folder autoMemoryDirectory names: ${location.reason}.`,
+        );
+        return null;
+      })());
+  }
+
+  /**
+   * What to write for `file`, given what is there: the file itself when nothing is, nothing
+   * when the same file is, else the user's answer to its conflict (`null`: skipped).
+   */
+  async function writesFor(
+    file: CollectedFile,
+    content: Uint8Array,
+    existing: Uint8Array | null,
+    ask: ConflictResolver,
+  ): Promise<readonly PlannedWrite[] | null> {
+    if (existing === null) return [{ path: file.path, content }];
+    if (sameForRestore(options.platform, file.path, existing, file.content)) return [];
+    const choice = await ask(file.path, { overwriteAllowed: true });
+    if (choice === 'skip') return null;
+    return selectMergeStrategy(mergeChoices, choice, file.path).resolve({
+      path: file.path,
+      existing,
+      incoming: content,
+    });
+  }
+
+  /** Writes the planned files next to `nativePath` and records each in the report. */
+  async function writeAll(
+    file: CollectedFile,
+    nativePath: string,
+    writes: readonly PlannedWrite[],
+    existingMode: number | null,
+    report: MutableReport,
+  ): Promise<void> {
+    for (const write of writes) {
+      // Backups and side-by-side copies sit next to the file, with a marker suffix; a
+      // name already taken (two pulls in one second) gets a number, never replaced (T45).
+      const replacing = write.path === file.path;
+      const suffix = replacing
+        ? ''
+        : await freeSuffix(nativePath + write.path.slice(file.path.length));
+      const writePath = nativePath + write.path.slice(file.path.length) + suffix;
+      await writeAtomically(
+        writePath,
+        write.content,
+        replacing ? modeFor(file, write.content, existingMode) : existingMode,
+      );
+      if (write.path.includes(BACKUP_MARKER)) report.backups.push(write.path + suffix);
+      else report.written.push(write.path + suffix);
+    }
+  }
+
+  /** Warnings for hooks and the status line that came from another OS. */
+  function otherOsWarnings(
+    target: ScopeTarget,
+    incoming: readonly CollectedFile[],
+    sourceOs: RestoreContext['sourceOs'],
+  ): string[] {
+    if (sourceOs === undefined || sourceOs === os) return [];
+    const settingsPaths = target.kind === 'global' ? GLOBAL_SETTINGS_FILES : PROJECT_SETTINGS_FILES;
+    return incoming
+      .filter((entry) => settingsPaths.includes(entry.path))
+      .flatMap((file) => hooksForOtherOs(new TextDecoder().decode(file.content), options.platform))
+      .map(
+        (command) =>
+          `This hook or status line came from ${sourceOs} and will likely not run here: ${printableLine(command)}`,
+      );
+  }
+
+  /** Says that `file` is refused, and why. */
+  function refuse(file: CollectedFile, reason: string, report: MutableReport): void {
+    report.skipped.push(file.path);
+    report.warnings.push(`Refused "${printableLine(file.path)}": ${printableLine(reason)}.`);
+  }
+
+  /** Why a file of a folder (paths from it) must not be written there, or `null`. */
+  function folderEntryProblem(path: string): string | null {
+    if (!BundlePathSchema.safeParse(path).success) return 'not a safe path';
+    if (path.split('/').some((part) => part.toLowerCase() === '.git')) {
+      return 'git keeps its own files';
+    }
+    return options.platform === 'win32' ? windowsNameProblem(path) : null;
+  }
+
+  /**
+   * Writes `file` to `nativePath` with the user's answer if one is there and differs. An auto
+   * memory note (`memory`) replaces one this run wrote there before without asking (T110).
+   */
+  async function writeEntry(
+    file: CollectedFile,
+    nativePath: string,
+    ask: ConflictResolver,
+    report: MutableReport,
+    memory = false,
+  ): Promise<void> {
+    const existing = await readExistingFile(nativePath);
+    if (existing === 'folder') {
+      report.skipped.push(file.path);
+      report.warnings.push(
+        `Skipped "${printableLine(file.path)}": a folder with that name exists.`,
+      );
+      return;
+    }
+    const content = lineEndingsFor(options.platform, file.path, file.content);
+    const key = memory ? sameFileKey(path.resolve(nativePath)) : null;
+    const earlier = key === null ? undefined : memoryWritten.get(key);
+    const ours = earlier !== undefined && existing !== null && sameBytes(existing.content, earlier);
+    const writes = ours
+      ? [{ path: file.path, content }]
+      : await writesFor(file, content, existing?.content ?? null, ask);
+    if (writes === null) {
+      report.skipped.push(file.path);
+      return;
+    }
+    await writeAll(file, nativePath, writes, existing?.mode ?? null, report);
+    if (key !== null && writes.some((write) => write.path === file.path)) {
+      memoryWritten.set(key, content);
+    }
+  }
+
+  /**
+   * Writes each of `incoming` with `writeOne`, in path order. A question the user cancelled
+   * (Ctrl+C) or that cannot be asked without a terminal stops the whole restore; only a
+   * problem with the entry itself is skipped (T53).
+   */
+  async function writeEach(
+    incoming: readonly CollectedFile[],
+    onConflict: ConflictResolver,
+    report: MutableReport,
+    writeOne: (file: CollectedFile, ask: ConflictResolver) => Promise<void>,
+  ): Promise<void> {
+    let stopped: { readonly error: unknown } | undefined;
+    const ask: ConflictResolver = async (...args) => {
+      try {
+        return await onConflict(...args);
+      } catch (error) {
+        stopped = { error };
+        throw error;
+      }
+    };
+    // Two entries a Linux PC keeps apart (`Notes.md`, `notes.md`) would land on one file
+    // where names fold: only the first is written (T43).
+    const seen = new Map<string, string>();
+    for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+      if (foldsHere) {
+        const folded = sameFileKey(file.path);
+        const first = seen.get(folded);
+        if (first !== undefined) {
+          report.skipped.push(file.path);
+          report.warnings.push(
+            `Skipped "${printableLine(file.path)}": on this PC it is the same file as "${printableLine(first)}".`,
+          );
+          continue;
+        }
+        seen.set(folded, file.path);
+      }
+      // One bad entry is skipped with a warning; it never stops the rest of the restore.
+      try {
+        await writeOne(file, ask);
+      } catch (error) {
+        if (stopped !== undefined) throw stopped.error;
+        report.skipped.push(file.path);
+        report.warnings.push(
+          // A file error quotes the path as it is: its message is kept on one line too.
+          `Skipped "${printableLine(file.path)}": ${printableLine(error instanceof Error ? error.message : String(error))}.`,
+        );
+      }
     }
   }
 
@@ -232,8 +574,11 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
       // One lookup table, not a search per file: a setup may hold thousands (PERF-01).
       const byPath = new Map(current.map((entry) => [entry.path, entry]));
       for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+        // Read by pull, never written as it is (`plugins.json`, a saved marketplace): nothing
+        // to ask about, even when this PC would save another one.
+        if (isPullMetadata(file.path)) continue;
         const here = byPath.get(file.path);
-        const claudeJson = file.path === CLAUDE_JSON_BUNDLE_PATH;
+        const claudeJson = isClaudeJsonPath(file.path);
         if (here === undefined && !claudeJson) continue;
         if (
           here !== undefined &&
@@ -242,191 +587,60 @@ export function createClaudeCodeRestorer(options: RestorerOptions): ClaudeCodeRe
           continue;
         found.push({
           path: file.path,
-          question: claudeJson ? CLAUDE_JSON_QUESTION : { overwriteAllowed: true },
+          question: claudeJson ? claudeJsonQuestion(file) : { overwriteAllowed: true },
         });
       }
       return found;
     },
 
-    async claudeJsonChange(incoming) {
-      const file = incoming.find((entry) => entry.path === CLAUDE_JSON_BUNDLE_PATH);
-      return file === undefined ? 'none' : claudeJson.change(file);
+    async claudeJsonChange(incoming, target) {
+      const file = incoming.find((entry) => isClaudeJsonPath(entry.path));
+      return file === undefined ? 'none' : claudeJson.change(file, target);
     },
 
     async restore(target, incoming, onConflict, context: ClaudeRestoreContext = {}) {
       const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
-      // A question the user cancelled (Ctrl+C) or that cannot be asked without a terminal
-      // stops the whole restore; only a problem with the entry itself is skipped (T53).
-      let stopped: { readonly error: unknown } | undefined;
-      const stopping =
-        <A extends unknown[], R>(question: (...args: A) => Promise<R>) =>
-        async (...args: A): Promise<R> => {
-          try {
-            return await question(...args);
-          } catch (error) {
-            stopped = { error };
-            throw error;
-          }
-        };
-      const ask = stopping(onConflict);
-      const projectScripts = new Set(
-        target.kind === 'project'
-          ? incoming
-              .filter((entry) => PROJECT_SETTINGS_FILES.includes(entry.path))
-              .flatMap((entry) =>
-                projectHookScripts(new TextDecoder().decode(entry.content), {
-                  projectDir: target.projectDir,
-                  platform: options.platform,
-                }).map((script) => script.bundlePath),
-              )
-          : [],
-      );
-      const globalScripts = new Set(
-        incoming
-          .filter((entry) => GLOBAL_SETTINGS_FILES.includes(entry.path))
-          .flatMap((entry) =>
-            hookScripts(new TextDecoder().decode(entry.content), options).map(
-              (script) => script.bundlePath,
-            ),
-          ),
-      );
-      const destinationOf = (path: string): RestoreDestination => {
-        const windowsProblem = options.platform === 'win32' ? windowsNameProblem(path) : null;
-        if (windowsProblem !== null) return { kind: 'refused', reason: windowsProblem };
-        return target.kind === 'global'
-          ? globalDestination(path, globalScripts)
-          : projectDestination(path, projectScripts);
+      const destinationOf = await destinations(target, incoming);
+      const memory: MemoryFolders = {
+        project: autoMemoryFolder(target, report),
+        shared: sharedMemoryFolder(incoming, report),
       };
 
-      let memory: Promise<string | null> | undefined;
-      const memoryDir = () =>
-        (memory ??= (async () => {
-          if (target.kind !== 'project') return null;
-          const location = await findAutoMemory({ ...options, projectDir: target.projectDir });
-          if (location.kind === 'folder') return location.dir;
-          report.warnings.push(
-            location.kind === 'shared'
-              ? 'Auto memory was not restored: autoMemoryDirectory in your user settings is shared by every project.'
-              : location.kind === 'refused'
-                ? `Auto memory was not restored to ${printableLine(location.dir)}, the folder autoMemoryDirectory names: ${location.reason}.`
-                : 'Auto memory was not restored: this project path is too long to find its memory folder.',
-          );
-          return null;
-        })());
-
-      /** Writes one entry; a problem with it is thrown and reported by the loop below. */
-      async function restoreEntry(file: CollectedFile): Promise<void> {
+      /** Writes one entry; a problem with it is thrown and reported by `writeEach`. */
+      async function restoreEntry(file: CollectedFile, ask: ConflictResolver): Promise<void> {
         const destination = destinationOf(file.path);
         if (destination.kind === 'refused') {
-          report.skipped.push(file.path);
-          report.warnings.push(
-            `Refused "${printableLine(file.path)}": ${printableLine(destination.reason)}.`,
-          );
+          refuse(file, destination.reason, report);
           return;
         }
         if (destination.kind === 'metadata') return;
         if (destination.kind === 'claude-json') {
-          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true);
+          await claudeJson.merge(file, ask, report, context.leaveClaudeJson === true, target);
           return;
         }
 
-        const nativePath = await nativePathOf(target, destination, memoryDir);
+        const nativePath = await nativePathOf(target, destination, memory);
         if (nativePath === null) {
           report.skipped.push(file.path);
           return;
         }
-
-        const content = lineEndingsFor(options.platform, file.path, file.content);
-        const existing = await readExisting(nativePath);
-        if (existing === 'folder') {
-          report.skipped.push(file.path);
-          report.warnings.push(
-            `Skipped "${printableLine(file.path)}": a folder with that name exists.`,
-          );
-          return;
-        }
-        const existingMode = existing === null ? null : (await stat(nativePath)).mode & 0o777;
-
-        let writes: readonly PlannedWrite[];
-        if (existing === null) {
-          writes = [{ path: file.path, content }];
-        } else if (sameForRestore(options.platform, file.path, existing, file.content)) {
-          return;
-        } else {
-          const choice = await ask(file.path, { overwriteAllowed: true });
-          if (choice === 'skip') {
-            report.skipped.push(file.path);
-            return;
-          }
-          writes = selectMergeStrategy(mergeChoices, choice, file.path).resolve({
-            path: file.path,
-            existing,
-            incoming: content,
-          });
-        }
-
-        for (const write of writes) {
-          // Backups and side-by-side copies sit next to the file, with a marker suffix; a
-          // name already taken (two pulls in one second) gets a number, never replaced (T45).
-          const replacing = write.path === file.path;
-          const suffix = replacing
-            ? ''
-            : await freeSuffix(nativePath + write.path.slice(file.path.length));
-          const writePath = nativePath + write.path.slice(file.path.length) + suffix;
-          await writeAtomically(
-            writePath,
-            write.content,
-            replacing ? modeFor(file, write.content, existingMode) : existingMode,
-          );
-          if (write.path.includes(BACKUP_MARKER)) report.backups.push(write.path + suffix);
-          else report.written.push(write.path + suffix);
-        }
+        const note =
+          destination.kind === 'auto-memory' || destination.kind === 'global-auto-memory';
+        await writeEntry(file, nativePath, ask, report, note);
       }
 
-      // Windows and macOS ignore case and Unicode form, so two entries a Linux PC keeps apart
-      // (`Notes.md`, `notes.md`) would land on one file here: only the first is written (T43).
-      const foldsNames = options.platform === 'win32' || options.platform === 'darwin';
-      const seen = new Map<string, string>();
-      for (const file of [...incoming].sort((a, b) => (a.path < b.path ? -1 : 1))) {
-        if (foldsNames) {
-          const folded = file.path.normalize('NFC').toLowerCase();
-          const first = seen.get(folded);
-          if (first !== undefined) {
-            report.skipped.push(file.path);
-            report.warnings.push(
-              `Skipped "${printableLine(file.path)}": on this PC it is the same file as "${printableLine(first)}".`,
-            );
-            continue;
-          }
-          seen.set(folded, file.path);
-        }
-        // One bad entry is skipped with a warning; it never stops the rest of the restore.
-        try {
-          await restoreEntry(file);
-        } catch (error) {
-          if (stopped !== undefined) throw stopped.error;
-          report.skipped.push(file.path);
-          report.warnings.push(
-            // A file error quotes the path as it is: its message is kept on one line too.
-            `Skipped "${printableLine(file.path)}": ${printableLine(error instanceof Error ? error.message : String(error))}.`,
-          );
-        }
-      }
+      await writeEach(incoming, onConflict, report, restoreEntry);
+      report.warnings.push(...otherOsWarnings(target, incoming, context.sourceOs));
+      return report;
+    },
 
-      if (context.sourceOs !== undefined && context.sourceOs !== os) {
-        const settingsPaths =
-          target.kind === 'global' ? GLOBAL_SETTINGS_FILES : PROJECT_SETTINGS_FILES;
-        for (const file of incoming.filter((entry) => settingsPaths.includes(entry.path))) {
-          for (const command of hooksForOtherOs(
-            new TextDecoder().decode(file.content),
-            options.platform,
-          )) {
-            report.warnings.push(
-              `This hook or status line came from ${context.sourceOs} and will likely not run here: ${printableLine(command)}`,
-            );
-          }
-        }
-      }
+    async restoreFolder(dir, files, onConflict) {
+      const report: MutableReport = { written: [], skipped: [], backups: [], warnings: [] };
+      await writeEach(files, onConflict, report, async (file, ask) => {
+        const problem = folderEntryProblem(file.path);
+        if (problem !== null) refuse(file, problem, report);
+        else await writeEntry(file, resolver.toNativePath(dir, file.path), ask, report);
+      });
       return report;
     },
   };

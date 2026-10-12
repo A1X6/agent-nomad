@@ -30,7 +30,7 @@ node packages/cli/dist/src/bin.js --help
 | `pnpm test`                 | All unit and integration tests (Vitest).                                                 |
 | `pnpm test:coverage`        | The tests with a coverage report (in `coverage/`).                                       |
 | `pnpm knip`                 | Lists unused files, dependencies and exports (mark a kept export `@public`).             |
-| `pnpm test:e2e`             | Builds, then runs the built CLI end to end against a local API (three simulated PCs).    |
+| `pnpm test:e2e`             | Builds, then runs the built CLI against a local API: cross-OS steps, one-OS scenarios.   |
 | `pnpm check`                | Typecheck, lint, format check and tests: what CI runs. Run it before every pull request. |
 | `pnpm lint` / `pnpm format` | ESLint / Prettier on their own.                                                          |
 | `pnpm release:build`        | Builds the npm package into `packages/cli/release/` (bundled with esbuild).              |
@@ -124,48 +124,102 @@ open, such as a chat or an option letter from a discussion.
     and `dataKey`) and the real password checker (`useZxcvbnChecker`, then `zxcvbn`);
     collected files (`collected`, `collectedJson`, `paths`, `text`); files on disk
     (`writeTestFile`, `linkFolder`, `readText`, `readJson`, `exists`); a secret store
-    (`memorySecretStore`, `memorySecrets`), a scripted prompter (`scriptedPrompter`), a
+    (`memorySecretStore`, `memorySecrets`, and `loggedInStore` for one already logged in), a
+    PC that finds only the programs it is given (`executableLookup`), a scripted prompter
+    (`scriptedPrompter`, with each yes/no question's default in `confirmDefaults`; its `last`
+    answers push's and pull's question after their summary by its words), a
     recording reporter (`recordingReporter`), an env writer (`fakeEnvWriter`), a typed
-    partial API client (`fakeApi`), a bundle server (`fakeBundleServer`, read with
-    `storedOn` and `revisionOn`), a local state in a temporary folder (`localStateIn`), an
-    adapter that only detects (`fakeAdapter`, with `installedAgent` and `missingAgent`),
-    a password the policy accepts (`STRONG`) and a project folder nobody looks in (`CWD`).
-  - `packages/cli/test/claude-code-project-fixtures.ts`: the Claude Code tests' temporary
-    home and project (`useProjectFolders`, then `root`, `home`, `base` and `project`), the
-    collectors (`options`, `globalCollector`, `collect`, `collectSkipped`), the real adapter
-    (`claudeCodeAdapter`), settings with one Stop hook (`stopHook`), an auto memory folder
-    (`setMemoryDirectory`, `memoryDir`) and a claude.ai synced skills folder (`synced`,
-    `syncedSetup`).
+    partial API client (`fakeApi`), a bundle server (`fakeBundleServer`, read with `storedOn`
+    and `revisionOn`), a local state in a temporary folder (`localStateIn`), an adapter that
+    only detects (`fakeAdapter`, with `installedAgent` and `missingAgent`), a password the
+    policy accepts (`STRONG`) and a project folder nobody looks in (`CWD`).
+  - `packages/cli/test/claude-code-project-fixtures.ts`: the Claude Code tests' temporary home and
+    project (`useProjectFolders`, then `root`, `home`, `base` and `project`), the collectors
+    (`options`, `globalCollector`, `collect`, `collectSkipped`, with or without memory), the real
+    adapter (`claudeCodeAdapter`), settings with one Stop hook (`stopHook`), an auto memory folder
+    (`setMemoryDirectory`, `memoryDir`, and any project's by its folder name, `projectMemory`,
+    T110), a claude.ai synced skills folder (`synced`, `syncedSetup`), and the project's entry in
+    `~/.claude.json` (T109: `claudeJsonKey`, the folder as Claude Code writes it as a key,
+    `writeClaudeJsonProject` and `LOCAL_MCP_SERVER`); for pull (DUP-03 of review 15), the plan
+    step with a global plan step's context, on a PC whose `claude` answers validate with a report
+    or that has no `claude`, with any adapter options (`planStepWith`, DUP-04 of review 16), a
+    Linux PC without managed settings for the adapter (`noManagedSystem`) and the restorer
+    (`testRestorer`).
+  - `packages/cli/test/claude-code-state-names.ts`: the state names the Claude Code program lists
+    for its own folder, read from the version in `STATE_NAMES_VERSION` (T108): `STATE_FOLDER_NAMES`,
+    and with the names a self-hosted runner leaves out, `STATE_NAMES`. A newer Claude Code's lists
+    replace them, with the new version.
+  - `packages/cli/test/claude-code-settings-reference.ts`: an excerpt of Claude Code's settings
+    reference saved on 2026-10-11 (`SETTINGS_REFERENCE_2026_10_11`) and its "Global config" keys
+    (`GLOBAL_CONFIG_KEYS_2026_10_11`), for the drift check (T109). A newer page's excerpt replaces
+    it, with its date.
   - `packages/cli/test/claude-code-plugin-fixtures.ts`: plugin files (`installedPluginsFile`,
-    `putJson`, `realisticPlugins`) and managed settings (`fakeManagedSystem` with
-    `FakeManagedPc`, `noManagedSettings`, `fileManagedSettings`).
-  - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about
-    other parts (`stubRestorer`).
-  - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase`
-    or `createTestDatabase` and `migrationsFolder` in `database.ts`; `useTestApp` or
-    `createTestApp`, `TEST_IP_HEADER` and `postJson` in `app.ts`). In `fixtures.ts`: values
-    (`b64`, `bytes`, `sha256Hex`, `scopeKeyOf`, `UNKNOWN_ID`, `authKey`), requests as the
-    CLI sends them (`registration`, `registerUser`, `registerForToken`, `preloginRequest`,
-    `loginRequest`, `putSetup`, `deleteAccountRequest`, the `bearer` header) and their
-    `errorCode`, users and sessions (`newUser`, `createUser`, `newSession`), setups
-    (`bundleRow`, `globalKey`, `metaWrite`, `seedSetups`) and `memoryLogger`.
+    `putJson`, `realisticPlugins`), managed settings (`fakeManagedSystem` with `FakeManagedPc`,
+    `noManagedSettings`, `fileManagedSettings`) and the plugin sources Claude Code 2.1.295 keeps
+    (T96, checked on 2.1.296 in T107): the names `SKILLS_DIR_MARKETPLACE`, `PLUGIN_DATA_FOLDERS`,
+    `PLUGIN_STORE_FILES` (names cut at `STORE_NAME_LENGTH`) and `PLUGIN_STORE_MODES`;
+    `claude plugin validate` runs as `ValidateRun` (`validatePassWithWarning`,
+    `validateBrokenManifest`, the mod folder shown as `VALIDATED_MOD`); and the claude.ai synced
+    files of `SYNCED_ACCOUNT` (`syncedSkillsManifest`, `olderSyncedSkillsManifest`,
+    `syncedPluginsManifest`, `syncedPluginMeta`, `syncedMarketplaces`, all written by
+    `syncedSources`), with more skill entries (`SyncedSkillEntry`: `syncedOrganizationSkill`,
+    `syncedDirectorySkill`) and `syncedAccount`, which also writes each skill's folder (T105), and
+    `syncedAccountPlugins`, which writes each plugin's folder (T101: `syncedPluginFiles`, entries as
+    `SyncedPluginEntry`); and a mod in `skills/` (T97: `MOD_NAME`, `MOD_MODULE`, `modFiles`), a
+    validate report with other `$` calls and hooks (`validatePassCalling`) or for a plugin
+    without hooks (`validatePassNoHooks`, T101) and the validator of a PC whose `claude` answers
+    validate with a report (`validatorFor`); a
+    marketplace added from a local folder (T98: `writeLocalMarketplace`, its catalog `localCatalog`,
+    `addedFromFolders`, `localModId`), its saved entry (`savedLocalMarketplace`, T104) and a
+    scripted `git` (`scriptedGit` with `GitAnswer`); the mod as a plugin folder of its own
+    (`writeModFolder`) or in `skills/` (`writeModInSkills`) and its saved `CLAUDE_CODE_PLUGIN_DIRS`
+    entry (T99: `savedPluginDir`, `SAVED_PLUGIN_DIR_ENTRY`); files as a saved folder lists them
+    (`savedFiles`, T104); a plugin's data folder and store file (T102: `writePluginData`,
+    `writePluginStore`); the names of the mod API a module reaches as `$.<name>`, read from the
+    Claude Code in `MOD_CALLS_VERSION` (`MOD_CALLS`, SEC-04 of review 15), and the events it
+    hooks with `on("<name>")`, read from the Claude Code in `MOD_HOOKS_VERSION` (`MOD_HOOKS`,
+    SEC-08 of review 16), each of which a newer Claude Code's list replaces, with the new
+    version.
+  - `packages/cli/test/stub-restorer.ts`: a restorer that writes nothing, for tests about other
+    parts (`stubRestorer`).
+  - `packages/cli/test/readme.ts`: the repository README as the tests that keep it and the CLI's
+    words the same read it (T115): the text under one heading (`readmeSection`) and a table's rows
+    as cells (`tableRows`).
+  - `packages/server/test/support/`: a fresh database or app for each test (`useTestDatabase` or
+    `createTestDatabase` and `migrationsFolder` in `database.ts`; `useTestApp` or `createTestApp`,
+    `TEST_IP_HEADER` and `postJson` in `app.ts`). In `fixtures.ts`: values (`b64`, `bytes`,
+    `sha256Hex`, `scopeKeyOf`, `UNKNOWN_ID`, `authKey`), requests as the CLI sends them
+    (`registration`, `registerUser`, `registerForToken`, `preloginRequest`, `loginRequest`,
+    `putSetup`, `deleteAccountRequest`, the `bearer` header) and their `errorCode`, users and
+    sessions (`newUser`, `createUser`, `newSession`), setups (`bundleRow`, `globalKey`, `metaWrite`,
+    `seedSetups`) and `memoryLogger`.
+  - `packages/e2e/src/`: in `pc.ts`, a simulated PC (`newPc`) and file helpers (`read`, `write`,
+    `forward`, `isExecutable`); in `fixtures.ts`, the built fake `claude` (`FAKE_CLAUDE`), a mod
+    (`writeMod`, `MOD_MODULE`, `MOD_HOOKS`) and a marketplace in a folder (`writeLocalMarketplace`);
+    in `leaks.ts`, the check that nothing readable left the PC (`secretsOf`, then `expectNoLeaks`
+    with the test's own strings), which every e2e test that pushes ends with.
   - `packages/core/test/fixtures.ts`: `useDataKey`, then `crypto` and `dataKey`.
-  - `packages/contracts/test/fixtures.ts`: a session `token`, the `kdfParams` as the wire
-    carries them and a bundle list `summary`.
+  - `packages/contracts/test/fixtures.ts`: a session `token`, the `kdfParams` as the wire carries
+    them and a bundle list `summary`.
 - Use a named constant instead of its value: `GLOBAL_SCOPE_KEY`, `BUNDLE_FORMAT_VERSION`,
-  `AUTH_KEY_BYTES`, `KDF_SALT_BYTES`, `WRAPPED_DATA_KEY_BYTES` and `MAX_BUNDLE_BYTES`
-  (contracts); `AEAD_KEY_BYTES`, `DATA_KEY_BYTES`, `BACKUP_MARKER`, `INCOMING_MARKER` and
-  `HOME_PLACEHOLDER` (core); `SECRETS_FILE`, `STATE_FILE`, `TEMP_MARKER`,
+  `AUTH_KEY_BYTES`, `KDF_SALT_BYTES`, `WRAPPED_DATA_KEY_BYTES`, `MAX_BUNDLE_BYTES` and
+  `MAX_BUNDLE_FILES` (contracts); `AEAD_KEY_BYTES`, `DATA_KEY_BYTES`, `BACKUP_MARKER`,
+  `INCOMING_MARKER` and `HOME_PLACEHOLDER` (core); `SECRETS_FILE`, `STATE_FILE`, `TEMP_MARKER`,
   `CLAUDE_JSON_BUNDLE_PATH`, `BLOCK_START` and `BLOCK_END` (the CLI). A value an assertion
   compares against stays written out, and so do the header names, sizes and settings that
   pin the API format in the contracts tests and the server's `support/fixtures.ts`.
-- A module's tests go in the test file named after it (see the file reference in
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), so they are found by name.
+- A module's tests go in the test file named after it, so they are found by name. The file
+  reference in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) lists the other test files and
+  the small modules tested through the code that uses them.
 - Anything that touches paths runs on macOS, Linux and Windows in CI; write it so it passes
   on all three (use `path.join`, never assume `/`).
-- A change to push, pull or the bundle belongs in the end-to-end steps too
-  (`packages/e2e/src/steps.ts`), including the check that nothing readable leaves the PC
-  (`packages/e2e/src/plaintext.ts`: as text, encoded or compressed).
+- A change to push, pull or the bundle belongs in an end-to-end test too: in the cross-OS steps
+  (`packages/e2e/src/steps.ts`) when it must cross operating systems, else in a scenario test of its
+  own in `packages/e2e/test/`, including the check that nothing readable leaves the PC
+  (`expectNoLeaks` in `packages/e2e/src/leaks.ts`, which searches with
+  `packages/e2e/src/plaintext.ts`: as text, encoded or compressed). A PC that pulls plugins gets the
+  `claude` command of `packages/e2e/src/fake-claude.ts` (`newPc` option `claude`), never the real
+  Claude Code.
 
 ## Pull requests
 

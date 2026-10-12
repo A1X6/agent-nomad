@@ -1,15 +1,21 @@
 /**
  * What in a skill, command or subagent file Claude Code runs by itself (T44), per its skills
  * and hooks docs: a `` !`command` `` placeholder at the start of a line or after whitespace,
- * a ` ```! ` block, and `hooks` in the frontmatter. These run without Claude choosing to (the
- * placeholders before Claude even sees the skill). Commands written as instructions (plain
- * text or code blocks without the `!` forms) never run by themselves and are not reported.
+ * a ` ```! ` block, and `hooks` in the frontmatter (a frontmatter it cannot read is shown
+ * too). These run without Claude choosing to (the placeholders before Claude even sees the
+ * skill). Commands written as instructions (plain text or code blocks without the `!` forms)
+ * never run by themselves and are not reported.
  */
 export function runnableInMarkdown(text: string): string[] {
   const found: string[] = [];
-  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
-  if (frontmatter?.[1] !== undefined && /^hooks\s*:/m.test(frontmatter[1])) {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1];
+  // The key quoted or not, as YAML reads it (SEC-07 of review 16).
+  if (frontmatter !== undefined && /^\s*["']?hooks["']?\s*:/m.test(frontmatter)) {
     found.push('hooks in its frontmatter');
+    // A flow mapping (`{`) or a complex key (`? `) can hold the key in a form the line above
+    // does not read, so the review fails toward showing it.
+  } else if (frontmatter !== undefined && /^\s*(?:\{|\?(?:\s|$))/m.test(frontmatter)) {
+    found.push('frontmatter the review cannot read, which may hold hooks');
   }
   // The open code block and its fence: as in CommonMark, only a fence of the same character,
   // at least as long and with nothing after it, closes it (SEC-02). `outer`: the plain block

@@ -1,18 +1,28 @@
-import { readFile } from 'node:fs/promises';
-
-import * as z from 'zod';
-
+import { isFile } from '../../system/files.ts';
 import type { CollectedFile, CollectOptions, Collector, ScopeTarget } from '../adapter.ts';
+import { underAnyFolder } from '../shared/bundle-paths.ts';
+import { pathsOf } from '../shared/detector-system.ts';
 import {
   createFileGatherer,
   type FileGatherer,
   jsonFile,
   uniqueByPath,
 } from '../shared/file-gathering.ts';
-import { pathsOf } from '../shared/detector-system.ts';
-import { underFolder } from '../shared/bundle-paths.ts';
-import { commandsInSettings, programOf } from './settings-commands.ts';
-import { settingsFilesIn } from './claude-code-paths.data.ts';
+import {
+  ACCOUNT_PLUGINS_PART,
+  collectAccountPlugins,
+  readSyncedPlugins,
+} from './account-plugins.ts';
+import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
+import { allAutoMemoryFolders } from './auto-memory.ts';
+import { claudeJsonFileOf, readClaudeJsonFile } from './claude-json-merge.ts';
+import {
+  GLOBAL_MEMORY_FILES,
+  globalImportPlace,
+  importsOf,
+  shownImportPath,
+  skippedImportReason,
+} from './claude-md-imports.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
   CLAUDE_JSON_MCP_KEY,
@@ -20,18 +30,23 @@ import {
   GLOBAL_FILES,
   GLOBAL_FOLDERS,
   GLOBAL_MEMORY_FOLDERS,
+  globalSettingsFiles,
   HOME_SCRIPTS_PREFIX,
   NEVER_SYNCED,
-  PLUGINS_BUNDLE_PATH,
   PROGRAMS_BUNDLE_PATH,
   SKIPPED_NAMES,
   TOOL_CONFIG_FILES,
 } from './global-paths.ts';
-import { ClaudeJsonError } from './claude-json-merge.ts';
-import { ACCOUNT_SKILLS_PART, collectAccountSkills, readSyncedSkills } from './account-skills.ts';
-import { hookScripts } from './hook-scripts.ts';
-import { readPluginManifest } from './plugins.ts';
+import { hookScripts, onceEachScript, type SkippedScript } from './hook-scripts.ts';
+import { localMarketplaceFiles } from './local-marketplaces.ts';
+import { pluginDirFiles } from './plugin-dirs.ts';
+import type { ProgramCli } from './plugin-sync.ts';
+import { collectPluginData, PLUGIN_DATA_PART, restoredPluginIds } from './plugin-data.ts';
+import { pluginFiles } from './plugins.ts';
+import { collectMemoryFolder } from './project-collector.ts';
 import { ProgramEntrySchema, type ProgramInfo, type ProgramLocator } from './programs.ts';
+import { commandsInSettings, programOf } from './settings-commands.ts';
+import { isGeneratedInSkillsPlugin } from './skills-dir-plugins.ts';
 
 export interface GlobalCollectorOptions {
   /** Claude Code's base folder, from the detector (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
@@ -42,33 +57,77 @@ export interface GlobalCollectorOptions {
   readonly customConfigDir: boolean;
   /** Looks up programs hooks and the status line run; without it none are recorded. */
   readonly findProgram?: ProgramLocator;
+  /**
+   * Finds `git` for saved local marketplaces (T98) and plugin folders (T99); without it their
+   * folders are walked.
+   */
+  readonly findGit?: () => Promise<ProgramCli | null>;
   /** Single files in the base folder; the paths data file's list unless a test gives one. */
   readonly globalFiles?: readonly string[];
 }
 
 /** True when `bundlePath` is a never-synced entry or inside one. */
-const isNeverSynced = (bundlePath: string) =>
-  NEVER_SYNCED.some((entry) => underFolder(bundlePath, entry));
+const isNeverSynced = underAnyFolder(NEVER_SYNCED);
+
+/** Left out of a walk: never-synced entries and what Claude Code generates in a plugin (T97). */
+const isLeftOut = (bundlePath: string) =>
+  isNeverSynced(bundlePath) || isGeneratedInSkillsPlugin(bundlePath);
 
 /** A Claude Code global collector for one PC (T25). Project scope is T26. */
 export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions): Collector {
   const path = pathsOf(options.platform);
   const { baseDir, homedir } = options;
   const globalFiles = options.globalFiles ?? GLOBAL_FILES;
-  // The settings files among them (DUP-01), as `GLOBAL_SETTINGS_FILES` is made.
-  const settingsFiles = settingsFilesIn(globalFiles);
+  // The settings files among them, as `GLOBAL_SETTINGS_FILES` is made.
+  const settingsFiles = globalSettingsFiles(globalFiles);
 
-  /** Script files that hooks and the status line run, if they are in the home folder. */
+  /**
+   * Script files that hooks and the status line run, if they are in the home folder; the
+   * others are told to `onSkipped` (T112).
+   */
   async function hookScriptFiles(
     files: FileGatherer,
     settingsJson: string,
+    onSkipped: SkippedScript | undefined,
   ): Promise<CollectedFile[]> {
     const found: CollectedFile[] = [];
-    for (const script of hookScripts(settingsJson, options)) {
+    for (const script of hookScripts(settingsJson, options, onSkipped)) {
       const file = await files.readIfFile(script.nativePath, script.bundlePath);
       if (file) found.push(file);
     }
     return found;
+  }
+
+  /**
+   * The files `CLAUDE.md` and the rules import (T111) that are not synced already: in the base
+   * folder or elsewhere in the home. Each one push cannot take is named, never left out silently.
+   */
+  async function importedFiles(
+    files: FileGatherer,
+    found: readonly CollectedFile[],
+    onSkipped: CollectOptions['onSkipped'],
+  ): Promise<CollectedFile[]> {
+    const imported: CollectedFile[] = [];
+    const { skipped } = await importsOf(
+      baseDir,
+      GLOBAL_MEMORY_FILES,
+      found,
+      {
+        place: (nativePath) => globalImportPlace(nativePath, options),
+        isFile,
+        async read(nativePath, bundlePath) {
+          const file = await files.readIfFile(nativePath, bundlePath);
+          if (file === null) return null;
+          imported.push(file);
+          return new TextDecoder().decode(file.content);
+        },
+      },
+      options,
+    );
+    for (const entry of skipped) {
+      onSkipped?.(shownImportPath(entry.nativePath, options), skippedImportReason(entry, options));
+    }
+    return imported;
   }
 
   /**
@@ -114,31 +173,16 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
 
   /** MCP servers and preference keys from `~/.claude.json`; nothing else in it. */
   async function claudeJson(): Promise<CollectedFile | null> {
-    const file = options.customConfigDir
-      ? path.join(baseDir, '.claude.json')
-      : path.join(homedir, '.claude.json');
-    let text: string;
-    try {
-      text = await readFile(file, 'utf8');
-    } catch {
-      return null;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch (error) {
-      throw new ClaudeJsonError(file, { cause: error });
-    }
-    const all = z.record(z.string(), z.unknown()).safeParse(parsed);
-    if (!all.success) throw new ClaudeJsonError(file, { cause: all.error });
+    const all = await readClaudeJsonFile(claudeJsonFileOf(options));
+    if (all === null) return null;
 
     const selected: Record<string, unknown> = {};
-    const mcpServers = all.data[CLAUDE_JSON_MCP_KEY];
+    const mcpServers = all[CLAUDE_JSON_MCP_KEY];
     if (mcpServers && typeof mcpServers === 'object' && Object.keys(mcpServers).length > 0) {
       selected[CLAUDE_JSON_MCP_KEY] = mcpServers;
     }
     for (const key of CLAUDE_JSON_PREFERENCE_KEYS) {
-      if (all.data[key] !== undefined) selected[key] = all.data[key];
+      if (all[key] !== undefined) selected[key] = all[key];
     }
     return Object.keys(selected).length === 0 ? null : jsonFile(CLAUDE_JSON_BUNDLE_PATH, selected);
   }
@@ -166,28 +210,68 @@ export function createClaudeCodeGlobalCollector(options: GlobalCollectorOptions)
         ? [...GLOBAL_FOLDERS, ...GLOBAL_MEMORY_FOLDERS]
         : GLOBAL_FOLDERS;
       for (const name of folders) {
-        found.push(...(await files.walk(path.join(baseDir, name), name, isNeverSynced, seen)));
+        found.push(...(await files.walk(path.join(baseDir, name), name, isLeftOut, seen)));
+      }
+      // With memory, the auto memory of every project too, not only of pushed projects (T110).
+      if (collectOptions.includeMemory) {
+        const { onSkipped } = collectOptions;
+        const machine = { baseDir, homedir, platform: options.platform };
+        const memory = await allAutoMemoryFolders(machine);
+        for (const left of memory.skipped) onSkipped?.(left.bundlePrefix, left.reason);
+        for (const { dir, bundlePrefix } of memory.folders) {
+          found.push(...(await collectMemoryFolder(dir, bundlePrefix, { ...machine, onSkipped })));
+        }
       }
 
       const settingsJsons = found
         .filter((file) => settingsFiles.includes(file.path))
         .map((file) => new TextDecoder().decode(file.content));
-      for (const text of settingsJsons) found.push(...(await hookScriptFiles(files, text)));
+      const skippedScript = onceEachScript(collectOptions.onSkipped);
+      for (const text of settingsJsons) {
+        found.push(...(await hookScriptFiles(files, text, skippedScript)));
+      }
       found.push(...(await programs(files, settingsJsons, collectOptions.onSkipped)));
+      found.push(...(await importedFiles(files, found, collectOptions.onSkipped)));
 
       const selected = await claudeJson();
       if (selected) found.push(selected);
 
-      const plugins = await readPluginManifest({
-        baseDir,
-        platform: options.platform,
-        scope: { kind: 'global' },
-      });
-      if (plugins) found.push(jsonFile(PLUGINS_BUNDLE_PATH, plugins));
+      const plugins = { baseDir, platform: options.platform, scope: { kind: 'global' } } as const;
+      found.push(...(await pluginFiles(plugins)));
+      found.push(
+        ...(await localMarketplaceFiles(plugins, {
+          homedir,
+          ...(options.findGit && { git: options.findGit }),
+          ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),
+        })),
+      );
+      // Plugin folders the user settings load through `env.CLAUDE_CODE_PLUGIN_DIRS` (T99).
+      found.push(
+        ...(await pluginDirFiles(
+          found.find((file) => file.path === 'settings.json'),
+          {
+            homedir,
+            platform: options.platform,
+            ...(options.findGit && { git: options.findGit }),
+            ...(collectOptions.onSkipped && { onSkipped: collectOptions.onSkipped }),
+          },
+        )),
+      );
 
       // Opt-in (T42): a copy of the user's own claude.ai skills, never skills/synced itself.
       if (collectOptions.include?.has(ACCOUNT_SKILLS_PART) === true) {
         found.push(...(await collectAccountSkills(files, await readSyncedSkills(path, baseDir))));
+      }
+      // Opt-in (T101): the user's own claude.ai plugins, never plugins/synced itself.
+      if (collectOptions.include?.has(ACCOUNT_PLUGINS_PART) === true) {
+        found.push(...(await collectAccountPlugins(files, await readSyncedPlugins(path, baseDir))));
+      }
+      // Opt-in (T102): the data of the plugins this setup restores, never plugins/data itself.
+      if (collectOptions.include?.has(PLUGIN_DATA_PART) === true) {
+        const ids = await restoredPluginIds(plugins, {
+          accountPlugins: collectOptions.include.has(ACCOUNT_PLUGINS_PART),
+        });
+        found.push(...(await collectPluginData(files, baseDir, ids, collectOptions.onSkipped)));
       }
 
       // A hook may name a file already in a synced folder.

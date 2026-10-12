@@ -12,7 +12,9 @@ import {
   type AskPluginSyncDeps,
   type InstallPluginsDeps,
   type PluginManifest,
+  type PluginVersions,
   type ProgramCli,
+  type SavedVersionCheck,
 } from '../src/index.ts';
 
 useProjectFolders('agentnomad-plugin-sync-');
@@ -219,5 +221,68 @@ describe('warnings (T31 done-when)', () => {
     expect(result.failed[0]?.reason).toBe(
       "blocked by your organization's Claude Code policy (/etc/claude-code/managed-settings.json). Ask your admin to allow it. Details: Marketplace evil-market is blocked by strictKnownMarketplaces",
     );
+  });
+});
+
+describe('changed plugin versions (T100)', () => {
+  /** What push saved: brag at 1.0.0 and builder at 2.0.0. */
+  const saved: PluginVersions = {
+    plugins: [
+      { id: 'brag@brag', scope: 'user', version: '1.0.0' },
+      { id: 'builder@company', scope: 'user', version: '2.0.0' },
+    ],
+  };
+
+  /** Installs brag and builder; Claude Code then reports `installed` as their versions. */
+  async function install(versions: SavedVersionCheck | undefined, failures = {}) {
+    const { claude } = fakeClaude(failures);
+    const { reporter, lines } = recordingReporter({ levels: false });
+    await installPlugins(
+      { marketplaces: [], plugins: savedManifest.plugins.slice(0, 2), declined: [] },
+      { claude, reporter, cwd: '/work/app', ...(versions && { versions }) },
+    );
+    return lines;
+  }
+  const installedAt = (brag: string, builder: string): SavedVersionCheck => ({
+    saved,
+    installed: (plugins) =>
+      Promise.resolve({
+        plugins: plugins.map(({ id, scope }) => ({
+          id,
+          scope,
+          version: id === 'brag@brag' ? brag : builder,
+        })),
+      }),
+  });
+
+  it('names each plugin Claude Code installed in another version than the saved one', async () => {
+    expect(await install(installedAt('1.2.0', '2.0.0'))).toEqual([
+      'Reinstalled brag@brag, builder@company.',
+      'Claude Code installs only the latest version of a plugin, so these changed:\n  brag@brag  was 1.0.0, now 1.2.0',
+    ]);
+  });
+
+  it('names nothing when the saved versions were installed', async () => {
+    expect(await install(installedAt('1.0.0', '2.0.0'))).toEqual([
+      'Reinstalled brag@brag, builder@company.',
+    ]);
+  });
+
+  it('a bundle without saved versions installs as before', async () => {
+    expect(await install(undefined)).toEqual(['Reinstalled brag@brag, builder@company.']);
+  });
+
+  it('a plugin that failed to install is not compared', async () => {
+    const lines = await install(installedAt('1.2.0', '3.0.0'), { 'brag@brag': 'Network error' });
+    expect(lines).toEqual([
+      'Reinstalled builder@company.',
+      'Claude Code installs only the latest version of a plugin, so these changed:\n  builder@company  was 2.0.0, now 3.0.0',
+      'Could not install brag@brag: Network error',
+    ]);
+  });
+
+  it('names nothing when the installed versions cannot be read', async () => {
+    const lines = await install({ saved, installed: () => Promise.resolve(null) });
+    expect(lines).toEqual(['Reinstalled brag@brag, builder@company.']);
   });
 });

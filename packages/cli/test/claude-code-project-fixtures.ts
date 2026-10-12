@@ -3,15 +3,25 @@ import { join } from 'node:path';
 
 import { beforeEach } from 'vitest';
 
-import { useTempDir, writeTestFile } from './fakes.ts';
+import {
+  fakeManagedSystem,
+  validatorFor,
+  type ValidateRun,
+} from './claude-code-plugin-fixtures.ts';
+import { recordingReporter, scriptedPrompter, useTempDir, writeTestFile } from './fakes.ts';
 import type { Collector, ScopeTarget } from '../src/agents/adapter.ts';
 import type { GlobalCollectorOptions } from '../src/agents/claude-code/global-collector.ts';
 import {
   createClaudeCodeAdapter,
   createClaudeCodeGlobalCollector,
   createClaudeCodeProjectCollector,
+  createClaudeCodeRestorer,
   projectDirName,
   type ClaudeCodeAdapterOptions,
+  type Prompter,
+  type Reporter,
+  type RestorePlanContext,
+  type RestorerOptions,
 } from '../src/index.ts';
 
 /**
@@ -73,6 +83,83 @@ export const claudeCodeAdapter = (
     ...overrides,
   });
 
+/**
+ * The context of a global plan step asking `prompter` and telling `reporter`: no files, no
+ * conflicts, no flags and no parts named, unless `overrides` say otherwise.
+ */
+const planContext = (
+  prompter: Prompter,
+  reporter: Reporter,
+  overrides: Partial<RestorePlanContext> = {},
+): RestorePlanContext => ({
+  target: { kind: 'global' },
+  files: [],
+  conflicts: new Map(),
+  conflictAnswer: undefined,
+  prompter,
+  reporter,
+  assumeYes: false,
+  allowCommands: false,
+  parts: new Map(),
+  ...overrides,
+});
+
+/** A Linux PC without organization-managed settings, for the adapter to read them from. */
+export const noManagedSystem = fakeManagedSystem({ platform: 'linux' });
+
+/**
+ * The real adapter's plan step in `homedir` (`home` unless said), with no managed settings
+ * and the adapter options in `adapter`, on a PC whose `claude` answers validate with
+ * `validate` (`null`: no `claude` here), given `answers` and the context of
+ * {@link planContext} with `overrides`. Returns the plan, the reporter, what was asked (and
+ * each yes/no default), the lines shown and the validate calls.
+ */
+export async function planStepWith(
+  validate: ValidateRun | null,
+  options: {
+    answers?: unknown[];
+    overrides?: Partial<RestorePlanContext>;
+    homedir?: string;
+    adapter?: Partial<ClaudeCodeAdapterOptions>;
+  } = {},
+) {
+  const script = scriptedPrompter(options.answers ?? []);
+  const { reporter, lines } = recordingReporter({ levels: false });
+  const { validator, calls } = await validatorFor(validate);
+  const adapter = claudeCodeAdapter(options.homedir ?? home, {
+    managedSystem: noManagedSystem,
+    pluginValidator: validator,
+    ...options.adapter,
+  });
+  if (!adapter.planRestore) throw new Error('no plan step');
+  const planned = await adapter.planRestore(
+    planContext(script.prompter, reporter, options.overrides),
+  );
+  return {
+    planned,
+    reporter,
+    lines,
+    asked: script.asked,
+    defaults: script.confirmDefaults,
+    validated: calls,
+  };
+}
+
+/**
+ * The Claude Code restorer for `base` in `home`, on this OS with no env, the default config
+ * folder and Claude Code not running, unless `overrides` say otherwise.
+ */
+export const testRestorer = (overrides: Partial<RestorerOptions> = {}) =>
+  createClaudeCodeRestorer({
+    baseDir: base,
+    homedir: home,
+    platform: process.platform,
+    env: {},
+    customConfigDir: false,
+    isClaudeRunning: () => Promise.resolve(false),
+    ...overrides,
+  });
+
 /** Claude Code settings with one Stop hook that runs `command`. */
 export const stopHook = (command: string) => ({
   hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] },
@@ -90,27 +177,60 @@ export function collect(includeMemory = false, env: Record<string, string> = {},
   );
 }
 
-/** Collects `target` (the test's project by default), recording each "path: reason" left out. */
+/**
+ * Collects `target` (the test's project by default), with memory when `includeMemory` says so,
+ * recording each "path: reason" left out.
+ */
 export async function collectSkipped(
   collector: Collector,
   target: ScopeTarget = { kind: 'project', projectDir: project },
+  includeMemory = false,
 ) {
   const skipped: string[] = [];
   const found = await collector.collect(target, {
-    includeMemory: false,
+    includeMemory,
     onSkipped: (path, reason) => skipped.push(`${path}: ${reason}`),
   });
   return { found, skipped };
 }
 
+/** A path in the auto memory folder `<base>/projects/<name>/memory/` (T110: any project's). */
+export const projectMemory = (name: string, ...parts: string[]) =>
+  join(base, 'projects', name, 'memory', ...parts);
+
+/**
+ * `dir` as Claude Code 2.1.296 writes it as a key of `projects` in `~/.claude.json` (T109):
+ * `/` for `\` on Windows, case as it is.
+ */
+export const claudeJsonKey = (dir = project) =>
+  process.platform === 'win32' ? dir.replaceAll('\\', '/') : dir;
+
+/** A local-scope MCP server as `claude mcp add` writes it, with a `${VAR}` in its env. */
+export const LOCAL_MCP_SERVER = {
+  type: 'stdio',
+  command: 'node',
+  args: ['server.js'],
+  env: { TOKEN: '${LOCAL_TOKEN}' },
+};
+
+/** Writes the test home's `~/.claude.json`: `top` keys and `entry` as the project's entry. */
+export const writeClaudeJsonProject = (entry: unknown, top: Record<string, unknown> = {}) =>
+  writeTestFile(
+    join(home, '.claude.json'),
+    JSON.stringify({ ...top, projects: { [claudeJsonKey()]: entry } }),
+  );
+
 /** The folder Claude Code keeps this project's auto memory in. */
-export const memoryDir = (repo = project) => join(base, 'projects', projectDirName(repo), 'memory');
+export const memoryDir = (repo = project) => projectMemory(projectDirName(repo));
 
 const ACCOUNT = '00000000-0000-4000-8000-000000000000_11111111-1111-4111-8111-111111111111';
 
 export const synced = (...parts: string[]) => join(base, 'skills', 'synced', ACCOUNT, ...parts);
 
-/** A synced folder as Claude Code 2.1.283 writes it: the user's skill, Anthropic's, an organization's. */
+/**
+ * A synced folder as Claude Code 2.1.283 writes it (its `.bucket-`, `.last-complete-round` and
+ * `.staging` names still in the 2.1.296 program): the user's skill, Anthropic's, an organization's.
+ */
 export async function syncedSetup(): Promise<void> {
   await writeTestFile(join(base, 'skills', 'synced', `.bucket-${ACCOUNT}`), '');
   await writeTestFile(synced('.last-complete-round'), '1');

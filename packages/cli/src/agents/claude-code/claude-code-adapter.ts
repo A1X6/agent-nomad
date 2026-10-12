@@ -1,26 +1,72 @@
-import type { AgentAdapter, Collector, OptionalPart } from '../adapter.ts';
+import type {
+  AgentAdapter,
+  CollectedFile,
+  Collector,
+  OptionalPart,
+  RestorePlanContext,
+} from '../adapter.ts';
 import { agentVersionNotice } from '../notices.ts';
-import { ACCOUNT_SKILLS_PART, readSyncedSkills } from './account-skills.ts';
-import { createClaudeCodeAfterRestore } from './after-restore.ts';
+import { underFolder } from '../shared/bundle-paths.ts';
 import { nodeDetectorSystem, pathsOf } from '../shared/detector-system.ts';
+import {
+  ACCOUNT_PLUGINS_PART,
+  askAccountPlugins,
+  localSkillNames,
+  namesHere,
+  readSyncedPlugins,
+} from './account-plugins.ts';
+import {
+  ACCOUNT_SKILLS_PART,
+  askAccountSkills,
+  readSyncedSkills,
+  reportAccountSkills,
+} from './account-skills.ts';
+import { createClaudeCodeAfterRestore } from './after-restore.ts';
+import { sharedMemoryNote } from './auto-memory.ts';
+import { CLAUDE_CODE_CONTENTS } from './claude-code-contents.data.ts';
+import { claudeJsonProjectNote, isClaudeJsonPath } from './claude-json-merge.ts';
 import { claudeConfigDir, createClaudeCodeDetector } from './detector.ts';
+import { devModsNotice, readDevMods } from './dev-mods.ts';
 import { CLAUDE_ENV_REFERENCES } from './env-files.ts';
 import { createClaudeCodeGlobalCollector } from './global-collector.ts';
-import { CLAUDE_JSON_BUNDLE_PATH } from './global-paths.ts';
+import { findGit, planLocalMarketplaces, savedMarketplaceMods } from './local-marketplaces.ts';
 import {
   detectManagedSettings,
   managedSettingsNotice,
   nodeManagedSettingsSystem,
   type ManagedSettingsSystem,
 } from './managed-settings.ts';
+import { planPluginDirs, savedPluginDirMods } from './plugin-dirs.ts';
+import {
+  askPluginFolders,
+  findPluginValidator,
+  pluginFolderChange,
+  withPartsHere,
+  type PluginGateContext,
+  type PluginValidator,
+} from './plugin-review.ts';
+import {
+  idsWithPluginData,
+  PLUGIN_DATA_PART,
+  planPluginData,
+  restoredPluginIds,
+} from './plugin-data.ts';
+import { readKnownMarketplaces } from './plugins.ts';
 import { createProgramLocator } from './programs.ts';
 import { createClaudeCodeProjectCollector } from './project-collector.ts';
+import { isPullMetadata } from './restore-rules.ts';
 import { createClaudeCodeRestorer } from './restorer.ts';
 import {
   createClaudeRunningCheck,
   systemProcessLister,
   type ClaudeRunningCheck,
 } from './running-claude.ts';
+import {
+  modsVersionNotice,
+  skillsFoldersToReview,
+  skillsPluginFolders,
+  skillsPluginsNote,
+} from './skills-dir-plugins.ts';
 import { findUnknownEntries } from './unknown-files.ts';
 
 export interface ClaudeCodeAdapterOptions {
@@ -31,6 +77,8 @@ export interface ClaudeCodeAdapterOptions {
   readonly isClaudeRunning?: ClaudeRunningCheck;
   /** Where organization-managed settings are read (T31); defaults to this PC (SOLID-01). */
   readonly managedSystem?: ManagedSettingsSystem;
+  /** Runs `claude plugin validate` for pull's plugin review (T97); defaults to this PC's. */
+  readonly pluginValidator?: PluginValidator;
 }
 
 /**
@@ -50,12 +98,19 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     options.isClaudeRunning ??
     createClaudeRunningCheck(systemProcessLister({ platform: options.platform, env: options.env }));
 
+  const findGitHere = () => findGit(system);
   const global = createClaudeCodeGlobalCollector({
     ...shared,
     customConfigDir,
     findProgram: createProgramLocator(system),
+    findGit: findGitHere,
   });
-  const project = createClaudeCodeProjectCollector({ ...shared, env: options.env });
+  const project = createClaudeCodeProjectCollector({
+    ...shared,
+    env: options.env,
+    customConfigDir,
+    findGit: findGitHere,
+  });
   const collector: Collector = {
     collect: (target, collectOptions) =>
       (target.kind === 'global' ? global : project).collect(target, collectOptions),
@@ -67,42 +122,161 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
     customConfigDir,
     isClaudeRunning,
   });
-  const followUp = createClaudeCodeAfterRestore({ system, restorer, managedSettings });
+  const followUp = createClaudeCodeAfterRestore({ system, managedSettings });
+  const validator = async () => options.pluginValidator ?? (await findPluginValidator(system));
 
-  /** A copy of the user's own claude.ai skills (T42), saved only after a yes. */
+  /**
+   * The plugin folders in `skills/` that a global setup would add or change (T97), reviewed and
+   * asked about; the files of the declined ones are left out. A folder whose name differs only
+   * in case is one folder, and a part that runs code is reviewed with the manifest and parts
+   * this PC already has there (review 16 SEC-02).
+   */
+  async function reviewSkillsPlugins(
+    files: readonly CollectedFile[],
+    gate: PluginGateContext,
+  ): Promise<{ files: readonly CollectedFile[]; leftOut: readonly string[] }> {
+    const path = pathsOf(options.platform);
+    const toReview = [];
+    for (const incoming of skillsFoldersToReview(files)) {
+      const dir = path.join(baseDir, 'skills', incoming.name);
+      const change = await pluginFolderChange(dir, incoming);
+      const folder = change === null ? null : await withPartsHere(dir, incoming);
+      if (change !== null && folder !== null) toReview.push({ folder, change });
+    }
+    if (toReview.length === 0) return { files, leftOut: [] };
+    const accepted = await askPluginFolders(toReview, await validator(), gate);
+    const leftOut = toReview
+      .map(({ folder }) => folder.folder)
+      .filter((folder) => !accepted.has(folder));
+    return {
+      files: files.filter(
+        (file) => !leftOut.some((folder) => underFolder(file.path, folder, { ignoreCase: true })),
+      ),
+      leftOut,
+    };
+  }
+
+  /** A copy of the user's own claude.ai skills (T42), saved unless the user says no (T114). */
   const accountSkills: OptionalPart = {
     id: ACCOUNT_SKILLS_PART,
     scope: 'global',
+    defaultYes: true,
     async available() {
       const synced = await readSyncedSkills(pathsOf(options.platform), baseDir);
-      return { names: synced.own.map((skill) => skill.name), problem: synced.problem };
+      return {
+        names: synced.own.map((skill) => skill.name),
+        problem: synced.problem,
+        notice: synced.notice,
+      };
     },
     question: (names) =>
-      `Also save a copy of your ${String(names.length)} claude.ai skill${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account.`,
+      `Also save a copy of your ${String(names.length)} claude.ai skill${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account. Saved unless you say no.`,
     unreadable: (problem) => `${problem} Your claude.ai skills were not saved.`,
     noneFound: 'No claude.ai skills of your own were found on this PC.',
     flagHelp: {
       push: {
-        include: 'save a copy of your own claude.ai skills (normally synced by your account)',
-        leaveOut: 'leave claude.ai skills out',
+        include:
+          'save a copy of your own claude.ai skills, for PCs without that claude.ai account (saved unless you say no)',
+        leaveOut: 'do not save a copy of your claude.ai skills',
       },
       pull: {
         include:
-          'add saved claude.ai skills as local skills (for a PC without that claude.ai account)',
+          'add saved claude.ai skills as local skills, for a PC without that claude.ai account (added unless you say no)',
         leaveOut: 'do not add saved claude.ai skills',
       },
     },
   };
 
+  /** A copy of the user's own claude.ai plugins (T101), saved unless the user says no (T114). */
+  const accountPlugins: OptionalPart = {
+    id: ACCOUNT_PLUGINS_PART,
+    scope: 'global',
+    defaultYes: true,
+    async available() {
+      const synced = await readSyncedPlugins(pathsOf(options.platform), baseDir);
+      return {
+        names: synced.own.map((plugin) => plugin.name),
+        problem: synced.problem,
+        notice: synced.notice,
+      };
+    },
+    question: (names) =>
+      `Also save a copy of your ${String(names.length)} claude.ai plugin${names.length === 1 ? '' : 's'} (${names.join(', ')})? Your claude.ai account already syncs them; the copy is for PCs without that account. Saved unless you say no.`,
+    unreadable: (problem) => `${problem} Your claude.ai plugins were not saved.`,
+    noneFound: 'No claude.ai plugins of your own were found on this PC.',
+    flagHelp: {
+      push: {
+        include:
+          'save a copy of your own claude.ai plugins, for PCs without that claude.ai account (saved unless you say no)',
+        leaveOut: 'do not save a copy of your claude.ai plugins',
+      },
+      pull: {
+        include:
+          'add saved claude.ai plugins as local plugins, for a PC without that claude.ai account (added unless you say no)',
+        leaveOut: 'do not add saved claude.ai plugins',
+      },
+    },
+  };
+
+  /** The data of the plugins a setup restores (T102), saved only after a yes. */
+  const pluginData: OptionalPart = {
+    id: PLUGIN_DATA_PART,
+    scope: 'global',
+    defaultYes: false,
+    async available() {
+      const ids = await restoredPluginIds(shared, { accountPlugins: true });
+      return {
+        names: await idsWithPluginData(pathsOf(options.platform), baseDir, ids),
+        problem: null,
+      };
+    },
+    question: (names) =>
+      `Also save the data of ${String(names.length)} plugin${names.length === 1 ? '' : 's'} (${names.join(', ')})? It holds what plugins and mods keep, e.g. a mod's saved choices; only for plugins this setup puts back.`,
+    unreadable: (problem) => `${problem} Plugin data was not saved.`,
+    noneFound: 'No data was found for the plugins this setup puts back.',
+    flagHelp: {
+      push: {
+        include: "save the data of the plugins this setup puts back (e.g. a mod's saved choices)",
+        leaveOut: 'leave plugin data out',
+      },
+      pull: {
+        include: 'put back saved plugin data, for plugins installed here',
+        leaveOut: 'do not put back saved plugin data',
+      },
+    },
+  };
+
+  /**
+   * Saved claude.ai plugins (T101) and skills (T42), asked about before the plugin review, so it
+   * sees every folder they add to `skills/` (SEC-03); a skill never takes a plugin's folder.
+   */
+  async function withAccountCopies(context: RestorePlanContext) {
+    const path = pathsOf(options.platform);
+    const here = await namesHere(path, baseDir, context.files);
+    const plugins = await askAccountPlugins(context, here);
+    const added = plugins.files;
+    const localNames = await localSkillNames(path, baseDir, [...context.files, ...added]);
+    const skills = await askAccountSkills(context, { ...here, localNames });
+    return {
+      files: [...context.files, ...added, ...skills.files],
+      added,
+      skills: skills.names,
+      // What they added and left out, for pull's summary (UX-01).
+      chosen: [plugins.chosen, skills.chosen].filter((line) => line !== null),
+    };
+  }
+
   return {
     id: 'claude-code',
     displayName: 'Claude Code',
-    memoryDescription: 'what Claude learned: subagent and auto memory',
+    memoryDescription:
+      "what Claude learned: subagent memory, and auto memory: every project's with the global setup, this project's with a project",
     detector: createClaudeCodeDetector(system),
     collector,
     restorer,
     envReferences: CLAUDE_ENV_REFERENCES,
-    optionalParts: [accountSkills],
+    optionalParts: [accountSkills, accountPlugins, pluginData],
+    contents: CLAUDE_CODE_CONTENTS,
     inspector: {
       unknownEntries: (target) =>
         findUnknownEntries(target, {
@@ -111,22 +285,50 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
           homedir: options.homedir,
         }),
       async notices(command) {
-        const notice = managedSettingsNotice(await managedSettings(), command);
-        return notice === null ? [] : [notice];
+        const notices = [managedSettingsNotice(await managedSettings(), command)];
+        // Mods in development are never pushed (T103): push names them so they can be kept.
+        if (command === 'push') {
+          notices.push(devModsNotice(await readDevMods(pathsOf(options.platform), baseDir)));
+        }
+        return notices.filter((notice) => notice !== null);
       },
-      versionNotice: (savedWith, here) => agentVersionNotice('Claude Code', savedWith, here),
+      versionNotice(savedWith, here, files) {
+        const notes = [
+          agentVersionNotice('Claude Code', savedWith, here),
+          // Mods in saved local marketplaces and plugin folders count too (T104).
+          modsVersionNotice(files, here, [
+            ...savedMarketplaceMods(files),
+            ...savedPluginDirMods(files),
+          ]),
+        ].filter((note) => note !== null);
+        return notes.length === 0 ? null : notes.join('\n');
+      },
+      pushNotes(files) {
+        // Plugins in skills/ (T97), the project's part of ~/.claude.json (T109) and shared auto
+        // memory (T110).
+        return [
+          skillsPluginsNote(files),
+          claudeJsonProjectNote(files),
+          sharedMemoryNote(files),
+        ].filter((note) => note !== null);
+      },
     },
 
     /**
      * Pull's Claude Code questions (T61), before anything is written: closing Claude Code
-     * when `~/.claude.json` would change (it rewrites the file while open), then plugins,
-     * programs and claude.ai skills. `--yes` never waits: the file is left with a warning.
+     * when `~/.claude.json` would change (it rewrites the file while open), plugin folders in
+     * `skills/` (T97) with saved claude.ai plugins (T101) and skills (T42, SEC-03), saved local
+     * marketplaces (T98) and `CLAUDE_CODE_PLUGIN_DIRS` folders (T99), then plugins, programs and
+     * plugin data (T102). `--yes` never waits: the file is left with a warning.
      */
     async planRestore(context) {
       let leaveClaudeJson = false;
-      const change = await restorer.claudeJsonChange(context.files);
+      const change = await restorer.claudeJsonChange(context.files, context.target);
       // An unanswered file is left as it is, like a skip.
-      const answer = context.conflicts.get(CLAUDE_JSON_BUNDLE_PATH) ?? context.conflictAnswer;
+      const claudeJsonPath = context.files.find((file) => isClaudeJsonPath(file.path))?.path;
+      const answer =
+        (claudeJsonPath === undefined ? undefined : context.conflicts.get(claudeJsonPath)) ??
+        context.conflictAnswer;
       const merging = change === 'merge' && answer !== undefined && answer !== 'skip';
       if (!context.assumeYes && (change === 'new' || merging)) {
         while (await isClaudeRunning()) {
@@ -143,14 +345,86 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Agen
           }
         }
       }
-      const afterRestore = await followUp(context);
+      const global = context.target.kind === 'global';
+      // What a project setup adds to ~/.claude.json for this folder (T109).
+      const claudeJsonNote = global ? null : claudeJsonProjectNote(context.files);
+      if (claudeJsonNote !== null) context.reporter.info(claudeJsonNote);
+      const withSaved = global
+        ? await withAccountCopies(context)
+        : { files: context.files, added: [], skills: [], chosen: [] };
+      const plugins = global
+        ? await reviewSkillsPlugins(withSaved.files, context)
+        : { files: context.files, leftOut: [] };
+      // What the questions chose, for pull's summary (UX-01).
+      const chosen: string[] = [...withSaved.chosen];
+      if (plugins.leftOut.length > 0)
+        chosen.push(`plugin folders left out: ${plugins.leftOut.join(', ')}`);
+      const kept = skillsPluginFolders(withSaved.added).filter((folder) =>
+        plugins.files.some((file) => underFolder(file.path, folder.folder)),
+      );
+      if (kept.length > 0) {
+        context.reporter.info(
+          `Adding ${kept.map((folder) => folder.id).join(', ')} as local plugins. If this PC later signs in to the claude.ai account they came from, Claude Code prefers the local copy.`,
+        );
+      }
+      const local = await planLocalMarketplaces(context, {
+        ...shared,
+        known: await readKnownMarketplaces(baseDir, options.platform),
+        validator,
+        restorer,
+        git: findGitHere,
+      });
+      const dirs = await planPluginDirs(context, {
+        ...shared,
+        validator,
+        restorer,
+        git: findGitHere,
+      });
+      // The settings as written: `CLAUDE_CODE_PLUGIN_DIRS` names the folders pull writes (T99).
+      const files = dirs.withPluginDirs(plugins.files);
+      const settingsRewritten = files.some((file, index) => file !== plugins.files[index]);
+      if (local.declined) chosen.push('plugin folders of saved local marketplaces left out');
+      if (dirs.declined) chosen.push('saved plugin folders (CLAUDE_CODE_PLUGIN_DIRS) left out');
+      const afterRestore = await followUp({ ...context, files }, local, chosen);
+      const data = global
+        ? await planPluginData(context, { baseDir, platform: options.platform, restorer }, chosen)
+        : null;
+      // What the setup's restore wrote, for naming the saved claude.ai skills it added.
+      let written: readonly string[] = [];
       return {
-        restore: (onConflict, restoreContext) =>
-          restorer.restore(context.target, context.files, onConflict, {
+        // The folders first: Claude Code adds the marketplaces after the setup is written.
+        async restore(onConflict, restoreContext) {
+          // Settings pull did not ask about were the same here, so only the rewritten value
+          // differs: written with a backup, as that is what pull is for.
+          const answer: typeof onConflict = (path, question) =>
+            settingsRewritten && path === 'settings.json' && !context.conflicts.has(path)
+              ? Promise.resolve(
+                  context.conflictAnswer ?? (question.overwriteAllowed ? 'overwrite' : 'merge'),
+                )
+              : onConflict(path, question);
+          const folders = [await local.restore(onConflict), await dirs.restore(onConflict)];
+          const setup = await restorer.restore(context.target, files, answer, {
             ...restoreContext,
             leaveClaudeJson,
-          }),
-        afterRestore,
+          });
+          written = setup.written;
+          const reports = [...folders, setup];
+          return {
+            written: reports.flatMap((report) => report.written),
+            skipped: reports.flatMap((report) => report.skipped),
+            backups: reports.flatMap((report) => report.backups),
+            warnings: reports.flatMap((report) => report.warnings),
+          };
+        },
+        // Plugin data last (T102): it goes only to plugins installed by then.
+        async afterRestore(afterContext) {
+          await afterRestore(afterContext);
+          reportAccountSkills(withSaved.skills, written, afterContext.reporter);
+          await data?.(afterContext);
+        },
+        declined: plugins.leftOut.length > 0 || local.declined || dirs.declined,
+        // Only what it writes: `plugins.json` and the like are read, never written.
+        summary: { files: files.filter((file) => !isPullMetadata(file.path)).length, chosen },
       };
     },
   };

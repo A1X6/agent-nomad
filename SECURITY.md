@@ -38,11 +38,18 @@ already compromised PC, and denial of service by volume.
 - **Bound bundles.** Each bundle is bound to its agent, scope and format, and carries its
   revision inside the encryption, so a server cannot swap one setup for another or pass an
   older copy off as the latest.
-- **Nothing runs unseen.** Pull lists everything new or changed that Claude Code would run
-  before writing it: hooks, status line commands, settings that run a command (such as
-  `apiKeyHelper`), MCP servers (their whole definition), the scripts they run, and skills,
-  commands or subagents with commands that run by themselves. It only restores files outside
-  the agent's folder that its own hooks run, never into a Startup, autostart or shell-profile
+- **Nothing runs unseen.** Pull lists everything new or changed that Claude Code would run before
+  writing it: hooks, status line commands, settings that run a command (such as `apiKeyHelper`), MCP
+  servers (their whole definition), the scripts they run, and skills, commands or subagents with
+  commands that run by themselves. Plugin and mod folders (in `skills/`, saved local marketplaces
+  and plugin folders, claude.ai plugins, and claude.ai skills that are plugins or mods) get a plugin
+  review first: `claude plugin validate`, what each mod calls, and the servers and monitors the
+  plugin starts; one with code needs a yes or `--allow-commands`. Outside the agent's folder pull
+  writes only: scripts the setup's own hooks run and known tool settings; saved plugin and
+  marketplace folders (after the plugin review); Markdown files its memory files import; auto
+  memory in the folder `autoMemoryDirectory` names; a merge into `~/.claude.json`; and, for the
+  environment values you add, one marked block in your shell profile (or Windows user
+  variables). Apart from that block, it never writes into a Startup, autostart or shell-profile
   folder. `--yes` alone never accepts new commands, installs, or environment values that make
   programs load code; `--allow-commands` does.
 - **Local secrets in the OS keychain,** or in a file only your user can read where there is

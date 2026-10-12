@@ -4,10 +4,9 @@
  */
 import * as z from 'zod';
 
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { PACKAGE_RUNNERS, RUNTIME_COMMANDS } from './global-paths.ts';
 
-const JsonObject = z.record(z.string(), z.unknown());
 const HookSchema = z.looseObject({
   type: z.string().optional(),
   command: z.string().optional(),
@@ -15,6 +14,7 @@ const HookSchema = z.looseObject({
   url: z.string().optional(),
 });
 const HookCommandSchema = z.looseObject({ command: z.string().optional() });
+const HookGroupSchema = z.looseObject({ hooks: z.array(z.unknown()).optional() });
 
 /**
  * One item of a settings `hooks` block: a hook, or a part of the block that could not be
@@ -31,7 +31,7 @@ export type HookItem =
  */
 export function hookItems(hooks: unknown): HookItem[] {
   if (hooks === undefined) return [];
-  const events = JsonObject.safeParse(hooks);
+  const events = JsonObjectSchema.safeParse(hooks);
   if (!events.success) return [{ event: null, unreadable: hooks }];
   const items: HookItem[] = [];
   for (const [event, groups] of Object.entries(events.data)) {
@@ -40,7 +40,7 @@ export function hookItems(hooks: unknown): HookItem[] {
       continue;
     }
     for (const group of groups) {
-      const parsed = z.looseObject({ hooks: z.array(z.unknown()).optional() }).safeParse(group);
+      const parsed = HookGroupSchema.safeParse(group);
       if (!parsed.success) {
         items.push({ event, unreadable: group });
         continue;
@@ -56,7 +56,7 @@ export function hookItems(hooks: unknown): HookItem[] {
 
 /** Parsed settings JSON, or `null` when the text is not a JSON object. */
 export function parseSettings(settingsJson: string): Record<string, unknown> | null {
-  return valueOrNull(parseJsonWith(JsonObject, settingsJson));
+  return valueOrNull(parseJsonWith(JsonObjectSchema, settingsJson));
 }
 
 /**

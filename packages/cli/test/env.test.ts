@@ -20,6 +20,7 @@ import {
   BLOCK_START,
   chooseEnvValues,
   CLAUDE_JSON_BUNDLE_PATH,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   createEnvCommand,
   createShellProfileWriter,
   createWindowsEnvWriter,
@@ -35,6 +36,7 @@ import {
   scanEnvReferences,
   shellProfileFor,
   upsertBlock,
+  warnNotSaved,
   writeEnvValues,
   type AgentAdapter,
   type Choice,
@@ -89,6 +91,30 @@ describe('finding ${VAR} references', () => {
     expect([...scan.setBySettings]).toEqual(['COMPANY_PROXY']);
   });
 
+  it("reads a project's local MCP servers in ~/.claude.json (T109)", () => {
+    const scan = scanEnvReferences(
+      [
+        collectedJson(CLAUDE_JSON_PROJECT_BUNDLE_PATH, {
+          mcpServers: { local: { command: 'node', env: { TOKEN: '${LOCAL_TOKEN}' } } },
+        }),
+      ],
+      CLAUDE_ENV_REFERENCES,
+      'this project',
+    );
+    expect(scan.variables).toEqual([
+      {
+        name: 'LOCAL_TOKEN',
+        usedBy: ['MCP server local (~/.claude.json, this project), this project'],
+      },
+    ]);
+  });
+
+  it('finds nothing for an agent that names no files to scan', () => {
+    const scan = scanEnvReferences([mcpJson], undefined);
+    expect(scan.variables).toEqual([]);
+    expect([...scan.setBySettings]).toEqual([]);
+  });
+
   it('ignores files that are not JSON', () => {
     const broken = collected('.mcp.json', '{ nope');
     expect(scanEnvReferences([broken], CLAUDE_ENV_REFERENCES).variables).toEqual([]);
@@ -132,6 +158,69 @@ describe('saving values on push (opt-in)', () => {
       prompter: { multiselect: () => Promise.resolve([]) },
     });
     expect(section).toBeNull();
+  });
+
+  describe('--env-values answers instead of asking (T115)', () => {
+    const env = { GITHUB_TOKEN: 'ghp_secret', API_KEY: 'key-1' };
+    const neverAsks = { multiselect: () => Promise.reject(new Error('must not ask')) };
+
+    it('names: saves those the setup uses and this PC has', async () => {
+      const section = await chooseEnvValues({
+        scan,
+        env,
+        prompter: neverAsks,
+        choice: ['GITHUB_TOKEN', 'NOT_USED'],
+      });
+      expect(section).toEqual({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
+    });
+
+    it('all: saves every value the setup uses and this PC has', async () => {
+      const section = await chooseEnvValues({
+        scan,
+        env: { GITHUB_TOKEN: 'ghp_secret' },
+        prompter: neverAsks,
+        choice: 'all',
+      });
+      expect(section).toEqual({ variables: { GITHUB_TOKEN: 'ghp_secret' } });
+    });
+
+    it('none: saves none', async () => {
+      const section = await chooseEnvValues({ scan, env, prompter: neverAsks, choice: 'none' });
+      expect(section).toBeNull();
+    });
+
+    it('--yes alone saves none, without asking', async () => {
+      const section = await chooseEnvValues({ scan, env, prompter: neverAsks, assumeYes: true });
+      expect(section).toBeNull();
+    });
+
+    it('a flag beats --yes', async () => {
+      const section = await chooseEnvValues({
+        scan,
+        env,
+        prompter: neverAsks,
+        assumeYes: true,
+        choice: ['API_KEY'],
+      });
+      expect(section).toEqual({ variables: { API_KEY: 'key-1' } });
+    });
+  });
+
+  it('asks with what the values are for and that none are saved unless ticked (T115)', async () => {
+    const asked: string[] = [];
+    await chooseEnvValues({
+      scan,
+      env: { GITHUB_TOKEN: 'x' },
+      prompter: {
+        multiselect: (message) => {
+          asked.push(message);
+          return Promise.resolve([]);
+        },
+      },
+    });
+    expect(asked).toEqual([
+      'Save these environment variable values with your setup? Your setup uses them (e.g. API keys); a saved value is encrypted and only you can read it. None are saved unless you tick them.',
+    ]);
   });
 
   it('the env section round-trips and is never written by restore', () => {
@@ -486,55 +575,150 @@ describe('restoring values on pull', () => {
     expect(written).toEqual([section.variables]);
   });
 
-  it('--yes alone never adds a variable that sends traffic elsewhere (T56)', async () => {
-    const { reporter, lines } = recordingReporter({ levels: false });
+  describe('variables that send traffic elsewhere (T56)', () => {
     const redirects = {
       variables: { API_KEY: 'key-1', HTTPS_PROXY: 'http://p', ANTHROPIC_BASE_URL: 'https://x' },
     };
-    const first = recordingWriter();
-    const result = await restoreEnvValues({
-      isRedirectVariable,
-      section: redirects,
-      env: {},
-      writer: first.writer,
-      prompter: neverAsks,
-      reporter,
-      assumeYes: true,
-    });
-    expect(first.written).toEqual([{ API_KEY: 'key-1' }]);
-    expect(result.declined).toBe(true);
-    expect(lines.join('\n')).toContain('Not added: ANTHROPIC_BASE_URL, HTTPS_PROXY.');
-    expect(lines.join('\n')).toContain('--allow-commands');
-    expect(lines.join('\n')).not.toContain('http://p');
+    const quiet = () => recordingReporter({ levels: false });
 
-    const { asked, prompter } = defaultAnswers();
-    const second = recordingWriter();
-    await restoreEnvValues({
-      isRedirectVariable,
-      section: redirects,
-      env: {},
-      writer: second.writer,
-      prompter,
-      reporter,
+    it('--yes alone adds the others but never these, and says how to accept them', async () => {
+      const { writer, written } = recordingWriter();
+      const { lines, reporter } = quiet();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section: redirects,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.declined).toBe(true);
+      expect(lines.join('\n')).toContain('Not added: ANTHROPIC_BASE_URL, HTTPS_PROXY.');
+      expect(lines.join('\n')).toContain('--allow-commands');
+      expect(lines.join('\n')).not.toContain('http://p');
     });
-    expect(asked[1]).toEqual([
-      'ANTHROPIC_BASE_URL, HTTPS_PROXY send programs’ requests elsewhere. Add them too?',
-      false,
-    ]);
-    expect(second.written).toEqual([{ API_KEY: 'key-1' }]);
 
-    const third = recordingWriter();
-    await restoreEnvValues({
-      isRedirectVariable,
-      section: redirects,
-      env: {},
-      writer: third.writer,
-      prompter: neverAsks,
-      reporter,
-      assumeYes: true,
-      allowCommands: true,
+    it('asks about them separately, defaulting to no', async () => {
+      const { writer, written } = recordingWriter();
+      const { asked, prompter } = defaultAnswers();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section: redirects,
+        env: {},
+        writer,
+        prompter,
+        reporter: quiet().reporter,
+      });
+      expect(asked[1]).toEqual([
+        'ANTHROPIC_BASE_URL, HTTPS_PROXY send programs’ requests elsewhere. Add them too?',
+        false,
+      ]);
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
     });
-    expect(third.written).toEqual([redirects.variables]);
+
+    it('--allow-commands adds them too', async () => {
+      const { writer, written } = recordingWriter();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section: redirects,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        assumeYes: true,
+        allowCommands: true,
+      });
+      expect(written).toEqual([redirects.variables]);
+    });
+  });
+
+  describe('--env-values answers instead of asking (T115)', () => {
+    const quiet = () => recordingReporter({ levels: false });
+
+    it('names: adds only those, without asking', async () => {
+      const { writer, written } = recordingWriter();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        choice: ['API_KEY'],
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.declined).toBe(true);
+    });
+
+    it('all: adds every one missing here, without asking', async () => {
+      const { writer, written } = recordingWriter();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        choice: 'all',
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1', GITHUB_TOKEN: 'ghp_secret' }]);
+    });
+
+    it('none: adds none, which counts as declined', async () => {
+      const { writer, written } = recordingWriter();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        choice: 'none',
+      });
+      expect(written).toEqual([]);
+      expect(result).toEqual({ added: [], alreadySet: [], declined: true });
+    });
+
+    it('a flag beats --yes', async () => {
+      const { writer, written } = recordingWriter();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section,
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter: quiet().reporter,
+        assumeYes: true,
+        choice: ['GITHUB_TOKEN'],
+      });
+      expect(written).toEqual([{ GITHUB_TOKEN: 'ghp_secret' }]);
+    });
+
+    // Pull says it once for all its setups (UX-02 of review 16), so the plan of one says nothing.
+    it('names a variable the saved setup does not hold', () => {
+      const { reporter, lines } = quiet();
+      warnNotSaved(reporter, ['API_KEY', 'NOT_SAVED'], Object.keys(section.variables));
+      expect(lines).toEqual(['Not in the saved setup, so not added: NOT_SAVED.']);
+    });
+
+    it('never passes the gate for one that runs code: --yes leaves it out (T44)', async () => {
+      const { writer, written } = recordingWriter();
+      const { reporter, lines } = quiet();
+      await restoreEnvValues({
+        isRedirectVariable,
+        section: { variables: { API_KEY: 'key-1', NODE_OPTIONS: '--require /tmp/x.js' } },
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+        choice: 'all',
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(lines.join('\n')).toContain('add --allow-commands to accept them');
+    });
   });
 
   describe('variables that make programs run code (T44)', () => {
@@ -559,6 +743,50 @@ describe('restoring values on pull', () => {
       expect(result.added).toEqual(['API_KEY']);
       expect(lines.join('\n')).toContain('--allow-commands');
       expect(lines.join('\n')).not.toContain('/tmp/x.js');
+    });
+
+    it('--yes never adds a lower-case one either: Windows reads node_options as NODE_OPTIONS (SEC-05)', async () => {
+      const { writer, written } = recordingWriter();
+      const { lines, reporter } = quiet();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section: {
+          variables: { API_KEY: 'key-1', node_options: '--require /tmp/x.js', ld_preload: 'x.so' },
+        },
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.added).toEqual(['API_KEY']);
+      expect(lines.join('\n')).toContain('Not added: ld_preload, node_options.');
+    });
+
+    it('--yes never adds Git config given through the environment, in any case (SEC-05 of review 16)', async () => {
+      const { writer, written } = recordingWriter();
+      const { lines, reporter } = quiet();
+      const result = await restoreEnvValues({
+        isRedirectVariable,
+        section: {
+          variables: {
+            API_KEY: 'key-1',
+            GIT_CONFIG_PARAMETERS: "'core.fsmonitor'='echo x'",
+            git_config_parameters: "'alias.st'='!echo x'",
+          },
+        },
+        env: {},
+        writer,
+        prompter: neverAsks,
+        reporter,
+        assumeYes: true,
+      });
+      expect(written).toEqual([{ API_KEY: 'key-1' }]);
+      expect(result.added).toEqual(['API_KEY']);
+      expect(lines.join('\n')).toContain(
+        'Not added: GIT_CONFIG_PARAMETERS, git_config_parameters.',
+      );
     });
 
     it('--allow-commands adds them too', async () => {
@@ -590,7 +818,7 @@ describe('restoring values on pull', () => {
         reporter: quiet().reporter,
       });
       expect(asked).toEqual([
-        ['Add 1 variable?', true],
+        ['Add 1 variable? The setup uses it, and it is not set on this PC yet.', true],
         ['NODE_OPTIONS, PROMPT_COMMAND make programs load or run code. Add them too?', false],
       ]);
       expect(written).toEqual([{ API_KEY: 'key-1' }]);
@@ -599,15 +827,11 @@ describe('restoring values on pull', () => {
 });
 
 describe('agentnomad env', () => {
-  const adapter = (
-    global: CollectedFile[],
-    project: CollectedFile[],
-    installed = true,
-  ): AgentAdapter => ({
+  const adapter = (global: CollectedFile[], project: CollectedFile[]): AgentAdapter => ({
     id: 'claude-code',
     displayName: 'Claude Code',
     detector: {
-      detect: () => Promise.resolve({ installed, baseDir: '/h/.claude', version: null }),
+      detect: () => Promise.resolve({ installed: true, baseDir: '/h/.claude', version: null }),
     },
     collector: {
       collect: (target) => Promise.resolve(target.kind === 'global' ? global : project),

@@ -1,9 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { win32 } from 'node:path';
 
-import * as z from 'zod';
-
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
+import { JsonObjectSchema, parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { runProgram } from '../../system/run-program.ts';
 import { pathsOf } from '../shared/detector-system.ts';
 
@@ -73,7 +71,7 @@ export function managedSettingsDir(
 
 function keysOf(text: string | null): string[] {
   if (text === null) return [];
-  return Object.keys(valueOrNull(parseJsonWith(z.record(z.string(), z.unknown()), text)) ?? {});
+  return Object.keys(valueOrNull(parseJsonWith(JsonObjectSchema, text)) ?? {});
 }
 
 /** Finds every managed settings source on this PC and which policy keys they set. */
@@ -175,11 +173,13 @@ export function managedSettingsNotice(
 const POLICY_WORDS =
   /\b(policy|policies|blocked|not allowed|strictKnownMarketplaces|blockedMarketplaces|managed settings)\b/i;
 
-/** A clearer reason for a failed plugin install when the organization's policy blocked it. */
+/**
+ * A clearer reason for a failed plugin install when the organization's policy blocked it.
+ * Only when this PC has managed settings: "blocked" or "not allowed" alone can mean anything.
+ */
 export function explainPluginFailure(reason: string, found: ManagedSettings | null): string {
-  if (!POLICY_WORDS.test(reason)) return reason;
-  const where = found && found.sources.length > 0 ? ` (${sourcesText(found)})` : '';
-  return `blocked by your organization's Claude Code policy${where}. Ask your admin to allow it. Details: ${reason}`;
+  if (found === null || found.sources.length === 0 || !POLICY_WORDS.test(reason)) return reason;
+  return `blocked by your organization's Claude Code policy (${sourcesText(found)}). Ask your admin to allow it. Details: ${reason}`;
 }
 
 /** The real PC. */

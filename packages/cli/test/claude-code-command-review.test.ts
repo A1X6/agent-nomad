@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { stopHook } from './claude-code-project-fixtures.ts';
+import { LOCAL_MCP_SERVER, stopHook } from './claude-code-project-fixtures.ts';
 import { collected, collectedJson } from './fakes.ts';
 
-import { reviewRunnable, type CollectedFile } from '../src/index.ts';
+import {
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
+  reviewRunnable,
+  type CollectedFile,
+} from '../src/index.ts';
 
 const labels = (incoming: CollectedFile[], current: CollectedFile[] = []) =>
   reviewRunnable(incoming, current).map((entry) => `${entry.change} ${entry.label}`);
@@ -29,6 +33,15 @@ describe('reviewRunnable: everything the docs say runs (T44)', () => {
     expect(labels([before], [before])).toEqual([]);
   });
 
+  it('lists the subagent status line, which runs a command (T107)', () => {
+    const settings = collectedJson('.claude/settings.json', {
+      subagentStatusLine: { type: 'command', command: '~/bin/agent-line.sh' },
+    });
+    expect(reviewRunnable([settings], []).map((entry) => [entry.label, entry.command])).toEqual([
+      ['setting subagentStatusLine', '~/bin/agent-line.sh'],
+    ]);
+  });
+
   it('lists loader variables in a settings env block, not ordinary ones', () => {
     const settings = collectedJson('settings.json', {
       env: { NODE_OPTIONS: '--require /tmp/x.js', LD_PRELOAD: '/tmp/x.so', DEBUG: '1' },
@@ -36,6 +49,39 @@ describe('reviewRunnable: everything the docs say runs (T44)', () => {
     expect(labels([settings])).toEqual([
       'new setting env NODE_OPTIONS',
       'new setting env LD_PRELOAD',
+    ]);
+  });
+
+  it('lists loader variables in lower case too, which Windows reads as upper case (SEC-05)', () => {
+    const settings = collectedJson('settings.json', {
+      env: { node_options: '--require /tmp/x.js', ld_preload: '/tmp/x.so', debug: '1' },
+    });
+    expect(labels([settings])).toEqual([
+      'new setting env node_options',
+      'new setting env ld_preload',
+    ]);
+  });
+
+  it('lists Git config given through the environment, in any case (SEC-05 of review 16)', () => {
+    const settings = collectedJson('settings.json', {
+      env: {
+        GIT_CONFIG_PARAMETERS: "'core.fsmonitor'='echo x'",
+        git_config_parameters: "'alias.st'='!echo x'",
+      },
+    });
+    expect(labels([settings])).toEqual([
+      'new setting env GIT_CONFIG_PARAMETERS',
+      'new setting env git_config_parameters',
+    ]);
+  });
+
+  it('lists the plugin folders Claude Code loads, in any case (SEC-04 of review 16)', () => {
+    const settings = collectedJson('settings.json', {
+      env: { CLAUDE_CODE_PLUGIN_DIRS: '~/.claude/hooks/x', claude_code_plugin_dirs: '/tmp/y' },
+    });
+    expect(labels([settings])).toEqual([
+      'new setting env CLAUDE_CODE_PLUGIN_DIRS',
+      'new setting env claude_code_plugin_dirs',
     ]);
   });
 
@@ -227,6 +273,38 @@ describe('reviewRunnable: settings that redirect or loosen Claude Code (T55)', (
     expect(labels([before], [before])).toEqual([]);
   });
 
+  it('lists the gateway /login signs in to from global settings, and when it is on (T107)', () => {
+    const settings = collectedJson('settings.json', {
+      forceLoginMethod: 'gateway',
+      forceLoginGatewayUrl: 'https://gateway.example',
+    });
+    expect(reviewRunnable([settings], []).map((entry) => [entry.label, entry.command])).toEqual([
+      [
+        'setting forceLoginGatewayUrl',
+        'https://gateway.example (sign-in and requests go to this Claude apps gateway)',
+      ],
+    ]);
+  });
+
+  it('shows the login gateway as changed when forceLoginMethod turns it on (T107)', () => {
+    const before = collectedJson('settings.json', {
+      forceLoginGatewayUrl: 'https://gateway.example',
+    });
+    const after = collectedJson('settings.json', {
+      forceLoginMethod: 'gateway',
+      forceLoginGatewayUrl: 'https://gateway.example',
+    });
+    expect(labels([after], [before])).toEqual(['changed setting forceLoginGatewayUrl']);
+  });
+
+  it('leaves out a login gateway in project settings, which Claude Code never reads (T107)', () => {
+    const settings = collectedJson('.claude/settings.json', {
+      forceLoginMethod: 'gateway',
+      forceLoginGatewayUrl: 'https://gateway.example',
+    });
+    expect(labels([settings])).toEqual([]);
+  });
+
   it('lists enableAllProjectMcpServers only when it is true (QA-01)', () => {
     expect(labels([collectedJson('settings.json', { enableAllProjectMcpServers: true })])).toEqual([
       'new setting enableAllProjectMcpServers',
@@ -406,5 +484,26 @@ describe('reviewRunnable: a hook that moves between exec and shell form (review 
 
   it('an unchanged hook in exec form is not shown', () => {
     expect(labels([exec], [exec])).toEqual([]);
+  });
+});
+
+describe("reviewRunnable: the project's part of ~/.claude.json (T109)", () => {
+  const part = (value: unknown) => collectedJson(CLAUDE_JSON_PROJECT_BUNDLE_PATH, value);
+
+  it('lists its local MCP servers as it lists .mcp.json servers', () => {
+    const review = reviewRunnable([part({ mcpServers: { local: LOCAL_MCP_SERVER } })], []);
+    expect(review.map((entry) => [entry.change, entry.label, entry.command])).toEqual([
+      ['new', 'MCP server local', 'node server.js  (env: TOKEN)'],
+    ]);
+  });
+
+  it('lists each newly approved .mcp.json server, which then starts without asking', () => {
+    const here = part({ enabledMcpjsonServers: ['shared'] });
+    expect(
+      labels(
+        [part({ enabledMcpjsonServers: ['shared', 'deploy'], disabledMcpjsonServers: ['x'] })],
+        [here],
+      ),
+    ).toEqual(['new approved .mcp.json server']);
   });
 });

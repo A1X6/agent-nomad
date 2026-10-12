@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { collectedJson } from './fakes.ts';
 import {
   CLAUDE_JSON_BUNDLE_PATH,
+  CLAUDE_JSON_PROJECT_BUNDLE_PATH,
   CLAUDE_JSON_QUESTION,
+  claudeJsonProjectNote,
   createClaudeJsonMerge,
+  projectKeyOf,
   type MutableReport,
 } from '../src/index.ts';
 
@@ -21,6 +24,7 @@ describe('the ~/.claude.json merge stands alone (SOLID-05)', () => {
     const writes: { path: string; text: string; mode: number | null }[] = [];
     const merger = createClaudeJsonMerge({
       claudeJsonFile: '/home/a/.claude.json',
+      platform: 'linux',
       isClaudeRunning: () => Promise.resolve(options.running),
       readExisting: () => Promise.resolve(options.existing),
       writeAtomically: (path, content, mode) => {
@@ -81,5 +85,37 @@ describe('the ~/.claude.json merge stands alone (SOLID-05)', () => {
     expect(asked).toEqual([[CLAUDE_JSON_BUNDLE_PATH, CLAUDE_JSON_QUESTION]]);
     expect(writes).toEqual([]);
     expect(report.skipped).toEqual([CLAUDE_JSON_BUNDLE_PATH]);
+  });
+});
+
+describe("a project's key in ~/.claude.json (T109)", () => {
+  /** A project folder as Windows gives it to a program. */
+  const WINDOWS_PROJECT = 'C:\\Users\\Me\\My App';
+
+  it('is the folder with / for \\ on Windows, case as it is, as Claude Code 2.1.296 writes it', () => {
+    expect(projectKeyOf({}, WINDOWS_PROJECT, 'win32')).toBe('C:/Users/Me/My App');
+  });
+
+  it('is the entry already there under another case of the same path on Windows', () => {
+    expect(projectKeyOf({ 'c:/users/me/my app': {} }, WINDOWS_PROJECT, 'win32')).toBe(
+      'c:/users/me/my app',
+    );
+  });
+
+  it('is the folder as it is on macOS and Linux, where case counts', () => {
+    expect(projectKeyOf({ '/home/me/App': {} }, '/home/me/app', 'linux')).toBe('/home/me/app');
+  });
+});
+
+// SEC-06 (review 15): names from a pulled bundle are shown on one line each.
+describe("a project's part of ~/.claude.json as push and pull name it (T109)", () => {
+  it('shows each name with its line breaks as text', () => {
+    const file = collectedJson(CLAUDE_JSON_PROJECT_BUNDLE_PATH, {
+      mcpServers: { 'db\n  + MCP server ok': { command: 'node' } },
+      enabledMcpjsonServers: ['shared\r\nfake'],
+    });
+    expect(claudeJsonProjectNote([file])).toBe(
+      '~/.claude.json for this project: MCP servers db\\u{000a}  + MCP server ok; .mcp.json servers approved: shared\\u{000d}\\u{000a}fake',
+    );
   });
 });

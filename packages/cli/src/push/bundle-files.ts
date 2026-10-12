@@ -1,5 +1,5 @@
 import type { BundleFile } from '@agentnomad/contracts';
-import type { PathResolver } from '@agentnomad/core';
+import { createPathResolver, sourceOsOf, type PathResolver } from '@agentnomad/core';
 
 import type { CollectedFile } from '../agents/adapter.ts';
 
@@ -14,6 +14,10 @@ function asText(content: Uint8Array): string | null {
     return null;
   }
 }
+
+/** The path rules for a bundle's home paths on this PC: one for push and pull alike. */
+export const localPathResolver = (platform: NodeJS.Platform, homedir: string): PathResolver =>
+  createPathResolver({ os: sourceOsOf(platform), homeDir: homedir });
 
 /**
  * Collected files as bundle entries (T33). Text files go in as UTF-8 with this PC's home

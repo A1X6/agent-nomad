@@ -21,12 +21,11 @@ import { AnswerNeededError, createNoTerminalPrompter } from '../src/ui/no-termin
 import type { Prompter } from '../src/ui/prompter.ts';
 import {
   crypto,
-  dataKey,
   exists,
   fakeBundleServer,
   fakeEnvWriter,
   localStateIn,
-  memorySecretStore,
+  loggedInStore,
   readText,
   recordingReporter,
   scriptedPrompter,
@@ -104,6 +103,7 @@ function exampleAdapter(home: string, seen: Seen): AgentAdapter {
       {
         id: 'prompts',
         scope: 'global',
+        defaultYes: false,
         available: () => Promise.resolve({ names: ['review'], problem: null }),
         question: (names) => `Also save your prompts library (${names.join(', ')})?`,
         unreadable: (problem) => problem,
@@ -194,7 +194,7 @@ function depsFor(
     prompter,
     reporter,
     registry: () => createAgentRegistry([exampleAdapter(pc.home, seen)]),
-    secrets: () => Promise.resolve(memorySecretStore({ loggedIn: dataKey })),
+    secrets: () => Promise.resolve(loggedInStore()),
     api: () => server,
     crypto: () => Promise.resolve(crypto),
     codec: createGzipBundleCodec(),
@@ -234,14 +234,15 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
     const a = machine('laptop');
     await writeTestFile(join(a.base, 'settings.toml'), 'theme = "dark"\n');
     const seen = newSeen();
-    const script = scriptedPrompter([false, true]);
+    const script = scriptedPrompter([false, true, true]);
     await createPushCommand(depsFor(a, server, script.prompter, seen).deps).push({
       global: true,
       yes: false,
     });
     expect(script.asked).toEqual([
-      'Include memory (what Example CLI remembers)?',
+      'Include memory (what Example CLI remembers)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
       'Also save your prompts library (review)?',
+      'Upload it now? Nothing is saved until you say yes.',
     ]);
     expect(seen.collected[0]?.include).toEqual(new Set(['prompts']));
   });
@@ -251,7 +252,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
     const b = machine('desktop');
     await writeTestFile(join(b.base, 'settings.toml'), 'theme = "light"\n');
     const seen = newSeen();
-    const script = scriptedPrompter([true, 'overwrite', true]);
+    const script = scriptedPrompter([true, 'overwrite', true, true]);
     const t = depsFor(b, server, script.prompter, seen);
     await createPullCommand(t.deps).pull({ global: true, yes: false });
 
@@ -259,6 +260,7 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
       'Allow them?',
       'settings.toml already exists here and is different.',
       'Example CLI: reinstall 1 extension?',
+      'Restore it now? Nothing is written until you say yes.',
     ]);
     expect(t.lines.some((line) => line.includes('+ hook: hooks/check.sh'))).toBe(true);
     expect(await readText(join(b.base, 'settings.toml'))).toBe('theme = "dark"\n');
@@ -296,16 +298,17 @@ describe('a second agent goes through push and pull from its adapter alone (T61)
         mcpServers: { docs: { env: { TOKEN: '${EXAMPLE_TOKEN}', DIR: '${EXAMPLE_HOME}' } } },
       }),
     );
-    const script = scriptedPrompter([false, false, ['EXAMPLE_TOKEN']]);
+    const script = scriptedPrompter([false, false, ['EXAMPLE_TOKEN'], true]);
     const pushing = depsFor(a, server, script.prompter, newSeen());
     await createPushCommand({
       ...pushing.deps,
       env: { EXAMPLE_TOKEN: 'token-1', EXAMPLE_HOME: '/opt/example' },
     }).push({ global: true, yes: false });
     expect(script.asked).toEqual([
-      'Include memory (what Example CLI remembers)?',
+      'Include memory (what Example CLI remembers)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
       'Also save your prompts library (review)?',
-      'Save these values with your setup (encrypted; only you can read them)? Leave all unticked to save none.',
+      'Save these environment variable values with your setup? Your setup uses them (e.g. API keys); a saved value is encrypted and only you can read it. None are saved unless you tick them.',
+      'Upload it now? Nothing is saved until you say yes.',
     ]);
 
     const b = machine('desktop');

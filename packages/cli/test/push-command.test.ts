@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-import { BUNDLE_FORMAT_VERSION, GLOBAL_SCOPE_KEY } from '@agentnomad/contracts';
+import { BUNDLE_FORMAT_VERSION, GLOBAL_SCOPE_KEY, MAX_BUNDLE_FILES } from '@agentnomad/contracts';
 import {
   createGzipBundleCodec,
   DATA_KEY_BYTES,
@@ -16,10 +16,15 @@ import {
   collected,
   crypto,
   dataKey,
+  fakeAdapter,
   fakeBundleServer,
+  installedAgent,
   localStateIn,
+  loggedInStore,
   memorySecretStore,
+  missingAgent,
   recordingReporter,
+  revisionOn,
   scriptedPrompter,
   storedOn,
   useDataKey,
@@ -52,7 +57,6 @@ const HOME = posix ? '/home/ahmed' : 'C:\\Users\\ahmed';
 const PROJECT = posix ? '/home/ahmed/work/my-app' : 'C:\\Users\\ahmed\\work\\my-app';
 
 useDataKey();
-const loggedIn = () => memorySecretStore({ loggedIn: dataKey });
 
 let dir: string;
 useTempDir('agentnomad-push-', (temp) => (dir = temp));
@@ -69,6 +73,8 @@ function collectingAdapter(
     project?: CollectedFile[];
     unknown?: string[];
     notices?: string[];
+    /** What the inspector adds to the summary (T97). */
+    pushNotes?: string[];
   } = {},
 ): AgentAdapter {
   return {
@@ -92,6 +98,7 @@ function collectingAdapter(
     inspector: {
       unknownEntries: () => Promise.resolve(options.unknown ?? []),
       notices: () => Promise.resolve(options.notices ?? []),
+      pushNotes: () => options.pushNotes ?? [],
     },
   };
 }
@@ -108,17 +115,22 @@ function setup(
     pc?: string;
     codec?: BundleCodec;
     prompter?: Prompter;
+    /** The answer to "Upload … now?" after the summary, when push asks it (T115); yes. */
+    upload?: boolean;
   } = {},
 ) {
   const server = options.server ?? fakeBundleServer();
-  const script = scriptedPrompter(answers);
+  const script = scriptedPrompter(answers, {
+    question: UPLOAD_QUESTION,
+    answer: options.upload ?? true,
+  });
   const { reporter, lines } = recordingReporter();
   const state = localStateIn(dir, `${options.pc ?? 'this-pc'}.json`);
   // What apply gets: everything but the prompter.
   const applyDeps: PushApplyDeps = {
     reporter,
     registry: () => createAgentRegistry([options.adapter ?? collectingAdapter()]),
-    secrets: () => Promise.resolve(options.secrets ?? loggedIn()),
+    secrets: () => Promise.resolve(options.secrets ?? loggedInStore()),
     api: () => server.api,
     crypto: () => Promise.resolve(crypto),
     codec: options.codec ?? createGzipBundleCodec(),
@@ -134,6 +146,11 @@ function setup(
 }
 
 const noFlags = { global: false, yes: false };
+
+/** Push's question after its summary, when it asked anything before (T115). */
+const UPLOAD_IT = 'Upload it now? Nothing is saved until you say yes.';
+/** That question, for one setup or several. */
+const UPLOAD_QUESTION = /^Upload .* now\? Nothing is saved until you say yes\.$/;
 
 /** A server holding the global setup, saved once from another PC: the laptop. */
 async function savedFromLaptop() {
@@ -191,6 +208,15 @@ describe('agentnomad push', () => {
     expect(revision).toBe(1);
     expect(t.lines.at(-1)).toMatch(
       /^success: Saved the Claude Code global setup: 1 file, \d+ B \(revision 1\)\.$/,
+    );
+  });
+
+  it("adds the agent's notes on the saved files to the summary (T97)", async () => {
+    const note = 'Plugins in skills/: probe-mod@skills-dir (runs code)';
+    const t = setup(['global', false], { adapter: collectingAdapter({ pushNotes: [note] }) });
+    await t.command.push(noFlags);
+    expect(t.lines.at(-1)).toMatch(
+      /^success: Saved the Claude Code global setup: 1 file, \d+ B \(revision 1\)\.\n {2}Plugins in skills\/: probe-mod@skills-dir \(runs code\)$/,
     );
   });
 
@@ -254,28 +280,42 @@ describe('agentnomad push', () => {
   });
 
   describe('claude.ai skills (T42)', () => {
-    // Claude Code's own optional part (its texts), with what this fake PC has.
-    const claudePart = claudeCodeAdapter(HOME).optionalParts?.[0];
-
-    function withAccountSkills(names: string[], problem: string | null = null) {
+    // Claude Code's own optional part (its texts and default), with what this fake PC has.
+    function withClaudePart(
+      names: string[],
+      problem: string | null = null,
+      notice: string | null = null,
+      id = 'account-skills',
+    ) {
       const seen: boolean[] = [];
       const base = collectingAdapter();
-      if (claudePart === undefined) throw new Error('no account skills part');
+      const claudePart = claudeCodeAdapter(HOME).optionalParts?.find((part) => part.id === id);
+      if (claudePart === undefined) throw new Error(`no ${id} part`);
       const adapter: AgentAdapter = {
         ...base,
         collector: {
           collect: (target, options) => {
-            seen.push(options.include?.has('account-skills') === true);
+            seen.push(options.include?.has(id) === true);
             return base.collector.collect(target, options);
           },
         },
-        optionalParts: [{ ...claudePart, available: () => Promise.resolve({ names, problem }) }],
+        optionalParts: [
+          { ...claudePart, available: () => Promise.resolve({ names, problem, notice }) },
+        ],
       };
       return { adapter, seen };
     }
 
+    it('says what was left out, and why, before asking (T105)', async () => {
+      const some = withClaudePart(['my-skill'], null, 'Not saved from claude.ai account a: x.');
+      const t = setup([false], { adapter: some.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
+      expect(t.lines).toContain('warn: Not saved from claude.ai account a: x.');
+      expect(t.script.asked).toHaveLength(2);
+    });
+
     it('says when they cannot be read, and that they were not saved', async () => {
-      const broken = withAccountSkills([], 'The synced skills folder could not be read.');
+      const broken = withClaudePart([], 'The synced skills folder could not be read.');
       const t = setup([], { adapter: broken.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
       expect(t.lines).toContain(
@@ -285,7 +325,7 @@ describe('agentnomad push', () => {
     });
 
     it('--account-skills with none here says so', async () => {
-      const none = withAccountSkills([]);
+      const none = withClaudePart([]);
       const t = setup([], { adapter: none.adapter });
       await t.command.push({
         global: true,
@@ -295,23 +335,35 @@ describe('agentnomad push', () => {
       expect(t.lines).toContain('info: No claude.ai skills of your own were found on this PC.');
     });
 
-    it('asks about them only when there are some; no by default', async () => {
-      const some = withAccountSkills(['my-skill']);
-      const t = setup([false], { adapter: some.adapter });
+    it('asks about them when there are some; yes by default (T114)', async () => {
+      const some = withClaudePart(['my-skill']);
+      const t = setup([true], { adapter: some.adapter });
       await t.command.push({ global: true, yes: false, memory: false });
       expect(t.script.asked).toEqual([
-        'Also save a copy of your 1 claude.ai skill (my-skill)? Your claude.ai account already syncs them; the copy is for PCs without that account.',
+        'Also save a copy of your 1 claude.ai skill (my-skill)? Your claude.ai account already syncs them; the copy is for PCs without that account. Saved unless you say no.',
+        UPLOAD_IT,
       ]);
-      expect(some.seen).toEqual([false]);
+      // The part's default, then the upload question's (T115).
+      expect(t.script.confirmDefaults).toEqual([true, true]);
+      expect(some.seen).toEqual([true]);
+    });
 
-      const none = withAccountSkills([]);
+    it('a no to the question leaves them out', async () => {
+      const some = withClaudePart(['my-skill']);
+      const t = setup([false], { adapter: some.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
+      expect(some.seen).toEqual([false]);
+    });
+
+    it('does not ask about them when there are none', async () => {
+      const none = withClaudePart([]);
       const quiet = setup([], { adapter: none.adapter, pc: 'no-account-skills' });
       await quiet.command.push({ global: true, yes: false, memory: false });
       expect(quiet.script.asked).toEqual([]);
     });
 
     it('--account-skills includes them without asking, for the global setup only', async () => {
-      const some = withAccountSkills(['my-skill']);
+      const some = withClaudePart(['my-skill']);
       const t = setup(['my-app'], { adapter: some.adapter });
       await t.command.push({
         global: true,
@@ -324,12 +376,69 @@ describe('agentnomad push', () => {
       expect(some.seen).toEqual([true, false]);
     });
 
-    it('--yes alone leaves them out without asking', async () => {
-      const some = withAccountSkills(['my-skill']);
+    it('--yes alone includes them without asking (T114)', async () => {
+      const some = withClaudePart(['my-skill']);
       const t = setup([], { adapter: some.adapter });
       await t.command.push({ global: true, yes: true });
       expect(t.script.asked).toEqual([]);
+      expect(some.seen).toEqual([true]);
+    });
+
+    it('--no-account-skills leaves them out without asking, even with --yes', async () => {
+      const some = withClaudePart(['my-skill']);
+      const t = setup([], { adapter: some.adapter });
+      await t.command.push({
+        global: true,
+        yes: true,
+        parts: new Map([['account-skills', false]]),
+      });
+      expect(t.script.asked).toEqual([]);
       expect(some.seen).toEqual([false]);
+    });
+
+    it('asks about claude.ai plugins with yes as the default (T114)', async () => {
+      const plugins = withClaudePart(['my-upload'], null, null, 'account-plugins');
+      const t = setup([true], { adapter: plugins.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
+      // The part's default, then the upload question's (T115).
+      expect(t.script.confirmDefaults).toEqual([true, true]);
+      expect(plugins.seen).toEqual([true]);
+    });
+
+    it('--yes alone includes claude.ai plugins without asking (T114)', async () => {
+      const plugins = withClaudePart(['my-upload'], null, null, 'account-plugins');
+      const t = setup([], { adapter: plugins.adapter });
+      await t.command.push({ global: true, yes: true });
+      expect(t.script.asked).toEqual([]);
+      expect(plugins.seen).toEqual([true]);
+    });
+
+    it('--no-account-plugins leaves them out without asking, even with --yes', async () => {
+      const plugins = withClaudePart(['my-upload'], null, null, 'account-plugins');
+      const t = setup([], { adapter: plugins.adapter });
+      await t.command.push({
+        global: true,
+        yes: true,
+        parts: new Map([['account-plugins', false]]),
+      });
+      expect(t.script.asked).toEqual([]);
+      expect(plugins.seen).toEqual([false]);
+    });
+
+    it('--yes alone still leaves plugin data out (its default stays no)', async () => {
+      const data = withClaudePart(['probe-mod@skills-dir'], null, null, 'plugin-data');
+      const t = setup([], { adapter: data.adapter });
+      await t.command.push({ global: true, yes: true });
+      expect(t.script.asked).toEqual([]);
+      expect(data.seen).toEqual([false]);
+    });
+
+    it('asks about plugin data with no as the default', async () => {
+      const data = withClaudePart(['probe-mod@skills-dir'], null, null, 'plugin-data');
+      const t = setup([false], { adapter: data.adapter });
+      await t.command.push({ global: true, yes: false, memory: false });
+      // The part's default, then the upload question's (T115).
+      expect(t.script.confirmDefaults).toEqual([false, true]);
     });
   });
 
@@ -358,7 +467,8 @@ describe('agentnomad push', () => {
     const t = setup([false], { cwd: HOME });
     await t.command.push(noFlags);
     expect(t.script.asked).toEqual([
-      'Include memory (what Claude learned: subagent and auto memory)?',
+      'Include memory (what Claude learned: subagent and auto memory)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
+      UPLOAD_IT,
     ]);
     expect(t.server.stored.size).toBe(1);
   });
@@ -380,7 +490,8 @@ describe('agentnomad push', () => {
     const t = setup([false], { cwd: join(HOME, '.claude') });
     await t.command.push(noFlags);
     expect(t.script.asked).toEqual([
-      'Include memory (what Claude learned: subagent and auto memory)?',
+      'Include memory (what Claude learned: subagent and auto memory)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
+      UPLOAD_IT,
     ]);
     expect(t.server.stored.size).toBe(1);
   });
@@ -490,6 +601,26 @@ describe('agentnomad push', () => {
     );
   });
 
+  it('a setup over MAX_BUNDLE_FILES is not done before encode; the next setup is saved (BUG-01)', async () => {
+    const files = Array.from({ length: MAX_BUNDLE_FILES + 1 }, (_, i) =>
+      collected(`skills/s${String(i)}.md`, 'x'),
+    );
+    const codec = createGzipBundleCodec();
+    const encode = vi.spyOn(codec, 'encode');
+    const t = setup([], { adapter: collectingAdapter({ global: files }), codec });
+    await expect(t.command.push({ global: true, project: 'my-app', yes: true })).rejects.toThrow(
+      'Not saved:\n  - the Claude Code global setup: 10,001 files, over the 10,000 limit',
+    );
+    expect(t.lines).toContain(
+      'error: The Claude Code global setup has 10,001 files; the limit is 10,000. Leave some out (e.g. old memory or unused skills) and try again.',
+    );
+    expect(encode.mock.calls.map(([bundle]) => bundle.scope)).toEqual([
+      { kind: 'project', name: 'my-app' },
+    ]);
+    expect((await received(t.server, { kind: 'project', name: 'my-app' })).revision).toBe(1);
+    expect(t.server.puts).toHaveLength(1);
+  });
+
   it('--yes skips a newer copy, saves the other setups, then exits with code 1 (BUG-03)', async () => {
     const server = await savedFromLaptop();
     const desktop = setup([], { server, pc: 'desktop' });
@@ -520,6 +651,7 @@ describe('agentnomad push', () => {
     await asked.command.push({ global: true, yes: false, memory: false });
     expect(asked.script.asked).toEqual([
       "This PC's last pull of the Claude Code global setup did not restore everything, so pushing now may drop parts of the saved copy (and of your other PCs on their next pull). Push anyway?",
+      UPLOAD_IT,
     ]);
     expect((await received(server, { kind: 'global' })).revision).toBe(2);
   });
@@ -534,7 +666,7 @@ describe('agentnomad push', () => {
     );
     const again = setup(['global', false, true], { server });
     await again.command.push(noFlags);
-    expect(again.script.asked.at(-1)).toBe(
+    expect(again.script.asked.at(-2)).toBe(
       'The saved Claude Code global setup was deleted since this PC last had it. Save it again?',
     );
     expect((await received(server, { kind: 'global' })).revision).toBe(1);
@@ -543,12 +675,12 @@ describe('agentnomad push', () => {
   it('the plan step asks every question and uploads nothing; apply uploads and asks nothing (T59)', async () => {
     const server = await savedFromLaptop();
     const desktop = setup(['global', false, true], { server, pc: 'desktop' });
-    const keys = { secrets: loggedIn(), crypto, dataKey };
+    const keys = { secrets: loggedInStore(), crypto, dataKey };
 
     const plan = await createPushPlanner(desktop.deps).plan(noFlags, keys);
     expect(desktop.script.asked).toEqual([
-      'Claude Code: what to save?',
-      'Include memory (what Claude learned: subagent and auto memory)?',
+      'Claude Code: what to save? The global setup follows you to every PC; a project setup belongs to the folder it is in.',
+      'Include memory (what Claude learned: subagent and auto memory)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
       "A newer copy of the Claude Code global setup (revision 1) was saved from another PC. Replace it with this PC's setup?",
     ]);
     expect(plan.uploads.map((upload) => [upload.setup, upload.expectedRevision])).toEqual([
@@ -567,7 +699,7 @@ describe('agentnomad push', () => {
   it('apply never asks: a copy saved from another PC after the plan is not done (T59)', async () => {
     const server = fakeBundleServer();
     const t = setup(['global', false], { server });
-    const keys = { secrets: loggedIn(), crypto, dataKey };
+    const keys = { secrets: loggedInStore(), crypto, dataKey };
     const plan = await createPushPlanner(t.deps).plan(noFlags, keys);
     // Another PC saves while this push is between its plan and its upload.
     await setup(['global', false], { server, pc: 'laptop' }).command.push(noFlags);
@@ -661,5 +793,156 @@ describe('agentnomad push', () => {
     await expect(setup([], { secrets: empty }).command.push(noFlags)).rejects.toThrow(
       /^You are not logged in on this PC\. Run `agentnomad login` first\.$/,
     );
+  });
+});
+
+describe('push: which agents, the project name and what is left out (T95)', () => {
+  /** `t`'s push with these agents registered instead of its one adapter. */
+  const pushWith = (t: ReturnType<typeof setup>, adapters: AgentAdapter[]) =>
+    createPushCommand({ ...t.deps, registry: () => createAgentRegistry(adapters) }).push;
+
+  it('asks which agents when several are installed, and saves only the chosen', async () => {
+    const t = setup([['claude-code'], false]);
+    const other = fakeAdapter('other', 'Other CLI', installedAgent);
+    await pushWith(t, [collectingAdapter(), other])({ global: true, yes: false });
+    expect(t.script.asked).toEqual([
+      "Which agents? Each agent's setup is saved and restored on its own.",
+      'Include memory (what Claude learned: subagent and auto memory)? It is what the agent learned about you and your projects, so it is left out unless you say yes.',
+      UPLOAD_IT,
+    ]);
+    expect(revisionOn(t.server, GLOBAL_SCOPE_KEY)).toBe(1);
+    expect(t.server.stored.size).toBe(1);
+  });
+
+  it('--agent with an unknown id names the next step', async () => {
+    const t = setup([]);
+    await expect(t.command.push({ global: true, yes: true, agents: ['nope'] })).rejects.toThrow(
+      'Unknown agent "nope". Run `agentnomad agents` to see the supported ones.',
+    );
+  });
+
+  it('--agent with an agent that is not installed here says so', async () => {
+    const t = setup([]);
+    const other = fakeAdapter('other', 'Other CLI', missingAgent);
+    await expect(
+      pushWith(t, [collectingAdapter(), other])({ global: true, yes: true, agents: ['other'] }),
+    ).rejects.toThrow('Other CLI is not installed on this PC.');
+  });
+
+  it('says so when no supported agent is installed', async () => {
+    const t = setup([], { adapter: fakeAdapter('claude-code', 'Claude Code', missingAgent) });
+    await t.command.push(noFlags);
+    expect(t.lines).toEqual([
+      'info: No supported agent is installed on this PC, so there is nothing to push.',
+    ]);
+  });
+
+  it('asks again for a project name the server would refuse', async () => {
+    const t = setup(['project', 'my\u0007app', 'my-app', false]);
+    await t.command.push(noFlags);
+    expect(t.script.rejected).toEqual(['Project name must not contain control characters']);
+    expect(await t.state.projectNameFor(PROJECT)).toBe('my-app');
+  });
+
+  it('says when a setup has nothing to save, and uploads nothing', async () => {
+    const t = setup([], { adapter: collectingAdapter({ global: [] }) });
+    await t.command.push({ global: true, yes: true });
+    expect(t.lines).toContain('info: Nothing to save for the Claude Code global setup.');
+    expect(t.server.stored.size).toBe(0);
+  });
+
+  it('names each file the collector left out, with why', async () => {
+    const base = collectingAdapter();
+    const adapter: AgentAdapter = {
+      ...base,
+      collector: {
+        collect: (target, options) => {
+          options.onSkipped?.('big.bin', 'it is larger than 10 MB');
+          return base.collector.collect(target, options);
+        },
+      },
+    };
+    const t = setup([], { adapter });
+    await t.command.push({ global: true, yes: true });
+    expect(t.lines).toContain(
+      'warn: Claude Code global setup: left out\n  - big.bin: it is larger than 10 MB',
+    );
+  });
+});
+
+describe('push: environment values and the summary before upload (T115)', () => {
+  /** A global setup whose MCP server reads GITHUB_TOKEN, which this PC has. */
+  const withToken = () =>
+    collectingAdapter({
+      global: [
+        collected(
+          '.mcp.json',
+          JSON.stringify({ mcpServers: { gh: { env: { T: '${GITHUB_TOKEN}' } } } }),
+        ),
+      ],
+    });
+  const ENV = { GITHUB_TOKEN: 'ghp_x' };
+
+  it('--env-values with a name saves that value, asking nothing about it', async () => {
+    const t = setup([], { adapter: withToken(), env: ENV });
+    await t.command.push({ global: true, yes: false, memory: false, envValues: ['GITHUB_TOKEN'] });
+    expect(t.script.asked).toEqual([]);
+    const { bundle } = await received(t.server, { kind: 'global' });
+    expect(bundle.files.find((file) => file.path === '.agentnomad/env.json')?.content).toBe(
+      '{\n  "variables": {\n    "GITHUB_TOKEN": "ghp_x"\n  }\n}\n',
+    );
+  });
+
+  it('names a value it could not save, with the setup and why', async () => {
+    const t = setup([], { adapter: withToken(), env: ENV });
+    await t.command.push({
+      global: true,
+      yes: false,
+      memory: false,
+      envValues: ['GITHUB_TOKEN', 'NPM_TOKEN'],
+    });
+    expect(t.lines).toContain(
+      'warn: Not saved with the Claude Code global setup: NPM_TOKEN (the setup does not use it, or it is not set on this PC).',
+    );
+  });
+
+  it('--yes alone saves no environment value', async () => {
+    const t = setup([], { adapter: withToken(), env: ENV });
+    await t.command.push({ global: true, yes: true });
+    const { bundle } = await received(t.server, { kind: 'global' });
+    expect(bundle.files.map((file) => file.path)).not.toContain('.agentnomad/env.json');
+  });
+
+  it('after asking anything, shows what it will save and asks once more', async () => {
+    const t = setup(['global', false]);
+    await t.command.push(noFlags);
+    expect(t.script.asked.at(-1)).toBe(UPLOAD_IT);
+    expect(t.lines).toContain(
+      [
+        'info: Ready to save:',
+        '  The Claude Code global setup: 1 file',
+        '    Saved only when you choose (a question, or the flag): --memory no; --env-values none',
+      ].join('\n'),
+    );
+  });
+
+  it('a no to that question uploads nothing and is not a failure', async () => {
+    const t = setup(['global', false], { upload: false });
+    await t.command.push(noFlags);
+    expect(t.lines).toContain('info: Nothing was saved.');
+    expect(t.server.stored.size).toBe(0);
+  });
+
+  it('flags that answer everything ask nothing more, so a script keeps working', async () => {
+    const t = setup([], { prompter: createNoTerminalPrompter() });
+    await t.command.push({ global: true, yes: false, memory: false });
+    expect(t.server.stored.size).toBe(1);
+  });
+
+  it('--yes asks nothing more', async () => {
+    const t = setup([]);
+    await t.command.push({ global: true, yes: true });
+    expect(t.script.asked).toEqual([]);
+    expect(t.server.stored.size).toBe(1);
   });
 });

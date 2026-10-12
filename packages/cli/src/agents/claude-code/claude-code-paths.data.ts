@@ -6,6 +6,9 @@
  */
 import * as z from 'zod';
 
+/** Where Claude Code keeps mods one session is developing: `dev-mods/<session>/<mod>/` (T103). */
+const DEV_MODS = 'dev-mods';
+
 const RAW = {
   /** Bumped when the meaning of an entry changes. */
   version: 1,
@@ -14,13 +17,30 @@ const RAW = {
    * The newest Claude Code these lists were checked against (T41). The weekly drift check
    * reports changelog entries of newer versions; bump this after reviewing them.
    */
-  reviewedVersion: '2.1.292',
+  reviewedVersion: '2.1.296',
 
   global: {
-    /** Single files in the base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`). */
-    files: ['settings.json', 'CLAUDE.md', 'keybindings.json'],
-    /** Folders taken whole. */
-    folders: ['rules', 'skills', 'commands', 'agents', 'workflows', 'output-styles', 'themes'],
+    /**
+     * Single files in the base folder (`~/.claude` or `CLAUDE_CONFIG_DIR`). `loop.md` is the
+     * user's own prompt for a bare `/loop` (T113): the 2.1.296 program reads it as text into the
+     * prompt, cut at 25,000 bytes, and runs nothing from it.
+     */
+    files: ['settings.json', 'CLAUDE.md', 'keybindings.json', 'loop.md'],
+    /**
+     * Folders taken whole. `hooks/` (T112) is where users keep the scripts their hooks run:
+     * Claude Code never loads it by itself, a script there runs only when a settings file
+     * names it, and pull shows every such setting for review first.
+     */
+    folders: [
+      'rules',
+      'skills',
+      'commands',
+      'agents',
+      'workflows',
+      'output-styles',
+      'themes',
+      'hooks',
+    ],
     /** Opt-in: subagent memory with `memory: user` (auto memory is per project). */
     memoryFolders: ['agent-memory'],
     /**
@@ -61,6 +81,54 @@ const RAW = {
       'feedback',
       'feedback-bundles',
       'policy-limits.json',
+      // When the limits above were last fetched (Claude Code 2.1.295, T96; checked on 2.1.296).
+      'policy-limits.json.stamp.json',
+      // Scratch copies of a repository an /ultrareview upload makes (its changelog for
+      // 2.1.295; the 2.1.296 program makes the folder with mode 700, T107).
+      'seed-admin',
+      // T108: the 2.1.296 program's own lists of state in its folder (the names it skips when
+      // it walks a .claude folder, and the ones a self-hosted runner leaves out when it copies
+      // this folder; the test fixture `claude-code-state-names.ts` keeps both). Logins: the
+      // session ingress token (kept with .oauth_token and .api_key) and the HFI login.
+      '.session_ingress_token',
+      'hfi-auth.json',
+      // `~/.claude.json` (account and project state) as it was before a write.
+      '.claude.json.backup',
+      // The signatures of the two files above that come from claude.ai, and the account's
+      // answer when the organization's settings asked for consent.
+      'policy-limits.json.signature.json',
+      'policy-limits.json.signature-iat.json',
+      'remote-settings.json.signature.json',
+      'remote-settings.json.signature-iat.json',
+      'remote-settings-consent.json',
+      'remote-settings-helper-consent',
+      // Sessions and what they send: prompt dumps (`dump-prompts/<session>.jsonl`), API dumps,
+      // files sent between PCs, Remote Control drafts and fork seeds, cloud (`ccr`) sessions
+      // and the home a cloud session starts from, the sessions a server runs, agent team
+      // mailboxes and tasks, and the session storage (`storage-v2`).
+      'dump-prompts',
+      'api-dumps',
+      'file-transfers',
+      'remote',
+      'remote-control',
+      'ccr',
+      'ccr-home-seed.json',
+      'server-sessions.json',
+      'teams',
+      'storage-v2',
+      // Plugins installed for Cowork, used instead of `plugins/` there.
+      'cowork_plugins',
+      // Checked on the 2.1.296 program (T113): zips it deletes when they get old (`shares/`),
+      // the session storage's per-session scratch (`scratch/`), and its per-project folders,
+      // laid out in bytecode the program never shows: local and project subagent memory and a
+      // project's local and shared settings. The user's own copies live in the project, which
+      // project push takes; local agent memory is personal by design.
+      'shares',
+      'scratch',
+      'agent-memory-local',
+      'agent-memory-project',
+      'local-settings',
+      'project-settings',
     ],
     /**
      * Other things Claude Code keeps in the base folder that are known and deliberately
@@ -81,22 +149,89 @@ const RAW = {
       'local',
       'usage-data',
       'stats-cache.json',
+      // T108, from the same 2.1.296 lists: caches (MCP tools found, MCP skill archives),
+      // startup profiles, traces, a systemd folder, activity times, locks and a write marker.
+      'mcp-discovery-cache',
+      'mcp-skill-archives',
+      'startup-perf',
+      'traces',
+      'systemd',
+      'active-time.json',
+      'antproto.json',
+      'bridge-spawn',
+      'computer-use.lock',
+      'server.lock',
+      '.cc-writes',
+      // Mods Claude Code writes while one session develops them, deleted after
+      // `cleanupPeriodDays`: never pushed; push names them (T103).
+      DEV_MODS,
     ],
   },
 
   project: {
     /** Files in the project root; `CLAUDE.local.md` is personal and usually gitignored. */
     rootFiles: ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.mcp.json', '.worktreeinclude'],
-    /** Single files in `<project>/.claude/`. */
-    claudeFiles: ['settings.json', 'settings.local.json', 'CLAUDE.md'],
-    /** Folders in `<project>/.claude/`, taken whole. */
-    claudeFolders: ['rules', 'skills', 'commands', 'agents', 'workflows', 'output-styles'],
+    /** Single files in `<project>/.claude/`; `loop.md` wins over the global one (T113). */
+    claudeFiles: ['settings.json', 'settings.local.json', 'CLAUDE.md', 'loop.md'],
+    /** Folders in `<project>/.claude/`, taken whole; `hooks/` as in the base folder (T112). */
+    claudeFolders: ['rules', 'skills', 'commands', 'agents', 'workflows', 'output-styles', 'hooks'],
     /** Opt-in: subagent memory with `memory: project`. */
     memoryFolders: ['agent-memory'],
     /** Never taken from a project (paths from the project root). */
     neverSynced: ['.git', '.claude/agent-memory-local', '.claude/worktrees'],
     /** Known entries in `<project>/.claude/` that are left out on purpose. */
-    knownState: ['hooks'],
+    knownState: [],
+  },
+
+  plugins: {
+    /**
+     * Folders inside a plugin or mod in `skills/<name>/` (T97) that Claude Code writes itself:
+     * `.claude-plugin/types/` when it hot-reloads a mod (Claude Code 2.1.295, T96; checked on
+     * 2.1.296). Never pushed, never written by pull.
+     */
+    generatedInPlugin: ['.claude-plugin/types'],
+    /**
+     * The parts of a plugin from which Claude Code starts programs by itself (SEC-02, read from
+     * the 2.1.296 program): `files` and `folders` at the plugin root, and the
+     * `.claude-plugin/plugin.json` keys that declare the same inline or name another file.
+     * Monitors are "unsandboxed, same trust tier as hooks"; a plugin in `skills/` is enabled
+     * and its MCP servers start. Pull asks before writing a plugin with any of them.
+     */
+    runsCode: {
+      files: ['hooks/hooks.json', '.mcp.json', '.lsp.json'],
+      folders: ['monitors'],
+      manifestKeys: ['hooks', 'mcpServers', 'lspServers', 'monitors'],
+    },
+    /**
+     * The first Claude Code that loads mods: its changelog for 2.1.287 says "Added Claude Mods:
+     * plugins may now modify deeper behavior" (T103). Pull warns when this PC's is older.
+     */
+    modsSince: '2.1.287',
+    /** The folder of mods in development, in the base folder (also known state above). */
+    devMods: DEV_MODS,
+    /**
+     * A plugin's own folder, `plugins/data/<folder>` (`CLAUDE_PLUGIN_DATA`), named from its id
+     * `<name>@<source>` with every character `unsafe` matches turned into `replaceWith`
+     * (Claude Code 2.1.295, T96; read from the 2.1.296 program, T107, which turns `*` too):
+     * `lm-plugin@my-local.mkt` → `lm-plugin-my-local-mkt`. Pushed on request, only for a
+     * plugin the setup restores (T102).
+     */
+    data: { folder: 'plugins/data', unsafe: '[^A-Za-z0-9_-]', replaceWith: '-' },
+    /**
+     * A mod's `$.store`, one file per plugin in `plugins/store/` (folder 700, file 600): the id
+     * with every character `unsafe` matches turned into `replaceWith`, cut to `maxNameLength`,
+     * then `-`, the first `hashDigits` hex digits of the id's SHA-256 and `.json` (2.1.295, T96;
+     * read from the 2.1.296 program, T107, which turns `*` too and cuts the name):
+     * `probe-mod@skills-dir` → `probe-mod_skills-dir-e89169932969.json`. Pushed as `data` (T102).
+     */
+    store: {
+      folder: 'plugins/store',
+      unsafe: '[^A-Za-z0-9_-]',
+      replaceWith: '_',
+      maxNameLength: 64,
+      hashDigits: 12,
+      extension: '.json',
+    },
   },
 
   /** Names skipped anywhere inside a synced folder: tool state and OS clutter. */
@@ -117,16 +252,33 @@ const RAW = {
   ignoredCopyPatterns: ['\\.bak$', '\\.orig$', '\\.old$', '~$', '\\.swp$'],
 
   /**
-   * `~/.claude.json` keys that are preferences: the "Global config" keys in Claude Code's
-   * settings reference. Everything else there is account, machine or project state.
+   * `~/.claude.json` keys that are preferences: every key with the scope "Global config" in
+   * Claude Code's settings reference (https://code.claude.com/docs/en/settings-reference,
+   * 2.1.296; the drift check compares them, T109). Everything else there is account, machine
+   * or project state. `permissionExplainerEnabled` and `teammateDefaultModel` are listed
+   * there as removed (2.1.257, 2.1.234) and still taken, so an older Claude Code keeps them.
    */
   claudeJsonPreferenceKeys: [
     'autoConnectIde',
     'autoInstallIdeExtension',
+    'claudeInChromeDefaultEnabled',
+    'copyFullResponse',
     'copyOnSelect',
+    'defaultToAgentsView',
     'diffTool',
     'externalEditorContext',
+    'leftArrowOpensAgents',
+    'permissionExplainerEnabled',
+    'prStatusFooterEnabled',
+    'teammateDefaultModel',
   ],
+
+  /**
+   * Keys of a project's entry in `~/.claude.json` (`projects[<path>]`) that are its setup
+   * (T109): local-scope MCP servers (the default of `claude mcp add`) and the choices made for
+   * the project's `.mcp.json` servers. Trust, history and allowed tools are never taken.
+   */
+  claudeJsonProjectKeys: ['mcpServers', 'enabledMcpjsonServers', 'disabledMcpjsonServers'],
 
   /** A hook argument is only taken as a script with one of these extensions. */
   scriptExtensions: [
@@ -206,6 +358,16 @@ const names = z.array(
     .regex(/^[^\\]+$/, 'Use forward slashes'),
 );
 
+/** A regular expression as text. */
+const Pattern = z.string().refine((pattern) => {
+  try {
+    new RegExp(pattern);
+    return true;
+  } catch {
+    return false;
+  }
+}, 'Not a valid pattern');
+
 const PathsDataSchema = z.strictObject({
   version: z.literal(1),
   reviewedVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
@@ -224,18 +386,25 @@ const PathsDataSchema = z.strictObject({
     neverSynced: names,
     knownState: names,
   }),
+  plugins: z.strictObject({
+    generatedInPlugin: names,
+    runsCode: z.strictObject({ files: names, folders: names, manifestKeys: names }),
+    modsSince: z.string().regex(/^\d+\.\d+\.\d+$/),
+    devMods: z.string().min(1),
+    data: z.strictObject({ folder: z.string().min(1), unsafe: Pattern, replaceWith: z.string() }),
+    store: z.strictObject({
+      folder: z.string().min(1),
+      unsafe: Pattern,
+      replaceWith: z.string(),
+      maxNameLength: z.number().int().min(1),
+      hashDigits: z.number().int().min(1).max(64),
+      extension: z.string().regex(/^\.[a-z]+$/),
+    }),
+  }),
   skippedNames: names,
-  ignoredCopyPatterns: z.array(
-    z.string().refine((pattern) => {
-      try {
-        new RegExp(pattern);
-        return true;
-      } catch {
-        return false;
-      }
-    }, 'Not a valid pattern'),
-  ),
+  ignoredCopyPatterns: z.array(Pattern),
   claudeJsonPreferenceKeys: names,
+  claudeJsonProjectKeys: names,
   scriptExtensions: z.array(z.string().regex(/^\.[a-z0-9]+$/)),
   autostartHomeDirs: names,
   toolConfigFiles: z.record(z.string(), names),

@@ -2,7 +2,7 @@ import * as clack from '@clack/prompts';
 import { describe, expect, it } from 'vitest';
 
 import { unwrapAnswer } from '../src/ui/clack-prompter.ts';
-import { formatSize } from '../src/ui/format-size.ts';
+import { formatSize, formatSizeOver } from '../src/ui/format-size.ts';
 import { printable, printableLine } from '../src/ui/printable.ts';
 import { PromptCancelledError } from '../src/ui/prompter.ts';
 
@@ -44,5 +44,13 @@ describe('formatSize', () => {
       '5 KB',
       '2.5 MB',
     ]);
+  });
+  it('a size over a limit never reads as equal to it (UX-06)', () => {
+    const limit = 5 * 1024 * 1024;
+    expect([
+      formatSizeOver(6 * 1024 * 1024, limit),
+      formatSizeOver(limit + 1, limit),
+      formatSizeOver(limit + 3000, limit),
+    ]).toEqual(['6.0 MB', '5.0 MB and 1 B', '5.0 MB and 3 KB']);
   });
 });

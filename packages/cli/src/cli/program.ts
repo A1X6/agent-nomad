@@ -1,11 +1,18 @@
-import { MAX_BUNDLE_BYTES } from '@agentnomad/contracts';
+import { MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES } from '@agentnomad/contracts';
 import { Command, Option, type CommandUnknownOpts } from '@commander-js/extra-typings';
 
 import type { OptionalPart } from '../agents/adapter.ts';
 import { formatSize } from '../ui/format-size.ts';
 import { CLI_VERSION } from '../version.ts';
 import type { CommandHandlers, CredentialOptions, ScopeFlags } from './commands.ts';
-import { parseAgentList, parseProjectName, parseUsername } from './flags.ts';
+import { parseAgentList, parseEnvValues, parseProjectName, parseUsername } from './flags.ts';
+import {
+  COMMAND_HELP,
+  contentsHelp,
+  FLAG_HELP,
+  type AgentHelp,
+  type ChosenFlag,
+} from './help-text.ts';
 
 /** Where commander writes help and errors; tests capture it instead of the terminal. */
 export interface ProgramOutput {
@@ -23,6 +30,8 @@ export interface ProgramDeps {
    * and pull (ARCH-02). A part id two agents share gets one pair of flags.
    */
   readonly optionalParts: readonly PartFlags[];
+  /** What each registered agent's setups hold, for push's and pull's `--help` (T115). */
+  readonly agents?: readonly AgentHelp[];
   readonly output?: ProgramOutput;
 }
 
@@ -42,7 +51,8 @@ Examples:
 With no terminal (a script or CI), nothing is asked: a question the flags do not
 answer stops the command with exit code 1 and names the flags to add. Push and pull
 also exit with code 1 when a setup was skipped or refused without a "no" from you
-(a newer or older copy, over ${formatSize(MAX_BUNDLE_BYTES)}, or skipped by --yes); the rest is done first.`;
+(a newer or older copy, over ${formatSize(MAX_BUNDLE_BYTES)} or ${MAX_BUNDLE_FILES.toLocaleString('en-US')} files,
+or skipped by --yes); the rest is done first.`;
 
 /** `--<id>` and `--no-<id>` for each optional part, with the command's help texts. */
 function addPartOptions(
@@ -54,6 +64,11 @@ function addPartOptions(
     command.addOption(new Option(`--${part.id}`, part.flagHelp[which].include));
     command.addOption(new Option(`--no-${part.id}`, part.flagHelp[which].leaveOut));
   }
+}
+
+/** The optional parts as push's or pull's "only when you choose" help lines (T115). */
+function partLines(parts: readonly PartFlags[], which: 'push' | 'pull'): ChosenFlag[] {
+  return parts.map((part) => ({ flag: `--${part.id}`, help: part.flagHelp[which].include }));
 }
 
 /** The part flags given, mapped to the part's id (T61). */
@@ -72,17 +87,23 @@ function partsOf(
 /** `--agent`, `--global`, `--project`: shared by the commands that work on saved setups. */
 function scopeOptions() {
   return [
-    new Option('--agent <ids>', 'agents to use, comma-separated (e.g. claude-code)').argParser(
-      parseAgentList,
-    ),
-    new Option('--global', 'the global setup (e.g. ~/.claude)'),
-    new Option('--project <name>', 'a project setup, by the name it was saved under').argParser(
-      parseProjectName,
-    ),
+    new Option('--agent <ids>', FLAG_HELP.agent).argParser(parseAgentList),
+    new Option('--global', FLAG_HELP.global),
+    new Option('--project <name>', FLAG_HELP.project).argParser(parseProjectName),
   ] as const;
 }
 
-const yesOption = () => new Option('-y, --yes', 'accept defaults instead of asking');
+/** `-y, --yes`: in each command that would otherwise ask, with what it answers there. */
+function yesOption(command: keyof typeof FLAG_HELP.yes) {
+  return new Option('-y, --yes', FLAG_HELP.yes[command]);
+}
+
+/** `--env-values`: which environment values push saves or pull adds (T115). */
+function envValuesOption(command: 'push' | 'pull') {
+  return new Option('--env-values <names|all|none>', FLAG_HELP.envValues[command]).argParser(
+    parseEnvValues,
+  );
+}
 
 /** `--username`, `--password-stdin`: register, login and account delete from a script. */
 function credentialOptions() {
@@ -123,7 +144,7 @@ function scope(options: {
  * The `agentnomad` command line (T20): every command, its flags and help.
  * Parsing only; each command's work is done by the injected handlers.
  */
-export function createProgram({ handlers, optionalParts, output }: ProgramDeps) {
+export function createProgram({ handlers, optionalParts, agents = [], output }: ProgramDeps) {
   const parts = [...new Map(optionalParts.map((part) => [part.id, part])).values()];
   const program = new Command('agentnomad')
     .description(
@@ -143,7 +164,7 @@ export function createProgram({ handlers, optionalParts, output }: ProgramDeps) 
   const [registerUsername, registerPassword] = credentialOptions();
   program
     .command('register')
-    .description('create an account (there is no password recovery)')
+    .description(COMMAND_HELP.register)
     .addOption(registerUsername)
     .addOption(registerPassword)
     .addOption(
@@ -157,7 +178,7 @@ export function createProgram({ handlers, optionalParts, output }: ProgramDeps) 
   const [loginUsername, loginPassword] = credentialOptions();
   program
     .command('login')
-    .description('log in on this PC')
+    .description(COMMAND_HELP.login)
     .addOption(loginUsername)
     .addOption(loginPassword)
     .addOption(new Option('-y, --yes', 'replace a login already on this PC without asking'))
@@ -165,75 +186,90 @@ export function createProgram({ handlers, optionalParts, output }: ProgramDeps) 
 
   program
     .command('logout')
-    .description('log out on this PC')
+    .description(COMMAND_HELP.logout)
     .action(() => handlers.logout());
 
   const [pushAgent, pushGlobal, pushProject] = scopeOptions();
   const push = program
     .command('push')
-    .description('save setups to the cloud (encrypted on this PC first)')
+    .description(COMMAND_HELP.push)
     .addOption(pushAgent)
     .addOption(pushGlobal)
     .addOption(pushProject)
-    .addOption(new Option('--memory', "include the agent's memory"))
-    .addOption(new Option('--no-memory', 'leave memory out'));
+    .addOption(new Option('--memory', FLAG_HELP.memory))
+    .addOption(new Option('--no-memory', FLAG_HELP.noMemory))
+    .addOption(envValuesOption('push'));
   addPartOptions(push, parts, 'push');
-  push.addOption(yesOption()).action((options, command) =>
-    handlers.push({
-      ...scope(options),
-      yes: options.yes === true,
-      ...(options.memory !== undefined && { memory: options.memory }),
-      ...partsOf(command, parts),
-    }),
-  );
+  push
+    .addOption(yesOption('push'))
+    .addHelpText(
+      'after',
+      contentsHelp('push', agents, [
+        { flag: '--memory', help: FLAG_HELP.memory },
+        { flag: '--env-values', help: FLAG_HELP.envValues.push },
+        ...partLines(parts, 'push'),
+      ]),
+    )
+    .action((options, command) =>
+      handlers.push({
+        ...scope(options),
+        yes: options.yes === true,
+        ...(options.memory !== undefined && { memory: options.memory }),
+        ...(options.envValues !== undefined && { envValues: options.envValues }),
+        ...partsOf(command, parts),
+      }),
+    );
 
   const [pullAgent, pullGlobal, pullProject] = scopeOptions();
   const pull = program
     .command('pull')
-    .description('restore saved setups onto this PC (a project goes into the current folder)')
+    .description(COMMAND_HELP.pull)
     .addOption(pullAgent)
     .addOption(pullGlobal)
     .addOption(pullProject)
-    .addOption(yesOption())
-    .addOption(
-      new Option(
-        '--merge',
-        'merge with existing files (JSON by key, others side by side)',
-      ).conflicts('overwrite'),
-    )
-    .addOption(new Option('--overwrite', 'replace existing files (the old ones are backed up)'))
-    .addOption(
-      new Option(
-        '--allow-commands',
-        'accept new or changed hooks, MCP servers and scripts, and install plugins and programs (--yes alone skips them)',
-      ),
-    );
+    .addOption(yesOption('pull'))
+    .addOption(new Option('--merge', FLAG_HELP.merge).conflicts(['overwrite', 'skipExisting']))
+    .addOption(new Option('--overwrite', FLAG_HELP.overwrite).conflicts('skipExisting'))
+    .addOption(new Option('--skip-existing', FLAG_HELP.skipExisting))
+    .addOption(new Option('--allow-commands', FLAG_HELP.allowCommands))
+    .addOption(envValuesOption('pull'));
   addPartOptions(pull, parts, 'pull');
-  pull.action((options, command) =>
-    handlers.pull({
-      ...scope(options),
-      yes: options.yes === true,
-      ...(options.allowCommands && { allowCommands: true }),
-      ...partsOf(command, parts),
-      ...(options.merge && { conflict: 'merge' as const }),
-      ...(options.overwrite && { conflict: 'overwrite' as const }),
-    }),
-  );
+  pull
+    .addHelpText(
+      'after',
+      contentsHelp('pull', agents, [
+        { flag: '--env-values', help: FLAG_HELP.envValues.pull },
+        { flag: '--allow-commands', help: FLAG_HELP.allowCommands },
+        ...partLines(parts, 'pull'),
+      ]),
+    )
+    .action((options, command) =>
+      handlers.pull({
+        ...scope(options),
+        yes: options.yes === true,
+        ...(options.allowCommands && { allowCommands: true }),
+        ...(options.envValues !== undefined && { envValues: options.envValues }),
+        ...partsOf(command, parts),
+        ...(options.merge && { conflict: 'merge' as const }),
+        ...(options.overwrite && { conflict: 'overwrite' as const }),
+        ...(options.skipExisting && { conflict: 'skip' as const }),
+      }),
+    );
 
   program
     .command('list')
-    .description('show saved setups, grouped by agent')
+    .description(COMMAND_HELP.list)
     .action(() => handlers.list());
 
   program
     .command('agents')
-    .description('show supported agents and which are installed here')
+    .description(COMMAND_HELP.agents)
     .action(() => handlers.agents());
 
   const [statusAgent, statusGlobal, statusProject] = scopeOptions();
   program
     .command('status')
-    .description('show whether this PC matches the saved setup')
+    .description(COMMAND_HELP.status)
     .addOption(statusAgent)
     .addOption(statusGlobal)
     .addOption(statusProject)
@@ -242,18 +278,18 @@ export function createProgram({ handlers, optionalParts, output }: ProgramDeps) 
   const [deleteAgent, deleteGlobal, deleteProject] = scopeOptions();
   program
     .command('delete')
-    .description('remove saved setups from the cloud (files on this PC are not touched)')
+    .description(COMMAND_HELP.delete)
     .addOption(deleteAgent)
     .addOption(deleteGlobal)
     .addOption(deleteProject)
-    .addOption(yesOption())
+    .addOption(yesOption('delete'))
     .action((options) => handlers.delete({ ...scope(options), yes: options.yes === true }));
 
-  const account = program.command('account').description('manage your account');
+  const account = program.command('account').description(COMMAND_HELP.account);
   const [deleteUsername, deletePassword] = credentialOptions();
   account
     .command('delete')
-    .description('delete your account and every saved setup (cannot be undone)')
+    .description(COMMAND_HELP['account delete'])
     .addOption(deleteUsername)
     .addOption(deletePassword)
     .addOption(
@@ -263,9 +299,7 @@ export function createProgram({ handlers, optionalParts, output }: ProgramDeps) 
 
   program
     .command('env')
-    .description(
-      'show which environment variables your setups use (e.g. API keys) and which are set here',
-    )
+    .description(COMMAND_HELP.env)
     .action(() => handlers.env());
 
   return program;

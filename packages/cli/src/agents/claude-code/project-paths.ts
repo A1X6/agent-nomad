@@ -2,8 +2,8 @@
  * What the Claude Code project collector takes from a project folder (T26). The lists come
  * from the paths data file (T32).
  */
-import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 import { RESERVED_DIR } from '../adapter.ts';
+import { CLAUDE_CODE_PATHS as DATA, settingsFilesIn } from './claude-code-paths.data.ts';
 
 /** Files in the project root. `CLAUDE.local.md` is personal and usually gitignored. */
 export const PROJECT_ROOT_FILES: readonly string[] = DATA.project.rootFiles;
@@ -25,11 +25,26 @@ export const PROJECT_MEMORY_FOLDERS: readonly string[] = DATA.project.memoryFold
 /** Never taken from a project, even when a hook names it; plus agentnomad's reserved folder. */
 export const PROJECT_NEVER_SYNCED: readonly string[] = [...DATA.project.neverSynced, RESERVED_DIR];
 
-/** Known `<project>/.claude/` entries left out on purpose (hook scripts come via the hooks). */
+/** Known `<project>/.claude/` entries left out on purpose (none since `hooks/` is synced, T112). */
 export const PROJECT_KNOWN_STATE: readonly string[] = DATA.project.knownState;
 
 /** Opt-in auto memory of the project, stored under this bundle folder. */
 export const AUTO_MEMORY_BUNDLE_PREFIX = `${RESERVED_DIR}/auto-memory`;
+
+/**
+ * In a global bundle (T110), auto memory sits under `<prefix>/<project folder name>/`, or under
+ * this name when `autoMemoryDirectory` in user settings is one folder for every project. A
+ * project folder name never has `_` (every non-letter or digit becomes `-`).
+ */
+export const SHARED_AUTO_MEMORY = '_shared';
+/** The keys of the project's entry in `~/.claude.json` that are its setup (T109). */
+export const CLAUDE_JSON_PROJECT_KEYS: readonly string[] = DATA.claudeJsonProjectKeys;
+
+/**
+ * Those keys as saved (T109): the project's local-scope MCP servers and its `.mcp.json`
+ * choices, merged into this PC's entry for the folder on pull.
+ */
+export const CLAUDE_JSON_PROJECT_BUNDLE_PATH = `${RESERVED_DIR}/claude-json-project.json`;
 
 /** Claude Code shortens longer project folder names and adds a hash. */
 export const MAX_PROJECT_DIR_NAME = 200;

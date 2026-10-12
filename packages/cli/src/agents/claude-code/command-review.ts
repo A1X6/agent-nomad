@@ -1,10 +1,20 @@
 import { sameBytes } from '@agentnomad/contracts';
 import * as z from 'zod';
 
+import { isLoaderVariable } from '../../env/loader-variables.ts';
+import { JsonObjectSchema, parseJsonWith, strings, valueOrNull } from '../../system/json.ts';
 import type { CollectedFile, ReviewedEntry, RunnableEntry } from '../adapter.ts';
-import { LOADER_VARIABLE } from '../../env/loader-variables.ts';
-import { parseJsonWith, valueOrNull } from '../../system/json.ts';
 import { MCP_FILES, SETTINGS_FILES } from './env-files.ts';
+import {
+  canRun,
+  GLOBAL_SETTINGS_FILES,
+  HOME_SCRIPTS_PREFIX,
+  isScript,
+  TOOL_SETTINGS_BUNDLE_PATHS,
+} from './global-paths.ts';
+import { CLAUDE_JSON_PROJECT_BUNDLE_PATH } from './project-paths.ts';
+import { COMMAND_SETTINGS, isWatchedVariable, LOGIN_GATEWAY_SETTING } from './reviewed-settings.ts';
+import { runnableInMarkdown } from './runnable-markdown.ts';
 import {
   commandsInSettings,
   commandText,
@@ -12,14 +22,6 @@ import {
   hookItems,
   pathWords,
 } from './settings-commands.ts';
-import {
-  GLOBAL_SETTINGS_FILES,
-  HOME_SCRIPTS_PREFIX,
-  isScript,
-  TOOL_CONFIG_FILES,
-} from './global-paths.ts';
-import { COMMAND_SETTINGS, isRedirectVariable } from './reviewed-settings.ts';
-import { runnableInMarkdown } from './runnable-markdown.ts';
 
 /*
  * Things in a Claude Code setup that run programs on this PC (T34, T44), as Claude Code's
@@ -49,16 +51,15 @@ const LOOSENING_MODES: Readonly<
  * Labels that many entries share (each hook, allow rule or directory is one entry): a new
  * one beside others is new, never a change of the others.
  */
-const LIST_LABELS = /^(hook |setting permissions\.(allow|additionalDirectories)$)/;
+const LIST_LABELS =
+  /^(hook |setting permissions\.(allow|additionalDirectories)$|approved \.mcp\.json server$)/;
 
 /** Folders whose Markdown files are skills, custom commands or subagents. */
 const MARKDOWN_FOLDERS = /^(\.claude\/)?(skills|commands|agents)\//;
 
-const Json = z.record(z.string(), z.unknown());
 const Command = z.looseObject({ command: z.string().optional() });
-const Env = z.record(z.string(), z.unknown());
 
-const parse = (file: CollectedFile) => valueOrNull(parseJsonWith(Json, file.content));
+const parse = (file: CollectedFile) => valueOrNull(parseJsonWith(JsonObjectSchema, file.content));
 
 /** JSON with sorted keys, so two copies of the same object compare equal. */
 function stable(value: unknown): string {
@@ -87,8 +88,11 @@ const entry = (file: string, label: string, command: string, identity = slashes(
 const unreadable = (file: string, label: string, value: unknown) =>
   entry(file, `${label} (unreadable)`, stable(value), stable(value));
 
-/** An MCP server as shown: what runs or where it connects, plus what else it carries. */
-function describeServer(server: Record<string, unknown>): string {
+/**
+ * An MCP server as shown: what runs or where it connects, plus what else it carries. Also an
+ * LSP server or monitor of a plugin (SEC-02), which have a `command` and `args` too.
+ */
+export function describeServer(server: Record<string, unknown>): string {
   const text = (value: unknown) => (typeof value === 'string' ? value : '');
   const args = Array.isArray(server['args']) ? server['args'].map(text) : [];
   const main =
@@ -144,16 +148,27 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
       typeof value === 'string' ? value : nested.success ? nested.data.command : undefined;
     if (command !== undefined) entries.push(entry(file.path, `setting ${key}`, command));
   }
-  const env = Env.safeParse(json['env']);
+  const env = JsonObjectSchema.safeParse(json['env']);
   for (const [name, value] of Object.entries(env.success ? env.data : {})) {
     // In a settings `env` block they reach Claude Code and every hook it starts. Redirect
-    // variables send its requests elsewhere or choose what it runs commands with (T55).
-    if (LOADER_VARIABLE.test(name) || isRedirectVariable(name)) {
+    // variables send its requests elsewhere or choose what it runs commands with (T55), and
+    // `CLAUDE_CODE_PLUGIN_DIRS` names folders it loads as plugins (SEC-04 of review 16).
+    if (isLoaderVariable(name) || isWatchedVariable(name)) {
       entries.push(entry(file.path, `setting env ${name}`, `${name}=${String(value)}`));
     }
   }
+  // The gateway `/login` signs in to, from the user settings it is read from (T107). The note
+  // says whether `forceLoginMethod` turns it on, so turning it on later shows as a change.
+  const gateway = json[LOGIN_GATEWAY_SETTING];
+  if (typeof gateway === 'string' && GLOBAL_SETTINGS_FILES.includes(file.path)) {
+    const note =
+      json['forceLoginMethod'] === 'gateway'
+        ? 'sign-in and requests go to this Claude apps gateway'
+        : 'used once forceLoginMethod is gateway';
+    entries.push(entry(file.path, `setting ${LOGIN_GATEWAY_SETTING}`, `${gateway} (${note})`));
+  }
   // A starting mode that lets Claude act without asking, from the files it takes effect in.
-  const permissions = Json.safeParse(json['permissions']);
+  const permissions = JsonObjectSchema.safeParse(json['permissions']);
   const mode = permissions.success ? permissions.data['defaultMode'] : undefined;
   const loosening = typeof mode === 'string' ? LOOSENING_MODES[mode] : undefined;
   if (
@@ -166,15 +181,13 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
   }
   // Rules that approve tools and folders Claude may use without asking, from any settings
   // file (a project's after the folder is trusted): one entry each, so only new ones show.
-  const strings = (value: unknown) =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
   for (const key of ['allow', 'additionalDirectories']) {
     for (const rule of strings(permissions.success ? permissions.data[key] : undefined)) {
       entries.push(entry(file.path, `setting permissions.${key}`, rule));
     }
   }
   // The sandbox block as a whole: a change anywhere in it may open commands or the network.
-  const sandbox = Json.safeParse(json['sandbox']);
+  const sandbox = JsonObjectSchema.safeParse(json['sandbox']);
   if (sandbox.success) {
     const shown = stable(sandbox.data);
     entries.push(entry(file.path, 'setting sandbox', shown, shown));
@@ -197,10 +210,10 @@ function settingsEntries(file: CollectedFile, json: Record<string, unknown>): Ru
  */
 function serverEntries(file: CollectedFile, servers: unknown): RunnableEntry[] {
   if (servers === undefined) return [];
-  const all = Json.safeParse(servers);
+  const all = JsonObjectSchema.safeParse(servers);
   if (!all.success) return [unreadable(file.path, 'MCP servers', servers)];
   return Object.entries(all.data).flatMap(([name, value]) => {
-    const server = Json.safeParse(value);
+    const server = JsonObjectSchema.safeParse(value);
     if (!server.success) return [unreadable(file.path, `MCP server ${name}`, value)];
     const shown = describeServer(server.data);
     return shown === ''
@@ -231,6 +244,15 @@ function runnableEntries(files: readonly CollectedFile[]): RunnableEntry[] {
     if (json === null) continue;
     if (SETTINGS_FILES.has(file.path)) entries.push(...settingsEntries(file, json));
     entries.push(...serverEntries(file, json['mcpServers']));
+    // A project's approvals in ~/.claude.json (T109): each starts that .mcp.json server
+    // without asking, as enableAllProjectMcpServers does for all of them.
+    const approved =
+      file.path === CLAUDE_JSON_PROJECT_BUNDLE_PATH ? json['enabledMcpjsonServers'] : [];
+    for (const name of Array.isArray(approved) ? approved : []) {
+      if (typeof name === 'string') {
+        entries.push(entry(file.path, 'approved .mcp.json server', name));
+      }
+    }
   }
   return entries;
 }
@@ -242,11 +264,7 @@ const folderOf = (path: string) => path.slice(0, path.lastIndexOf('/') + 1);
  * extension at all (`bin/run`), the executable bit, or a `#!` first line. A data file that a
  * command only reads (`jq … config.json`) is not one.
  */
-const isProgram = (file: CollectedFile) =>
-  isScript(file.path) ||
-  !/\.[^./]+$/.test(file.path) ||
-  file.executable ||
-  (file.content[0] === 0x23 && file.content[1] === 0x21);
+const isProgram = (file: CollectedFile) => canRun(file) || !/\.[^./]+$/.test(file.path);
 
 /**
  * Incoming script files that a command runs, matched by path: the command names the
@@ -330,13 +348,8 @@ export function reviewRunnable(
 
   // Settings of status line tools can hold commands of their own (ccstatusline's Custom
   // Command widget), so a new or changed copy is shown too.
-  const toolSettings = new Set(
-    Object.values(TOOL_CONFIG_FILES)
-      .flat()
-      .map((path) => HOME_SCRIPTS_PREFIX + path),
-  );
   const tools: ReviewedEntry[] = incoming
-    .filter((file) => toolSettings.has(file.path))
+    .filter((file) => TOOL_SETTINGS_BUNDLE_PATHS.has(file.path))
     .flatMap((file) => {
       const change = newOrChanged(file);
       if (change === null) return [];

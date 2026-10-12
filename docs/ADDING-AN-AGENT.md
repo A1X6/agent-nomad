@@ -186,7 +186,8 @@ the data file lists it; that is what keeps credentials out.
 **Restore rules** are a pure function: for each bundle path, where it goes, or why it is
 refused. Allow only what your collector could have produced. This is what stops a damaged
 or tampered bundle from writing credentials, state or files outside the setup. See
-`claude-code/restore-rules.ts`, including `windowsNameProblem` for Windows-unsafe names.
+`claude-code/restore-rules.ts`; names Windows cannot hold are refused with core's
+`windowsNameProblem` (`path-resolver.ts`).
 
 **The restorer** also tells pull's plan step what to ask before anything is written, and
 never asks anything itself:
@@ -225,12 +226,19 @@ loop) into a shared `agents/shared/` module rather than copying them.
   does not know, so push can tell the user (see `claude-code/unknown-files.ts`).
 - **`inspector.notices('push' | 'pull' | 'agents')`:** anything to point out, such as
   organization-managed settings (see `claude-code/managed-settings.ts`).
-- **`inspector.versionNotice(savedWith, here)`:** what pull says about the version a setup
-  was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text).
-- **`optionalParts`:** what push saves only after a yes, as data (an id, its scope, what
-  there is, the question, and `flagHelp`, the help for `--<id>` / `--no-<id>` in push and
-  pull); the collector gets the chosen ids in `options.include`. The command line builds
-  the flags from the registered adapters: nothing to add in `cli/`.
+- **`inspector.versionNotice(savedWith, here, files)`:** what pull says about the version a
+  setup was saved with (`agentVersionNotice` in `agents/notices.ts` is the usual text), and
+  what in `files` this version cannot run (Claude Code: mods).
+- **`inspector.pushNotes(files)`:** lines push's summary adds about the collected files, such
+  as the plugins among them (see `skillsPluginsNote` in `claude-code/skills-dir-plugins.ts`).
+- **`optionalParts`:** what push asks about, as data (an id, its scope, `defaultYes`, the
+  question's default and what `--yes` does, what there is, the question, and `flagHelp`, the
+  help for `--<id>` / `--no-<id>` in push and pull); the collector gets the chosen ids in
+  `options.include`. The command line builds the flags from the registered adapters: nothing
+  to add in `cli/`.
+- **`contents`:** what a setup always, optionally and never holds, in the words of `--help`
+  (see `claude-code/claude-code-contents.data.ts`); `push --help` and `pull --help` show it
+  under "What is saved" and "What is restored". Without it, the agent has no such section.
 - **`memoryDescription`:** what push's memory question names.
 - **`envReferences`:** which bundle files hold MCP servers (`mcp`) and settings with an
   `env` block (`settings`) that can use `${VAR}`, the variables the agent sets itself
@@ -241,7 +249,11 @@ loop) into a shared `agents/shared/` module rather than copying them.
   is written, such as reinstalling extensions with the agent's own commands. It returns how
   to write the setup (usually the restorer's `restore`) and a follow-up that runs after
   writing and gets no prompter. Respect `context.assumeYes` and `context.allowCommands`:
-  without `allowCommands`, never install or run anything unasked.
+  without `allowCommands`, never install or run anything unasked. When its questions leave
+  part of the setup out, it returns `declined: true`, so a later push asks first. Fill
+  `summary` (`files`: how many files it writes; `chosen`: one line per choice, e.g.
+  `--<part> yes (names)`) so pull's summary before `Restore it now?` shows them (review 15
+  UX-01).
 
 ## Step 7 · Put the adapter together
 
@@ -323,7 +335,8 @@ the fakes the existing tests use.
       folder is enough), including a pull onto a PC that already has a different setup.
 - [ ] Anything that runs programs is shown by pull before it is written: your restorer's
       `reviewRunnable` lists it (Claude Code's is `claude-code/command-review.ts`).
-- [ ] `pnpm lint` passes: `push/`, `pull/`, `cli/`, `env/` and `commands/` (and every other generic folder) must not import your folder.
+- [ ] `pnpm lint` passes: `push/`, `pull/`, `cli/`, `env/` and `commands/` (and every other
+      generic folder) must not import your folder.
 - [ ] README (supported agents), [ROADMAP.md](ROADMAP.md) and
       [ARCHITECTURE.md](ARCHITECTURE.md) (file reference) updated.
 - [ ] The [threat model](security/threat-model.md) still holds: no credentials collected,

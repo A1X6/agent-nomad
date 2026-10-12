@@ -47,3 +47,20 @@ describe('scriptedPrompter: a scripted answer of the wrong kind fails at its que
     );
   });
 });
+
+describe('scriptedPrompter: the question after a summary is answered by its words (review 15 QA-03)', () => {
+  const last = { question: /^Restore .* now\?/, answer: false };
+
+  it('answers it without taking from the script, and records it as asked', async () => {
+    const { prompter, asked, left } = scriptedPrompter([true], last);
+    expect(await prompter.confirm('Restore it now?', true)).toBe(false);
+    expect(await prompter.confirm('Allow them?')).toBe(true);
+    expect(asked).toEqual(['Restore it now?', 'Allow them?']);
+    expect(left).toEqual([]);
+  });
+
+  it('leaves no spare answer when it is not asked, so a new question finds none', () => {
+    const { prompter } = scriptedPrompter([], last);
+    expect(() => prompter.confirm('Add 1 variable?')).toThrow('No answer scripted');
+  });
+});

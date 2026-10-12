@@ -9,12 +9,16 @@ import {
   collectSkipped,
   globalCollector,
   home,
+  projectMemory,
+  setMemoryDirectory,
   stopHook,
   syncedSetup,
   useProjectFolders,
 } from './claude-code-project-fixtures.ts';
+import { syncedAccountPlugins, writeModFolder } from './claude-code-plugin-fixtures.ts';
 import { linkFolder, paths, text, withTempDir, writeTestFile } from './fakes.ts';
 import {
+  ACCOUNT_PLUGINS_PREFIX,
   ACCOUNT_SKILLS_PREFIX,
   ClaudeJsonError,
   TEMP_MARKER,
@@ -100,6 +104,13 @@ describe('global collector: what is taken', () => {
     ]);
   });
 
+  it('takes loop.md, the prompt a bare /loop runs (T113)', async () => {
+    await writeTestFile(join(base, 'loop.md'), 'Check the release PR.');
+    const files = await collect();
+    expect(paths(files)).toEqual(['loop.md']);
+    expect(text(files, 'loop.md')).toBe('Check the release PR.');
+  });
+
   it('never takes credentials, history, transcripts or other state', async () => {
     await realisticSetup();
     const files = await collect(true);
@@ -112,12 +123,28 @@ describe('global collector: what is taken', () => {
     }
   });
 
-  it('never takes skills/synced/, even through a link or a hook', async () => {
+  it('never takes skills/synced/, even when a hook runs a script there', async () => {
     await writeTestFile(join(base, 'skills', 'synced', 'a', 'SKILL.md'));
     await writeTestFile(join(base, 'skills', 'synced', 'a', 'helper.sh'));
     await writeSettings(stopHook(`bash ${join(base, 'skills', 'synced', 'a', 'helper.sh')}`));
     const files = paths(await collect(true));
     expect(files.some((path) => path.startsWith('skills/synced'))).toBe(false);
+  });
+
+  it('never takes .claude-plugin/types/ of a plugin in skills/ (T97)', async () => {
+    const mod = join(base, 'skills', 'probe-mod', '.claude-plugin');
+    await writeTestFile(join(mod, 'plugin.json'), '{}');
+    await writeTestFile(join(mod, 'types', 'register.d.ts'));
+    const files = paths(await collect()).filter((path) => path.startsWith('skills/probe-mod/'));
+    expect(files).toEqual(['skills/probe-mod/.claude-plugin/plugin.json']);
+  });
+
+  it('never takes skills/synced/, even when it is a link to another folder', async () => {
+    const elsewhere = join(home, 'synced-elsewhere');
+    await writeTestFile(join(elsewhere, 'a', 'SKILL.md'));
+    await writeTestFile(join(base, 'skills', 'mine', 'SKILL.md'));
+    await linkFolder(elsewhere, join(base, 'skills', 'synced'));
+    expect(paths(await collect(true))).toEqual(['skills/mine/SKILL.md']);
   });
 
   it('skips .git, node_modules, OS clutter and agentnomad backup copies', async () => {
@@ -183,6 +210,28 @@ describe('global collector: ~/.claude.json', () => {
     expect(text(files, '.agentnomad/claude.json')).not.toContain('SECRET');
   });
 
+  it('keeps every "Global config" key of the settings reference (T109)', async () => {
+    const preferences = {
+      claudeInChromeDefaultEnabled: true,
+      copyFullResponse: true,
+      defaultToAgentsView: true,
+      leftArrowOpensAgents: false,
+      permissionExplainerEnabled: false,
+      prStatusFooterEnabled: false,
+      teammateDefaultModel: 'sonnet',
+    };
+    await writeTestFile(
+      join(home, '.claude.json'),
+      JSON.stringify({ ...claudeJson, ...preferences }),
+    );
+    expect(JSON.parse(text(await collect(), '.agentnomad/claude.json'))).toEqual({
+      mcpServers: claudeJson.mcpServers,
+      diffTool: 'terminal',
+      autoConnectIde: true,
+      ...preferences,
+    });
+  });
+
   it('adds nothing when there are no servers or preferences', async () => {
     await writeTestFile(
       join(home, '.claude.json'),
@@ -204,6 +253,11 @@ describe('global collector: ~/.claude.json', () => {
 
   it('stops with a clear message when the file is half-written', async () => {
     await writeTestFile(join(home, '.claude.json'), '{"mcpServers": {');
+    await expect(collect()).rejects.toBeInstanceOf(ClaudeJsonError);
+  });
+
+  it('stops with a clear message when the file is not a JSON object', async () => {
+    await writeTestFile(join(home, '.claude.json'), '["mcpServers"]');
     await expect(collect()).rejects.toBeInstanceOf(ClaudeJsonError);
   });
 });
@@ -300,6 +354,25 @@ describe('global collector: hook and status line scripts', () => {
     expect(paths(files)).toEqual(['settings.json']);
   });
 
+  it('takes hooks/ whole, also the scripts no setting runs (T112)', async () => {
+    await writeTestFile(join(base, 'hooks', 'check.sh'), 'echo check');
+    await writeTestFile(join(base, 'hooks', 'lib', 'common.ps1'), 'shared');
+    expect(paths(await collect())).toEqual(['hooks/check.sh', 'hooks/lib/common.ps1']);
+  });
+
+  it('tells push about each script it cannot take, once (T112)', async () => {
+    await withTempDir('agentnomad-outside-', async (outside) => {
+      const script = join(outside, 'tool.sh');
+      await writeTestFile(script);
+      await writeSettings({
+        statusLine: { type: 'command', command: `bash ${script}` },
+        ...stopHook(script),
+      });
+      const { skipped } = await collectSkipped(collector(), { kind: 'global' });
+      expect(skipped).toEqual([`script ${script}: it is outside the home folder`]);
+    });
+  });
+
   it('ignores programs on PATH, missing files and files outside home', async () => {
     await withTempDir('agentnomad-outside-', async (outside) => {
       await writeTestFile(join(outside, 'tool.sh'));
@@ -378,6 +451,14 @@ describe('global collector: programs the status line and hooks need', () => {
     });
   });
 
+  it('records a program the lookup does not find, without install details', async () => {
+    await writeSettings(stopHook('terminal-notifier -message done'));
+    const files = await collectWith(() => Promise.resolve(null));
+    expect(JSON.parse(text(files, '.agentnomad/programs.json'))).toEqual({
+      programs: [{ command: 'terminal-notifier', npm: null }],
+    });
+  });
+
   it('leaves out, and says so, a program pull would refuse (BUG-01)', async () => {
     await writeSettings({
       hooks: {
@@ -430,5 +511,137 @@ describe('global collector: claude.ai skills (T42)', () => {
       2,
     );
     expect(withSkills.some((file) => file.path.startsWith('skills/synced'))).toBe(false);
+  });
+});
+
+describe('global collector: claude.ai plugins (T101)', () => {
+  it('leaves them out unless asked', async () => {
+    await syncedAccountPlugins(base);
+    const plain = await collector().collect({ kind: 'global' }, { includeMemory: false });
+    expect(plain.some((file) => file.path.startsWith(ACCOUNT_PLUGINS_PREFIX))).toBe(false);
+  });
+
+  it('adds your own when asked, never plugins/synced itself', async () => {
+    await syncedAccountPlugins(base);
+    const withPlugins = await collector().collect(
+      { kind: 'global' },
+      { includeMemory: false, include: new Set(['account-plugins']) },
+    );
+    expect(
+      paths(withPlugins.filter((file) => file.path.startsWith(ACCOUNT_PLUGINS_PREFIX))).sort(),
+    ).toEqual([`${ACCOUNT_PLUGINS_PREFIX}my-upload.json`]);
+    expect(withPlugins.some((file) => file.path.startsWith('plugins/synced'))).toBe(false);
+  });
+});
+
+describe('global collector: plugin folders in CLAUDE_CODE_PLUGIN_DIRS (T99)', () => {
+  it('saves each folder the user settings name', async () => {
+    await writeModFolder(join(home, 'dev', 'probe-mod'));
+    await writeSettings({ env: { CLAUDE_CODE_PLUGIN_DIRS: join(home, 'dev', 'probe-mod') } });
+    const files = await collect();
+    expect(files.map((file) => file.path)).toContain('.agentnomad/plugin-dirs/0.json');
+  });
+});
+
+describe('global collector: auto memory of every project (T110)', () => {
+  /** The auto memory entries among `files`. */
+  const memoryOf = (files: readonly CollectedFile[]) =>
+    paths(files).filter((path) => path.startsWith('.agentnomad/auto-memory/'));
+
+  it('takes the notes of every project, each under its folder name', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'), 'app notes');
+    await writeTestFile(projectMemory('C--work-app', 'topics', 'testing.md'));
+    await writeTestFile(projectMemory('-home-me-site', 'MEMORY.md'));
+    const files = await collect(true);
+    expect(memoryOf(files)).toEqual([
+      '.agentnomad/auto-memory/-home-me-site/MEMORY.md',
+      '.agentnomad/auto-memory/C--work-app/MEMORY.md',
+      '.agentnomad/auto-memory/C--work-app/topics/testing.md',
+    ]);
+    expect(text(files, '.agentnomad/auto-memory/C--work-app/MEMORY.md')).toBe('app notes');
+  });
+
+  it('takes none without memory', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'));
+    expect(memoryOf(await collect(false))).toEqual([]);
+  });
+
+  it('takes only Markdown files', async () => {
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'));
+    await writeTestFile(projectMemory('C--work-app', 'run.sh'), 'echo hi');
+    expect(memoryOf(await collect(true))).toEqual([
+      '.agentnomad/auto-memory/C--work-app/MEMORY.md',
+    ]);
+  });
+
+  it('adds nothing for a project whose memory folder is empty or missing', async () => {
+    await mkdir(projectMemory('C--work-app'), { recursive: true });
+    await writeTestFile(join(base, 'projects', 'C--work-site', 'abc.jsonl'), 'SECRET transcript');
+    expect(memoryOf(await collect(true))).toEqual([]);
+  });
+
+  it('takes the folder autoMemoryDirectory in user settings names once, as _shared', async () => {
+    await setMemoryDirectory(join(base, 'settings.json'), '~/all-memory');
+    await writeTestFile(join(home, 'all-memory', 'MEMORY.md'), 'shared');
+    await writeTestFile(projectMemory('C--work-app', 'MEMORY.md'), 'no longer read');
+    const files = await collect(true);
+    expect(memoryOf(files)).toEqual(['.agentnomad/auto-memory/_shared/MEMORY.md']);
+    expect(text(files, '.agentnomad/auto-memory/_shared/MEMORY.md')).toBe('shared');
+  });
+
+  it('leaves out a shared folder for keys, and says why (T43)', async () => {
+    await setMemoryDirectory(join(base, 'settings.json'), '~/.ssh');
+    await writeTestFile(join(home, '.ssh', 'notes.md'), 'SECRET');
+    const { found, skipped } = await collectSkipped(collector(), { kind: 'global' }, true);
+    expect(memoryOf(found)).toEqual([]);
+    expect(skipped).toEqual([
+      `.agentnomad/auto-memory/_shared: autoMemoryDirectory in your user settings names ${join(home, '.ssh')}: it is a folder for keys and logins`,
+    ]);
+  });
+
+  it('leaves out a project folder named _shared, and says why', async () => {
+    await writeTestFile(projectMemory('_shared', 'MEMORY.md'));
+    const { found, skipped } = await collectSkipped(collector(), { kind: 'global' }, true);
+    expect(memoryOf(found)).toEqual([]);
+    expect(skipped).toEqual([
+      '.agentnomad/auto-memory/_shared: agentnomad keeps that name for a shared memory folder',
+    ]);
+  });
+});
+
+describe('global collector: files CLAUDE.md and the rules import (T111)', () => {
+  it('takes a file elsewhere in home under .agentnomad/home/', async () => {
+    await writeTestFile(join(base, 'CLAUDE.md'), '@~/notes/style.md\n');
+    await writeTestFile(join(home, 'notes', 'style.md'), 'Use tabs.\n');
+    expect(text(await collect(), '.agentnomad/home/notes/style.md')).toBe('Use tabs.\n');
+  });
+
+  it('takes a file in the base folder by its path there', async () => {
+    await writeTestFile(join(base, 'rules', 'team.md'), '@../shared/team.md\n');
+    await writeTestFile(join(base, 'shared', 'team.md'), 'Team rules.\n');
+    expect(text(await collect(), 'shared/team.md')).toBe('Team rules.\n');
+  });
+
+  it('takes what an imported file imports', async () => {
+    await writeTestFile(join(base, 'CLAUDE.md'), '@~/notes/a.md\n');
+    await writeTestFile(join(home, 'notes', 'a.md'), '@b.md\n');
+    await writeTestFile(join(home, 'notes', 'b.md'), 'B\n');
+    expect(paths(await collect())).toContain('.agentnomad/home/notes/b.md');
+  });
+
+  it('names a file it cannot take, who imports it and how', async () => {
+    await writeTestFile(join(base, 'CLAUDE.md'), '# Me\n@~/.ssh/notes.md\n');
+    await writeTestFile(join(home, '.ssh', 'notes.md'), 'secret\n');
+    const { found, skipped } = await collectSkipped(collector(), { kind: 'global' });
+    expect(paths(found)).not.toContain('.agentnomad/home/.ssh/notes.md');
+    expect(skipped).toEqual([
+      '~/.ssh/notes.md: ~/.claude/CLAUDE.md imports it on line 2 (@~/.ssh/notes.md), but it is in a folder for keys and logins',
+    ]);
+  });
+
+  it('says nothing about an import of a missing file', async () => {
+    await writeTestFile(join(base, 'CLAUDE.md'), '@~/.ssh/missing.md\n');
+    const { skipped } = await collectSkipped(collector(), { kind: 'global' });
+    expect(skipped).toEqual([]);
   });
 });

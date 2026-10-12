@@ -60,8 +60,15 @@ describe('deriveKeys', () => {
   });
 
   it('refuses settings outside the allowed range before doing any work', async () => {
-    const huge: KdfParams = { ...params, memoryKiB: 4_194_304 }; // 4 GiB, above the 1 GiB limit
-    await expect(crypto.deriveKeys('password', salt, huge)).rejects.toThrow();
+    // Just over the 1 GiB limit: a value libsodium itself would accept and allocate.
+    const huge: KdfParams = { ...params, memoryKiB: 1_048_577, passes: 11 };
+    const pwhash = vi.spyOn(sodium, 'crypto_pwhash');
+    try {
+      await expect(crypto.deriveKeys('password', salt, huge)).rejects.toThrow();
+      expect(pwhash).not.toHaveBeenCalled();
+    } finally {
+      pwhash.mockRestore();
+    }
   });
 
   it('wipes the password bytes once the master key is made, also on an error (BP-01)', async () => {

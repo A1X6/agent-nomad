@@ -73,8 +73,22 @@ new PC, and shows you anything that would run programs before writing it.
 - **Plugins reinstalled, not copied,** with Claude Code's own `claude plugin` commands.
 - **Opt-in memory and secrets.** Include Claude's memory, and save environment variable
   values (such as API keys for MCP servers) inside the encrypted setup.
-- **Your claude.ai skills too (opt-in).** Save a copy of the skills you made on claude.ai and
-  add them as local skills on a PC that uses another claude.ai account, or none.
+- **Your claude.ai skills too.** A copy of the skills you made on claude.ai is saved and
+  added as local skills on a PC that uses another claude.ai account, or none, unless you say
+  no (`--no-account-skills`). Anthropic's are never saved, and neither are your
+  organization's when Claude Code's files tell them apart; push names any skill it leaves
+  out, and says when it cannot tell. Pull reviews a skill that is a plugin or mod like any
+  plugin before writing it.
+- **And your claude.ai plugins.** A copy of the plugins you uploaded to claude.ai is saved
+  and added as local plugins in `~/.claude/skills/` on a PC that uses another claude.ai
+  account, or none, unless you say no (`--no-account-plugins`). Plugins from claude.ai's
+  directory or your organization, and ones claude.ai installs by itself, are never saved;
+  push names each one it leaves out, and pull reviews each plugin before writing it.
+- **Plugin data too (opt-in).** Save what your plugins and mods keep between sessions, such
+  as a mod's saved choices, for the plugins the setup puts back; data a removed plugin left
+  behind is never saved. Pull puts it back once the plugin is installed. It is left out
+  unless you say yes, as it can be large and private. Installed dependencies (`node_modules`)
+  and files that can run are never saved or put back, as plugins run them.
 - **Scriptable.** Every command runs from a script or CI with flags and clear exit codes.
 
 ## Install
@@ -119,41 +133,53 @@ agentnomad pull       # restores the global setup, or a project into the current
 
 ## Commands
 
-| Command                     | What it does                                                                                   |
-| --------------------------- | ---------------------------------------------------------------------------------------------- |
-| `agentnomad register`       | Create an account (there is no password recovery).                                             |
-| `agentnomad login`          | Log in on this PC.                                                                             |
-| `agentnomad logout`         | Log out on this PC.                                                                            |
-| `agentnomad push`           | Save setups to the cloud, encrypted on this PC first.                                          |
-| `agentnomad pull`           | Restore saved setups onto this PC; a project goes into the current folder.                     |
-| `agentnomad list`           | Show saved setups, grouped by agent, with revision, size and age.                              |
-| `agentnomad status`         | Show whether this PC matches the saved setups.                                                 |
-| `agentnomad delete`         | Remove saved setups from the cloud (files on your PCs are not touched).                        |
-| `agentnomad account delete` | Delete your account and every saved setup.                                                     |
-| `agentnomad agents`         | Show supported agents and which are installed here.                                            |
-| `agentnomad env`            | Show which environment variables your setups use, and which are set here (never their values). |
+| Command                     | What it does                                                                                                |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `agentnomad register`       | Create an account (there is no password recovery).                                                          |
+| `agentnomad login`          | Log in on this PC, so push and pull can reach your saved setups.                                            |
+| `agentnomad logout`         | Log out on this PC (your files and saved setups stay as they are).                                          |
+| `agentnomad push`           | Save your agent setup (settings, skills, hooks…) to your account, encrypted on this PC first.               |
+| `agentnomad pull`           | Write a saved setup onto this PC, asking before anything new runs (a project goes into the current folder). |
+| `agentnomad list`           | Show your saved setups, grouped by agent (changes nothing).                                                 |
+| `agentnomad status`         | Show whether this PC matches your saved setups (changes nothing).                                           |
+| `agentnomad delete`         | Delete saved setups from your account (files on your PCs are not touched).                                  |
+| `agentnomad account delete` | Delete your account and every saved setup (cannot be undone).                                               |
+| `agentnomad agents`         | Show the supported agents and which are installed here (changes nothing).                                   |
+| `agentnomad env`            | Show which environment variables your setups use and which are set here (never their values).               |
 
 Run `agentnomad <command> --help` for every option.
 
 ### Flags
 
-| Flag                                       | Commands                                            | Meaning                                                                                                                                          |
-| ------------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--agent <ids>`                            | push, pull, status, delete                          | Agents to use, comma-separated (e.g. `claude-code`).                                                                                             |
-| `--global`                                 | push, pull, status, delete                          | The global setup (`~/.claude`).                                                                                                                  |
-| `--project <name>`                         | push, pull, status, delete                          | A project setup, by the name it was saved under.                                                                                                 |
-| `--memory` / `--no-memory`                 | push                                                | Include Claude's memory, or not.                                                                                                                 |
-| `--account-skills` / `--no-account-skills` | push, pull                                          | Push: save a copy of your own claude.ai skills. Pull: add them as local skills (for a PC without that claude.ai account).                        |
-| `--merge` / `--overwrite`                  | pull                                                | One answer for every existing file (overwrite keeps a backup).                                                                                   |
-| `--allow-commands`                         | pull                                                | Accept new hooks, MCP servers, scripts and anything else that runs, and install plugins and programs, without asking. Only for setups you trust. |
-| `-y`, `--yes`                              | push, pull, delete, register, login, account delete | Accept the safe defaults instead of asking. It never accepts new commands or installs.                                                           |
-| `--username <name>`, `--password-stdin`    | register, login, account delete                     | Log in from a script; the password is read from standard input.                                                                                  |
+| Flag                                          | Commands                                            | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent <ids>`                               | push, pull, status, delete                          | Which agents to work on, comma-separated (e.g. `claude-code`); asked when not given.                                                                                                                                                                                                                                                                                                                                                                 |
+| `--global`                                    | push, pull, status, delete                          | The global setup: the agent's own folder in your home (`~/.claude`).                                                                                                                                                                                                                                                                                                                                                                                 |
+| `--project <name>`                            | push, pull, status, delete                          | A project setup, by the name it was saved under (push: this folder's project; pull: written into this folder).                                                                                                                                                                                                                                                                                                                                       |
+| `--memory` / `--no-memory`                    | push                                                | Save Claude's memory, what it learned about you and your projects (the global setup takes every project's, a project only its own).                                                                                                                                                                                                                                                                                                                  |
+| `--env-values <names\|all\|none>`             | push, pull                                          | Push: save these environment variable values with your setup (encrypted; only you can read them): names comma-separated, `all` (every one the setup uses and this PC has) or `none`. `--yes` alone saves none. Pull: add these saved values to this PC (shell profile or Windows user variables); `--yes` alone adds every plain one. One that makes programs run code or sends their requests elsewhere still needs `--allow-commands` or your yes. |
+| `--account-skills` / `--no-account-skills`    | push, pull                                          | Push: save a copy of your own claude.ai skills. Pull: add them as local skills (for a PC without that claude.ai account). Yes unless you say no.                                                                                                                                                                                                                                                                                                     |
+| `--account-plugins` / `--no-account-plugins`  | push, pull                                          | Push: save a copy of the plugins you uploaded to claude.ai. Pull: add them as local plugins (for a PC without that claude.ai account). Yes unless you say no.                                                                                                                                                                                                                                                                                        |
+| `--plugin-data` / `--no-plugin-data`          | push, pull                                          | Push: save the data of the plugins the setup puts back (e.g. a mod's saved choices). Pull: put it back, for plugins installed here. `--yes`: left out.                                                                                                                                                                                                                                                                                               |
+| `--merge` / `--overwrite` / `--skip-existing` | pull                                                | Every file here that differs from the saved one: merge them (JSON by key, other files kept with the saved copy next to them), replace it with the saved copy (the old one is backed up), or leave it as it is. `--yes`: merge.                                                                                                                                                                                                                       |
+| `--allow-commands`                            | pull                                                | Accept new or changed hooks, MCP servers and scripts, and install plugins and programs, without asking. Only for setups you trust.                                                                                                                                                                                                                                                                                                                   |
+| `-y`, `--yes`                                 | push, pull, delete, register, login, account delete | Answer every question with its default instead of asking (each row above says what that is): it includes your claude.ai skills and plugins and leaves out memory and plugin data; push saves no environment values and pull adds every plain one. It never accepts new commands or installs. Delete still asks which setups unless `--global` or `--project` names them.                                                                             |
+| `--username <name>`, `--password-stdin`       | register, login, account delete                     | Log in from a script; the password is read from standard input.                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ### From scripts and CI
 
 With no terminal, agentnomad never asks: a question the flags do not answer stops the
 command with exit code 1 and names the flags to add. Push and pull ask every question before
-they change anything, so a script never stops halfway.
+they change anything, so a script never stops halfway. Every choice about what to save or
+restore has a flag. The safety questions have none, on purpose: replacing a newer copy, pushing
+after a pull that did not restore everything, restoring an older copy, writing a plugin that
+`claude plugin validate` finds broken and closing Claude Code. Only a person can answer them
+yes, and `--yes` answers them no. `push --help` and `pull --help` list what is always saved,
+what only when you choose (with the flag that chooses it) and what never.
+
+When push or pull asked you anything, they then show what they will save or write and ask once
+more (`Upload it now?`, `Restore it now?`); nothing changes until you say yes. A run whose every
+answer came from flags, or with `--yes`, goes ahead without that question.
 
 ```sh
 echo "$AGENTNOMAD_PASSWORD" | agentnomad login --username me --password-stdin
@@ -162,21 +188,137 @@ agentnomad pull --global --merge --yes
 
 Exit codes: `0` done, `1` failed (or an answer was needed), `130` cancelled. Push and pull
 also exit with `1` when a setup was skipped or refused without you answering no: a newer copy
-on the server, an older copy than this PC had, a setup over 5 MB, or a skip made by `--yes`.
-The other setups are still done first, and one message lists what was not.
+on the server, an older copy than this PC had, a setup over 5 MB or 10,000 files, or a skip
+made by `--yes`. The other setups are still done first, and one message lists what was not.
 
 ## What is synced
 
-|                          | Synced                                                                                                                                                                           | Never synced                                                                                                                         |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, scripts your hooks and status line run | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself) |
-| **`~/.claude.json`**     | Your MCP servers and documented preferences, merged in                                                                                                                           | Your login, project list, usage and onboarding state                                                                                 |
-| **Plugins**              | Which plugins and marketplaces you use (reinstalled on the other PC)                                                                                                             | Plugin files and caches                                                                                                              |
-| **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings and folders, scripts the project's hooks run                                   | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                       |
-| **Opt-in**               | Memory (subagent and auto memory), environment variable values, a copy of your own claude.ai skills (`--account-skills`; never Anthropic's or your organization's)               |                                                                                                                                      |
+|                          | Synced                                                                                                                                                                                                                                                                                                                                                  | Never synced                                                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Global** (`~/.claude`) | `settings.json`, `CLAUDE.md`, `keybindings.json`, `loop.md` (your `/loop` prompt), `rules/`, `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`, `themes/`, `hooks/`, scripts your hooks and status line run                                                                                                                             | Credentials, history, transcripts, sessions, caches, backups, `settings.local.json`, `skills/synced/` (claude.ai syncs those itself)    |
+| **`~/.claude.json`**     | Your MCP servers and documented preferences in `~/.claude.json` (the settings reference's 12 "Global config" keys), merged in; for a project, its local MCP servers (`claude mcp add`'s default) and `.mcp.json` approvals, merged into that folder's entry                                                                                             | Your login, project trust, history and allowed tools, usage and onboarding state                                                        |
+| **Plugins**              | Which plugins and marketplaces you use, and their versions (reinstalled on the other PC; Claude Code installs the latest version, and pull names each plugin whose version changed); a marketplace added from a local folder, with its files; plugin folders `CLAUDE_CODE_PLUGIN_DIRS` loads, with their files; their data on request (`--plugin-data`) | Plugin caches; a local marketplace's `.git` and the files git ignores; `--plugin-dir` and SDK plugins                                   |
+| **Project**              | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`, `.worktreeinclude`, `.claude/` settings, `loop.md` and folders, scripts the project's hooks run                                                                                                                                                                                               | Your code, `.env`, `.git`, `.claude/agent-memory-local/`, `.claude/worktrees/`                                                          |
+| **Opt-in**               | Memory (subagent and auto memory; the global setup takes every project's), environment variable values (`--env-values`)                                                                                                                                                                                                                                 |                                                                                                                                         |
+| **claude.ai**            | A copy of your own claude.ai skills and of the plugins you uploaded to claude.ai, added on a PC without that claude.ai account, unless you say no (`--no-account-skills`, `--no-account-plugins`)                                                                                                                                                       | Anthropic's skills and claude.ai's directory, your organization's (when it can be told apart), and plugins claude.ai installs by itself |
 
 Settings your organization manages on a PC are never synced; agentnomad tells you when they
 exist.
+
+`hooks/` (in `~/.claude` and in a project's `.claude/`) is synced whole, also scripts no
+setting runs yet: a script there runs only when a settings file names it, and pull shows each
+new or changed hook first. A script your hooks or status line run elsewhere is saved when it is
+in your home folder (or, for a project, inside the project). One push cannot take (outside your
+home folder, in a folder agentnomad never syncs, a folder for keys and logins or one whose
+files run by themselves) is named where push lists what it left out, with why.
+
+Claude Code keeps each project's auto memory in `~/.claude/projects/<name>/memory/`, the name
+made from the project's path. Pull puts it back under the same name, so Claude Code finds it
+when the project is at the same path on the new PC; when it is not, the notes still land under
+that name and are picked up once the project is at that path. When `autoMemoryDirectory` in
+your user settings names one folder for every project, the global setup saves that folder once
+and pull puts it back in the folder your user settings name. When one pull restores the global
+setup and a project that both hold the same note, the project's copy wins.
+
+### Files your `CLAUDE.md` imports
+
+A `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` or rule file can pull in other files with
+`@path` lines. Push follows them as Claude Code does (from the importing file, `~/` for your
+home folder, up to four hops deep, never inside code) and saves each imported text document
+that is not synced already: from your home folder in a global setup, from inside the project in
+a project setup. Pull puts each one back where the import points. Push names every imported
+file it cannot take, with the file and line that import it: one outside your home folder (or
+the project), one in a folder for keys and logins or never synced, and code, scripts or files
+without an extension. Pull writes imported files without asking, so only Markdown and plain
+text (`.md`, `.txt` and the like) come along; settings such as `.json` files never do. Claude
+Code reads imported files as instructions and never runs them. On Windows, write import paths
+with forward slashes: Claude Code ends a path at a backslash.
+
+### Where plugins come from, and what happens to each
+
+| Plugin source                                                                                           | Push                                                                                                                | Pull                                                                                                                | Reviewed before it is written                                              |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| A marketplace from GitHub, git or a URL                                                                 | Saves which plugins you installed and their versions, never their files                                             | Reinstalls them with `claude plugin`; Claude Code installs the latest version, and pull names each one that changed | Installing needs a yes or `--allow-commands`; `--yes` alone never installs |
+| [A marketplace added from a local folder](#marketplaces-added-from-a-local-folder)                      | Saves its files, and its remote and commit when the commit is pushed                                                | Writes the folder back, re-cloned first when it can, then adds it and installs its plugins                          | Each plugin in it, as for `skills/`                                        |
+| [A plugin or mod in `~/.claude/skills/`](#plugins-and-mods-in-skills)                                   | Saved with `skills/`                                                                                                | Written back to `skills/`                                                                                           | Yes: `claude plugin validate` and what each module hooks into and calls    |
+| [A folder in `CLAUDE_CODE_PLUGIN_DIRS`](#plugin-folders-in-claude_code_plugin_dirs)                     | Saves its files, as for a local marketplace                                                                         | Writes the folder back and points the value at it, with this PC's separator                                         | Yes, as for `skills/`                                                      |
+| A plugin you uploaded to claude.ai (unless `--no-account-plugins`)                                      | Saves a copy of its folder                                                                                          | Adds it to `skills/` on a PC without that claude.ai account                                                         | Yes, as for `skills/`                                                      |
+| [Plugin data](#plugin-data) (opt-in, `--plugin-data`)                                                   | Saves it for the plugins the setup puts back                                                                        | Puts it back after they are installed, only for a plugin installed here                                             | No: `node_modules` and runnable files are refused; a changed file is asked |
+| claude.ai's directory (Anthropic's plugins), your organization's, and ones claude.ai installs by itself | Never: claude.ai or your organization gives them to each PC; push names the ones it leaves out                      |                                                                                                                     |                                                                            |
+| Mods in development (`~/.claude/dev-mods/`)                                                             | Never: Claude Code deletes them after a while; push names each one so you can move it to `skills/` or a marketplace |                                                                                                                     |                                                                            |
+| `--plugin-dir` and plugins an SDK passes                                                                | Never: they are given to one run and written nowhere agentnomad can see                                             |                                                                                                                     |                                                                            |
+
+Plugin caches, a folder's `.git/` and the files git ignores, and what Claude Code generates in a
+plugin (`.claude-plugin/types/`) are never saved. A plugin with code is written only after your
+yes or with `--allow-commands`; one that `claude plugin validate` finds broken only after your
+yes. Pull warns when the setup has mods (in `skills/`, a saved local marketplace or a plugin
+folder) and this PC's Claude Code is older than 2.1.287, the first that loads them. Saved
+folders and plugin data are encrypted like the rest of the setup and saved as they are, so a
+key written in them travels too: keep keys in environment variables, which push asks about.
+
+### Plugins and mods in `skills/`
+
+A folder in `~/.claude/skills/` with `.claude-plugin/plugin.json` is a plugin Claude Code
+loads as `<name>@skills-dir`; with `hooks/hooks.json` it is a mod that runs code inside Claude
+Code. Push saves it with the rest of `skills/` (never `.claude-plugin/types/`, which Claude
+Code generates) and names it in its summary. Before pull writes a new or changed one, it runs
+`claude plugin validate` on a copy and shows what each module hooks into, calls and writes, and the
+MCP servers, LSP servers and monitors Claude Code starts from the folder (`.mcp.json`, `.lsp.json`,
+`monitors/` or `plugin.json`). It flags hooks that decide tool permissions (they can allow every
+Bash command without a prompt) and calls that run programs, tools (Bash included), commands or
+subagents, start or call MCP servers, change settings or environment variables, send prompts, use
+your Claude login, write files, call the model or use the network; you can read the module first.
+A plugin with code is
+written only after your yes or with `--allow-commands`; `--yes` alone never writes it, and one that
+validate finds broken needs your yes. Without Claude Code on the PC, the plugin counts as unreviewed
+code.
+
+### Plugin folders in `CLAUDE_CODE_PLUGIN_DIRS`
+
+`settings.json` can load plugin folders every session through
+`env.CLAUDE_CODE_PLUGIN_DIRS` (full paths or `~/…`, separated by `:`, or `;` on Windows).
+Push saves each folder's files as it saves a local marketplace (in a git repository only
+what git lists, never `.git/`). Pull writes each folder to the same path from home (one
+outside home goes to `~/.agentnomad/plugin-dirs/<name>`), reviews it like a plugin in
+`skills/`, and points the value at the folders it wrote, with this PC's separator. A folder in
+the value that the setup did not save stays only when your own value here already names it;
+pull takes any other out and says so, and lists a new or changed value for review. Only your
+own `~/.claude/settings.json` is read: Claude Code takes this variable from no project
+settings file. Plugins given to one run with `--plugin-dir`, or passed by an SDK, are never
+written anywhere agentnomad can see, so they are not synced.
+
+### Marketplaces added from a local folder
+
+A marketplace you added with `claude plugin marketplace add <folder>` exists only on the PC
+that has the folder, so push saves its files when one of its plugins is installed: in a git
+repository only what git lists (tracked files with your current edits, and new files that
+are not ignored), elsewhere the whole folder, never `.git/`, `node_modules` or the other
+folders push always skips. When the folder's commit is on its remote, push also saves the
+remote and the commit. Pull writes the folder back at the same place in your home folder (one
+that was outside it, or with a file that would land in a refused folder, goes to
+`~/.agentnomad/marketplaces/<name>`), re-cloning it first when it
+can and writing the saved files whatever happens, reviews each mod in it as above, then adds
+the marketplace and installs its plugins. A marketplace over 5 MB is left out, and push says
+why.
+
+### Plugin data
+
+Claude Code keeps a plugin's own state in `~/.claude/plugins/data/` and a mod's saved
+choices (`$.store`) in `~/.claude/plugins/store/`, and leaves both behind when the plugin is
+removed. With `--plugin-data` (or a yes to push's question), push saves them only for the
+plugins the setup puts back: those it reinstalls, the plugins of saved local marketplaces,
+plugins and mods in `skills/`, and saved claude.ai plugins. It looks them up by the names
+Claude Code gives them and never lists those folders, so a removed plugin's leftovers are
+never saved. A plugin whose data passes 5 MB is left out, and push says why. Plugins keep
+installed dependencies there too (`node_modules`, virtual environments) and run them, so
+neither push nor pull takes the names push always skips (in any case) or a file that can run
+(a script extension, the executable flag or a `#!` first line): push leaves them out and says
+how many, pull refuses them and names each one. Pull lists what was saved and puts it back
+only after a yes or `--plugin-data` (`--yes` alone never: plugin data stays opt-in, as it can
+be large and private), after the setup is written and its plugins installed, and only for a
+plugin installed here under the same id; a file here that differs is asked about like the
+setup's files, and the store keeps its permissions (only you can read it). Older agentnomad
+versions skip saved plugin data with one warning per file and restore the rest.
 
 ## Security
 
@@ -202,6 +344,7 @@ Details: [SECURITY.md](SECURITY.md) and the [threat model](docs/security/threat-
 | **v1**   | Claude Code on macOS, Linux and Windows: global and project setups, plugins, memory, secrets, scripting, cross-OS tests, security review                                                      | Released as 1.0 |
 | **v1.x** | More agents: OpenAI Codex CLI, Google Gemini CLI, OpenCode, Cursor, Claude Desktop and others                                                                                                 | Next            |
 | **v1.x** | Data-only agents: support a simple agent with a data file, no code                                                                                                                            | Planned         |
+| **v1.x** | claude.ai account items: your own skills and the plugins you uploaded are saved; connectors next                                                                                              | Started         |
 | **v2**   | **One setup, every agent:** turn your Claude Code setup into a Codex, Gemini CLI, OpenCode or Cursor setup (instructions, skills, MCP servers, commands), with a preview of what carries over | Planned         |
 | Later    | Password change, version history, selective sync, team sharing, dashboard, background sync                                                                                                    | Ideas           |
 
